@@ -1,5 +1,5 @@
+// src/components/vault/vault.tsx
 "use client";
-
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -7,7 +7,6 @@ import clsx from "clsx";
 import {
   Upload, Trash2, Star, Download, FileText, Folder, Heart, Pencil, CheckCircle2, AlertCircle
 } from "lucide-react";
-
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter
 } from "@/components/ui/dialog";
@@ -16,7 +15,6 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
 
-/** REQUIRED DOCS (MVP) — codes double as tags for GHL workflows */
 const REQUIRED_DOCS = [
   { code: "bank_statements_6mo", label: "Bank Statements (last 6 months)" },
   { code: "drivers_license_front", label: "Driver’s License — Front" },
@@ -24,24 +22,17 @@ const REQUIRED_DOCS = [
   { code: "voided_check", label: "Voided Business Check" },
   { code: "debt_schedule", label: "Business Debt Schedule (if applicable)" },
 ] as const;
-
 type RequiredCode = typeof REQUIRED_DOCS[number]["code"];
 
 interface UserDocument {
-  id: string;
-  name: string;
-  size: number;
-  type: string;
-  category: string | null;       // stores RequiredCode
-  custom_label: string | null;
-  description: string | null;
-  is_favorite: boolean;
-  upload_date: string;
-  storage_path: string;
-  tags?: string[];
+  id: string; name: string; size: number; type: string;
+  category: string | null; custom_label: string | null; description: string | null;
+  is_favorite: boolean; upload_date: string; storage_path: string; tags?: string[];
 }
 
-export default function Vault() {
+type ChecklistInfo = { progress: number; complete: boolean };
+
+export default function Vault({ onChecklist }: { onChecklist?: (info: ChecklistInfo) => void }) {
   const supabase = createClient();
   const { toast } = useToast();
 
@@ -51,13 +42,10 @@ export default function Vault() {
   const [uploading, setUploading] = useState(false);
   const [activeTab, setActiveTab] = useState<"required" | "all" | "favorites">("required");
 
-  // new upload modal
   const [showModal, setShowModal] = useState(false);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [docType, setDocType] = useState<RequiredCode | "">("");
   const [fileName, setFileName] = useState("");
-
-  // edit existing modal
   const [editDoc, setEditDoc] = useState<UserDocument | null>(null);
 
   useEffect(() => {
@@ -78,7 +66,6 @@ export default function Vault() {
         .select("*")
         .eq("user_id", uid)
         .order("upload_date", { ascending: false });
-
       if (error) throw error;
 
       const mapped = (data || []).map((d: any) => ({
@@ -137,7 +124,6 @@ export default function Vault() {
 
       setDocuments((prev) => [{ ...data, tags: [docType] }, ...prev]);
 
-      // optional hook to notify GHL / underwriting (safe if not present)
       try {
         await fetch("/api/uploads", {
           method: "POST",
@@ -168,7 +154,6 @@ export default function Vault() {
         })
         .eq("id", editDoc.id);
       if (error) throw error;
-
       setDocuments((prev) => prev.map((d) => (d.id === editDoc.id ? editDoc : d)));
       setEditDoc(null);
       toast({ title: "Updated", description: "Document updated successfully." });
@@ -215,12 +200,10 @@ export default function Vault() {
     }
   };
 
-  // checklist + progress
+  // Checklist + progress
   const uploadedByCode = useMemo(() => {
     const map = new Map<string, number>();
-    documents.forEach((d) => {
-      if (d.category) map.set(d.category, (map.get(d.category) || 0) + 1);
-    });
+    documents.forEach((d) => { if (d.category) map.set(d.category, (map.get(d.category) || 0) + 1); });
     return map;
   }, [documents]);
 
@@ -238,6 +221,13 @@ export default function Vault() {
     return Math.round((have / total) * 100);
   }, [checklist]);
 
+  const allComplete = checklist.every((c) => c.has);
+
+  // 🔔 Notificar al dashboard
+  useEffect(() => {
+    onChecklist?.({ progress: progressPct, complete: allComplete });
+  }, [progressPct, allComplete, onChecklist]);
+
   const filteredDocs = useMemo(() => {
     if (activeTab === "all") return documents;
     if (activeTab === "favorites") return documents.filter((d) => d.is_favorite);
@@ -247,7 +237,7 @@ export default function Vault() {
 
   return (
     <div className="w-full space-y-8">
-      {/* Title */}
+      {/* Header */}
       <div className="flex items-center gap-3">
         <div className="w-12 h-12 bg-emerald-600 rounded-lg flex items-center justify-center shadow">
           <Folder className="w-6 h-6 text-white" />
@@ -258,7 +248,7 @@ export default function Vault() {
         </div>
       </div>
 
-      {/* Checklist + progress */}
+      {/* Checklist */}
       <div className="bg-white border rounded-xl p-6">
         <div className="flex items-center justify-between mb-4">
           <div className="font-semibold text-gray-900">Checklist Progress</div>
@@ -267,23 +257,12 @@ export default function Vault() {
         <Progress value={progressPct} className="mb-4" />
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-3">
           {checklist.map((item) => (
-            <div
-              key={item.code}
-              className={clsx(
-                "flex items-center gap-3 border rounded-lg px-3 py-2",
-                item.has ? "bg-emerald-50 border-emerald-200" : "bg-gray-50"
-              )}
-            >
-              {item.has ? (
-                <CheckCircle2 className="h-5 w-5 text-emerald-600" />
-              ) : (
-                <AlertCircle className="h-5 w-5 text-gray-400" />
-              )}
+            <div key={item.code} className={clsx("flex items-center gap-3 border rounded-lg px-3 py-2",
+              item.has ? "bg-emerald-50 border-emerald-200" : "bg-gray-50")}>
+              {item.has ? <CheckCircle2 className="h-5 w-5 text-emerald-600" /> : <AlertCircle className="h-5 w-5 text-gray-400" />}
               <div className="flex-1">
                 <div className="text-sm font-medium text-gray-900">{item.label}</div>
-                <div className="text-xs text-gray-500">
-                  {item.has ? `Uploaded (${item.count})` : "Missing"}
-                </div>
+                <div className="text-xs text-gray-500">{item.has ? `Uploaded (${item.count})` : "Missing"}</div>
               </div>
             </div>
           ))}
@@ -302,9 +281,7 @@ export default function Vault() {
             onClick={() => setActiveTab(tab.key as any)}
             className={clsx(
               "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition",
-              activeTab === tab.key
-                ? "bg-emerald-600 text-white shadow"
-                : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+              activeTab === tab.key ? "bg-emerald-600 text-white shadow" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
             )}
           >
             <tab.icon className="h-4 w-4" />
@@ -313,7 +290,7 @@ export default function Vault() {
         ))}
       </div>
 
-      {/* Grid: left upload / right docs */}
+      {/* Upload + List */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="bg-white border rounded-xl shadow p-10 flex flex-col items-center justify-center">
           <label className="flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-lg p-10 cursor-pointer hover:bg-gray-50 transition w-full">
@@ -386,9 +363,7 @@ export default function Vault() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowModal(false)}>Cancel</Button>
-            <Button onClick={confirmUpload} disabled={uploading || !docType}>
-              {uploading ? "Uploading..." : "Save & Upload"}
-            </Button>
+            <Button onClick={confirmUpload} disabled={uploading || !docType}>{uploading ? "Uploading..." : "Save & Upload"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -399,25 +374,14 @@ export default function Vault() {
           <DialogHeader><DialogTitle>Edit document</DialogTitle></DialogHeader>
           {editDoc && (
             <div className="space-y-4">
-              <Input
-                value={editDoc.custom_label || ""}
-                onChange={(e) => setEditDoc({ ...editDoc, custom_label: e.target.value })}
-                placeholder="Custom file name"
-              />
-              <Select
-                value={(editDoc.category as RequiredCode) || ""}
-                onValueChange={(v) => setEditDoc({ ...editDoc, category: v })}
-              >
+              <Input value={editDoc.custom_label || ""} onChange={(e) => setEditDoc({ ...editDoc, custom_label: e.target.value })} placeholder="Custom file name" />
+              <Select value={(editDoc.category as RequiredCode) || ""} onValueChange={(v) => setEditDoc({ ...editDoc, category: v })}>
                 <SelectTrigger><SelectValue placeholder="Select document type" /></SelectTrigger>
                 <SelectContent>
                   {REQUIRED_DOCS.map((r) => (<SelectItem key={r.code} value={r.code}>{r.label}</SelectItem>))}
                 </SelectContent>
               </Select>
-              <Input
-                value={editDoc.tags?.join(", ") || ""}
-                onChange={(e) => setEditDoc({ ...editDoc, tags: e.target.value.split(",").map(t => t.trim()).filter(Boolean) })}
-                placeholder="Tags (comma separated)"
-              />
+              <Input value={editDoc.tags?.join(", ") || ""} onChange={(e) => setEditDoc({ ...editDoc, tags: e.target.value.split(",").map(t => t.trim()).filter(Boolean) })} placeholder="Tags (comma separated)" />
             </div>
           )}
           <DialogFooter>

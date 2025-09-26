@@ -1,3 +1,4 @@
+// src/app/api/client-signup/route.ts
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { ClientSignupSchema } from "@/schema";
@@ -14,13 +15,13 @@ export async function POST(req: Request) {
     const body = await req.json();
     const p = ClientSignupSchema.parse(body);
 
-    // ---------- 1) GHL CONTACT (igual)
-    const nameParts = p.client_full_name.trim().split(" ");
-    const firstName = nameParts[0];
-    const lastName = nameParts.slice(1).join(" ") || null;
+    // ---------- 1) GHL CONTACT
+    const firstName = p.first_name.trim();
+    const lastName = p.last_name.trim() || null;
 
     const cf = (idEnv: string, value: any) =>
       process.env[idEnv] ? { id: process.env[idEnv]!, value } : null;
+
     const customFields = [
       cf("GHL_CF_FUNDING_GOAL", p.amount_requested),
       cf("GHL_CF_LEGAL_ENTITY", p.legal_entity_type),
@@ -50,7 +51,6 @@ export async function POST(req: Request) {
     });
 
     // ---------- 2) SUPABASE USER (SIN password + invite/magic link)
-    // a) ¿ya lo tenemos mapeado en tu tabla users?
     const { data: existingUserRow } = await admin
       .from("users")
       .select("id")
@@ -61,64 +61,70 @@ export async function POST(req: Request) {
     let action_link: string | undefined;
 
     if (!userId) {
-      // b) crear user en Auth SIN password
-      const { data: created, error: createErr } = await admin.auth.admin.createUser({
-        email: p.email,
-        email_confirm: true,
-        user_metadata: {
-          full_name: p.client_full_name,
-          company: p.company_legal_name,
-          must_set_password: true,
-        },
-      });
+      // Crear user en Auth sin password
+      const { data: created, error: createErr } =
+        await admin.auth.admin.createUser({
+          email: p.email,
+          email_confirm: true,
+          user_metadata: {
+            full_name: `${p.first_name} ${p.last_name}`,
+            company: p.company_legal_name,
+            must_set_password: true,
+          },
+        });
       if (createErr) throw createErr;
       userId = created.user!.id;
 
-      // c) generar invite link (primera vez)
-      const { data: linkData, error: linkErr } = await admin.auth.admin.generateLink({
-        type: "invite",
-        email: p.email,
-        options: { redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/auth/set-password` },
-      });
+      // Invite link inicial
+      const { data: linkData, error: linkErr } =
+        await admin.auth.admin.generateLink({
+          type: "invite",
+          email: p.email,
+          options: {
+            redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/auth/set-password`,
+          },
+        });
       if (linkErr) throw linkErr;
       action_link = (linkData as any)?.properties?.action_link;
     } else {
-      // d) ya existe en tu tabla -> forzamos must_set_password y generamos MAGICLINK
+      // Ya existía → forzar must_set_password y mandar magic link
       await admin.auth.admin.updateUserById(userId, {
         user_metadata: { must_set_password: true },
       });
 
-      const { data: linkData, error: linkErr } = await admin.auth.admin.generateLink({
-        type: "magiclink",
-        email: p.email,
-        options: { redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/set-password` },
-      });
+      const { data: linkData, error: linkErr } =
+        await admin.auth.admin.generateLink({
+          type: "magiclink",
+          email: p.email,
+          options: {
+            redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/auth/set-password`,
+          },
+        });
       if (linkErr) throw linkErr;
       action_link = (linkData as any)?.properties?.action_link;
     }
 
-    // e) disparar welcome email (n8n) con el invite/magic link
+    // Bienvenida vía n8n (si está configurado)
     if (process.env.N8N_WEBHOOK_WELCOME && action_link) {
       fetch(process.env.N8N_WEBHOOK_WELCOME, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           to: p.email,
-          full_name: p.client_full_name,
+          full_name: `${p.first_name} ${p.last_name}`,
           portal_url: action_link,
         }),
       }).catch(() => {});
     }
 
-    // ---------- 3) USERS + BUSINESS_PROFILE (igual)
-    await admin
-      .from("users")
-      .upsert({
-        id: userId!,
-        email: p.email.toLowerCase(),
-        first_name: p.client_full_name,
-        role: "free",
-      });
+    // ---------- 3) USERS + BUSINESS_PROFILE
+    await admin.from("users").upsert({
+      id: userId!,
+      email: p.email.toLowerCase(),
+      first_name: p.first_name,
+      last_name: p.last_name,
+      role: "free",
+    });
 
     const { data: bp } = await admin
       .from("business_profiles")
@@ -135,28 +141,29 @@ export async function POST(req: Request) {
       .single();
     const profile_id = bp!.id;
 
-    // ---------- 4) OWNERS / LOANS / FLAGS (igual)
+    // ---------- 4) OWNERS / LOANS / FLAGS
     if (p.owners?.length) {
-      await admin
-        .from("business_owners")
-        .insert(
-          p.owners.map((o) => ({
-            profile_id,
-            full_name: o.name,
-            ownership_pct: o.ownership_pct,
-          }))
-        );
+      await admin.from("business_owners").insert(
+        p.owners.map((o) => ({
+          profile_id,
+          full_name: `${o.first_name} ${o.last_name}`,
+          ownership_pct: o.ownership_pct,
+        }))
+      );
     }
+
     const L = p.outstanding_loans;
     const loans = [
       L?.loan1 ? { position: 1, ...L.loan1 } : null,
       L?.loan2 ? { position: 2, ...L.loan2 } : null,
       L?.loan3 ? { position: 3, ...L.loan3 } : null,
     ].filter(Boolean) as any[];
-    if (loans.length)
+
+    if (loans.length) {
       await admin
         .from("outstanding_loans")
         .insert(loans.map((l) => ({ profile_id, ...l })));
+    }
 
     await admin.from("application_flags").upsert({
       profile_id,
@@ -171,15 +178,16 @@ export async function POST(req: Request) {
       additional_info: p.additional_info ?? null,
     });
 
-    // ---------- 5) INTEGRATION MAP (igual)
+    // ---------- 5) Integrations
     await admin
       .from("integrations")
       .upsert({ profile_id, ghl_contact_id, last_push_at: new Date().toISOString() });
 
-    // ---------- 6) VAULT STATE & OVERRIDES (igual)
+    // ---------- 6) Vault state & eventos
     await admin
       .from("user_vault_profiles")
       .upsert({ user_id: userId!, current_product_tag: "Pre-Approval" });
+
     if (p.has_previous_debt) {
       await admin.from("events").insert({
         profile_id,
@@ -188,17 +196,18 @@ export async function POST(req: Request) {
         actor: p.advisor_id ?? null,
       });
     }
+
     await admin.from("events").insert({
       profile_id,
       type: "client_signup",
       payload: {
         amount_requested: p.amount_requested,
-        proposed_loan_type: p.proposed_loan_type,
+        // proposed_loan_type: p.proposed_loan_type, // <- añádelo si lo reintroduces en el schema
       },
       actor: p.advisor_id ?? null,
     });
 
-    // ---------- 7) TAGS (igual)
+    // ---------- 7) Tags en GHL
     const docTags = p.documents_requested.map((d) =>
       d.toLowerCase().replace(/\s+/g, "_")
     );
@@ -215,7 +224,7 @@ export async function POST(req: Request) {
       profile_id,
       user_id: userId,
       ghl_contact_id,
-      invite_link: action_link, // útil para panel del advisor si quieres mostrarlo
+      invite_link: action_link,
     });
   } catch (e: any) {
     console.error(e);

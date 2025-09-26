@@ -62,7 +62,7 @@ export function SignUpForm({ className, ...props }: React.ComponentPropsWithoutR
           firstName: firstName.trim(),
           lastName: normalizedLast, // 👈 puede ser null
           email: email.trim().toLowerCase(),
-          tags: ["creditbanc-signup"],
+          tags: ["vault-signup"],
         }),
       });
 

@@ -1,35 +1,55 @@
 import { z } from "zod";
 
-const Owner = z.object({ name: z.string().min(1), ownership_pct: z.coerce.number().min(0).max(100) });
-const Loan  = z.object({ balance: z.coerce.number().optional(), lender_name: z.string().optional(), term: z.string().optional() });
+const Owner = z.object({
+  first_name: z.string().min(1, "Owner first name is required"),
+  last_name:  z.string().min(1, "Owner last name is required"),
+  ownership_pct: z.coerce.number().min(0).max(100),
+});
+const Loan  = z.object({
+  balance: z.coerce.number().optional(),
+  lender_name: z.string().optional(),
+  term: z.string().optional()
+});
 
 export const ClientSignupSchema = z.object({
-  // COMPANY / CONTACT
-  client_full_name: z.string().min(1),
+  // CONTACT (advisor collects this on the call)
+  first_name: z.string().min(1),
+  last_name:  z.string().min(1),
+  email:      z.string().email(),
+  phone:      z.string().min(7).optional(),
+
+  // COMPANY / LOCATION (lo que realmente uses)
   company_legal_name: z.string().min(1),
-  phone: z.string().min(7),
-  email: z.string().email(),
-  state: z.string().min(2), city: z.string().min(1), zip: z.string().min(3),
-  // GOAL
+  city:  z.string().optional(),
+  state: z.string().optional(),
+  zip:   z.string().optional(),
+
+  // GOAL / PROFILE
   amount_requested: z.coerce.number().int().positive(),
-  proposed_loan_type: z.string().min(1),
-  use_of_funds: z.string().min(2),
+  legal_entity_type: z.string().min(1),
+  industry_1: z.string().optional(),
+  industry_2: z.string().optional(),
+  industry_3: z.string().optional(),
+  business_start_date: z.string().optional(), // "YYYY-MM" or "YYYY-MM-DD"
+  avg_monthly_deposits: z.coerce.number().nonnegative().optional(),
+  annual_revenue:       z.coerce.number().nonnegative().optional(),
+  credit_score: z.string().optional(), // keep string for flexibility ("680-700", etc.)
+  sbss_score:   z.coerce.number().optional(),
+  use_of_funds: z.string().optional(),
+
   // OWNERS
-  owners_count: z.enum(["one","more"]),
+  owners_count: z.enum(["one", "more"]).optional(),
   owners: z.array(Owner).max(5).default([]),
-  // LEGAL + INDUSTRY
-  legal_entity_type: z.string().min(1), home_based: z.coerce.boolean().optional(),
-  industry_1: z.string().optional(), industry_2: z.string().optional(), industry_3: z.string().optional(),
-  // DATES / MONEY
-  business_start_date: z.string(), avg_monthly_deposits: z.coerce.number().nonnegative(),
-  annual_revenue: z.coerce.number().nonnegative(),
-  // SCORES
-  credit_score: z.enum(["700","680","650","600","400"]),
-  sbss_score: z.coerce.number().optional(),
+
   // DEBT
   has_previous_debt: z.coerce.boolean().optional(),
-  outstanding_loans: z.object({ loan1: Loan.optional(), loan2: Loan.optional(), loan3: Loan.optional() }).optional(),
-  // RISKS
+  outstanding_loans: z.object({
+    loan1: Loan.optional(),
+    loan2: Loan.optional(),
+    loan3: Loan.optional(),
+  }).optional(),
+
+  // RISK FLAGS
   defaulted_on_mca: z.coerce.boolean().optional(),
   reduced_mca_payments: z.coerce.boolean().optional(),
   owns_real_estate: z.coerce.boolean().optional(),
@@ -37,24 +57,35 @@ export const ClientSignupSchema = z.object({
   foreclosures_or_bankruptcies_3y: z.coerce.boolean().optional(),
   tax_liens: z.coerce.boolean().optional(),
   judgements: z.coerce.boolean().optional(),
-  // Logic details
+
+  // Conditional details (when toggles above are true)
   personal_cc_debt_amount: z.coerce.number().optional(),
   bk_fc_months_ago: z.coerce.number().optional(),
-  bk_fc_type: z.string().optional(), // foreclosure|bankruptcy|both
-  tax_liens_type: z.string().optional(), // personal|business
+  bk_fc_type: z.string().optional(), // foreclosure | bankruptcy | both
+  tax_liens_type: z.string().optional(), // personal | business
   tax_liens_amount: z.coerce.number().optional(),
   tax_liens_on_plan: z.coerce.boolean().optional(),
   judgements_explain: z.string().optional(),
+
   // TIMING
   how_soon_funds: z.string().optional(),
   employees_count: z.coerce.number().int().nonnegative().optional(),
   additional_info: z.string().optional(),
-  // DOCS REQUESTED (última pantalla: checkboxes)
+
+  // DOCS (checkboxes at the end)
   documents_requested: z.array(z.enum([
-    "Funding Application","Business Bank Statements","Business/Personal Tax Returns",
-    "Profit & Loss Stament","Balance Sheet","Debt Schedule","A/R Report","Driver's License","Voided Check"
+    "Funding Application",
+    "Business Bank Statements",
+    "Business/Personal Tax Returns",
+    "Profit & Loss Stament",
+    "Balance Sheet",
+    "Debt Schedule",
+    "A/R Report",
+    "Driver's License",
+    "Voided Check",
   ])).default([]),
 
-  advisor_id: z.string().optional()
+  advisor_id: z.string().optional(),
 });
+
 export type ClientSignupInput = z.infer<typeof ClientSignupSchema>;
