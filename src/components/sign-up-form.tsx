@@ -27,7 +27,7 @@ const DOC_OPTIONS = [
   "Voided Check",
 ] as const;
 
-export default function AdvisorSignupForm() {
+export default function SignUpForm() {
   const router = useRouter();
 
   // PASO 1 — Contact & Business
