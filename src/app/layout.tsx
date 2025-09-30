@@ -1,10 +1,10 @@
-import '@/app/globals.css';
+import '@/globals.css';
 import type { Metadata } from 'next'
 import { ThemeProvider } from 'next-themes'
 
 export const metadata: Metadata = {
-  title: 'CreditBanc Finance Academy',
-  description: 'Created to build your credit score and financial literacy',
+  title: 'CreditBanc Vault',
+  description: 'Created to Kepp your Credit information safe and secure.',
   generator: 'creditbanc it',
 }
 
