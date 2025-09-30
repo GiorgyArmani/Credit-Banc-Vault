@@ -59,6 +59,24 @@ export async function ghlUpdateContact(contactId: string, body: Partial<GhlConta
   return handle(res);
 }
 
+export type GhlCustomField = { id: string; name: string; key: string; objectType: string };
+
+export async function ghlFetchCustomFields(locationId: string) {
+  const res = await fetch(`${BASE}/locations/${locationId}/custom-fields`, {
+    method: "GET",
+    headers: authHeaders(),
+    cache: "no-store",
+  });
+  return handle(res) as Promise<{ customFields: GhlCustomField[] }>;
+}
+
+/** Crea un índice { "contact.slug_key": "cf_xxx_id" } a partir del listado */
+export function buildFieldIndex(list: GhlCustomField[]) {
+  const map: Record<string, string> = {};
+  for (const f of list) map[f.key] = f.id; // p.ej. "contact.documents_requested" -> "cf_abc123"
+  return map;
+}
+
 export async function ghlAddTags(contactId: string, tags: string[]) {
   if (!tags?.length) return;
   const res = await fetch(`${BASE}/contacts/${contactId}/tags`, {

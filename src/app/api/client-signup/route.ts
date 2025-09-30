@@ -46,76 +46,56 @@ export async function POST(req: Request) {
       state: p.state,
       postalCode: p.zip,
       country: "US",
-      tags: [],
+      tags: ['vault-user'],
       customFields,
     });
 
-    // ---------- 2) SUPABASE USER (SIN password + invite/magic link)
-    const { data: existingUserRow } = await admin
-      .from("users")
-      .select("id")
-      .eq("email", p.email.toLowerCase())
-      .maybeSingle();
+    // ---------- 2) SUPABASE USER (SIN password + correo enviado por Supabase)
+const { data: existingUserRow } = await admin
+  .from("users")
+  .select("id")
+  .eq("email", p.email.toLowerCase())
+  .maybeSingle();
 
-    let userId = existingUserRow?.id as string | undefined;
-    let action_link: string | undefined;
+let userId = existingUserRow?.id as string | undefined;
+let action_link: string | undefined; // opcional, por si quieres mostrar el link en la UI
 
-    if (!userId) {
-      // Crear user en Auth sin password
-      const { data: created, error: createErr } =
-        await admin.auth.admin.createUser({
-          email: p.email,
-          email_confirm: true,
-          user_metadata: {
-            full_name: `${p.first_name} ${p.last_name}`,
-            company: p.company_legal_name,
-            must_set_password: true,
-          },
-        });
-      if (createErr) throw createErr;
-      userId = created.user!.id;
+const redirectTo = `${process.env.NEXT_PUBLIC_APP_URL}/auth/set-password`;
 
-      // Invite link inicial
-      const { data: linkData, error: linkErr } =
-        await admin.auth.admin.generateLink({
-          type: "invite",
-          email: p.email,
-          options: {
-            redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/auth/set-password`,
-          },
-        });
-      if (linkErr) throw linkErr;
-      action_link = (linkData as any)?.properties?.action_link;
-    } else {
-      // Ya existía → forzar must_set_password y mandar magic link
-      await admin.auth.admin.updateUserById(userId, {
-        user_metadata: { must_set_password: true },
-      });
+if (!userId) {
+  // A1) Crear usuario y ENVIAR email de invitación (Supabase lo manda)
+  const { data: created, error: createErr } = await admin.auth.admin.createUser({
+    email: p.email,
+    email_confirm: false, // deja que la invitación maneje la confirmación
+    user_metadata: {
+      full_name: `${p.first_name} ${p.last_name}`,
+      company: p.company_legal_name,
+      must_set_password: true,
+    },
+  });
+  if (createErr) throw createErr;
+  userId = created.user!.id;
 
-      const { data: linkData, error: linkErr } =
-        await admin.auth.admin.generateLink({
-          type: "magiclink",
-          email: p.email,
-          options: {
-            redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/auth/set-password`,
-          },
-        });
-      if (linkErr) throw linkErr;
-      action_link = (linkData as any)?.properties?.action_link;
-    }
+  // Correo real al usuario (usa la plantilla "Invite user")
+  const { error: inviteErr } = await admin.auth.admin.inviteUserByEmail(p.email, { redirectTo });
+  if (inviteErr) throw inviteErr;
 
-    // Bienvenida vía n8n (si está configurado)
-    if (process.env.N8N_WEBHOOK_WELCOME && action_link) {
-      fetch(process.env.N8N_WEBHOOK_WELCOME, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          to: p.email,
-          full_name: `${p.first_name} ${p.last_name}`,
-          portal_url: action_link,
-        }),
-      }).catch(() => {});
-    }
+  // (Opcional) también genero el link por si quieres mostrarlo al advisor en la pantalla de éxito
+  const { data: linkData } = await admin.auth.admin.generateLink({ type: "invite", email: p.email, options: { redirectTo }});
+  action_link = (linkData as any)?.properties?.action_link;
+} else {
+  // A2) Ya existe: ENVIAR email de "Reset Password" (usa tu plantilla actual)
+  const { error: resetErr } = await admin.auth.resetPasswordForEmail(p.email, { redirectTo });
+  if (resetErr) throw resetErr;
+
+  // (Opcional) genero link equivalente para mostrar en UI si lo necesitas
+  const { data: linkData } = await admin.auth.admin.generateLink({ type: "recovery", email: p.email, options: { redirectTo }});
+  action_link = (linkData as any)?.properties?.action_link;
+
+  // tip: puedes seguir marcando user_metadata si quieres
+  await admin.auth.admin.updateUserById(userId, { user_metadata: { must_set_password: true } });
+}
+
 
     // ---------- 3) USERS + BUSINESS_PROFILE
     await admin.from("users").upsert({
