@@ -1,4 +1,4 @@
-// src/components/advisor-signup-form.tsx
+// src/components/sign-up-form.tsx
 "use client";
 
 import { useState } from "react";
@@ -10,16 +10,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useRouter } from "next/navigation";
-
-type Owner = { first_name: string; last_name: string; ownership_pct: number };
-type Loan = { balance?: number; lender_name?: string; term?: string };
-type OutstandingLoans = { loan1?: Loan; loan2?: Loan; loan3?: Loan };
+import { ChevronRight, ChevronLeft, Building2, DollarSign, FileText, CheckCircle2 } from "lucide-react";
 
 const DOC_OPTIONS = [
   "Funding Application",
   "Business Bank Statements",
   "Business/Personal Tax Returns",
-  "Profit & Loss Stament",
+  "Profit & Loss Statement",
   "Balance Sheet",
   "Debt Schedule",
   "A/R Report",
@@ -29,146 +26,102 @@ const DOC_OPTIONS = [
 
 export default function SignUpForm() {
   const router = useRouter();
+  const [step, set_step] = useState(1);
+  const [submitting, set_submitting] = useState(false);
+  const [error, set_error] = useState("");
 
-  // PASO 1 — Contact & Business
-  const [first_name, setFirstName] = useState("");
-  const [last_name, setLastName] = useState("");
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-  const [company_legal_name, setCompanyLegal] = useState("");
-  const [city, setCity] = useState("");
-  const [state, setState] = useState("");
-  const [zip, setZip] = useState("");
-  const [amount_requested, setAmountRequested] = useState<number | "">("");
-  const [legal_entity_type, setEntity] = useState("");
-  const [industry_1, setIndustry1] = useState("");
-  const [industry_2, setIndustry2] = useState("");
-  const [industry_3, setIndustry3] = useState("");
-  const [use_of_funds, setUseOfFunds] = useState("");
+  // STEP 1 — Contact & Business
+  const [first_name, set_first_name] = useState("");
+  const [last_name, set_last_name] = useState("");
+  const [email, set_email] = useState("");
+  const [phone, set_phone] = useState("");
+  const [company_legal_name, set_company_legal_name] = useState("");
+  const [city, set_city] = useState("");
+  const [state, set_state] = useState("");
+  const [zip, set_zip] = useState("");
+  const [amount_requested, set_amount_requested] = useState<number | "">("");
+  const [legal_entity_type, set_legal_entity_type] = useState("");
+  const [industry_1, set_industry_1] = useState("");
+  const [use_of_funds, set_use_of_funds] = useState("");
 
-  // Owners
-  const [owners, setOwners] = useState<Owner[]>([{ first_name: "", last_name: "", ownership_pct: 100 }]);
+  // STEP 2 — Financials
+  const [business_start_date, set_business_start_date] = useState("");
+  const [avg_monthly_deposits, set_avg_monthly_deposits] = useState<number | "">("");
+  const [annual_revenue, set_annual_revenue] = useState<number | "">("");
+  const [credit_score, set_credit_score] = useState("");
+  const [sbss_score, set_sbss_score] = useState<number | "">("");
 
-  // PASO 2 — Financials
-  const [business_start_date, setStartDate] = useState(""); // yyyy-mm-dd
-  const [avg_monthly_deposits, setMonthlyDeposits] = useState<number | "">("");
-  const [annual_revenue, setAnnualRevenue] = useState<number | "">("");
-  const [credit_score, setCreditScore] = useState<"700" | "680" | "650" | "600" | "400" | "">("");
-  const [sbss_score, setSbss] = useState<number | "">("");
+  // STEP 3 — Risk & Docs
+  const [has_previous_debt, set_has_previous_debt] = useState(false);
+  const [defaulted_on_mca, set_defaulted_on_mca] = useState(false);
+  const [reduced_mca_payments, set_reduced_mca_payments] = useState(false);
+  const [owns_real_estate, set_owns_real_estate] = useState(false);
+  const [personal_cc_debt_over_75k, set_personal_cc_debt_over_75k] = useState(false);
+  const [personal_cc_debt_amount, set_personal_cc_debt_amount] = useState<number | "">("");
+  const [foreclosures_or_bankruptcies_3y, set_foreclosures_or_bankruptcies_3y] = useState(false);
+  const [bk_fc_months_ago, set_bk_fc_months_ago] = useState<number | "">("");
+  const [bk_fc_type, set_bk_fc_type] = useState("");
+  const [tax_liens, set_tax_liens] = useState(false);
+  const [tax_liens_type, set_tax_liens_type] = useState("");
+  const [tax_liens_amount, set_tax_liens_amount] = useState<number | "">("");
+  const [tax_liens_on_plan, set_tax_liens_on_plan] = useState(false);
+  const [judgements_explain, set_judgements_explain] = useState("");
+  const [how_soon_funds, set_how_soon_funds] = useState("");
+  const [employees_count, set_employees_count] = useState<number | "">("");
+  const [additional_info, set_additional_info] = useState("");
+  const [documents_requested, set_documents_requested] = useState<string[]>([]);
 
-  // Loans (opcionales)
-  const [outstanding_loans, setLoans] = useState<OutstandingLoans>({});
-
-  // PASO 3 — Riesgos & Docs
-  const [has_previous_debt, setPrevDebt] = useState<boolean>(false);
-  const [defaulted_on_mca, setDefaulted] = useState<boolean>(false);
-  const [reduced_mca_payments, setReduced] = useState<boolean>(false);
-  const [owns_real_estate, setRealEstate] = useState<boolean>(false);
-  const [personal_cc_debt_over_75k, setPcc75] = useState<boolean>(false);
-  const [personal_cc_debt_amount, setPccAmount] = useState<number | "">("");
-  const [foreclosures_or_bankruptcies_3y, setBkFc3y] = useState<boolean>(false);
-  const [bk_fc_months_ago, setBkFcMonths] = useState<number | "">("");
-  const [bk_fc_type, setBkFcType] = useState<string>("");
-  const [tax_liens, setTaxLiens] = useState<boolean>(false);
-  const [tax_liens_type, setTaxLiensType] = useState<string>("");
-  const [tax_liens_amount, setTaxLiensAmount] = useState<number | "">("");
-  const [tax_liens_on_plan, setTaxLiensPlan] = useState<boolean>(false);
-  const [judgements, setJudgements] = useState<boolean>(false);
-  const [judgements_explain, setJudgementsExplain] = useState<string>("");
-  const [how_soon_funds, setHowSoon] = useState<string>("");
-  const [employees_count, setEmployees] = useState<number | "">("");
-  const [additional_info, setAdditional] = useState<string>("");
-
-  // Docs solicitados (checklist final)
-  const [documents_requested, setDocs] = useState<string[]>([]);
-
-  // UI
-  const [step, setStep] = useState<1 | 2 | 3>(1);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const toggleDoc = (label: string) => {
-    setDocs(prev => (prev.includes(label) ? prev.filter(l => l !== label) : [...prev, label]));
+  const toggle_document = (doc: string) => {
+    set_documents_requested((prev) =>
+      prev.includes(doc) ? prev.filter((d) => d !== doc) : [...prev, doc]
+    );
   };
 
-  const addOwner = () => setOwners(o => [...o, { first_name: "", last_name: "", ownership_pct: 0 }]);
-  const removeOwner = (i: number) => setOwners(o => o.filter((_, idx) => idx !== i));
-  const updateOwner = (i: number, patch: Partial<Owner>) =>
-    setOwners(o => o.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
+  const handle_submit = async () => {
+    set_submitting(true);
+    set_error("");
 
-  const submit = async () => {
-    setSubmitting(true);
-    setError(null);
     try {
-      // Validaciones mínimas de UI
-      if (!first_name || !last_name) throw new Error("First/Last name are required.");
-      if (!email) throw new Error("Email is required.");
-      if (!company_legal_name) throw new Error("Company legal name is required.");
-      if (!amount_requested || Number(amount_requested) <= 0) throw new Error("Funding goal must be a positive number.");
-      if (!legal_entity_type) throw new Error("Entity type is required.");
-      if (!avg_monthly_deposits && avg_monthly_deposits !== 0) throw new Error("Monthly revenue is required.");
-      if (!annual_revenue && annual_revenue !== 0) throw new Error("Annual revenue is required.");
-      if (!credit_score) throw new Error("Credit score is required.");
-
-      // Construir payload que valida ClientSignupSchema
       const payload = {
-        // CONTACT / COMPANY
         first_name,
         last_name,
-        email: email.trim().toLowerCase(),
+        email,
         phone,
         company_legal_name,
         city,
         state,
         zip,
-        // GOAL
         amount_requested: Number(amount_requested),
-        use_of_funds,
-        // OWNERS
-        owners_count: owners.length > 1 ? "more" as const : "one" as const,
-        owners: owners.map(o => ({
-          first_name: o.first_name.trim(),
-          last_name: o.last_name.trim(),
-          ownership_pct: Number(o.ownership_pct),
-        })),
-        // LEGAL + INDUSTRY
         legal_entity_type,
-        industry_1: industry_1 || undefined,
-        industry_2: industry_2 || undefined,
-        industry_3: industry_3 || undefined,
-        // DATES / MONEY
+        industry_1,
+        industry_2: "",
+        industry_3: "",
+        use_of_funds,
         business_start_date,
-        avg_monthly_deposits: Number(avg_monthly_deposits || 0),
-        annual_revenue: Number(annual_revenue || 0),
-        // SCORES
-        credit_score, // "700" | "680" | "650" | "600" | "400"
-        sbss_score: sbss_score === "" ? undefined : Number(sbss_score),
-        // DEBT & LOANS
+        avg_monthly_deposits: Number(avg_monthly_deposits),
+        annual_revenue: Number(annual_revenue),
+        credit_score,
+        sbss_score: sbss_score === "" ? null : Number(sbss_score),
+        owners: [], // Empty owners array by default
+        outstanding_loans: {},
         has_previous_debt,
-        outstanding_loans,
-        // RISKS
         defaulted_on_mca,
         reduced_mca_payments,
         owns_real_estate,
         personal_cc_debt_over_75k,
-        judgements,
-        personal_cc_debt_amount: personal_cc_debt_amount === "" ? undefined : Number(personal_cc_debt_amount),
+        personal_cc_debt_amount: personal_cc_debt_amount === "" ? null : Number(personal_cc_debt_amount),
         foreclosures_or_bankruptcies_3y,
-        bk_fc_months_ago: bk_fc_months_ago === "" ? undefined : Number(bk_fc_months_ago),
-        bk_fc_type: bk_fc_type || undefined,
+        bk_fc_months_ago: bk_fc_months_ago === "" ? null : Number(bk_fc_months_ago),
+        bk_fc_type: bk_fc_type || null,
         tax_liens,
-        tax_liens_type: tax_liens_type || undefined,
-        tax_liens_amount: tax_liens_amount === "" ? undefined : Number(tax_liens_amount),
+        tax_liens_type: tax_liens_type || null,
+        tax_liens_amount: tax_liens_amount === "" ? null : Number(tax_liens_amount),
         tax_liens_on_plan,
-        judgements_explain: judgements_explain || undefined,
-        // TIMING
-        how_soon_funds: how_soon_funds || undefined,
-        employees_count: employees_count === "" ? undefined : Number(employees_count),
-        additional_info: additional_info || undefined,
-        // DOCS
+        judgements_explain: judgements_explain || null,
+        how_soon_funds: how_soon_funds || null,
+        employees_count: employees_count === "" ? null : Number(employees_count),
+        additional_info: additional_info || null,
         documents_requested,
-        // (opcional) advisor que hace el registro si lo tienes
-        // advisor_id: "uuid-del-advisor"
       };
 
       const res = await fetch("/api/client-signup", {
@@ -182,254 +135,665 @@ export default function SignUpForm() {
         throw new Error(j?.error || "Signup failed");
       }
 
-      // listo -> mostramos success (puedes redirigir a un success page)
       router.push("/auth/sign-up-success");
     } catch (err: any) {
-      setError(err.message || "Error");
+      set_error(err.message || "Error");
     } finally {
-      setSubmitting(false);
+      set_submitting(false);
     }
   };
 
   return (
-    <Card className="max-w-4xl mx-auto">
-      <CardHeader>
-        <CardTitle>New Client (Advisor)</CardTitle>
-        <CardDescription>Complete the 3 steps. A magic link will be emailed to the client to set their password.</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-8">
-        {/* STEPPER */}
-        <div className="flex gap-2 text-sm">
-          <span className={`px-2.5 py-1 rounded ${step === 1 ? "bg-emerald-600 text-white" : "bg-gray-100"}`}>1. Contact & Business</span>
-          <span className={`px-2.5 py-1 rounded ${step === 2 ? "bg-emerald-600 text-white" : "bg-gray-100"}`}>2. Financials</span>
-          <span className={`px-2.5 py-1 rounded ${step === 3 ? "bg-emerald-600 text-white" : "bg-gray-100"}`}>3. Risk & Docs</span>
-        </div>
+    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-blue-50 py-12 px-4">
+      <Card className="max-w-4xl mx-auto shadow-xl">
+        <CardHeader className="border-b bg-gradient-to-r from-emerald-600 to-teal-600 text-white">
+          <CardTitle className="text-2xl">New Client Application</CardTitle>
+          <CardDescription className="text-emerald-50">
+            Complete the 3 steps. A magic link will be emailed to the client to set their password.
+          </CardDescription>
+        </CardHeader>
 
-        {step === 1 && (
-          <div className="space-y-6">
-            <div className="grid md:grid-cols-2 gap-4">
-              <div>
-                <Label>First name</Label>
-                <Input value={first_name} onChange={(e) => setFirstName(e.target.value)} required />
-              </div>
-              <div>
-                <Label>Last name</Label>
-                <Input value={last_name} onChange={(e) => setLastName(e.target.value)} required />
-              </div>
-              <div>
-                <Label>Email</Label>
-                <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-              </div>
-              <div>
-                <Label>Phone</Label>
-                <Input value={phone} onChange={(e) => setPhone(e.target.value)} />
-              </div>
-              <div className="md:col-span-2">
-                <Label>Company legal name</Label>
-                <Input value={company_legal_name} onChange={(e) => setCompanyLegal(e.target.value)} required />
-              </div>
-              <div>
-                <Label>City</Label>
-                <Input value={city} onChange={(e) => setCity(e.target.value)} />
-              </div>
-              <div>
-                <Label>State</Label>
-                <Input value={state} onChange={(e) => setState(e.target.value)} />
-              </div>
-              <div>
-                <Label>ZIP</Label>
-                <Input value={zip} onChange={(e) => setZip(e.target.value)} />
-              </div>
-              <div>
-                <Label>Funding goal (USD)</Label>
-                <Input type="number" value={amount_requested} onChange={(e) => setAmountRequested(e.target.value === "" ? "" : Number(e.target.value))} />
-              </div>
-              <div>
-                <Label>Entity type</Label>
-                <Select onValueChange={setEntity} value={legal_entity_type}>
-                  <SelectTrigger><SelectValue placeholder="Select entity" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="LLC">LLC</SelectItem>
-                    <SelectItem value="S-Corp">S-Corp</SelectItem>
-                    <SelectItem value="C-Corp">C-Corp</SelectItem>
-                    <SelectItem value="Sole Prop">Sole Prop</SelectItem>
-                    <SelectItem value="Partnership">Partnership</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="md:col-span-2">
-                <Label>Use of funds</Label>
-                <Textarea rows={2} value={use_of_funds} onChange={(e) => setUseOfFunds(e.target.value)} />
-              </div>
-              <div>
-                <Label>Industry (primary)</Label>
-                <Input value={industry_1} onChange={(e) => setIndustry1(e.target.value)} />
-              </div>
-              <div>
-                <Label>Industry (secondary)</Label>
-                <Input value={industry_2} onChange={(e) => setIndustry2(e.target.value)} />
-              </div>
-              <div>
-                <Label>Industry (tertiary)</Label>
-                <Input value={industry_3} onChange={(e) => setIndustry3(e.target.value)} />
-              </div>
-            </div>
-
-            {/* Owners */}
-            <div className="space-y-3">
-              <div className="font-medium">Owners</div>
-              {owners.map((o, i) => (
-                <div key={i} className="grid md:grid-cols-4 gap-3 items-end">
-                  <div><Label>First</Label><Input value={o.first_name} onChange={e => updateOwner(i, { first_name: e.target.value })} /></div>
-                  <div><Label>Last</Label><Input value={o.last_name} onChange={e => updateOwner(i, { last_name: e.target.value })} /></div>
-                  <div><Label>% Ownership</Label><Input type="number" value={o.ownership_pct} onChange={e => updateOwner(i, { ownership_pct: Number(e.target.value) })} /></div>
-                  <div className="flex gap-2">
-                    {owners.length > 1 && (
-                      <Button type="button" variant="outline" onClick={() => removeOwner(i)} className="w-full">Remove</Button>
-                    )}
-                    {i === owners.length - 1 && (
-                      <Button type="button" onClick={addOwner} className="w-full">Add Owner</Button>
-                    )}
+        <CardContent className="pt-8">
+          {/* Progress Steps */}
+          <div>
+            <div className="flex items-center justify-between mb-8">
+              {[
+                { num: 1, label: "Contact & Business", icon: Building2 },
+                { num: 2, label: "Financials", icon: DollarSign },
+                { num: 3, label: "Risk & Docs", icon: FileText },
+              ].map((s, idx) => (
+                <div key={s.num} className="flex items-center flex-1">
+                  <div className="flex flex-col items-center flex-1">
+                    <div
+                      className={`
+                        w-12 h-12 rounded-full flex items-center justify-center font-bold text-sm transition-all
+                        ${
+                          step === s.num
+                            ? "bg-emerald-600 text-white ring-4 ring-emerald-100 scale-110"
+                            : step > s.num
+                            ? "bg-emerald-100 text-emerald-700"
+                            : "bg-gray-100 text-gray-400"
+                        }
+                      `}
+                    >
+                      {step > s.num ? <CheckCircle2 className="w-6 h-6" /> : <s.icon className="w-6 h-6" />}
+                    </div>
+                    <span
+                      className={`
+                        text-xs font-medium mt-2 text-center
+                        ${step === s.num ? "text-emerald-700" : "text-gray-500"}
+                      `}
+                    >
+                      {s.label}
+                    </span>
                   </div>
+                  {idx < 2 && (
+                    <div
+                      className={`
+                        flex-1 h-1 mx-4 rounded transition-all
+                        ${step > s.num ? "bg-emerald-200" : "bg-gray-200"}
+                      `}
+                    />
+                  )}
                 </div>
               ))}
             </div>
 
-            <div className="flex justify-end">
-              <Button onClick={() => setStep(2)}>Next</Button>
-            </div>
-          </div>
-        )}
+            {/* Error Display */}
+            {error && (
+              <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-800 text-sm">
+                <strong className="font-semibold">Error:</strong> {error}
+              </div>
+            )}
+</div>
+            {/* STEP 1: Contact & Business */}
+            {step === 1 && (
+              <div className="space-y-6 animate-in fade-in duration-300">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="first_name" className="text-sm font-medium text-gray-700">
+                      First Name <span className="text-red-500">*</span>
+                    </Label>
+                    <Input
+                      id="first_name"
+                      value={first_name}
+                      onChange={(e) => set_first_name(e.target.value)}
+                      required
+                      className="mt-1"
+                      placeholder="John"
+                    />
+                  </div>
 
-        {step === 2 && (
-          <div className="space-y-6">
-            <div className="grid md:grid-cols-2 gap-4">
-              <div>
-                <Label>Business start date</Label>
-                <Input type="date" value={business_start_date} onChange={(e) => setStartDate(e.target.value)} />
-              </div>
-              <div>
-                <Label>Avg. monthly deposits (USD)</Label>
-                <Input type="number" value={avg_monthly_deposits} onChange={(e) => setMonthlyDeposits(e.target.value === "" ? "" : Number(e.target.value))} />
-              </div>
-              <div>
-                <Label>Annual revenue last year (USD)</Label>
-                <Input type="number" value={annual_revenue} onChange={(e) => setAnnualRevenue(e.target.value === "" ? "" : Number(e.target.value))} />
-              </div>
-              <div>
-                <Label>Credit score</Label>
-                <Select value={credit_score} onValueChange={(v) => setCreditScore(v as any)}>
-                  <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="700">700+</SelectItem>
-                    <SelectItem value="680">680–699</SelectItem>
-                    <SelectItem value="650">650–679</SelectItem>
-                    <SelectItem value="600">600–649</SelectItem>
-                    <SelectItem value="400">≤599</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label>SBSS score (optional)</Label>
-                <Input type="number" value={sbss_score} onChange={(e) => setSbss(e.target.value === "" ? "" : Number(e.target.value))} />
-              </div>
-            </div>
-
-            {/* Loans (simple) */}
-            <div className="space-y-3">
-              <div className="font-medium">Outstanding loans (optional)</div>
-              {[1,2,3].map(n => (
-                <div key={n} className="grid md:grid-cols-3 gap-3">
-                  <div><Label>Lender #{n}</Label>
-                    <Input
-                      value={(outstanding_loans as any)[`loan${n}`]?.lender_name || ""}
-                      onChange={(e) => setLoans(prev => ({
-                        ...prev,
-                        [`loan${n}`]: { ...(prev as any)[`loan${n}`], lender_name: e.target.value }
-                      }))}
-                    />
-                  </div>
-                  <div><Label>Balance</Label>
-                    <Input
-                      type="number"
-                      value={(outstanding_loans as any)[`loan${n}`]?.balance ?? ""}
-                      onChange={(e) => setLoans(prev => ({
-                        ...prev,
-                        [`loan${n}`]: { ...(prev as any)[`loan${n}`], balance: e.target.value === "" ? undefined : Number(e.target.value) }
-                      }))}
-                    />
-                  </div>
-                  <div><Label>Term</Label>
-                    <Input
-                      placeholder="e.g. 12 months"
-                      value={(outstanding_loans as any)[`loan${n}`]?.term || ""}
-                      onChange={(e) => setLoans(prev => ({
-                        ...prev,
-                        [`loan${n}`]: { ...(prev as any)[`loan${n}`], term: e.target.value }
-                      }))}
-                    />
-                  </div>
+                <div>
+                  <Label htmlFor="last_name" className="text-sm font-medium text-gray-700">
+                    Last Name <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    id="last_name"
+                    value={last_name}
+                    onChange={(e) => set_last_name(e.target.value)}
+                    required
+                    className="mt-1"
+                    placeholder="Doe"
+                  />
                 </div>
-              ))}
-            </div>
-
-            <div className="flex justify-between">
-              <Button variant="outline" onClick={() => setStep(1)}>Back</Button>
-              <Button onClick={() => setStep(3)}>Next</Button>
-            </div>
-          </div>
-        )}
-
-        {step === 3 && (
-          <div className="space-y-6">
-            <div className="grid md:grid-cols-3 gap-4">
-              <div className="flex items-center gap-2"><Checkbox checked={has_previous_debt} onCheckedChange={v => setPrevDebt(Boolean(v))} /><Label>Has previous debt?</Label></div>
-              <div className="flex items-center gap-2"><Checkbox checked={defaulted_on_mca} onCheckedChange={v => setDefaulted(Boolean(v))} /><Label>Defaulted on MCA</Label></div>
-              <div className="flex items-center gap-2"><Checkbox checked={reduced_mca_payments} onCheckedChange={v => setReduced(Boolean(v))} /><Label>Reduced MCA payments</Label></div>
-              <div className="flex items-center gap-2"><Checkbox checked={owns_real_estate} onCheckedChange={v => setRealEstate(Boolean(v))} /><Label>Owns real estate</Label></div>
-              <div className="flex items-center gap-2"><Checkbox checked={personal_cc_debt_over_75k} onCheckedChange={v => setPcc75(Boolean(v))} /><Label>Personal CC debt &gt; 75k</Label></div>
-              <div>
-                <Label>Personal CC debt amount (if any)</Label>
-                <Input type="number" value={personal_cc_debt_amount} onChange={e => setPccAmount(e.target.value === "" ? "" : Number(e.target.value))} />
               </div>
-              <div className="flex items-center gap-2"><Checkbox checked={foreclosures_or_bankruptcies_3y} onCheckedChange={v => setBkFc3y(Boolean(v))} /><Label>BK/FC in last 3y</Label></div>
-              <div><Label>BK/FC months ago</Label><Input type="number" value={bk_fc_months_ago} onChange={e => setBkFcMonths(e.target.value === "" ? "" : Number(e.target.value))} /></div>
-              <div><Label>BK/FC type</Label><Input value={bk_fc_type} onChange={e => setBkFcType(e.target.value)} placeholder="foreclosure | bankruptcy | both" /></div>
-              <div className="flex items-center gap-2"><Checkbox checked={tax_liens} onCheckedChange={v => setTaxLiens(Boolean(v))} /><Label>Tax liens</Label></div>
-              <div><Label>Tax liens type</Label><Input value={tax_liens_type} onChange={e => setTaxLiensType(e.target.value)} placeholder="personal | business" /></div>
-              <div><Label>Tax liens amount</Label><Input type="number" value={tax_liens_amount} onChange={e => setTaxLiensAmount(e.target.value === "" ? "" : Number(e.target.value))} /></div>
-              <div className="flex items-center gap-2"><Checkbox checked={tax_liens_on_plan} onCheckedChange={v => setTaxLiensPlan(Boolean(v))} /><Label>On payment plan</Label></div>
-              <div className="flex items-center gap-2"><Checkbox checked={judgements} onCheckedChange={v => setJudgements(Boolean(v))} /><Label>Judgements</Label></div>
-              <div className="md:col-span-2"><Label>Judgements — explain</Label><Textarea rows={2} value={judgements_explain} onChange={e => setJudgementsExplain(e.target.value)} /></div>
-              <div><Label>How soon do they need funds?</Label><Input value={how_soon_funds} onChange={e => setHowSoon(e.target.value)} placeholder="ASAP, 1–2 weeks, etc." /></div>
-              <div><Label>Employees</Label><Input type="number" value={employees_count} onChange={e => setEmployees(e.target.value === "" ? "" : Number(e.target.value))} /></div>
-              <div className="md:col-span-3"><Label>Additional info</Label><Textarea rows={2} value={additional_info} onChange={e => setAdditional(e.target.value)} /></div>
-            </div>
 
-            {/* Docs checklist */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="email" className="text-sm font-medium text-gray-700">
+                    Email <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    value={email}
+                    onChange={(e) => set_email(e.target.value)}
+                    required
+                    className="mt-1"
+                    placeholder="john@example.com"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="phone" className="text-sm font-medium text-gray-700">
+                    Phone <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    id="phone"
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => set_phone(e.target.value)}
+                    required
+                    className="mt-1"
+                    placeholder="+1 (555) 123-4567"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <Label htmlFor="company_legal_name" className="text-sm font-medium text-gray-700">
+                  Company Legal Name <span className="text-red-500">*</span>
+                </Label>
+                <Input
+                  id="company_legal_name"
+                  value={company_legal_name}
+                  onChange={(e) => set_company_legal_name(e.target.value)}
+                  required
+                  className="mt-1"
+                  placeholder="Acme Corp LLC"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <Label htmlFor="city" className="text-sm font-medium text-gray-700">
+                    City <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    id="city"
+                    value={city}
+                    onChange={(e) => set_city(e.target.value)}
+                    required
+                    className="mt-1"
+                    placeholder="New York"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="state" className="text-sm font-medium text-gray-700">
+                    State <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    id="state"
+                    value={state}
+                    onChange={(e) => set_state(e.target.value)}
+                    required
+                    className="mt-1"
+                    placeholder="NY"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="zip" className="text-sm font-medium text-gray-700">
+                    ZIP Code <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    id="zip"
+                    value={zip}
+                    onChange={(e) => set_zip(e.target.value)}
+                    required
+                    className="mt-1"
+                    placeholder="10001"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="amount_requested" className="text-sm font-medium text-gray-700">
+                    Funding Amount Requested <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    id="amount_requested"
+                    type="number"
+                    value={amount_requested}
+                    onChange={(e) => set_amount_requested(e.target.value ? Number(e.target.value) : "")}
+                    required
+                    className="mt-1"
+                    placeholder="50000"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="legal_entity_type" className="text-sm font-medium text-gray-700">
+                    Entity Type <span className="text-red-500">*</span>
+                  </Label>
+                  <Select value={legal_entity_type} onValueChange={set_legal_entity_type}>
+                    <SelectTrigger className="mt-1">
+                      <SelectValue placeholder="Select entity type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="LLC">LLC</SelectItem>
+                      <SelectItem value="Corporation">Corporation</SelectItem>
+                      <SelectItem value="Sole Proprietorship">Sole Proprietorship</SelectItem>
+                      <SelectItem value="Partnership">Partnership</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+    <div>
+      <Label htmlFor="industry_1" className="text-sm font-medium text-gray-700">
+        Industry
+      </Label>
+      <Input
+        id="industry_1"
+        value={industry_1}
+        onChange={(e) => set_industry_1(e.target.value)}
+        className="mt-1"
+        placeholder="e.g., Retail, Healthcare, Technology"
+      />
+    </div>
+    <div>
+      <Label htmlFor="use_of_funds" className="text-sm font-medium text-gray-700">
+        Use of Funds <span className="text-red-500">*</span>
+      </Label>
+      <Textarea
+        id="use_of_funds"
+        value={use_of_funds}
+        onChange={(e) => set_use_of_funds(e.target.value)}
+        required
+        className="mt-1"
+        placeholder="Describe how you plan to use the funds..."
+        rows={3}
+      />
+    </div>
+    <div className="flex justify-end">
+      <Button
+        onClick={() => set_step(2)}
+        className="bg-emerald-600 hover:bg-emerald-700"
+      >
+        Next Step
+        <ChevronRight className="ml-2 w-4 h-4" />
+      </Button>
+    </div>
+  </div>
+)}
+
+      {/* STEP 2: Financials */}
+      {step === 2 && (
+        <div className="space-y-6 animate-in fade-in duration-300">
+          <div>
+            <Label htmlFor="business_start_date" className="text-sm font-medium text-gray-700">
+              Business Start Date <span className="text-red-500">*</span>
+            </Label>
+            <Input
+              id="business_start_date"
+              type="date"
+              value={business_start_date}
+              onChange={(e) => set_business_start_date(e.target.value)}
+              required
+              className="mt-1"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <div className="font-medium mb-2">Documents requested</div>
-              <div className="grid md:grid-cols-2 gap-2">
-                {DOC_OPTIONS.map((label) => (
-                  <label key={label} className="flex items-center gap-2 text-sm">
-                    <Checkbox checked={documents_requested.includes(label)} onCheckedChange={() => toggleDoc(label)} />
-                    {label}
-                  </label>
-                ))}
-              </div>
+              <Label htmlFor="avg_monthly_deposits" className="text-sm font-medium text-gray-700">
+                Average Monthly Deposits <span className="text-red-500">*</span>
+              </Label>
+              <Input
+                id="avg_monthly_deposits"
+                type="number"
+                value={avg_monthly_deposits}
+                onChange={(e) => set_avg_monthly_deposits(e.target.value ? Number(e.target.value) : "")}
+                required
+                className="mt-1"
+                placeholder="25000"
+              />
             </div>
 
-            {error && <p className="text-red-600 text-sm">{error}</p>}
-
-            <div className="flex justify-between">
-              <Button variant="outline" onClick={() => setStep(2)}>Back</Button>
-              <Button onClick={submit} disabled={submitting}>
-                {submitting ? "Submitting..." : "Create Client & Send Magic Link"}
-              </Button>
+            <div>
+              <Label htmlFor="annual_revenue" className="text-sm font-medium text-gray-700">
+                Annual Revenue <span className="text-red-500">*</span>
+              </Label>
+              <Input
+                id="annual_revenue"
+                type="number"
+                value={annual_revenue}
+                onChange={(e) => set_annual_revenue(e.target.value ? Number(e.target.value) : "")}
+                required
+                className="mt-1"
+                placeholder="300000"
+              />
             </div>
           </div>
-        )}
-      </CardContent>
-    </Card>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="credit_score" className="text-sm font-medium text-gray-700">
+                Credit Score Range <span className="text-red-500">*</span>
+              </Label>
+              <Select value={credit_score} onValueChange={set_credit_score}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Select credit score range" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="750+">750+ (Excellent)</SelectItem>
+                  <SelectItem value="700-749">700-749 (Good)</SelectItem>
+                  <SelectItem value="650-699">650-699 (Fair)</SelectItem>
+                  <SelectItem value="600-649">600-649 (Poor)</SelectItem>
+                  <SelectItem value="Below 600">Below 600</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <Label htmlFor="sbss_score" className="text-sm font-medium text-gray-700">
+                SBSS Score (Optional)
+              </Label>
+              <Input
+                id="sbss_score"
+                type="number"
+                value={sbss_score}
+                onChange={(e) => set_sbss_score(e.target.value ? Number(e.target.value) : "")}
+                className="mt-1"
+                placeholder="e.g., 160"
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-between">
+            <Button
+              onClick={() => set_step(1)}
+              variant="outline"
+              className="border-emerald-600 text-emerald-600 hover:bg-emerald-50"
+            >
+              <ChevronLeft className="mr-2 w-4 h-4" />
+              Previous
+            </Button>
+            <Button
+              onClick={() => set_step(3)}
+              className="bg-emerald-600 hover:bg-emerald-700"
+            >
+              Next Step
+              <ChevronRight className="ml-2 w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* STEP 3: Risk & Docs */}
+      {step === 3 && (
+        <div className="space-y-6 animate-in fade-in duration-300">
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <h3 className="text-sm font-semibold text-blue-900 mb-3">Risk Assessment</h3>
+            <div className="space-y-3">
+              <div className="flex items-start space-x-3">
+                <Checkbox
+                  id="has_previous_debt"
+                  checked={has_previous_debt}
+                  onCheckedChange={(checked) => set_has_previous_debt(checked as boolean)}
+                  className="mt-1"
+                />
+                <Label htmlFor="has_previous_debt" className="text-sm text-gray-700 cursor-pointer">
+                  Has previous debt
+                </Label>
+              </div>
+
+              <div className="flex items-start space-x-3">
+                <Checkbox
+                  id="defaulted_on_mca"
+                  checked={defaulted_on_mca}
+                  onCheckedChange={(checked) => set_defaulted_on_mca(checked as boolean)}
+                  className="mt-1"
+                />
+                <Label htmlFor="defaulted_on_mca" className="text-sm text-gray-700 cursor-pointer">
+                  Defaulted on MCA
+                </Label>
+              </div>
+
+              <div className="flex items-start space-x-3">
+                <Checkbox
+                  id="reduced_mca_payments"
+                  checked={reduced_mca_payments}
+                  onCheckedChange={(checked) => set_reduced_mca_payments(checked as boolean)}
+                  className="mt-1"
+                />
+                <Label htmlFor="reduced_mca_payments" className="text-sm text-gray-700 cursor-pointer">
+                  Reduced MCA payments
+                </Label>
+              </div>
+
+              <div className="flex items-start space-x-3">
+                <Checkbox
+                  id="owns_real_estate"
+                  checked={owns_real_estate}
+                  onCheckedChange={(checked) => set_owns_real_estate(checked as boolean)}
+                  className="mt-1"
+                />
+                <Label htmlFor="owns_real_estate" className="text-sm text-gray-700 cursor-pointer">
+                  Owns real estate
+                </Label>
+              </div>
+
+              <div className="flex items-start space-x-3">
+                <Checkbox
+                  id="personal_cc_debt_over_75k"
+                  checked={personal_cc_debt_over_75k}
+                  onCheckedChange={(checked) => set_personal_cc_debt_over_75k(checked as boolean)}
+                  className="mt-1"
+                />
+                <Label htmlFor="personal_cc_debt_over_75k" className="text-sm text-gray-700 cursor-pointer">
+                  Personal CC debt over $75k
+                </Label>
+              </div>
+
+              {personal_cc_debt_over_75k && (
+                <div className="ml-8">
+                  <Label htmlFor="personal_cc_debt_amount" className="text-sm font-medium text-gray-700">
+                    Personal CC Debt Amount
+                  </Label>
+                  <Input
+                    id="personal_cc_debt_amount"
+                    type="number"
+                    value={personal_cc_debt_amount}
+                    onChange={(e) => set_personal_cc_debt_amount(e.target.value ? Number(e.target.value) : "")}
+                    className="mt-1"
+                    placeholder="Amount"
+                  />
+                </div>
+              )}
+
+              <div className="flex items-start space-x-3">
+                <Checkbox
+                  id="foreclosures_or_bankruptcies_3y"
+                  checked={foreclosures_or_bankruptcies_3y}
+                  onCheckedChange={(checked) => set_foreclosures_or_bankruptcies_3y(checked as boolean)}
+                  className="mt-1"
+                />
+                <Label htmlFor="foreclosures_or_bankruptcies_3y" className="text-sm text-gray-700 cursor-pointer">
+                  Foreclosures or bankruptcies in past 3 years
+                </Label>
+              </div>
+
+              {foreclosures_or_bankruptcies_3y && (
+                <div className="ml-8 space-y-3">
+                  <div>
+                    <Label htmlFor="bk_fc_months_ago" className="text-sm font-medium text-gray-700">
+                      How many months ago?
+                    </Label>
+                    <Input
+                      id="bk_fc_months_ago"
+                      type="number"
+                      value={bk_fc_months_ago}
+                      onChange={(e) => set_bk_fc_months_ago(e.target.value ? Number(e.target.value) : "")}
+                      className="mt-1"
+                      placeholder="Months"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="bk_fc_type" className="text-sm font-medium text-gray-700">
+                      Type
+                    </Label>
+                    <Select value={bk_fc_type} onValueChange={set_bk_fc_type}>
+                      <SelectTrigger className="mt-1">
+                        <SelectValue placeholder="Select type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="foreclosure">Foreclosure</SelectItem>
+                        <SelectItem value="bankruptcy">Bankruptcy</SelectItem>
+                        <SelectItem value="both">Both</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-start space-x-3">
+                <Checkbox
+                  id="tax_liens"
+                  checked={tax_liens}
+                  onCheckedChange={(checked) => set_tax_liens(checked as boolean)}
+                  className="mt-1"
+                />
+                <Label htmlFor="tax_liens" className="text-sm text-gray-700 cursor-pointer">
+                  Tax liens
+                </Label>
+              </div>
+
+              {tax_liens && (
+                <div className="ml-8 space-y-3">
+                  <div>
+                    <Label htmlFor="tax_liens_type" className="text-sm font-medium text-gray-700">
+                      Tax lien type
+                    </Label>
+                    <Select value={tax_liens_type} onValueChange={set_tax_liens_type}>
+                      <SelectTrigger className="mt-1">
+                        <SelectValue placeholder="Select type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="personal">Personal</SelectItem>
+                        <SelectItem value="business">Business</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label htmlFor="tax_liens_amount" className="text-sm font-medium text-gray-700">
+                      Tax lien amount
+                    </Label>
+                    <Input
+                      id="tax_liens_amount"
+                      type="number"
+                      value={tax_liens_amount}
+                      onChange={(e) => set_tax_liens_amount(e.target.value ? Number(e.target.value) : "")}
+                      className="mt-1"
+                      placeholder="Amount"
+                    />
+                  </div>
+                  <div className="flex items-start space-x-3">
+                    <Checkbox
+                      id="tax_liens_on_plan"
+                      checked={tax_liens_on_plan}
+                      onCheckedChange={(checked) => set_tax_liens_on_plan(checked as boolean)}
+                      className="mt-1"
+                    />
+                    <Label htmlFor="tax_liens_on_plan" className="text-sm text-gray-700 cursor-pointer">
+                      On payment plan
+                    </Label>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <Label htmlFor="judgements_explain" className="text-sm font-medium text-gray-700">
+              Judgements — explain (if any)
+            </Label>
+            <Textarea
+              id="judgements_explain"
+              value={judgements_explain}
+              onChange={(e) => set_judgements_explain(e.target.value)}
+              className="mt-1"
+              placeholder="Explain any judgements..."
+              rows={2}
+            />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="how_soon_funds" className="text-sm font-medium text-gray-700">
+                How soon do they need funds?
+              </Label>
+              <Select value={how_soon_funds} onValueChange={set_how_soon_funds}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Select timeframe" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ASAP">ASAP</SelectItem>
+                  <SelectItem value="1-2 weeks">1-2 weeks</SelectItem>
+                  <SelectItem value="2-4 weeks">2-4 weeks</SelectItem>
+                  <SelectItem value="1+ months">1+ months</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <Label htmlFor="employees_count" className="text-sm font-medium text-gray-700">
+                Number of Employees
+              </Label>
+              <Input
+                id="employees_count"
+                type="number"
+                value={employees_count}
+                onChange={(e) => set_employees_count(e.target.value ? Number(e.target.value) : "")}
+                className="mt-1"
+                placeholder="5"
+              />
+            </div>
+          </div>
+
+          <div>
+            <Label htmlFor="additional_info" className="text-sm font-medium text-gray-700">
+              Additional Information
+            </Label>
+            <Textarea
+              id="additional_info"
+              value={additional_info}
+              onChange={(e) => set_additional_info(e.target.value)}
+              className="mt-1"
+              placeholder="Any additional information about the business..."
+              rows={3}
+            />
+          </div>
+
+          <div>
+            <Label className="text-sm font-medium text-gray-700 mb-3 block">
+              Documents Requested
+            </Label>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-gray-50 p-4 rounded-lg border">
+              {DOC_OPTIONS.map((doc) => (
+                <div key={doc} className="flex items-start space-x-3">
+                  <Checkbox
+                    id={`doc-${doc}`}
+                    checked={documents_requested.includes(doc)}
+                    onCheckedChange={() => toggle_document(doc)}
+                    className="mt-1"
+                  />
+                  <Label
+                    htmlFor={`doc-${doc}`}
+                    className="text-sm text-gray-700 cursor-pointer leading-tight"
+                  >
+                    {doc}
+                  </Label>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex justify-between pt-4 border-t">
+            <Button
+              onClick={() => set_step(2)}
+              variant="outline"
+              className="border-emerald-600 text-emerald-600 hover:bg-emerald-50"
+            >
+              <ChevronLeft className="mr-2 w-4 h-4" />
+              Previous
+            </Button>
+            <Button
+              onClick={handle_submit}
+              disabled={submitting}
+              className="bg-emerald-600 hover:bg-emerald-700 px-8"
+            >
+              {submitting ? "Creating Client..." : "Create Client & Send Magic Link"}
+            </Button>
+          </div>
+        </div>
+      )}
+    </CardContent>
+      </Card>
+    </div>
   );
 }

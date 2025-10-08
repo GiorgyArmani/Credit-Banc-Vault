@@ -50,6 +50,8 @@ export async function ghlUpsertContact(body: GhlContactPayload) {
   return (data?.contact?.id ?? data?.id) as string;
 }
 
+
+
 export async function ghlUpdateContact(contactId: string, body: Partial<GhlContactPayload>) {
   const res = await fetch(`${BASE}/contacts/${contactId}`, {
     method: "PUT",
@@ -62,7 +64,8 @@ export async function ghlUpdateContact(contactId: string, body: Partial<GhlConta
 export type GhlCustomField = { id: string; name: string; key: string; objectType: string };
 
 export async function ghlFetchCustomFields(locationId: string) {
-  const res = await fetch(`${BASE}/locations/${locationId}/custom-fields`, {
+  // Change: custom-fields → customFields (camelCase)
+  const res = await fetch(`${BASE}/locations/${locationId}/customFields`, {
     method: "GET",
     headers: authHeaders(),
     cache: "no-store",

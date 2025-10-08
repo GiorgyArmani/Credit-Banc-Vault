@@ -19,7 +19,7 @@
   },
   "include": [
     "next-env.d.ts",
-    "types/**/*.d.ts",     // ← añade esta línea
+    "types/**/*.d.ts",     
     "**/*.ts",
     "**/*.tsx",
     ".next/types/**/*.ts"
