@@ -10,6 +10,9 @@ const admin = createClient(
   { auth: { persistSession: false } }
 );
 
+// Default password for all new clients
+const DEFAULT_PASSWORD = "CBvault2025!";
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -23,10 +26,9 @@ export async function POST(req: Request) {
       });
     }
     
-    // Parse and validate
     const p = ClientSignupSchema.parse(body);
 
-    // ---------- 1) GHL CONTACT
+    // ---------- 1) GHL CONTACT WITH ALL CUSTOM FIELDS
     const first_name = p.first_name.trim();
     const last_name = p.last_name.trim() || null;
 
@@ -34,9 +36,9 @@ export async function POST(req: Request) {
       process.env[id_env] ? { id: process.env[id_env]!, value } : null;
 
     const custom_fields = [
+      // Core fields
       cf("GHL_CF_FUNDING_GOAL", p.amount_requested),
       cf("GHL_CF_LEGAL_ENTITY", p.legal_entity_type),
-      cf("GHL_CF_INDUSTRY", p.industry_1 || p.industry_2 || p.industry_3 || ""),
       cf("GHL_CF_BUSINESS_START", p.business_start_date),
       cf("GHL_CF_MONTHLY_REV", p.avg_monthly_deposits),
       cf("GHL_CF_ANNUAL_REV", p.annual_revenue),
@@ -44,6 +46,60 @@ export async function POST(req: Request) {
       cf("GHL_CF_SBSS_SCORE", p.sbss_score ?? ""),
       cf("GHL_CF_USE_OF_FUNDS", p.use_of_funds),
       cf("GHL_CF_EMPLOYEES", p.employees_count ?? ""),
+      cf("GHL_CF_BUSINESS_NAME", p.company_legal_name),
+      cf("GHL_CF_ZIP", p.zip),
+      cf("GHL_CF_STATE", p.state),
+      
+      // Industry fields
+      cf("GHL_CF_PREFERRED_INDUSTRIES", p.industry_1 || ""),
+      
+      // Owner information
+      cf("GHL_CF_HOW_MANY_COMPANY_OWNERS_ARE_THERE", p.owners?.length?.toString() || "0"),
+      ...(p.owners && p.owners[0] ? [
+        cf("GHL_CF_FIRST_OWNER", `${p.owners[0].first_name} ${p.owners[0].last_name}`),
+        cf("GHL_CF_1ST_OWNER_PERCENTAGE", p.owners[0].ownership_pct)
+      ] : []),
+      ...(p.owners && p.owners[1] ? [
+        cf("GHL_CF_SECOND_OWNER", `${p.owners[1].first_name} ${p.owners[1].last_name}`),
+        cf("GHL_CF_2ND_OWNER_PERCENTAGE", p.owners[1].ownership_pct)
+      ] : []),
+      ...(p.owners && p.owners[2] ? [
+        cf("GHL_CF_THIRD_OWNER", `${p.owners[2].first_name} ${p.owners[2].last_name}`),
+        cf("GHL_CF_3RD_OWNER_PERCENTAGE", p.owners[2].ownership_pct)
+      ] : []),
+      
+      // Outstanding loans
+      ...(p.outstanding_loans?.loan1 ? [
+        cf("GHL_CF_BALANCE_LOAN_1", p.outstanding_loans.loan1.balance),
+        cf("GHL_CF_LENDER_LOAN_1", p.outstanding_loans.loan1.lender_name),
+        cf("GHL_CF_TERM_LOAN_1", p.outstanding_loans.loan1.term)
+      ] : []),
+      ...(p.outstanding_loans?.loan2 ? [
+        cf("GHL_CF_BALANCE_LOAN_2", p.outstanding_loans.loan2.balance),
+        cf("GHL_CF_LENDER_LOAN_2", p.outstanding_loans.loan2.lender_name),
+        cf("GHL_CF_TERM_LOAN_2", p.outstanding_loans.loan2.term)
+      ] : []),
+      ...(p.outstanding_loans?.loan3 ? [
+        cf("GHL_CF_BALANCE_LOAN_3", p.outstanding_loans.loan3.balance),
+        cf("GHL_CF_LENDER_LOAN_3", p.outstanding_loans.loan3.lender_name),
+        cf("GHL_CF_TERM_LOAN_3", p.outstanding_loans.loan3.term)
+      ] : []),
+      
+      // Risk flags
+      cf("GHL_CF_MCA_DEFAULTS", p.defaulted_on_mca ? "Yes" : "No"),
+      cf("GHL_CF_OWNS_REAL_ESTATE", p.owns_real_estate ? "Yes" : "No"),
+      cf("GHL_CF_REDUCED_MCA_PAYMENTS", p.reduced_mca_payments ? "Yes" : "No"),
+      cf("GHL_CF_PERSONAL_DEBT_OVER_75K", p.personal_cc_debt_over_75k ? "Yes" : "No"),
+      cf("GHL_CF_PERSONAL_DEBT_AMOUNT", p.personal_cc_debt_amount ?? ""),
+      cf("GHL_CF_FORECLOSURES_OR_BANKRUPTCIES_3Y", p.foreclosures_or_bankruptcies_3y ? "Yes" : "No"),
+      cf("GHL_CF_BK_FC_MONTHS_AGO", p.bk_fc_months_ago ?? ""),
+      cf("GHL_CF_BK_FC_TYPE", p.bk_fc_type ?? ""),
+      cf("GHL_CF_TAX_LIENS", p.tax_liens ? "Yes" : "No"),
+      cf("GHL_CF_TAX_LIEN_TYPE", p.tax_liens_type ?? ""),
+      cf("GHL_CF_TAX_LIEN_PAYMENT_PLAN", p.tax_liens_on_plan ? "Yes" : "No"),
+      cf("GHL_CF_HOW_SOON_FUNDS", p.how_soon_funds ?? ""),
+      cf("GHL_CF_ADDITIONAL_INFO", p.additional_info ?? ""),
+      cf("GHL_CF_JUDGEMENT_EXPLANATION", p.judgements_explain ?? ""),
     ].filter(Boolean) as Array<{ id: string; value: any }>;
 
     const ghl_contact_id = await ghlUpsertContact({
@@ -61,7 +117,7 @@ export async function POST(req: Request) {
       customFields: custom_fields,
     });
 
-    // ---------- 2) SUPABASE USER
+    // ---------- 2) SUPABASE USER WITH DEFAULT PASSWORD
     const { data: existing_user_row } = await admin
       .from("users")
       .select("id")
@@ -69,49 +125,40 @@ export async function POST(req: Request) {
       .maybeSingle();
 
     let user_id = existing_user_row?.id as string | undefined;
-    let action_link: string | undefined;
-
-    const redirect_to = `${process.env.NEXT_PUBLIC_APP_URL}/auth/set-password`;
+    let login_url = `${process.env.NEXT_PUBLIC_APP_URL}/auth/sign-in`;
 
     if (!user_id) {
+      // Create user with default password
       const { data: created, error: create_err } = await admin.auth.admin.createUser({
         email: p.email,
-        email_confirm: false,
+        password: DEFAULT_PASSWORD,
+        email_confirm: true, // Auto-confirm so they can login immediately
         user_metadata: {
           full_name: `${p.first_name} ${p.last_name}`,
           company: p.company_legal_name,
-          must_set_password: true,
+          should_change_password: true, // Flag to show password change prompt
         },
       });
       if (create_err) throw create_err;
       user_id = created.user!.id;
 
-      const { error: invite_err } = await admin.auth.admin.inviteUserByEmail(p.email, { redirectTo: redirect_to });
-      if (invite_err) throw invite_err;
-
-      const { data: link_data } = await admin.auth.admin.generateLink({ 
-        type: "invite", 
-        email: p.email, 
-        options: { redirectTo: redirect_to }
-      });
-      action_link = (link_data as any)?.properties?.action_link;
+      // Send welcome email with login instructions
+      // You can integrate with your email service here
+      
     } else {
-      const { error: reset_err } = await admin.auth.resetPasswordForEmail(p.email, { redirectTo: redirect_to });
-      if (reset_err) throw reset_err;
-
-      const { data: link_data } = await admin.auth.admin.generateLink({ 
-        type: "recovery", 
-        email: p.email, 
-        options: { redirectTo: redirect_to }
-      });
-      action_link = (link_data as any)?.properties?.action_link;
-
+      // Update existing user
       await admin.auth.admin.updateUserById(user_id, { 
-        user_metadata: { must_set_password: true } 
+        password: DEFAULT_PASSWORD,
+        email_confirm: true,
+        user_metadata: { 
+          should_change_password: true,
+          full_name: `${p.first_name} ${p.last_name}`,
+          company: p.company_legal_name,
+        } 
       });
     }
 
-    // ---------- 3) USERS + BUSINESS_PROFILE
+    // ---------- 3) USERS TABLE
     await admin.from("users").upsert({
       id: user_id!,
       email: p.email.toLowerCase(),
@@ -120,24 +167,34 @@ export async function POST(req: Request) {
       role: "free",
     });
 
+    // ---------- 4) BUSINESS_PROFILE WITH ALL FIELDS
     const { data: bp } = await admin
       .from("business_profiles")
       .upsert({
         user_id: user_id!,
         business_name: p.company_legal_name,
-        industry: p.industry_1 ?? p.industry_2 ?? p.industry_3 ?? null,
+        industry: p.industry_1 ?? null,
+        legal_entity_type: p.legal_entity_type,
+        city: p.city,
+        state: p.state,
+        zip: p.zip,
+        phone: p.phone,
         monthly_revenue: String(p.avg_monthly_deposits),
         annual_revenue_last_year: String(p.annual_revenue),
         business_model: p.legal_entity_type,
         primary_goal: p.use_of_funds,
         business_start_date: p.business_start_date,
         credit_score: p.credit_score,
+        amount_requested: p.amount_requested,
+        use_of_funds: p.use_of_funds,
+        avg_monthly_deposits: p.avg_monthly_deposits,
+        sbss_score: p.sbss_score,
       })
       .select("id")
       .single();
     const profile_id = bp!.id;
 
-    // ---------- 4) OWNERS (only if we have any)
+    // ---------- 5) BUSINESS OWNERS
     if (p.owners && p.owners.length > 0) {
       await admin.from("business_owners").insert(
         p.owners.map((o) => ({
@@ -148,7 +205,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // ---------- 5) OUTSTANDING LOANS
+    // ---------- 6) OUTSTANDING LOANS
     const L = p.outstanding_loans;
     const loans = [
       L?.loan1 ? { position: 1, ...L.loan1 } : null,
@@ -162,7 +219,7 @@ export async function POST(req: Request) {
         .insert(loans.map((l) => ({ profile_id, ...l })));
     }
 
-    // ---------- 6) APPLICATION FLAGS
+    // ---------- 7) APPLICATION FLAGS WITH ALL FIELDS
     await admin.from("application_flags").upsert({
       profile_id,
       defaulted_on_mca: p.defaulted_on_mca ?? false,
@@ -183,16 +240,16 @@ export async function POST(req: Request) {
       additional_info: p.additional_info ?? null,
     });
 
-    // ---------- 7) INTEGRATIONS
+    // ---------- 8) INTEGRATIONS
     await admin
       .from("integrations")
       .upsert({ 
         profile_id, 
         ghl_contact_id, 
-        last_push_at: new Date().toISOString() 
+        last_push_at: new Date().toISOString(),
       });
 
-    // ---------- 8) VAULT STATE
+    // ---------- 9) VAULT STATE
     await admin
       .from("user_vault_profiles")
       .upsert({ 
@@ -200,26 +257,19 @@ export async function POST(req: Request) {
         current_product_tag: "Pre-Approval" 
       });
 
-    // ---------- 9) EVENTS
-    if (p.has_previous_debt) {
-      await admin.from("events").insert({
-        profile_id,
-        type: "rule_override",
-        payload: { require_debt_schedule: true },
-        actor: p.advisor_id ?? null,
-      });
-    }
-
+    // ---------- 10) EVENTS
     await admin.from("events").insert({
       profile_id,
       type: "client_signup",
       payload: {
         amount_requested: p.amount_requested,
+        legal_entity_type: p.legal_entity_type,
+        credit_score: p.credit_score,
       },
       actor: p.advisor_id ?? null,
     });
 
-    // ---------- 10) TAGS IN GHL
+    // ---------- 11) TAGS IN GHL
     const doc_tags = p.documents_requested.map((d) =>
       d.toLowerCase().replace(/\s+/g, "_")
     );
@@ -237,7 +287,11 @@ export async function POST(req: Request) {
       profile_id,
       user_id,
       ghl_contact_id,
-      invite_link: action_link,
+      login_url,
+      credentials: {
+        email: p.email,
+        password: DEFAULT_PASSWORD,
+      }
     });
     
   } catch (e: any) {
