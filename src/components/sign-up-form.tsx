@@ -156,7 +156,7 @@ export default function SignUpForm() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-blue-50">
       {/* Container with proper responsive behavior */}
-      <div className="container mx-auto px-4 py-8 md:py-12">
+      <div className="w-full px-4 py-8 md:py-12">
         {/* Header Banner */}
         <div className="mb-6 md:mb-8">
           <div className="bg-gradient-to-r from-emerald-600 to-teal-600 rounded-2xl p-6 md:p-8 text-white shadow-2xl">
@@ -249,7 +249,7 @@ export default function SignUpForm() {
             )}
 
             {/* Form Content with max-width for better readability */}
-            <div className="max-w-6xl mx-auto">
+            <div className="w-full">
               {/* STEP 1: Contact & Business */}
               {step === 1 && (
                 <div className="space-y-6 animate-in fade-in duration-300">
