@@ -1,14 +1,15 @@
 // src/app/auth/sign-up-success/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { CheckCircle2, Mail, Lock, ArrowRight, Copy, Check } from "lucide-react";
 
-export default function SignUpSuccessPage() {
+// Separate component that uses useSearchParams
+function SuccessContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const email = searchParams.get("email");
@@ -144,5 +145,23 @@ export default function SignUpSuccessPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+// Main page component with Suspense wrapper
+export default function SignUpSuccessPage() {
+  return (
+    <Suspense 
+      fallback={
+        <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-blue-50 flex items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-emerald-600 mx-auto mb-4"></div>
+            <p className="text-gray-600 text-lg font-medium">Loading your credentials...</p>
+          </div>
+        </div>
+      }
+    >
+      <SuccessContent />
+    </Suspense>
   );
 }
