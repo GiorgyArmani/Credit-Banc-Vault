@@ -89,8 +89,8 @@ export function Sidebar({
           <div className="flex items-center justify-between px-4 py-3 md:justify-center border-b">
             {/* En desktop colapsado: ocultar branding totalmente */}
             <div className={collapsed ? 'hidden' : 'block'}>
-              <h2 className="text-xl font-bold text-emerald-600">Business Coach</h2>
-              <p className="text-sm text-gray-500">AI-powered guidance</p>
+              <h2 className="text-xl font-bold text-emerald-600">CB Vault</h2>
+              <p className="text-sm text-gray-500">Business Document Hub</p>
             </div>
             <button
               onClick={onMobileClose}
