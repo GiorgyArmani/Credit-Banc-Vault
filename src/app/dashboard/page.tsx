@@ -1,5 +1,5 @@
 'use client';
-
+import AdvisorDisplay from "@/components/advisor-display";
 import { useEffect, useState, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import Vault from '@/components/vault';
@@ -120,6 +120,7 @@ export default function DashboardPage() {
         </div>
 
         {/* Profile Summary */}
+        <AdvisorDisplay />
         <Card className="bg-white/90 border-slate-200">
           <CardHeader>
             <CardTitle className="text-slate-900">Your Profile</CardTitle>

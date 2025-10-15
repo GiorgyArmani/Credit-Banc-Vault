@@ -15,8 +15,8 @@ const DEFAULT_PASSWORD = "CBvault2025!";
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    
+        const body = await req.json();
+
     // Clean up empty owners before validation
     if (body.owners && Array.isArray(body.owners)) {
       body.owners = body.owners.filter((owner: any) => {
@@ -39,14 +39,14 @@ export async function POST(req: Request) {
       // Core fields
       cf("GHL_CF_FUNDING_GOAL", p.amount_requested),
       cf("GHL_CF_LEGAL_ENTITY", p.legal_entity_type),
-      cf("GHL_CF_BUSINESS_START", p.business_start_date),
+            cf("GHL_CF_BUSINESS_START", p.business_start_date),
       cf("GHL_CF_MONTHLY_REV", p.avg_monthly_deposits),
       cf("GHL_CF_ANNUAL_REV", p.annual_revenue),
       cf("GHL_CF_CREDIT_SCORE", p.credit_score),
       cf("GHL_CF_SBSS_SCORE", p.sbss_score ?? ""),
       cf("GHL_CF_USE_OF_FUNDS", p.use_of_funds),
       cf("GHL_CF_EMPLOYEES", p.employees_count ?? ""),
-      cf("GHL_CF_BUSINESS_NAME", p.company_legal_name),
+cf("GHL_CF_BUSINESS_NAME", p.company_legal_name),
       cf("GHL_CF_ZIP", p.zip),
       cf("GHL_CF_STATE", p.state),
       
@@ -102,7 +102,7 @@ export async function POST(req: Request) {
       cf("GHL_CF_JUDGEMENT_EXPLANATION", p.judgements_explain ?? ""),
     ].filter(Boolean) as Array<{ id: string; value: any }>;
 
-    const ghl_contact_id = await ghlUpsertContact({
+        const ghl_contact_id = await ghlUpsertContact({
       locationId: process.env.GHL_LOCATION_ID!,
       firstName: first_name,
       lastName: last_name,
@@ -131,7 +131,7 @@ export async function POST(req: Request) {
       // Create user with default password
       const { data: created, error: create_err } = await admin.auth.admin.createUser({
         email: p.email,
-        password: DEFAULT_PASSWORD,
+password: DEFAULT_PASSWORD,
         email_confirm: true, // Auto-confirm so they can login immediately
         user_metadata: {
           full_name: `${p.first_name} ${p.last_name}`,
@@ -144,7 +144,7 @@ export async function POST(req: Request) {
 
       // Send welcome email with login instructions
       // You can integrate with your email service here
-      
+
     } else {
       // Update existing user
       await admin.auth.admin.updateUserById(user_id, { 
@@ -183,7 +183,7 @@ export async function POST(req: Request) {
         annual_revenue_last_year: String(p.annual_revenue),
         business_model: p.legal_entity_type,
         primary_goal: p.use_of_funds,
-        business_start_date: p.business_start_date,
+                business_start_date: p.business_start_date,
         credit_score: p.credit_score,
         amount_requested: p.amount_requested,
         use_of_funds: p.use_of_funds,
@@ -192,7 +192,7 @@ export async function POST(req: Request) {
       })
       .select("id")
       .single();
-    const profile_id = bp!.id;
+        const profile_id = bp!.id;
 
     // ---------- 5) BUSINESS OWNERS
     if (p.owners && p.owners.length > 0) {
@@ -246,7 +246,7 @@ export async function POST(req: Request) {
       .upsert({ 
         profile_id, 
         ghl_contact_id, 
-        last_push_at: new Date().toISOString(),
+                last_push_at: new Date().toISOString(), 
       });
 
     // ---------- 9) VAULT STATE
@@ -273,16 +273,16 @@ export async function POST(req: Request) {
     const doc_tags = p.documents_requested.map((d) =>
       d.toLowerCase().replace(/\s+/g, "_")
     );
-    const state_tags = ["portal_created", "vault_pre_approval"];
-    await ghlAddTags(ghl_contact_id, [...doc_tags, ...state_tags]);
+        const state_tags = ["portal_created", "vault_pre_approval"];
+        await ghlAddTags(ghl_contact_id, [...doc_tags, ...state_tags]);
     
-    await admin.from("events").insert({
+        await admin.from("events").insert({
       profile_id,
       type: "tags_applied",
       payload: { tags: [...doc_tags, ...state_tags] },
-    });
+          });
 
-    return NextResponse.json({
+        return NextResponse.json({
       ok: true,
       profile_id,
       user_id,
@@ -297,7 +297,7 @@ export async function POST(req: Request) {
   } catch (e: any) {
     console.error("Client signup error:", e);
     return NextResponse.json({ 
-      error: String(e.message ?? e) 
-    }, { status: 400 });
+error: String(e.message ?? e) 
+    },       { status: 400 }    );
   }
 }

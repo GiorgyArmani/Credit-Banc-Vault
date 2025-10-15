@@ -237,16 +237,6 @@ export default function Vault({ onChecklist }: { onChecklist?: (info: ChecklistI
 
   return (
     <div className="w-full space-y-8">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <div className="w-12 h-12 bg-emerald-600 rounded-lg flex items-center justify-center shadow">
-          <Folder className="w-6 h-6 text-white" />
-        </div>
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900">Document Vault</h2>
-          <p className="text-gray-500">Upload, track, and submit your required documents.</p>
-        </div>
-      </div>
 
       {/* Checklist */}
       <div className="bg-white border rounded-xl p-6">
