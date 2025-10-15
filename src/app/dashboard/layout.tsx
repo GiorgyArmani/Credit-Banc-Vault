@@ -28,12 +28,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   // Título dinámico para el topbar en mobile
   const currentTitle = useMemo(() => {
     const map: Record<string, string> = {
-      '/dashboard': 'Finance Academy',
-      '/dashboard/chat': 'AI Chat',
-      '/dashboard/credit-report-assistant': 'Credit Report Assistant',
-      '/dashboard/book-consultation': 'Book Consultation',
       '/dashboard/business-vault': 'Business Vault',
-      '/dashboard/business-profile': 'Business Profile',
     }
     // normaliza al primer segmento importante, ej: /dashboard/credit-report-assistant/123
     const key = Object.keys(map).find(k => pathname?.startsWith(k))

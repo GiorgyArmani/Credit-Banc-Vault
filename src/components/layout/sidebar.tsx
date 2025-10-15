@@ -51,10 +51,10 @@ export function Sidebar({
 
   const navItems = [
     { label: 'CB Vault', href: '/dashboard', icon: BookMarked },
-    { label: 'AI Chat', href: '/dashboard/chat', icon: MessageSquare },
+    // { label: 'AI Chat', href: '/dashboard/chat', icon: MessageSquare },
     //{ label: 'Credit Report Assistant', href: '/dashboard/credit-report-assistant', icon: FileSearch },
     //{ label: 'Book Consultation', href: '/dashboard/book-consultation', icon: Calendar },
-    { label: 'Business Vault', href: '/dashboard/business-vault', icon: BookMarked },
+    // { label: 'Business Vault', href: '/dashboard/business-vault', icon: BookMarked },
     //{ label: 'Business Profile', href: '/dashboard/business-profile', icon: User },
   ]
 
