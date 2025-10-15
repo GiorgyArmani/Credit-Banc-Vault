@@ -1,3 +1,4 @@
+// src/app/dashboard/page.tsx
 'use client';
 import AdvisorDisplay from "@/components/advisor-display";
 import { useEffect, useState, useMemo } from 'react';
@@ -22,7 +23,7 @@ type ProfileRow = {
 
 type IntegrationRow = {
   ghl_contact_id: string | null;
-  advisor_name?: string | null; // si decides guardar advisor aquí
+  advisor_id?: string | null; // si decides guardar advisor aquí
 };
 
 export default function DashboardPage() {
@@ -84,7 +85,7 @@ export default function DashboardPage() {
       { label: 'Business start date', value: profile?.business_start_date || '—' },
       { label: 'Monthly revenue', value: profile?.monthly_revenue || '—' },
       { label: 'Credit score', value: profile?.credit_score || '—' },
-      { label: 'Your advisor is', value: integration?.advisor_name || '—' },
+      { label: 'Your advisor is', value: integration?.advisor_id || '—' },
     ];
   }, [profile, integration]);
 
