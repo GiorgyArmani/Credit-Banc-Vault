@@ -163,7 +163,7 @@ export const ClientSignupSchema = z.object({
     "Funding Application",
     "Business Bank Statements",
     "Business/Personal Tax Returns",
-    "Profit & Loss Stament",
+    "Profit & Loss Statement",
     "Balance Sheet",
     "Debt Schedule",
     "A/R Report",
