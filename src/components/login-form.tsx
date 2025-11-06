@@ -26,6 +26,14 @@ export default function LoginForm({
   const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
 
+  /**
+   * Handles login with role-based redirect
+   * 
+   * Flow:
+   * 1. Authenticate user with Supabase
+   * 2. Get user's role from the database
+   * 3. Redirect to role-specific dashboard
+   */
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     const supabase = createClient();
@@ -33,13 +41,50 @@ export default function LoginForm({
     setError(null);
 
     try {
-      const { error } = await supabase.auth.signInWithPassword({
+      // Step 1: Authenticate the user
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
-      if (error) throw error;
-      // Update this route to redirect to an authenticated route. The user already has an active session.
-      router.push("/dashboard");
+
+      if (authError) throw authError;
+
+      // Step 2: Get the authenticated user's ID
+      const userId = authData.user?.id;
+      if (!userId) {
+        throw new Error("User ID not found after login");
+      }
+
+      // Step 3: Fetch user's role from the public.users table
+      const { data: userData, error: userError } = await supabase
+        .from("users")
+        .select("role")
+        .eq("id", userId)
+        .single();
+
+      if (userError) {
+        console.error("Error fetching user role:", userError);
+        // If we can't get the role, default to /dashboard
+        router.push("/dashboard");
+        return;
+      }
+
+      // Step 4: Map roles to their respective dashboard URLs
+      const roleRedirects: Record<string, string> = {
+        advisor: "/advisor/dashboard",
+        underwriting: "/underwriting/dashboard",
+        premium: "/dashboard",
+        free: "/dashboard",
+      };
+
+      // Step 5: Redirect to the appropriate dashboard based on role
+      const redirectPath = roleRedirects[userData.role] || "/dashboard";
+      
+      console.log(`✅ User logged in with role: ${userData.role}`);
+      console.log(`➡️  Redirecting to: ${redirectPath}`);
+
+      router.push(redirectPath);
+
     } catch (error: unknown) {
       setError(error instanceof Error ? error.message : "An error occurred");
     } finally {
@@ -59,6 +104,7 @@ export default function LoginForm({
         <CardContent>
           <form onSubmit={handleLogin}>
             <div className="flex flex-col gap-6">
+              {/* Email Input Field */}
               <div className="grid gap-2">
                 <Label htmlFor="email">Email</Label>
                 <Input
@@ -70,6 +116,8 @@ export default function LoginForm({
                   onChange={(e) => setEmail(e.target.value)}
                 />
               </div>
+
+              {/* Password Input Field */}
               <div className="grid gap-2">
                 <div className="flex items-center">
                   <Label htmlFor="password">Password</Label>
@@ -89,11 +137,17 @@ export default function LoginForm({
                   onChange={(e) => setPassword(e.target.value)}
                 />
               </div>
+
+              {/* Error Message Display */}
               {error && <p className="text-sm text-red-500">{error}</p>}
+
+              {/* Submit Button */}
               <Button type="submit" className="w-full" disabled={isLoading}>
                 {isLoading ? "Logging in..." : "Login"}
               </Button>
             </div>
+
+            {/* Sign Up Link */}
             <div className="mt-4 text-center text-sm">
               Don&apos;t have an account?{" "}
               <Link

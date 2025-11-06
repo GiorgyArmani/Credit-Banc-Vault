@@ -1,0 +1,507 @@
+/**
+ * Lender Qualifier Component Styles
+ * Provides a professional, clean design for the underwriting dashboard
+ */
+
+/* Main container */
+.lender-qualifier {
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 24px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  background-color: #f8f9fa;
+  border-radius: 8px;
+}
+
+/* Header section */
+.qualifier-header {
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 2px solid #e9ecef;
+}
+
+.qualifier-title {
+  font-size: 28px;
+  font-weight: 700;
+  color: #212529;
+  margin: 0 0 16px 0;
+}
+
+.client-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.client-info,
+.request-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.client-name {
+  font-size: 18px;
+  font-weight: 600;
+  color: #495057;
+}
+
+.company-name {
+  font-size: 14px;
+  color: #6c757d;
+}
+
+.requested-amount {
+  font-size: 20px;
+  font-weight: 600;
+  color: #0d6efd;
+}
+
+.loan-type {
+  font-size: 14px;
+  color: #6c757d;
+  text-transform: capitalize;
+}
+
+/* Summary statistics */
+.qualification-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.summary-card {
+  background: white;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  text-align: center;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.summary-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.summary-value {
+  font-size: 32px;
+  font-weight: 700;
+  color: #212529;
+  margin-bottom: 8px;
+}
+
+.summary-label {
+  font-size: 14px;
+  color: #6c757d;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Controls section */
+.qualifier-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 16px;
+  padding: 16px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.filter-group label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #495057;
+}
+
+.filter-select {
+  padding: 8px 12px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  font-size: 14px;
+  background: white;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.filter-select:hover {
+  border-color: #0d6efd;
+}
+
+.filter-select:focus {
+  outline: none;
+  border-color: #0d6efd;
+  box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.1);
+}
+
+.checkbox-group {
+  margin-left: auto;
+}
+
+.checkbox-group label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.checkbox-group input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+
+/* Results count */
+.results-count {
+  font-size: 14px;
+  color: #6c757d;
+  margin-bottom: 16px;
+}
+
+/* Lender results grid */
+.lender-results-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+  gap: 20px;
+}
+
+/* Individual lender card */
+.lender-card {
+  background: white;
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s ease;
+  border-left: 4px solid transparent;
+}
+
+/* Qualified lender styling */
+.lender-card.qualified {
+  border-left-color: #28a745;
+}
+
+.lender-card.qualified:hover {
+  box-shadow: 0 4px 12px rgba(40, 167, 69, 0.2);
+  transform: translateY(-2px);
+}
+
+/* Not qualified lender styling */
+.lender-card.not-qualified {
+  border-left-color: #dc3545;
+  opacity: 0.85;
+}
+
+.lender-card.not-qualified:hover {
+  opacity: 1;
+  box-shadow: 0 4px 12px rgba(220, 53, 69, 0.15);
+}
+
+/* Lender card header */
+.lender-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 16px;
+  gap: 16px;
+}
+
+.lender-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lender-name {
+  font-size: 18px;
+  font-weight: 600;
+  color: #212529;
+  margin: 0;
+}
+
+.lender-specialty {
+  display: inline-block;
+  padding: 4px 8px;
+  background: #e9ecef;
+  color: #495057;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.lender-status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.status-badge {
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.status-badge.qualified {
+  background: #d4edda;
+  color: #155724;
+}
+
+.status-badge.not-qualified {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.match-score {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.score-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: #0d6efd;
+}
+
+.score-label {
+  font-size: 11px;
+  color: #6c757d;
+  text-transform: uppercase;
+}
+
+/* Funding information */
+.lender-funding-info {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 16px;
+  padding: 12px;
+  background: #f8f9fa;
+  border-radius: 6px;
+}
+
+.funding-detail {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.funding-detail .label {
+  font-size: 12px;
+  color: #6c757d;
+  font-weight: 500;
+}
+
+.funding-detail .value {
+  font-size: 14px;
+  color: #212529;
+  font-weight: 600;
+}
+
+/* Expand button */
+.expand-button {
+  width: 100%;
+  padding: 10px;
+  margin-bottom: 12px;
+  background: transparent;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  color: #495057;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.expand-button:hover {
+  background: #f8f9fa;
+  border-color: #0d6efd;
+  color: #0d6efd;
+}
+
+/* Lender details (expanded) */
+.lender-details {
+  border-top: 1px solid #dee2e6;
+  padding-top: 16px;
+  margin-bottom: 16px;
+}
+
+.criteria-section {
+  margin-bottom: 16px;
+}
+
+.criteria-section:last-child {
+  margin-bottom: 0;
+}
+
+.section-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 8px 0;
+  padding: 8px 12px;
+  border-radius: 4px;
+}
+
+.criteria-section:has(.matched) .section-title {
+  background: #d4edda;
+  color: #155724;
+}
+
+.criteria-section:has(.failed) .section-title {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.criteria-section:has(.warnings) .section-title {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.criteria-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.criteria-list li {
+  padding: 8px 12px;
+  margin-bottom: 4px;
+  border-radius: 4px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.criteria-list.matched li {
+  background: #f8fff9;
+  border-left: 3px solid #28a745;
+}
+
+.criteria-list.failed li {
+  background: #fff8f8;
+  border-left: 3px solid #dc3545;
+}
+
+.criteria-list.warnings li {
+  background: #fffef8;
+  border-left: 3px solid #ffc107;
+}
+
+/* Select lender button */
+.select-lender-button {
+  width: 100%;
+  padding: 12px;
+  background: #28a745;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.select-lender-button:hover {
+  background: #218838;
+}
+
+.select-lender-button:active {
+  transform: scale(0.98);
+}
+
+/* No results state */
+.no-results {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 60px 20px;
+  background: white;
+  border-radius: 8px;
+}
+
+.no-results p {
+  font-size: 18px;
+  color: #6c757d;
+  margin-bottom: 20px;
+}
+
+.no-results button {
+  padding: 10px 24px;
+  background: #0d6efd;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.no-results button:hover {
+  background: #0b5ed7;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .lender-qualifier {
+    padding: 16px;
+  }
+  
+  .lender-results-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .client-summary {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .qualifier-controls {
+    flex-direction: column;
+  }
+  
+  .checkbox-group {
+    margin-left: 0;
+  }
+  
+  .lender-card-header {
+    flex-direction: column;
+  }
+  
+  .lender-status {
+    align-items: flex-start;
+  }
+}
+
+/* Print styles */
+@media print {
+  .qualifier-controls,
+  .expand-button,
+  .select-lender-button {
+    display: none;
+  }
+  
+  .lender-card.not-qualified {
+    opacity: 0.5;
+  }
+  
+  .lender-details {
+    display: block !important;
+  }
+}
