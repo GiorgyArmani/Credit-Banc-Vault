@@ -1,4 +1,3 @@
-
 import type {
   ClientProfile,
   LenderCriteria,
@@ -220,7 +219,7 @@ function evaluateStateRestrictions(
     return true;
   }
   
-  if (is-state-restricted(
+  if (isStateRestricted(
     client_profile.company_state,
     lender_criteria.restricted_states
   )) {
@@ -251,7 +250,7 @@ function evaluateIndustryRestrictions(
     return true;
   }
   
-  if (is-industry-restricted(
+  if (isIndustryRestricted(
     client_profile.loan_purpose,
     client_profile.legal_entity_type,
     lender_criteria.restricted_industries
