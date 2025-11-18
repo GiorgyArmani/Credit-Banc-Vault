@@ -1,5 +1,5 @@
 "use client";
-
+import AdvisorNewClientPage from "./clients/new/page";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
@@ -18,7 +18,8 @@ import {
   CheckCircle, 
   AlertCircle,
   TrendingUp,
-  LogOut
+  LogOut,
+  Link
 } from "lucide-react";
 
 /**
@@ -60,8 +61,14 @@ function StatCard({
  */
 export default function AdvisorDashboard() {
   // State management
-  const [user, setUser] = useState<any>(null);
-  const [userData, setUserData] = useState<any>(null);
+  interface AdvisorUserProfile {
+    id: string;
+    first_name: string;
+    role: string;
+    // Add other fields as needed
+  }
+
+  const [userData, setUserData] = useState<AdvisorUserProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [stats, setStats] = useState({
     totalClients: 0,
@@ -86,8 +93,6 @@ export default function AdvisorDashboard() {
           router.push("/auth/login");
           return;
         }
-
-        setUser(user);
 
         // Get user profile from public.users table
         const { data: profile, error: profileError } = await supabase
@@ -117,7 +122,7 @@ export default function AdvisorDashboard() {
     }
 
     loadUserData();
-  }, []);
+  }, [router, supabase]);
 
   /**
    * Load advisor statistics from database
@@ -168,7 +173,9 @@ export default function AdvisorDashboard() {
           <div>
             <h1 className="text-2xl font-bold">Advisor Dashboard</h1>
             <p className="text-sm text-muted-foreground">
-              Welcome back, {userData?.first_name}!
+              {userData
+                ? `Welcome back, ${userData.first_name}!`
+                : "Welcome back!"}
             </p>
           </div>
           <Button 
@@ -222,13 +229,14 @@ export default function AdvisorDashboard() {
           </CardHeader>
           <CardContent>
             <div className="grid gap-4 md:grid-cols-3">
-              <Button className="h-auto flex-col items-start p-4" variant="outline">
-                <FileText className="mb-2 h-6 w-6" />
-                <span className="font-semibold">New Application</span>
-                <span className="text-xs text-muted-foreground">
-                  Start a new client application
-                </span>
-              </Button>
+            <Button
+              className="h-auto flex-col items-start p-4"
+              variant="outline"
+              onClick={() => router.push("/advisor/dashboard/clients/new")}
+            >
+              <FileText className="mb-2 h-6 w-6" />
+              <span className="font-semibold">New Client Application</span>
+            </Button>
               <Button className="h-auto flex-col items-start p-4" variant="outline">
                 <Users className="mb-2 h-6 w-6" />
                 <span className="font-semibold">View Clients</span>

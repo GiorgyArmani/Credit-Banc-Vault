@@ -117,7 +117,7 @@ interface OutstandingLoans {
   };
 }
 
-export default function ClientSignupFormHybrid() {
+export default function ClientSignupForm() {
   const router = useRouter();
   const supabase = createClient();
   const [step, set_step] = useState(1);
