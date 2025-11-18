@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react'
 import clsx from 'clsx'
-import { Sidebar } from '@/components/layout/sidebar'
+import { Sidebar } from '@/components/layout/advisor/sidebar'
 import { useProtectedRoute } from '@/hooks/use-protected-route'
 import { usePathname } from 'next/navigation'
 import OnboardingGate from '@/components/onboarding/onboarding-gate'
@@ -28,8 +28,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   // Título dinámico para el topbar en mobile
   const currentTitle = useMemo(() => {
     const map: Record<string, string> = {
-      '/dashboard': 'Finance Academy',
-      '/dashboard/chat': 'AI Chat',
+      '/advisor/dashboard': 'Advisor Dashboard',
       '/dashboard/credit-report-assistant': 'Credit Report Assistant',
       '/dashboard/book-consultation': 'Book Consultation',
       '/dashboard/business-vault': 'Business Vault',
