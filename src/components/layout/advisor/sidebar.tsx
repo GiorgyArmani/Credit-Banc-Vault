@@ -14,6 +14,7 @@ import {
   X,
   ChevronsLeft,
   ChevronsRight,
+  BookCheck,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
@@ -50,7 +51,7 @@ export function Sidebar({
   }
 
   const navItems = [
-    { label: 'Dashboard', href: '/advisor/dashboard', icon: MessageSquare },
+    { label: 'Dashboard', href: '/advisor/dashboard', icon: BookCheck },
     // { label: 'AI Chat', href: '/dashboard/chat', icon: MessageSquare },
     
     //{ label: 'Credit Report Assistant', href: '/dashboard/credit-report-assistant', icon: FileSearch },
