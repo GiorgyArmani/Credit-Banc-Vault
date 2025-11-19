@@ -51,7 +51,7 @@ export function LandingPage() {
         <div className="container mx-auto px-4 py-2 text-center text-sm">
           <Badge className="mr-2 bg-emerald-600 text-white hover:bg-emerald-600">BETA</Badge>
           <span className="text-gray-700">
-            Introducing <span className="font-semibold">CreditBanc Vault</span> — Easy · Fast · Secure document collection.
+            Introducing <span className="font-semibold">Credit Banc Vault</span> — Easy · Fast · Secure document collection.
           </span>
         </div>
       </div>
@@ -60,7 +60,7 @@ export function LandingPage() {
 <section className="relative w-full bg-gradient-to-br from-emerald-200 via-emerald-300 to-blue-300">
   <div className="container mx-auto px-4 pt-20 pb-16 text-center text-white">
     <div className="max-w-4xl mx-auto">
-      <Badge className="mb-4 bg-white/20 text-white">The CreditBanc Vault</Badge>
+      <Badge className="mb-4 bg-white/20 text-white">The Credit Banc Vault</Badge>
       <h1 className="text-5xl md:text-6xl font-bold mb-6">
         Upload. Track. <span className="text-gray-900 bg-white/60 px-2 rounded">Get Funded.</span>
       </h1>
