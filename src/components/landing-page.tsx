@@ -63,9 +63,9 @@ export function LandingPage() {
                   src="/vaultlogo.svg"
                   alt="Credit Banc Vault"
                   width={140}
-                  height={40}
+                  height={60}
                   priority
-                  className="h-8 w-auto"
+                  className="h-20 w-auto"
                   onError={(e) => {
                     // fallback-to-png: If SVG fails, try PNG
                     const target = e.target as HTMLImageElement;
