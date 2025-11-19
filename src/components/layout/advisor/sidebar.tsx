@@ -1,3 +1,4 @@
+//src/components/layout/advisor/sidebar.tsx
 'use client'
 
 import { useEffect, useState } from 'react'
@@ -91,7 +92,7 @@ export function Sidebar({
           <div className="flex items-center justify-between px-4 py-3 md:justify-center border-b">
             {/* En desktop colapsado: ocultar branding totalmente */}
             <div className={collapsed ? 'hidden' : 'block'}>
-              <h2 className="text-xl font-bold text-emerald-600">CB Vault</h2>
+              <img src="vaultlogo.svg" alt="Logo" className="h-60 w-100 mb-1" />
               <p className="text-sm text-gray-500">Business Document Hub</p>
             </div>
             <button

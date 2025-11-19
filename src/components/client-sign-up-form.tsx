@@ -240,6 +240,34 @@ export default function ClientSignupForm() {
   // Each selected document will generate a "requested_{doc}" tag in GHL
   const [documents_requested, set_documents_requested] = useState<string[]>([]);
 
+  // ===== Advisor Context & Success State =====
+  // Detects if form is being used by an advisor (vs public client signup)
+  // This determines success flow: advisor stays on page, client redirects to login
+  const [is_advisor_context, set_is_advisor_context] = useState(false);
+  const [show_success, set_show_success] = useState(false);
+  const [created_client_email, set_created_client_email] = useState("");
+  const [created_client_name, set_created_client_name] = useState("");
+
+  // Check if current user is an advisor
+  // This determines the success flow: redirect to login page (client) vs stay on page (advisor)
+  useEffect(() => {
+    async function check_user_role() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: user_data } = await supabase
+          .from("users")
+          .select("role")
+          .eq("id", user.id)
+          .maybeSingle();
+        
+        if (user_data?.role === "advisor") {
+          set_is_advisor_context(true);
+        }
+      }
+    }
+    check_user_role();
+  }, [supabase]);
+
   // Fetch advisors
   useEffect(() => {
     async function fetch_advisors() {
@@ -445,8 +473,21 @@ export default function ClientSignupForm() {
 
       const result = await res.json();
       
-      // Redirigir a página de éxito
-      router.push(`/auth/sign-up-success?email=${encodeURIComponent(client_email)}`);
+      // Handle success based on context
+      if (is_advisor_context) {
+        // Advisor context: Show success modal and stay on page
+        set_created_client_email(client_email);
+        set_created_client_name(client_name);
+        set_show_success(true);
+        
+        // Reset form for next client
+        setTimeout(() => {
+          window.location.reload(); // Reload to reset all form fields
+        }, 5000);
+      } else {
+        // Client self-signup context: Redirect to success page with login credentials
+        router.push(`/auth/sign-up-success?email=${encodeURIComponent(client_email)}`);
+      }
     } catch (err: any) {
       set_error(err.message || "Error submitting form");
     } finally {
@@ -456,6 +497,68 @@ export default function ClientSignupForm() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-blue-50">
+      {/* Success Modal for Advisor Context */}
+      {/* This modal appears when an advisor successfully creates a client */}
+      {/* Shows client credentials and auto-refreshes page for next client */}
+      {show_success && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-8 animate-fade-in">
+            <div className="text-center mb-6">
+              <div className="mx-auto w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mb-4">
+                <CheckCircle2 className="w-12 h-12 text-emerald-600" />
+              </div>
+              <h2 className="text-3xl font-bold text-gray-900 mb-2">
+                Client Created Successfully!
+              </h2>
+              <p className="text-gray-600">
+                {created_client_name} has been added to your client list
+              </p>
+            </div>
+
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-xl p-6 mb-6">
+              <h3 className="text-lg font-bold text-blue-900 mb-4 flex items-center gap-2">
+                <CheckCircle2 className="w-6 h-6" />
+                Client Login Credentials
+              </h3>
+              
+              <div className="space-y-3">
+                <div className="bg-white rounded-lg p-4 border border-blue-200">
+                  <p className="text-sm font-semibold text-gray-600 mb-1">Email Address</p>
+                  <p className="text-lg font-mono text-gray-900">{created_client_email}</p>
+                </div>
+
+                <div className="bg-white rounded-lg p-4 border border-blue-200">
+                  <p className="text-sm font-semibold text-gray-600 mb-1">Temporary Password</p>
+                  <p className="text-lg font-mono text-gray-900">CBvault2025!</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-yellow-50 border-2 border-yellow-200 rounded-xl p-4 mb-6">
+              <p className="text-sm text-yellow-800">
+                <strong>Note:</strong> Please share these credentials with your client. The page will refresh in 5 seconds so you can create another client.
+              </p>
+            </div>
+
+            <div className="flex gap-3">
+              <Button
+                onClick={() => window.location.reload()}
+                className="flex-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white"
+              >
+                Create Another Client
+              </Button>
+              <Button
+                onClick={() => router.push('/advisor/clients')}
+                variant="outline"
+                className="flex-1 border-2 border-emerald-600 text-emerald-600 hover:bg-emerald-50"
+              >
+                View Client List
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="w-full px-4 py-8 md:py-12">
         {/* Header Banner */}
         <div className="mb-6 md:mb-8">
