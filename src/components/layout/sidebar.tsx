@@ -1,3 +1,4 @@
+//src/components/layout/sidebar.tsx  VAULT
 'use client'
 
 import { useEffect, useState } from 'react'
