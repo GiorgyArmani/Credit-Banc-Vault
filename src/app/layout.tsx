@@ -3,9 +3,9 @@ import type { Metadata } from 'next'
 import { ThemeProvider } from 'next-themes'
 
 export const metadata: Metadata = {
-  title: 'CreditBanc Vault',
+  title: 'Credit Banc Vault',
   description: 'Created to Kepp your Credit information safe and secure.',
-  generator: 'creditbanc it',
+  generator: 'credit banc it',
 }
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
