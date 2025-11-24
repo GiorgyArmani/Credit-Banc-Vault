@@ -371,24 +371,27 @@ export async function POST(req: Request) {
 
             if (uploadResult.success && uploadResult.fileData) {
               // C. Merge new file with existing files
-              // The upload response `fileData` should contain the new file's metadata object
-              // We need to extract the specific file object from the upload result.
-              // Assuming uploadResult.fileData returns the structure { "UUID": { ... } } or similar
-
-              // Note: The /customFields/upload endpoint might return:
-              // { meta: [ { uuid: "...", ... } ], ... }
-              // We need to convert this to the map format expected by PUT:
-              // { "UUID": { meta: ..., url: ..., documentId: ... } }
-
               let newFileEntry = {};
               if (uploadResult.fileData.meta && uploadResult.fileData.meta.length > 0) {
                 const m = uploadResult.fileData.meta[0];
-                const uuid = m.uuid || m.documentId;
+
+                // Extract UUID from uploadedFiles URL
+                const uploadedFiles = uploadResult.fileData.uploadedFiles || {};
+                const firstFileUrl = Object.values(uploadedFiles)[0] as string;
+
+                // URL format: https://.../UUID.ext
+                let uuid = "undefined";
+                if (firstFileUrl) {
+                  const urlParts = firstFileUrl.split('/');
+                  const lastPart = urlParts[urlParts.length - 1];
+                  uuid = lastPart.split('.')[0]; // Remove extension
+                }
+
                 newFileEntry = {
                   [uuid]: {
                     meta: m,
-                    url: m.url,
-                    documentId: m.documentId || m.uuid
+                    url: firstFileUrl,
+                    documentId: uuid
                   }
                 };
               } else {
@@ -414,18 +417,18 @@ export async function POST(req: Request) {
             } else {
               console.error(`❌ Failed to upload ${doc_code}:`, uploadResult.error);
             }
+
+            // Update tags: requested_* → submitted_*
+            await updateGHLTags(
+              vaultRecord.ghl_contact_id,
+              doc_code,
+              process.env.GHL_TOKEN
+            );
           } else {
             console.warn(
               `⚠️ No GHL field mapping found for doc_code: ${doc_code}`
             );
           }
-
-          // Update tags: requested_* → submitted_*
-          await updateGHLTags(
-            vaultRecord.ghl_contact_id,
-            doc_code,
-            process.env.GHL_TOKEN
-          );
         }
       } else {
         console.warn("No GHL Contact ID found in client_data_vault for user", doc.user_id);
