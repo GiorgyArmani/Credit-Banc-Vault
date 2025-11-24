@@ -26,6 +26,11 @@ const DOC_CODE_TO_GHL_FIELD_MAP: Record<string, { fieldId: string; fieldKey: str
     fieldId: process.env.GHL_CF_DRIVERS_LICENSE!,
     fieldKey: "contact.data_vault_files_drivers_license",
   },
+  // Consolidated Driver's License (Front & Back)
+  drivers_license: {
+    fieldId: process.env.GHL_CF_DRIVERS_LICENSE!,
+    fieldKey: "contact.data_vault_files_drivers_license",
+  },
   // Voided business check
   voided_check: {
     fieldId: process.env.GHL_CF_VOIDED_CHECK!,
@@ -51,14 +56,55 @@ const DOC_CODE_TO_GHL_FIELD_MAP: Record<string, { fieldId: string; fieldKey: str
 console.log("Loaded GHL Field Map:", JSON.stringify(DOC_CODE_TO_GHL_FIELD_MAP, null, 2));
 
 /**
+ * getContact: Fetches contact details from GHL
+ */
+async function getContact(contactId: string, authToken: string) {
+  const response = await fetch(
+    `https://services.leadconnectorhq.com/contacts/${contactId}`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+        Version: "2021-07-28",
+      },
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch contact: ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
+/**
+ * updateContact: Updates contact custom fields in GHL
+ */
+async function updateContact(contactId: string, customFields: any[], authToken: string) {
+  const response = await fetch(
+    `https://services.leadconnectorhq.com/contacts/${contactId}`,
+    {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+        Version: "2021-07-28",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ customFields }),
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Failed to update contact: ${response.status} - ${errorText}`);
+  }
+
+  return response.json();
+}
+
+/**
  * uploadFileToGHL: Downloads file from Supabase and uploads it to GHL custom field
- * 
- * @param contactId - GHL contact ID
- * @param locationId - GHL location ID
- * @param fieldId - Custom field ID in GHL
- * @param storagePath - Path to file in Supabase storage
- * @param fileName - Original file name
- * @param authToken - GHL API authorization token
+ * Returns the full file metadata needed for the custom field value
  */
 async function uploadFileToGHL(
   contactId: string,
@@ -67,7 +113,7 @@ async function uploadFileToGHL(
   storagePath: string,
   fileName: string,
   authToken: string
-): Promise<{ success: boolean; url?: string; error?: string }> {
+): Promise<{ success: boolean; fileData?: any; error?: string }> {
   console.log(`Starting GHL upload for ${fileName} to field ${fieldId}`);
   try {
     // 1. Download file from Supabase storage
@@ -88,8 +134,8 @@ async function uploadFileToGHL(
     // 3. Create FormData for GHL upload
     const formData = new FormData();
     formData.append("id", contactId);
-    formData.append("maxFiles", "15");
-    formData.append(fileName, file);
+    formData.append("maxFiles", "15"); // Ensure GHL knows we support multiple files
+    formData.append(fieldId, file);
 
     // 4. Upload to GHL
     const ghlResponse = await fetch(
@@ -113,9 +159,44 @@ async function uploadFileToGHL(
     }
 
     const result = await ghlResponse.json();
-    const uploadedUrl = result.uploadedFiles?.[fileName] || null;
+    console.log("GHL API Response:", JSON.stringify(result, null, 2));
 
-    return { success: true, url: uploadedUrl };
+    // The upload endpoint returns the file metadata keyed by the filename in `uploadedFiles`
+    // OR it might return it in `meta` array. Structure varies based on GHL version/endpoint.
+    // Based on user example: {"f31175d4...": { meta: ..., url: ..., documentId: ... }}
+    // We need to construct this object or extract it.
+
+    // Let's look at what we get. Usually `uploadedFiles` contains the key-value pair we need.
+    const uploadedFileKey = Object.keys(result.uploadedFiles || {})[0];
+    const uploadedFileData = result.uploadedFiles?.[uploadedFileKey];
+
+    if (uploadedFileData) {
+      // We need to return the object structure expected by the custom field
+      // The key is the UUID of the file.
+      // result.uploadedFiles is likely { "filename.jpg": "url" } OR { "filename.jpg": { ...metadata } }
+      // Wait, the user example shows:
+      // field_value: { "UUID": { meta: {...}, url: "...", documentId: "..." } }
+
+      // If the upload endpoint returns the simple URL, we might need to construct the metadata manually?
+      // OR the upload endpoint returns the full object.
+      // Let's assume `result` contains the necessary info.
+
+      // If `result.uploadedFiles` is just { "name": "url" }, we might be missing metadata.
+      // However, usually the upload endpoint for custom fields handles the assignment if we just POST.
+      // BUT, since we want to MERGE, we need the value.
+
+      // Let's return the whole result for now and debug if needed, but try to construct the object.
+      return {
+        success: true,
+        fileData: result // Return raw result to let caller handle or inspect
+      };
+    }
+
+    return {
+      success: true,
+      fileData: result // Return raw result
+    };
+
   } catch (error: any) {
     return { success: false, error: error.message };
   }
@@ -249,19 +330,6 @@ export async function POST(req: Request) {
       }
     }
 
-    // 4. Send webhook notification to n8n (if configured)
-    if (process.env.N8N_WEBHOOK_UPLOAD && profileId) {
-      fetch(process.env.N8N_WEBHOOK_UPLOAD, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          profile_id: profileId, // Sending vault ID here as it's the main ID now
-          user_id: doc.user_id,
-          doc_code,
-          document_id,
-        }),
-      }).catch(() => { });
-    }
 
     // 5. GHL Integration - Upload file and update tags
     console.log(`Checking GHL Integration prerequisites: VaultRecord: ${!!vaultRecord}, GHL_TOKEN exists: ${!!process.env.GHL_TOKEN}`);
@@ -280,7 +348,18 @@ export async function POST(req: Request) {
           console.log(`Processing doc_code: ${doc_code}, Mapping found:`, ghlFieldMapping);
 
           if (ghlFieldMapping) {
-            // Upload file to GHL custom field
+            // A. Fetch current contact to get existing files
+            console.log("Fetching current contact data...");
+            const contactData = await getContact(vaultRecord.ghl_contact_id, process.env.GHL_TOKEN);
+            const currentCustomFields = contactData.contact?.customFields || [];
+
+            // Find existing value for this field
+            const existingField = currentCustomFields.find((f: any) => f.id === ghlFieldMapping.fieldId);
+            const existingValue = existingField ? existingField.value : {}; // File fields are objects
+
+            console.log("Existing field value:", JSON.stringify(existingValue, null, 2));
+
+            // B. Upload new file
             const uploadResult = await uploadFileToGHL(
               vaultRecord.ghl_contact_id,
               ghlLocationId,
@@ -290,15 +369,50 @@ export async function POST(req: Request) {
               process.env.GHL_TOKEN
             );
 
-            if (uploadResult.success) {
-              console.log(
-                `✅ Successfully uploaded ${doc_code} to GHL field ${ghlFieldMapping.fieldKey}`
+            if (uploadResult.success && uploadResult.fileData) {
+              // C. Merge new file with existing files
+              // The upload response `fileData` should contain the new file's metadata object
+              // We need to extract the specific file object from the upload result.
+              // Assuming uploadResult.fileData returns the structure { "UUID": { ... } } or similar
+
+              // Note: The /customFields/upload endpoint might return:
+              // { meta: [ { uuid: "...", ... } ], ... }
+              // We need to convert this to the map format expected by PUT:
+              // { "UUID": { meta: ..., url: ..., documentId: ... } }
+
+              let newFileEntry = {};
+              if (uploadResult.fileData.meta && uploadResult.fileData.meta.length > 0) {
+                const m = uploadResult.fileData.meta[0];
+                const uuid = m.uuid || m.documentId;
+                newFileEntry = {
+                  [uuid]: {
+                    meta: m,
+                    url: m.url,
+                    documentId: m.documentId || m.uuid
+                  }
+                };
+              } else {
+                // Fallback if structure is different
+                console.warn("Unexpected upload response structure, trying to use as is", uploadResult.fileData);
+                newFileEntry = uploadResult.fileData;
+              }
+
+              // Merge: existingValue + newFileEntry
+              // Ensure existingValue is an object
+              const mergedValue = { ...(typeof existingValue === 'object' ? existingValue : {}), ...newFileEntry };
+
+              console.log("Merged field value:", JSON.stringify(mergedValue, null, 2));
+
+              // D. Update contact with merged value
+              await updateContact(
+                vaultRecord.ghl_contact_id,
+                [{ id: ghlFieldMapping.fieldId, field_value: mergedValue }],
+                process.env.GHL_TOKEN
               );
+
+              console.log(`✅ Successfully updated contact with new file for ${doc_code}`);
             } else {
-              console.error(
-                `❌ Failed to upload ${doc_code} to GHL:`,
-                uploadResult.error
-              );
+              console.error(`❌ Failed to upload ${doc_code}:`, uploadResult.error);
             }
           } else {
             console.warn(

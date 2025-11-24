@@ -1,4 +1,3 @@
-// src/components/vault/vault.tsx
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -19,9 +18,20 @@ import { Progress } from "@/components/ui/progress";
  * Each document type will have its own card with upload functionality
  */
 const REQUIRED_DOCS = [
-  { code: "bank_statements_6mo", label: "Bank Statements (last 6 months)" },
-  { code: "drivers_license_front", label: "Driver's License — Front" },
-  { code: "drivers_license_back", label: "Driver's License — Back" },
+  {
+    code: "bank_statements_6mo",
+    label: "Bank Statements (last 6 months)",
+    multiple: true,
+    maxFiles: 12
+  },
+  {
+    code: "drivers_license",
+    label: "Driver's License (Front & Back)",
+    multiple: true,
+    minFiles: 2,
+    maxFiles: 2,
+    legacyCodes: ["drivers_license_front", "drivers_license_back"]
+  },
   { code: "voided_check", label: "Voided Business Check" },
   { code: "balance_sheets", label: "Balance Sheets" },
   { code: "profit_loss", label: "Profit & Loss" },
@@ -77,92 +87,145 @@ function DocumentCard({
   const supabase = createClient();
   const { toast } = useToast();
 
-  // State for handling file selection and upload for this specific document type
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  // State for handling file selection and upload
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [customName, setCustomName] = useState("");
 
   /**
    * Filter documents to only show those matching this card's document type
-   * This allows multiple versions of the same document type
+   * Includes support for legacy codes (e.g. old driver's license front/back)
    */
-  const relevantDocs = documents.filter(doc => doc.category === docType.code);
+  const relevantDocs = documents.filter(doc =>
+    doc.category === docType.code ||
+    //@ts-ignore - legacyCodes might not exist on all types
+    docType.legacyCodes?.includes(doc.category)
+  );
+
   const hasDocuments = relevantDocs.length > 0;
+  //@ts-ignore
+  const isComplete = hasDocuments && relevantDocs.length >= (docType.minFiles || 1);
 
   /**
-   * handleFileSelect: Triggered when user selects a file for this document type
-   * Pre-fills the custom name with the original filename (without extension)
+   * handleFileSelect: Triggered when user selects files
+   * Enforces maxFiles limit
    */
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
-    const file = e.target.files[0];
-    setSelectedFile(file);
-    // Pre-fill custom name with filename without extension
-    setCustomName(file.name.replace(/\.[^.]+$/, ""));
+    const newFiles = Array.from(e.target.files);
+
+    //@ts-ignore
+    const max = docType.maxFiles || 1;
+    //@ts-ignore
+    const multiple = docType.multiple || false;
+
+    if (!multiple && newFiles.length > 1) {
+      toast({
+        title: "Single file only",
+        description: "Please select only one file for this document type.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    if (selectedFiles.length + newFiles.length > max) {
+      toast({
+        title: "Too many files",
+        description: `You can only upload up to ${max} files.`,
+        variant: "destructive"
+      });
+      return;
+    }
+
+    if (!multiple) {
+      setSelectedFiles([newFiles[0]]);
+      setCustomName(newFiles[0].name.replace(/\.[^.]+$/, ""));
+    } else {
+      setSelectedFiles(prev => [...prev, ...newFiles]);
+      setCustomName(""); // Disable custom name for batch
+    }
+  };
+
+  const removeSelectedFile = (index: number) => {
+    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
   };
 
   /**
-   * handleUpload: Uploads the selected file to Supabase storage and creates database record
-   * Each document is stored with the document type code as a prefix for organization
+   * handleUpload: Uploads all selected files
    */
   const handleUpload = async () => {
-    if (!selectedFile || !userId) return;
+    if (selectedFiles.length === 0 || !userId) return;
 
     setUploading(true);
+    let successCount = 0;
+    let failCount = 0;
+
     try {
-      // Generate unique filename with document type prefix
-      const ext = selectedFile.name.split(".").pop() || "bin";
-      const normalized = `${docType.code}-${Date.now()}.${ext}`;
-      const filePath = `${userId}/${normalized}`;
+      for (const file of selectedFiles) {
+        try {
+          // Generate unique filename
+          const ext = file.name.split(".").pop() || "bin";
+          const normalized = `${docType.code}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.${ext}`;
+          const filePath = `${userId}/${normalized}`;
 
-      // Upload file to Supabase storage bucket
-      const { error: upErr } = await supabase.storage
-        .from("user-documents")
-        .upload(filePath, selectedFile);
-      if (upErr) throw upErr;
+          // Upload file
+          const { error: upErr } = await supabase.storage
+            .from("user-documents")
+            .upload(filePath, file, { upsert: true });
+          if (upErr) throw upErr;
 
-      // Create database record with document metadata
-      const { data, error: dbErr } = await supabase
-        .from("user_documents")
-        .insert({
-          user_id: userId,
-          name: selectedFile.name,
-          size: selectedFile.size,
-          type: selectedFile.type,
-          storage_path: filePath,
-          category: docType.code, // Links this document to its type
-          custom_label: customName || selectedFile.name,
-          metadata: { tags: [docType.code] }, // Initial tag is the document type
-        })
-        .select("*")
-        .single();
-      if (dbErr) throw dbErr;
+          // Create database record
+          const { data, error: dbErr } = await supabase
+            .from("user_documents")
+            .insert({
+              user_id: userId,
+              name: file.name,
+              size: file.size,
+              type: file.type,
+              storage_path: filePath,
+              category: docType.code,
+              // Use custom name only if single file and specified, otherwise filename
+              custom_label: (selectedFiles.length === 1 && customName) ? customName : file.name,
+              metadata: { tags: [docType.code] },
+            })
+            .select("*")
+            .single();
+          if (dbErr) throw dbErr;
 
-      // Optional: Notify backend API about the upload (for workflows, notifications, etc.)
-      try {
-        await fetch("/api/uploads", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            document_id: data.id,
-            storage_path: data.storage_path,
-            doc_code: docType.code
-          }),
-        });
-      } catch (apiError) {
-        // API notification is optional, don't block on errors
-        console.error("API notification failed:", apiError);
+          // Optional: Notify backend
+          try {
+            await fetch("/api/uploads", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                document_id: data.id,
+                storage_path: data.storage_path,
+                doc_code: docType.code
+              }),
+            });
+          } catch (apiError) {
+            console.error("API notification failed:", apiError);
+          }
+
+          successCount++;
+        } catch (err) {
+          console.error("Error uploading file:", file.name, err);
+          failCount++;
+        }
       }
 
-      toast({
-        title: "Success",
-        description: `${docType.label} uploaded successfully.`
-      });
+      if (successCount > 0) {
+        toast({
+          title: "Upload complete",
+          description: `Successfully uploaded ${successCount} file(s).${failCount > 0 ? ` Failed: ${failCount}` : ""}`
+        });
+        setSelectedFiles([]);
+        setCustomName("");
+        onUploadComplete();
+      } else {
+        throw new Error("Failed to upload files");
+      }
 
-      // Reset form state
-      setSelectedFile(null);
-      setCustomName("");
-      onUploadComplete();
     } catch (err: any) {
       toast({
         title: "Upload error",
@@ -179,19 +242,19 @@ function DocumentCard({
    * Allows user to change their mind before submitting
    */
   const clearSelection = () => {
-    setSelectedFile(null);
+    setSelectedFiles([]);
     setCustomName("");
   };
 
   return (
     <div className={clsx(
       "border rounded-xl p-6 transition-all",
-      hasDocuments ? "bg-emerald-50 border-emerald-200" : "bg-white border-gray-200"
+      isComplete ? "bg-emerald-50 border-emerald-200" : "bg-white border-gray-200"
     )}>
-      {/* Card Header - Shows document type and status */}
+      {/* Card Header */}
       <div className="flex items-start justify-between mb-4">
         <div className="flex items-center gap-3">
-          {hasDocuments ? (
+          {isComplete ? (
             <CheckCircle2 className="h-6 w-6 text-emerald-600 flex-shrink-0" />
           ) : (
             <AlertCircle className="h-6 w-6 text-gray-400 flex-shrink-0" />
@@ -199,73 +262,79 @@ function DocumentCard({
           <div>
             <h3 className="font-semibold text-gray-900">{docType.label}</h3>
             <p className="text-sm text-gray-600">
-              {hasDocuments ? `${relevantDocs.length} file(s) uploaded` : "Not uploaded yet"}
+              {relevantDocs.length} file(s) uploaded
+              {/* @ts-ignore */}
+              {docType.minFiles && docType.minFiles > 1 && ` (Min: ${docType.minFiles})`}
             </p>
           </div>
         </div>
       </div>
 
-      {/* Upload Area - Shows when no file is selected */}
-      {!selectedFile && (
+      {/* Upload Area */}
+      {/* @ts-ignore */}
+      {(selectedFiles.length === 0 || docType.multiple) && (
         <div className="mb-4">
           <label className={clsx(
             "flex flex-col items-center justify-center border-2 border-dashed rounded-lg p-6 cursor-pointer transition",
-            hasDocuments
+            isComplete
               ? "border-emerald-300 bg-white hover:bg-emerald-50"
               : "border-gray-300 bg-gray-50 hover:bg-gray-100"
           )}>
             <Upload className={clsx(
               "h-8 w-8 mb-2",
-              hasDocuments ? "text-emerald-600" : "text-gray-400"
+              isComplete ? "text-emerald-600" : "text-gray-400"
             )} />
             <span className="text-sm font-medium text-gray-700">
               Click to upload {docType.label}
             </span>
             <span className="text-xs text-gray-500 mt-1">
-              PDF, images, or documents
+              {/* @ts-ignore */}
+              {docType.multiple ? `Up to ${docType.maxFiles} files` : "Single file"} supported
             </span>
             <input
               type="file"
               onChange={handleFileSelect}
               className="hidden"
               accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx"
+              // @ts-ignore
+              multiple={docType.multiple}
             />
           </label>
         </div>
       )}
 
-      {/* File Preview - Shows when a file is selected but not yet uploaded */}
-      {selectedFile && (
+      {/* Selected Files Preview (Before Upload) */}
+      {selectedFiles.length > 0 && (
         <div className="mb-4 bg-white border border-gray-200 rounded-lg p-4">
-          <div className="flex items-start justify-between mb-3">
-            <div className="flex items-center gap-3 flex-1">
-              <FileText className="h-8 w-8 text-blue-600" />
-              <div className="flex-1 min-w-0">
-                <p className="font-medium text-gray-900 truncate">
-                  {selectedFile.name}
-                </p>
-                <p className="text-sm text-gray-500">
-                  {(selectedFile.size / 1024).toFixed(1)} KB
-                </p>
+          <h4 className="text-sm font-medium text-gray-700 mb-2">Selected for Upload:</h4>
+          <div className="space-y-2 mb-3">
+            {selectedFiles.map((file, idx) => (
+              <div key={idx} className="flex items-center justify-between bg-gray-50 p-2 rounded">
+                <div className="flex items-center gap-2 overflow-hidden">
+                  <FileText className="h-4 w-4 text-blue-600 flex-shrink-0" />
+                  <span className="text-sm text-gray-700 truncate">{file.name}</span>
+                  <span className="text-xs text-gray-500">({(file.size / 1024).toFixed(0)} KB)</span>
+                </div>
+                <button
+                  onClick={() => removeSelectedFile(idx)}
+                  className="text-gray-400 hover:text-red-600"
+                >
+                  <X className="h-4 w-4" />
+                </button>
               </div>
-            </div>
-            <button
-              onClick={clearSelection}
-              className="text-gray-400 hover:text-red-600 transition"
-            >
-              <X className="h-5 w-5" />
-            </button>
+            ))}
           </div>
 
-          {/* Custom Name Input */}
-          <Input
-            value={customName}
-            onChange={(e) => setCustomName(e.target.value)}
-            placeholder="Custom file name (optional)"
-            className="mb-3"
-          />
+          {/* Custom Name Input (Only for single file) */}
+          {selectedFiles.length === 1 && (
+            <Input
+              value={customName}
+              onChange={(e) => setCustomName(e.target.value)}
+              placeholder="Custom file name (optional)"
+              className="mb-3"
+            />
+          )}
 
-          {/* Upload Button - Submits this specific document */}
           <Button
             onClick={handleUpload}
             disabled={uploading}
@@ -274,19 +343,19 @@ function DocumentCard({
             {uploading ? (
               <>
                 <Upload className="h-4 w-4 mr-2 animate-pulse" />
-                Uploading...
+                Uploading {selectedFiles.length} file(s)...
               </>
             ) : (
               <>
                 <Upload className="h-4 w-4 mr-2" />
-                Upload {docType.label}
+                Upload {selectedFiles.length} File(s)
               </>
             )}
           </Button>
         </div>
       )}
 
-      {/* Uploaded Documents List - Shows all documents of this type */}
+      {/* Uploaded Documents List */}
       {relevantDocs.length > 0 && (
         <div className="space-y-2">
           <h4 className="text-sm font-medium text-gray-700 mb-2">
@@ -317,7 +386,6 @@ function DocumentCard({
                 </button>
               </div>
 
-              {/* Document Tags - Can be added by advisors/underwriting */}
               {doc.tags && doc.tags.length > 0 && (
                 <div className="flex flex-wrap gap-1 mb-2">
                   {doc.tags.map((tag, idx) => (
@@ -331,7 +399,6 @@ function DocumentCard({
                 </div>
               )}
 
-              {/* Document Actions */}
               <div className="flex gap-2">
                 <button
                   onClick={() => onDownload(doc)}
@@ -560,11 +627,19 @@ export default function Vault({ onChecklist }: { onChecklist?: (info: ChecklistI
    * Includes count of uploaded files for each document type
    */
   const checklist = useMemo(() => {
-    return REQUIRED_DOCS.map((r) => ({
-      ...r,
-      count: uploadedByCode.get(r.code) || 0,
-      has: (uploadedByCode.get(r.code) || 0) > 0,
-    }));
+    return REQUIRED_DOCS.map((r) => {
+      // @ts-ignore
+      const legacyCount = r.legacyCodes?.reduce((acc, code) => acc + (uploadedByCode.get(code) || 0), 0) || 0;
+      const count = (uploadedByCode.get(r.code) || 0) + legacyCount;
+      // @ts-ignore
+      const minRequired = r.minFiles || 1;
+
+      return {
+        ...r,
+        count,
+        has: count >= minRequired,
+      };
+    });
   }, [uploadedByCode]);
 
   /**

@@ -3,19 +3,19 @@ import AdvisorNewClientPage from "./clients/new/page";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
-import { 
-  Card, 
-  CardContent, 
-  CardDescription, 
-  CardHeader, 
-  CardTitle 
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { 
-  Users, 
-  FileText, 
-  Clock, 
-  CheckCircle, 
+import {
+  Users,
+  FileText,
+  Clock,
+  CheckCircle,
   AlertCircle,
   TrendingUp,
   LogOut,
@@ -26,15 +26,15 @@ import {
  * Stat Card Component
  * Displays a single metric with icon and label
  */
-function StatCard({ 
-  icon: Icon, 
-  label, 
-  value, 
-  trend 
-}: { 
-  icon: any; 
-  label: string; 
-  value: string | number; 
+function StatCard({
+  icon: Icon,
+  label,
+  value,
+  trend
+}: {
+  icon: any;
+  label: string;
+  value: string | number;
   trend?: string;
 }) {
   return (
@@ -88,7 +88,7 @@ export default function AdvisorDashboard() {
       try {
         // Get authenticated user
         const { data: { user }, error: authError } = await supabase.auth.getUser();
-        
+
         if (authError || !user) {
           router.push("/auth/login");
           return;
@@ -132,7 +132,7 @@ export default function AdvisorDashboard() {
     try {
       // TODO: Replace with actual queries based on your data model
       // Example: Count applications, clients, etc.
-      
+
       // For now, using placeholder data
       setStats({
         totalClients: 12,
@@ -178,8 +178,8 @@ export default function AdvisorDashboard() {
                 : "Welcome back!"}
             </p>
           </div>
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             size="sm"
             onClick={handleLogout}
           >
@@ -229,15 +229,19 @@ export default function AdvisorDashboard() {
           </CardHeader>
           <CardContent>
             <div className="grid gap-4 md:grid-cols-3">
-            <Button
-              className="h-auto flex-col items-start p-4"
-              variant="outline"
-              onClick={() => router.push("/advisor/dashboard/clients/new")}
-            >
-              <FileText className="mb-2 h-6 w-6" />
-              <span className="font-semibold">New Client Application</span>
-            </Button>
-              <Button className="h-auto flex-col items-start p-4" variant="outline">
+              <Button
+                className="h-auto flex-col items-start p-4"
+                variant="outline"
+                onClick={() => router.push("/advisor/dashboard/clients/new")}
+              >
+                <FileText className="mb-2 h-6 w-6" />
+                <span className="font-semibold">New Client Application</span>
+              </Button>
+              <Button
+                className="h-auto flex-col items-start p-4"
+                variant="outline"
+                onClick={() => router.push("/advisor/dashboard/clients")}
+              >
                 <Users className="mb-2 h-6 w-6" />
                 <span className="font-semibold">View Clients</span>
                 <span className="text-xs text-muted-foreground">
