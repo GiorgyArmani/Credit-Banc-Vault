@@ -23,7 +23,9 @@ const REQUIRED_DOCS = [
   { code: "drivers_license_front", label: "Driver's License — Front" },
   { code: "drivers_license_back", label: "Driver's License — Back" },
   { code: "voided_check", label: "Voided Business Check" },
-  { code: "debt_schedule", label: "Business Debt Schedule (if applicable)" },
+  { code: "balance_sheets", label: "Balance Sheets" },
+  { code: "profit_loss", label: "Profit & Loss" },
+  { code: "tax_returns", label: "Tax Returns" },
 ] as const;
 type RequiredCode = typeof REQUIRED_DOCS[number]["code"];
 
@@ -32,16 +34,16 @@ type RequiredCode = typeof REQUIRED_DOCS[number]["code"];
  * Includes metadata like tags for advisor/underwriting categorization
  */
 interface UserDocument {
-  id: string; 
-  name: string; 
-  size: number; 
+  id: string;
+  name: string;
+  size: number;
   type: string;
-  category: string | null; 
-  custom_label: string | null; 
+  category: string | null;
+  custom_label: string | null;
   description: string | null;
-  is_favorite: boolean; 
-  upload_date: string; 
-  storage_path: string; 
+  is_favorite: boolean;
+  upload_date: string;
+  storage_path: string;
   tags?: string[];
 }
 
@@ -62,10 +64,10 @@ interface DocumentCardProps {
   onDownload: (doc: UserDocument) => void;
 }
 
-function DocumentCard({ 
-  docType, 
-  documents, 
-  userId, 
+function DocumentCard({
+  docType,
+  documents,
+  userId,
   onUploadComplete,
   onDelete,
   onEdit,
@@ -74,7 +76,7 @@ function DocumentCard({
 }: DocumentCardProps) {
   const supabase = createClient();
   const { toast } = useToast();
-  
+
   // State for handling file selection and upload for this specific document type
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -141,10 +143,10 @@ function DocumentCard({
         await fetch("/api/uploads", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ 
-            document_id: data.id, 
-            storage_path: data.storage_path, 
-            doc_code: docType.code 
+          body: JSON.stringify({
+            document_id: data.id,
+            storage_path: data.storage_path,
+            doc_code: docType.code
           }),
         });
       } catch (apiError) {
@@ -152,20 +154,20 @@ function DocumentCard({
         console.error("API notification failed:", apiError);
       }
 
-      toast({ 
-        title: "Success", 
-        description: `${docType.label} uploaded successfully.` 
+      toast({
+        title: "Success",
+        description: `${docType.label} uploaded successfully.`
       });
-      
+
       // Reset form state
       setSelectedFile(null);
       setCustomName("");
       onUploadComplete();
     } catch (err: any) {
-      toast({ 
-        title: "Upload error", 
-        description: err.message, 
-        variant: "destructive" 
+      toast({
+        title: "Upload error",
+        description: err.message,
+        variant: "destructive"
       });
     } finally {
       setUploading(false);
@@ -208,8 +210,8 @@ function DocumentCard({
         <div className="mb-4">
           <label className={clsx(
             "flex flex-col items-center justify-center border-2 border-dashed rounded-lg p-6 cursor-pointer transition",
-            hasDocuments 
-              ? "border-emerald-300 bg-white hover:bg-emerald-50" 
+            hasDocuments
+              ? "border-emerald-300 bg-white hover:bg-emerald-50"
               : "border-gray-300 bg-gray-50 hover:bg-gray-100"
           )}>
             <Upload className={clsx(
@@ -222,9 +224,9 @@ function DocumentCard({
             <span className="text-xs text-gray-500 mt-1">
               PDF, images, or documents
             </span>
-            <input 
-              type="file" 
-              onChange={handleFileSelect} 
+            <input
+              type="file"
+              onChange={handleFileSelect}
               className="hidden"
               accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx"
             />
@@ -247,7 +249,7 @@ function DocumentCard({
                 </p>
               </div>
             </div>
-            <button 
+            <button
               onClick={clearSelection}
               className="text-gray-400 hover:text-red-600 transition"
             >
@@ -256,16 +258,16 @@ function DocumentCard({
           </div>
 
           {/* Custom Name Input */}
-          <Input 
-            value={customName} 
-            onChange={(e) => setCustomName(e.target.value)} 
+          <Input
+            value={customName}
+            onChange={(e) => setCustomName(e.target.value)}
             placeholder="Custom file name (optional)"
             className="mb-3"
           />
 
           {/* Upload Button - Submits this specific document */}
-          <Button 
-            onClick={handleUpload} 
+          <Button
+            onClick={handleUpload}
             disabled={uploading}
             className="w-full bg-emerald-600 hover:bg-emerald-700"
           >
@@ -291,8 +293,8 @@ function DocumentCard({
             Uploaded Files:
           </h4>
           {relevantDocs.map((doc) => (
-            <div 
-              key={doc.id} 
+            <div
+              key={doc.id}
               className="bg-white border border-gray-200 rounded-lg p-3"
             >
               <div className="flex items-start justify-between mb-2">
@@ -301,15 +303,15 @@ function DocumentCard({
                     {doc.custom_label || doc.name}
                   </p>
                   <p className="text-xs text-gray-500">
-                    {(doc.size / 1024).toFixed(1)} KB • 
+                    {(doc.size / 1024).toFixed(1)} KB •
                     Uploaded {new Date(doc.upload_date).toLocaleDateString()}
                   </p>
                 </div>
                 <button onClick={() => onToggleFavorite(doc)}>
                   <Star className={clsx(
-                    "h-5 w-5", 
-                    doc.is_favorite 
-                      ? "text-yellow-500 fill-yellow-500" 
+                    "h-5 w-5",
+                    doc.is_favorite
+                      ? "text-yellow-500 fill-yellow-500"
                       : "text-gray-400"
                   )} />
                 </button>
@@ -319,8 +321,8 @@ function DocumentCard({
               {doc.tags && doc.tags.length > 0 && (
                 <div className="flex flex-wrap gap-1 mb-2">
                   {doc.tags.map((tag, idx) => (
-                    <span 
-                      key={idx} 
+                    <span
+                      key={idx}
                       className="px-2 py-0.5 bg-gray-200 text-gray-700 rounded-full text-xs"
                     >
                       {tag}
@@ -331,25 +333,25 @@ function DocumentCard({
 
               {/* Document Actions */}
               <div className="flex gap-2">
-                <button 
-                  onClick={() => onDownload(doc)} 
+                <button
+                  onClick={() => onDownload(doc)}
                   className="flex-1 py-1.5 text-xs font-medium text-emerald-600 border border-emerald-200 rounded hover:bg-emerald-50 transition"
                 >
-                  <Download className="inline h-3 w-3 mr-1" /> 
+                  <Download className="inline h-3 w-3 mr-1" />
                   Download
                 </button>
-                <button 
-                  onClick={() => onEdit(doc)} 
+                <button
+                  onClick={() => onEdit(doc)}
                   className="flex-1 py-1.5 text-xs font-medium text-blue-600 border border-blue-200 rounded hover:bg-blue-50 transition"
                 >
-                  <Pencil className="inline h-3 w-3 mr-1" /> 
+                  <Pencil className="inline h-3 w-3 mr-1" />
                   Edit
                 </button>
-                <button 
-                  onClick={() => onDelete(doc)} 
+                <button
+                  onClick={() => onDelete(doc)}
                   className="flex-1 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded hover:bg-red-50 transition"
                 >
-                  <Trash2 className="inline h-3 w-3 mr-1" /> 
+                  <Trash2 className="inline h-3 w-3 mr-1" />
                   Delete
                 </button>
               </div>
@@ -409,10 +411,10 @@ export default function Vault({ onChecklist }: { onChecklist?: (info: ChecklistI
 
       setDocuments(mapped);
     } catch (err: any) {
-      toast({ 
-        title: "Error", 
-        description: err.message, 
-        variant: "destructive" 
+      toast({
+        title: "Error",
+        description: err.message,
+        variant: "destructive"
       });
     } finally {
       setLoading(false);
@@ -435,20 +437,20 @@ export default function Vault({ onChecklist }: { onChecklist?: (info: ChecklistI
         })
         .eq("id", editDoc.id);
       if (error) throw error;
-      
-      setDocuments((prev) => 
+
+      setDocuments((prev) =>
         prev.map((d) => (d.id === editDoc.id ? editDoc : d))
       );
       setEditDoc(null);
-      toast({ 
-        title: "Updated", 
-        description: "Document updated successfully." 
+      toast({
+        title: "Updated",
+        description: "Document updated successfully."
       });
     } catch (err: any) {
-      toast({ 
-        title: "Error", 
-        description: err.message, 
-        variant: "destructive" 
+      toast({
+        title: "Error",
+        description: err.message,
+        variant: "destructive"
       });
     }
   };
@@ -464,17 +466,17 @@ export default function Vault({ onChecklist }: { onChecklist?: (info: ChecklistI
         .update({ is_favorite: !doc.is_favorite })
         .eq("id", doc.id);
       if (error) throw error;
-      
-      setDocuments((prev) => 
-        prev.map((d) => 
+
+      setDocuments((prev) =>
+        prev.map((d) =>
           d.id === doc.id ? { ...d, is_favorite: !doc.is_favorite } : d
         )
       );
     } catch (err: any) {
-      toast({ 
-        title: "Error", 
-        description: err.message, 
-        variant: "destructive" 
+      toast({
+        title: "Error",
+        description: err.message,
+        variant: "destructive"
       });
     }
   };
@@ -489,23 +491,23 @@ export default function Vault({ onChecklist }: { onChecklist?: (info: ChecklistI
       await supabase.storage
         .from("user-documents")
         .remove([doc.storage_path]);
-      
+
       // Delete database record
       await supabase
         .from("user_documents")
         .delete()
         .eq("id", doc.id);
-      
+
       setDocuments((prev) => prev.filter((d) => d.id !== doc.id));
-      toast({ 
-        title: "Deleted", 
-        description: `${doc.custom_label || doc.name} removed.` 
+      toast({
+        title: "Deleted",
+        description: `${doc.custom_label || doc.name} removed.`
       });
     } catch (err: any) {
-      toast({ 
-        title: "Error", 
-        description: err.message, 
-        variant: "destructive" 
+      toast({
+        title: "Error",
+        description: err.message,
+        variant: "destructive"
       });
     }
   };
@@ -520,7 +522,7 @@ export default function Vault({ onChecklist }: { onChecklist?: (info: ChecklistI
         .from("user-documents")
         .download(doc.storage_path);
       if (error) throw error;
-      
+
       // Create blob URL and trigger download
       const url = URL.createObjectURL(data);
       const a = document.createElement("a");
@@ -531,10 +533,10 @@ export default function Vault({ onChecklist }: { onChecklist?: (info: ChecklistI
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch (err: any) {
-      toast({ 
-        title: "Download error", 
-        description: err.message, 
-        variant: "destructive" 
+      toast({
+        title: "Download error",
+        description: err.message,
+        variant: "destructive"
       });
     }
   };
@@ -657,12 +659,12 @@ export default function Vault({ onChecklist }: { onChecklist?: (info: ChecklistI
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Document Name
                 </label>
-                <Input 
-                  value={editDoc.custom_label || ""} 
-                  onChange={(e) => setEditDoc({ 
-                    ...editDoc, 
-                    custom_label: e.target.value 
-                  })} 
+                <Input
+                  value={editDoc.custom_label || ""}
+                  onChange={(e) => setEditDoc({
+                    ...editDoc,
+                    custom_label: e.target.value
+                  })}
                   placeholder="Enter custom name"
                 />
               </div>
@@ -672,15 +674,15 @@ export default function Vault({ onChecklist }: { onChecklist?: (info: ChecklistI
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Tags (comma separated)
                 </label>
-                <Input 
-                  value={editDoc.tags?.join(", ") || ""} 
-                  onChange={(e) => setEditDoc({ 
-                    ...editDoc, 
+                <Input
+                  value={editDoc.tags?.join(", ") || ""}
+                  onChange={(e) => setEditDoc({
+                    ...editDoc,
                     tags: e.target.value
                       .split(",")
                       .map(t => t.trim())
-                      .filter(Boolean) 
-                  })} 
+                      .filter(Boolean)
+                  })}
                   placeholder="e.g., verified, reviewed, needs-attention"
                 />
                 <p className="text-xs text-gray-500 mt-1">
@@ -690,8 +692,8 @@ export default function Vault({ onChecklist }: { onChecklist?: (info: ChecklistI
             </div>
           )}
           <DialogFooter>
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               onClick={() => setEditDoc(null)}
             >
               Cancel

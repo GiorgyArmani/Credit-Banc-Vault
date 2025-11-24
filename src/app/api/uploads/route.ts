@@ -14,39 +14,41 @@ const admin = createClient(
 const DOC_CODE_TO_GHL_FIELD_MAP: Record<string, { fieldId: string; fieldKey: string }> = {
   // Bank statements (last 6 months)
   bank_statements_6mo: {
-    fieldId: "gdpBhJJ5RKtLYbWlFXhI",
+    fieldId: process.env.GHL_CF_BANK_STATEMENTS!,
     fieldKey: "contact.data_vault_files_bank_statements",
   },
   // Driver's license front and back (both use same custom field)
   drivers_license_front: {
-    fieldId: "XMXkevs2VI8IOLIeEGhp",
+    fieldId: process.env.GHL_CF_DRIVERS_LICENSE!,
     fieldKey: "contact.data_vault_files_drivers_license",
   },
   drivers_license_back: {
-    fieldId: "XMXkevs2VI8IOLIeEGhp",
+    fieldId: process.env.GHL_CF_DRIVERS_LICENSE!,
     fieldKey: "contact.data_vault_files_drivers_license",
   },
   // Voided business check
   voided_check: {
-    fieldId: "QXOn6kwwOAkJk7YtD8ls",
+    fieldId: process.env.GHL_CF_VOIDED_CHECK!,
     fieldKey: "contact.data_vault_files_voided_check",
   },
   // Debt schedule or balance sheets
-  debt_schedule: {
-    fieldId: "XawiUQdnYleZz5eqHfuH",
+  balance_sheets: {
+    fieldId: process.env.GHL_CF_BALANCE_SHEETS!,
     fieldKey: "contact.data_vault_files_balance_sheets",
   },
   // Tax returns
   tax_returns: {
-    fieldId: "7eGo8ubBbbP5e3T2gsbv",
+    fieldId: process.env.GHL_CF_TAX_RETURNS!,
     fieldKey: "contact.data_vault_files_tax_returns",
   },
   // Profit & Loss statements
   profit_loss: {
-    fieldId: "W9Q4eJJ2uPoW7RAW2kZB",
+    fieldId: process.env.GHL_CF_CREDIT_PROFIT_LOSS!,
     fieldKey: "contact.data_vault_files_profit__loss",
   },
 };
+
+console.log("Loaded GHL Field Map:", JSON.stringify(DOC_CODE_TO_GHL_FIELD_MAP, null, 2));
 
 /**
  * uploadFileToGHL: Downloads file from Supabase and uploads it to GHL custom field
@@ -66,6 +68,7 @@ async function uploadFileToGHL(
   fileName: string,
   authToken: string
 ): Promise<{ success: boolean; url?: string; error?: string }> {
+  console.log(`Starting GHL upload for ${fileName} to field ${fieldId}`);
   try {
     // 1. Download file from Supabase storage
     const { data: fileData, error: downloadError } = await admin.storage
@@ -127,12 +130,14 @@ async function updateGHLTags(
   docCode: string,
   authToken: string
 ): Promise<void> {
+  console.log(`Updating GHL tags for contact ${contactId}, docCode: ${docCode}`);
   try {
     const requestedTag = `requested_${docCode}`;
     const submittedTag = `submitted_${docCode}`;
 
     // Remove requested tag
-    await fetch(
+    console.log(`Removing tag: ${requestedTag}`);
+    const deleteResp = await fetch(
       `https://services.leadconnectorhq.com/contacts/${contactId}/tags`,
       {
         method: "DELETE",
@@ -143,10 +148,18 @@ async function updateGHLTags(
         },
         body: JSON.stringify({ tags: [requestedTag] }),
       }
-    ).catch((err) => console.warn("Failed to remove requested tag:", err));
+    );
+
+    if (!deleteResp.ok) {
+      const errText = await deleteResp.text();
+      console.warn(`Failed to remove tag ${requestedTag}: ${deleteResp.status} - ${errText}`);
+    } else {
+      console.log(`Successfully removed tag: ${requestedTag}`);
+    }
 
     // Add submitted tag
-    await fetch(
+    console.log(`Adding tag: ${submittedTag}`);
+    const addResp = await fetch(
       `https://services.leadconnectorhq.com/contacts/${contactId}/tags`,
       {
         method: "POST",
@@ -157,7 +170,15 @@ async function updateGHLTags(
         },
         body: JSON.stringify({ tags: [submittedTag] }),
       }
-    ).catch((err) => console.warn("Failed to add submitted tag:", err));
+    );
+
+    if (!addResp.ok) {
+      const errText = await addResp.text();
+      console.error(`Failed to add tag ${submittedTag}: ${addResp.status} - ${errText}`);
+    } else {
+      console.log(`Successfully added tag: ${submittedTag}`);
+    }
+
   } catch (error) {
     console.error("Error updating GHL tags:", error);
   }
@@ -197,27 +218,35 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Document not found" }, { status: 404 });
     }
 
-    // 2. Get business profile for this user
-    const { data: profile, error: profileError } = await admin
-      .from("business_profiles")
-      .select("id")
+    // 2. Get client_data_vault record for this user (Primary source for GHL info)
+    const { data: vaultRecord, error: vaultError } = await admin
+      .from("client_data_vault")
+      .select("id, ghl_contact_id, user_id")
       .eq("user_id", doc.user_id)
       .maybeSingle();
 
-    if (profileError) {
-      console.error("Error fetching profile:", profileError);
+    if (vaultError) {
+      console.error("Error fetching client_data_vault:", vaultError);
     }
 
-    const profileId = profile?.id;
+    const profileId = vaultRecord?.id; // Use vault ID as profile ID for events/logging if needed
 
-    // 3. Create event record if we have a profile
+    // 3. Create event record (audit trail)
     if (profileId) {
-      await admin.from("events").insert({
-        profile_id: profileId,
-        type: "upload",
-        payload: { doc_code, storage_path, document_id },
-        actor: doc.user_id,
-      });
+      // Note: events table might still reference business_profiles(id). 
+      // If client_data_vault.id is not compatible with events.profile_id (FK), we might skip this or need to fetch business_profile too.
+      // However, for GHL sync, we prioritize vaultRecord.
+      // Let's try to fetch business_profile just for the event FK constraint if it exists.
+      const { data: bp } = await admin.from("business_profiles").select("id").eq("user_id", doc.user_id).maybeSingle();
+
+      if (bp) {
+        await admin.from("events").insert({
+          profile_id: bp.id,
+          type: "upload",
+          payload: { doc_code, storage_path, document_id },
+          actor: doc.user_id,
+        });
+      }
     }
 
     // 4. Send webhook notification to n8n (if configured)
@@ -226,35 +255,34 @@ export async function POST(req: Request) {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          profile_id: profileId,
+          profile_id: profileId, // Sending vault ID here as it's the main ID now
           user_id: doc.user_id,
           doc_code,
           document_id,
         }),
-      }).catch(() => {});
+      }).catch(() => { });
     }
 
     // 5. GHL Integration - Upload file and update tags
-    if (profileId && process.env.GHL_TOKEN) {
-      const { data: integ } = await admin
-        .from("integrations")
-        .select("ghl_contact_id, ghl_location_id")
-        .eq("profile_id", profileId)
-        .maybeSingle();
+    console.log(`Checking GHL Integration prerequisites: VaultRecord: ${!!vaultRecord}, GHL_TOKEN exists: ${!!process.env.GHL_TOKEN}`);
 
-      if (integ?.ghl_contact_id) {
-        const ghlLocationId = integ.ghl_location_id || process.env.GHL_LOCATION_ID;
+    if (vaultRecord && process.env.GHL_TOKEN) {
+      if (vaultRecord.ghl_contact_id) {
+        // Use env var for location ID as it's not consistently in client_data_vault yet (or we can add it later)
+        // The user said "we have it mapped on the env like this" for custom fields, implying env is source of truth for config.
+        const ghlLocationId = process.env.GHL_LOCATION_ID;
 
         if (!ghlLocationId) {
-          console.warn("GHL location ID not found, skipping GHL upload");
+          console.warn("GHL location ID not found in env, skipping GHL upload");
         } else {
           // Check if this doc_code has a mapped GHL custom field
           const ghlFieldMapping = DOC_CODE_TO_GHL_FIELD_MAP[doc_code];
+          console.log(`Processing doc_code: ${doc_code}, Mapping found:`, ghlFieldMapping);
 
           if (ghlFieldMapping) {
             // Upload file to GHL custom field
             const uploadResult = await uploadFileToGHL(
-              integ.ghl_contact_id,
+              vaultRecord.ghl_contact_id,
               ghlLocationId,
               ghlFieldMapping.fieldId,
               doc.storage_path,
@@ -280,11 +308,13 @@ export async function POST(req: Request) {
 
           // Update tags: requested_* → submitted_*
           await updateGHLTags(
-            integ.ghl_contact_id,
+            vaultRecord.ghl_contact_id,
             doc_code,
             process.env.GHL_TOKEN
           );
         }
+      } else {
+        console.warn("No GHL Contact ID found in client_data_vault for user", doc.user_id);
       }
     }
 
