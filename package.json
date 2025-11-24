@@ -41,6 +41,7 @@
     "@react-pdf/renderer": "^4.3.0",
     "@supabase/ssr": "^0.6.1",
     "@supabase/supabase-js": "^2.51.0",
+    "adm-zip": "^0.5.16",
     "ai": "^4.3.19",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -74,6 +75,7 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@types/adm-zip": "^0.5.7",
     "@types/node": "^20.19.1",
     "@types/nodemailer": "^7.0.4",
     "@types/react": "^19",
