@@ -129,6 +129,7 @@ async function uploadFileToGHL(
     }
 
     // 2. Convert Blob to File object
+    console.log(`Downloaded file size: ${fileData.size}, type: ${fileData.type}`);
     const file = new File([fileData], fileName, { type: fileData.type });
 
     // 3. Create FormData for GHL upload
@@ -137,6 +138,7 @@ async function uploadFileToGHL(
     formData.append("maxFiles", "15"); // Ensure GHL knows we support multiple files
     formData.append(fieldId, file);
 
+    console.log("Sending request to GHL...");
     // 4. Upload to GHL
     const ghlResponse = await fetch(
       `https://services.leadconnectorhq.com/locations/${locationId}/customFields/upload`,
@@ -150,8 +152,11 @@ async function uploadFileToGHL(
       }
     );
 
+    console.log(`GHL Response Status: ${ghlResponse.status}`);
+
     if (!ghlResponse.ok) {
       const errorText = await ghlResponse.text();
+      console.error(`GHL Error Response: ${errorText}`);
       return {
         success: false,
         error: `GHL API error: ${ghlResponse.status} - ${errorText}`,
@@ -161,43 +166,13 @@ async function uploadFileToGHL(
     const result = await ghlResponse.json();
     console.log("GHL API Response:", JSON.stringify(result, null, 2));
 
-    // The upload endpoint returns the file metadata keyed by the filename in `uploadedFiles`
-    // OR it might return it in `meta` array. Structure varies based on GHL version/endpoint.
-    // Based on user example: {"f31175d4...": { meta: ..., url: ..., documentId: ... }}
-    // We need to construct this object or extract it.
-
-    // Let's look at what we get. Usually `uploadedFiles` contains the key-value pair we need.
-    const uploadedFileKey = Object.keys(result.uploadedFiles || {})[0];
-    const uploadedFileData = result.uploadedFiles?.[uploadedFileKey];
-
-    if (uploadedFileData) {
-      // We need to return the object structure expected by the custom field
-      // The key is the UUID of the file.
-      // result.uploadedFiles is likely { "filename.jpg": "url" } OR { "filename.jpg": { ...metadata } }
-      // Wait, the user example shows:
-      // field_value: { "UUID": { meta: {...}, url: "...", documentId: "..." } }
-
-      // If the upload endpoint returns the simple URL, we might need to construct the metadata manually?
-      // OR the upload endpoint returns the full object.
-      // Let's assume `result` contains the necessary info.
-
-      // If `result.uploadedFiles` is just { "name": "url" }, we might be missing metadata.
-      // However, usually the upload endpoint for custom fields handles the assignment if we just POST.
-      // BUT, since we want to MERGE, we need the value.
-
-      // Let's return the whole result for now and debug if needed, but try to construct the object.
-      return {
-        success: true,
-        fileData: result // Return raw result to let caller handle or inspect
-      };
-    }
-
     return {
       success: true,
-      fileData: result // Return raw result
+      fileData: result
     };
 
   } catch (error: any) {
+    console.error("Error in uploadFileToGHL:", error);
     return { success: false, error: error.message };
   }
 }
