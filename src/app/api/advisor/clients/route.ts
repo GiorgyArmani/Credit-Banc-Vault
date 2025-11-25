@@ -1,6 +1,7 @@
-// File: F:\Credit Banc Vault\src\app\api\advisor\clients\route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+
+export const dynamic = 'force-dynamic';
 
 /**
  * GET /api/advisor/clients
