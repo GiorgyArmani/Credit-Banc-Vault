@@ -32,10 +32,33 @@ const REQUIRED_DOCS = [
     maxFiles: 2,
     legacyCodes: ["drivers_license_front", "drivers_license_back"]
   },
-  { code: "voided_check", label: "Voided Business Check" },
-  { code: "balance_sheets", label: "Balance Sheets" },
-  { code: "profit_loss", label: "Profit & Loss" },
-  { code: "tax_returns", label: "Tax Returns" },
+  {
+    code: "voided_check", label: "Voided Business Check",
+    multiple: true,
+    maxFiles: 12
+  },
+  {
+    code: "balance_sheets", label: "Balance Sheets",
+    multiple: true,
+    maxFiles: 12
+  },
+  {
+    code: "profit_loss", label: "Profit & Loss",
+    multiple: true,
+    maxFiles: 12
+  },
+  {
+    code: "tax_returns", label: "Tax Returns",
+    multiple: true,
+    maxFiles: 12
+  },
+  { code: "funding_application", label: "Funding Application" },
+  { code: "ar_report", label: "A/R Report" },
+  {
+    code: "debt_schedule", label: "Debt Schedule",
+    multiple: true,
+    maxFiles: 12
+  },
 ] as const;
 type RequiredCode = typeof REQUIRED_DOCS[number]["code"];
 

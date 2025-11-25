@@ -14,46 +14,59 @@ const admin = createClient(
 const DOC_CODE_TO_GHL_FIELD_MAP: Record<string, { fieldId: string; fieldKey: string }> = {
   // Bank statements (last 6 months)
   bank_statements_6mo: {
-    fieldId: process.env.GHL_CF_BANK_STATEMENTS!,
+    fieldId: process.env.GHL_CF_BANK_STATEMENTS || "gdpBhJJ5RKtLYbWlFXhI",
     fieldKey: "contact.data_vault_files_bank_statements",
   },
   // Driver's license front and back (both use same custom field)
   drivers_license_front: {
-    fieldId: process.env.GHL_CF_DRIVERS_LICENSE!,
+    fieldId: process.env.GHL_CF_DRIVERS_LICENSE || "XMXkevs2VI8IOLIeEGhp",
     fieldKey: "contact.data_vault_files_drivers_license",
   },
   drivers_license_back: {
-    fieldId: process.env.GHL_CF_DRIVERS_LICENSE!,
+    fieldId: process.env.GHL_CF_DRIVERS_LICENSE || "XMXkevs2VI8IOLIeEGhp",
     fieldKey: "contact.data_vault_files_drivers_license",
   },
   // Consolidated Driver's License (Front & Back)
   drivers_license: {
-    fieldId: process.env.GHL_CF_DRIVERS_LICENSE!,
+    fieldId: process.env.GHL_CF_DRIVERS_LICENSE || "XMXkevs2VI8IOLIeEGhp",
     fieldKey: "contact.data_vault_files_drivers_license",
   },
   // Voided business check
   voided_check: {
-    fieldId: process.env.GHL_CF_VOIDED_CHECK!,
+    fieldId: process.env.GHL_CF_VOIDED_CHECK || "QXOn6kwwOAkJk7YtD8ls",
     fieldKey: "contact.data_vault_files_voided_check",
   },
   // Debt schedule or balance sheets
   balance_sheets: {
-    fieldId: process.env.GHL_CF_BALANCE_SHEETS!,
+    fieldId: process.env.GHL_CF_BALANCE_SHEETS || "XawiUQdnYleZz5eqHfuH",
     fieldKey: "contact.data_vault_files_balance_sheets",
   },
   // Tax returns
   tax_returns: {
-    fieldId: process.env.GHL_CF_TAX_RETURNS!,
+    fieldId: process.env.GHL_CF_TAX_RETURNS || "7eGo8ubBbbP5e3T2gsbv",
     fieldKey: "contact.data_vault_files_tax_returns",
   },
   // Profit & Loss statements
   profit_loss: {
-    fieldId: process.env.GHL_CF_CREDIT_PROFIT_LOSS!,
+    fieldId: process.env.GHL_CF_CREDIT_PROFIT_LOSS || "W9Q4eJJ2uPoW7RAW2kZB",
     fieldKey: "contact.data_vault_files_profit__loss",
   },
+  // Funding Application
+  funding_application: {
+    fieldId: process.env.GHL_CF_FUNDING_APPLICATION || "iSvQIeBgIsbtHTPYmHiv",
+    fieldKey: "contact.data_vault_files_funding_application",
+  },
+  // A/R Report
+  ar_report: {
+    fieldId: process.env.GHL_CF_AR_REPORT || "10ciAtMopHUBGL40iXbu",
+    fieldKey: "contact.data_vault_files_ar_report",
+  },
+  // Debt Schedule
+  debt_schedule: {
+    fieldId: process.env.GHL_CF_DEBT_SCHEDULE || "xY2NMYDxjp5ZzMo1SRCj",
+    fieldKey: "contact.data_vault_files_debt_schedule",
+  },
 };
-
-console.log("Loaded GHL Field Map:", JSON.stringify(DOC_CODE_TO_GHL_FIELD_MAP, null, 2));
 
 /**
  * getContact: Fetches contact details from GHL
@@ -384,7 +397,7 @@ export async function POST(req: Request) {
               // D. Update contact with merged value
               await updateContact(
                 vaultRecord.ghl_contact_id,
-                [{ id: ghlFieldMapping.fieldId, field_value: mergedValue }],
+                [{ id: ghlFieldMapping.fieldId, value: mergedValue }],
                 process.env.GHL_TOKEN
               );
 

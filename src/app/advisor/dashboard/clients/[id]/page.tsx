@@ -108,6 +108,9 @@ const REQUIRED_DOC_TYPES = [
     { code: "drivers_license_back", label: "Driver's License - Back" },
     { code: "voided_check", label: "Voided Business Check" },
     { code: "debt_schedule", label: "Business Debt Schedule" },
+    { code: "profit_loss", label: "Profit and Loss" },
+    { code: "funding_application", label: "Funding Application" },
+    { code: "ar_report", label: "A/R Report" },
 ];
 
 export default function AdvisorClientDetailsPage() {
