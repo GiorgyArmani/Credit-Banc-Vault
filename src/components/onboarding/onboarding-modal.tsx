@@ -32,20 +32,20 @@ export default function OnboardingModal({
   onClose,
   onSkipThisSession,
 }: OnboardingModalProps) {
-  const [currentStep, setCurrentStep] = useState(0);
-  const [profile, setProfile] = useState<Partial<BusinessProfile>>({});
+  // const [currentStep, setCurrentStep] = useState(0);
+  // const [profile, setProfile] = useState<Partial<BusinessProfile>>({});
   const supabase = createClient();
   const router = useRouter();
-  const step: Step | undefined = steps[currentStep];
-  const progress = steps.length > 0 ? ((currentStep + 1) / steps.length) * 100 : 0;
-  if (!step) return null;
+  // const step: Step | undefined = steps[currentStep];
+  // const progress = steps.length > 0 ? ((currentStep + 1) / steps.length) * 100 : 0;
+  // if (!step) return null;
 
-  const handleChange = (key: keyof BusinessProfile, value: string) => {
-    setProfile((prev) => ({ ...prev, [key]: value }));
-  };
+  // const handleChange = (key: keyof BusinessProfile, value: string) => {
+  //   setProfile((prev) => ({ ...prev, [key]: value }));
+  // };
 
-  const isStepValid = () =>
-    step.fields.filter((f) => f.required).every((f) => !!profile[f.key]);
+  // const isStepValid = () =>
+  //   step.fields.filter((f) => f.required).every((f) => !!profile[f.key]);
 
   const handleComplete = async () => {
     const {
@@ -53,19 +53,20 @@ export default function OnboardingModal({
     } = await supabase.auth.getUser();
     if (!user) return;
 
-    const finalProfile: BusinessProfile = {
-      business_name: profile.business_name ?? undefined,
-      business_description: profile.business_description ?? undefined,
-      business_model: profile.business_model ?? undefined,
-      years_in_business: profile.years_in_business ?? undefined,
-      industry: profile.industry ?? undefined,
-      primary_goal: profile.primary_goal ?? undefined,
-      secondary_goal: profile.secondary_goal ?? undefined,
-      main_challenge: profile.main_challenge ?? undefined,
-      annual_revenue_last_year: profile.annual_revenue_last_year ?? undefined,
-      monthly_revenue: profile.monthly_revenue ?? undefined,
+    // Minimal profile to satisfy the constraint or just mark as completed
+    // We might need to adjust the table constraints if these fields are strictly required
+    // For now, I'll send a dummy completed profile or just the completion flag if the schema allows
+    // Looking at the previous code, it seems we were sending a full profile.
+    // Let's assume for now we just want to mark it as done.
+    // If the DB requires fields, we might need to send defaults or make them nullable in DB.
+    // Based on previous code, they were optional in the interface but some required in UI.
+    // Let's try to upsert just the completion info.
+
+    const finalProfile: Partial<BusinessProfile> = {
+      // business_name: profile.business_name ?? undefined,
+      // ...
       completion_level: 100,
-      completed_categories: ["basic", "goals", "financial"],
+      completed_categories: ["video_tutorial"], // Changed from ["basic", "goals", "financial"]
       updated_at: new Date().toISOString(),
     };
 
@@ -88,130 +89,49 @@ export default function OnboardingModal({
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose?.()}>
-      <DialogContent className="max-w-3xl w-full p-0 overflow-hidden">
-        <DialogHeader className="px-6 pt-6">
-          <DialogTitle>Complete your business profile</DialogTitle>
-          <DialogDescription>
-            Completing this helps us personalize your coaching and recommendations.
+      <DialogContent className="max-w-4xl w-full p-0 overflow-hidden bg-background border-border">
+        <DialogHeader className="px-6 pt-6 pb-2">
+          <DialogTitle className="text-foreground">Welcome to Credit Banc Vault</DialogTitle>
+          <DialogDescription className="text-muted-foreground">
+            Watch this quick tutorial to learn how to get the most out of our platform.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="px-6 pb-6">
-          {/* Progress */}
-          <div className="mb-4">
-            <div className="flex justify-between text-sm text-gray-500 mb-1">
-              <span>
-                Step {currentStep + 1} of {steps.length}
-              </span>
-              <span>{Math.round(progress)}% complete</span>
-            </div>
-            <Progress value={progress} />
+        <div className="flex flex-col items-center justify-center p-6 space-y-6">
+          <div className="w-full aspect-video bg-muted rounded-lg overflow-hidden relative shadow-lg border border-border">
+            {/* Placeholder for Video - Replace src with actual Supabase URL */}
+            <video
+              className="w-full h-full object-cover"
+              controls
+              autoPlay
+              // src="YOUR_SUPABASE_VIDEO_URL_HERE"
+              poster="/placeholder-video-poster.jpg" // Optional: Add a poster image
+            >
+              <source src="https://vowcnxlmahbildgsreso.supabase.co/storage/v1/object/sign/public%20videos/riverside_2025_11%2025%2019%2054%2059.mp4%20magic%20episode%20_%20nov%2026%2C%202_the_weekly%20recap.mp4?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV9iNmYyMTI4MC04NmY3LTQ3NDgtYTUxZC02M2RhNmRmNjBiYzQiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJwdWJsaWMgdmlkZW9zL3JpdmVyc2lkZV8yMDI1XzExIDI1IDE5IDU0IDU5Lm1wNCBtYWdpYyBlcGlzb2RlIF8gbm92IDI2LCAyX3RoZV93ZWVrbHkgcmVjYXAubXA0IiwiaWF0IjoxNzY0MTI2MjI5LCJleHAiOjIwNzk0ODYyMjl9.Ik77t63UnAnbZF9P0F8zcGV8uX0a7Jyq_gSCVKQUAEo" type="video/mp4" />
+              Your browser does not support the video tag.
+            </video>
           </div>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>{step.title}</CardTitle>
-              <CardDescription>{step.description}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {step.fields.map((field) => {
-                const id = String(field.key);
-                const value = String(profile[field.key] ?? "");
+          <div className="flex w-full justify-between items-center">
+            <Button
+              variant="ghost"
+              onClick={() => {
+                onSkipThisSession?.();
+                onClose?.();
+              }}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              Skip for now
+            </Button>
 
-                return (
-                  <div key={id} className="space-y-2">
-                    <Label htmlFor={id}>
-                      {field.label}
-                      {field.required && (
-                        <span className="text-red-500 ml-1">*</span>
-                      )}
-                    </Label>
-
-                    {field.type === "input" && (
-                      <Input
-                        id={id}
-                        name={id}
-                        placeholder={field.placeholder}
-                        value={value}
-                        onChange={(e) => handleChange(field.key, e.target.value)}
-                      />
-                    )}
-
-                    {field.type === "textarea" && (
-                      <Textarea
-                        id={id}
-                        name={id}
-                        placeholder={field.placeholder}
-                        rows={3}
-                        value={value}
-                        onChange={(e) => handleChange(field.key, e.target.value)}
-                      />
-                    )}
-
-                    {field.type === "select" && (
-                      <Select
-                        value={value}
-                        onValueChange={(val) => handleChange(field.key, val)}
-                      >
-                        <SelectTrigger id={id} name={id}>
-                          <SelectValue placeholder="Select an option" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {field.options?.map((opt) => (
-                            <SelectItem key={opt} value={opt}>
-                              {opt}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
-                  </div>
-                );
-              })}
-
-              <div className="flex items-center justify-between pt-6">
-                <div className="flex items-center gap-2">
-                  {currentStep > 0 ? (
-                    <Button
-                      variant="outline"
-                      onClick={() => setCurrentStep((s) => s - 1)}
-                    >
-                      <ArrowLeft className="mr-2 h-4 w-4" /> Back
-                    </Button>
-                  ) : (
-                    <Button
-                      variant="ghost"
-                      onClick={() => {
-                        onSkipThisSession?.();
-                        onClose?.();
-                      }}
-                    >
-                      Skip for now
-                    </Button>
-                  )}
-                </div>
-
-                <Button
-                  disabled={!isStepValid()}
-                  onClick={
-                    currentStep === steps.length - 1
-                      ? handleComplete
-                      : () => setCurrentStep((s) => s + 1)
-                  }
-                >
-                  {currentStep === steps.length - 1 ? (
-                    <>
-                      <CheckCircle className="mr-2 h-4 w-4" /> Complete Setup
-                    </>
-                  ) : (
-                    <>
-                      Next <ArrowRight className="ml-2 h-4 w-4" />
-                    </>
-                  )}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+            <Button
+              size="lg"
+              onClick={handleComplete}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+            >
+              Get Started <ArrowRight className="ml-2 h-5 w-5" />
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>

@@ -97,40 +97,32 @@ const steps: Step[] = [
 ]
 
 export default function OnboardingFlow() {
-  const [currentStep, setCurrentStep] = useState(0)
-  const [profile, setProfile] = useState<Partial<BusinessProfile>>({})
+  // const [currentStep, setCurrentStep] = useState(0)
+  // const [profile, setProfile] = useState<Partial<BusinessProfile>>({})
   const router = useRouter()
   const supabase = createClient()
-  const currentStepData = steps[currentStep]
-  const progress = ((currentStep + 1) / steps.length) * 100
+  // const currentStepData = steps[currentStep]
+  // const progress = ((currentStep + 1) / steps.length) * 100
 
-  const handleFieldChange = (key: keyof BusinessProfile, value: string) => {
-    setProfile(prev => ({ ...prev, [key]: value }))
-  }
+  // const handleFieldChange = (key: keyof BusinessProfile, value: string) => {
+  //   setProfile(prev => ({ ...prev, [key]: value }))
+  // }
 
-  const isStepValid = () => {
-    return currentStepData.fields
-      .filter(field => field.required)
-      .every(field => !!profile[field.key])
-  }
+  // const isStepValid = () => {
+  //   return currentStepData.fields
+  //     .filter(field => field.required)
+  //     .every(field => !!profile[field.key])
+  // }
 
   const handleComplete = async () => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
 
-    const finalProfile: BusinessProfile = {
-      business_name: profile.business_name ?? undefined,
-      business_description: profile.business_description ?? undefined,
-      business_model: profile.business_model ?? undefined,
-      years_in_business: profile.years_in_business ?? undefined,
-      industry: profile.industry ?? undefined,
-      primary_goal: profile.primary_goal ?? undefined,
-      secondary_goal: profile.secondary_goal ?? undefined,
-      main_challenge: profile.main_challenge ?? undefined,
-      annual_revenue_last_year: profile.annual_revenue_last_year ?? undefined,
-      monthly_revenue: profile.monthly_revenue ?? undefined,
+    const finalProfile: Partial<BusinessProfile> = {
+      // business_name: profile.business_name ?? undefined,
+      // ...
       completion_level: 100,
-      completed_categories: ["basic", "goals", "financial"],
+      completed_categories: ["video_tutorial"],
       updated_at: new Date().toISOString()
     }
 
@@ -148,79 +140,62 @@ export default function OnboardingFlow() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center p-4">
-      <div className="w-full max-w-2xl">
+      <div className="w-full max-w-4xl">
         <div className="text-center mb-8">
           <Badge className="mb-4 bg-blue-100 text-blue-800 border-blue-200">
             <Sparkles className="h-4 w-4 mr-2" />
             Quick Setup
           </Badge>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Let's get to know your business</h1>
-          <p className="text-gray-600">This helps us provide personalized recommendations</p>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Welcome to Credit Banc Vault</h1>
+          <p className="text-gray-600">Watch this quick tutorial to learn how to get the most out of our platform.</p>
         </div>
 
-        <div className="mb-8">
+        {/* <div className="mb-8">
           <div className="flex justify-between text-sm text-gray-500 mb-2">
             <span>Step {currentStep + 1} of {steps.length}</span>
             <span>{Math.round(progress)}% complete</span>
           </div>
           <Progress value={progress} className="h-2" />
-        </div>
+        </div> */}
 
-        <Card>
-          <CardHeader>
+        <Card className="bg-background border-border overflow-hidden">
+          {/* <CardHeader>
             <CardTitle>{currentStepData.title}</CardTitle>
             <CardDescription>{currentStepData.description}</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            {currentStepData.fields.map((field) => (
-              <div key={field.key} className="space-y-2">
-                <Label htmlFor={field.key}>{field.label}{field.required && <span className="text-red-500 ml-1">*</span>}</Label>
-
-                {field.type === "input" && (
-                  <Input id={field.key} name={field.key} placeholder={field.placeholder} value={String(profile[field.key] ?? "")} onChange={(e) => handleFieldChange(field.key, e.target.value)} />
-                )}
-                {field.type === "textarea" && (
-                  <Textarea id={field.key} name={field.key} placeholder={field.placeholder} rows={3} value={String(profile[field.key] ?? "")} onChange={(e) => handleFieldChange(field.key, e.target.value)} />
-                )}
-                {field.type === "select" && (
-                  <Select value={String(profile[field.key] ?? "")} onValueChange={(value) => handleFieldChange(field.key, value)}>
-                    <SelectTrigger id={field.key} name={field.key}>
-                      <SelectValue placeholder="Select an option" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {field.options?.map((option) => (
-                        <SelectItem key={option} value={option}>{option}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              </div>
-            ))}
-
-            <div className="flex justify-between pt-6">
-              <div className="flex gap-2">
-                {currentStep > 0 && (
-                  <Button variant="outline" onClick={() => setCurrentStep(currentStep - 1)}>
-                    <ArrowLeft className="h-4 w-4 mr-2" />
-                    Back
-                  </Button>
-                )}
-                <Button variant="ghost" onClick={() => router.push("/dashboard")}>Skip for now</Button>
+          </CardHeader> */}
+          <CardContent className="p-0">
+            <div className="flex flex-col items-center justify-center p-6 space-y-6">
+              <div className="w-full aspect-video bg-muted rounded-lg overflow-hidden relative shadow-lg border border-border">
+                {/* Placeholder for Video - Replace src with actual Supabase URL */}
+                <video
+                  className="w-full h-full object-cover"
+                  controls
+                  autoPlay
+                  // src="YOUR_SUPABASE_VIDEO_URL_HERE"
+                  poster="/placeholder-video-poster.jpg" // Optional: Add a poster image
+                >
+                  <source src="https://vowcnxlmahbildgsreso.supabase.co/storage/v1/object/sign/public%20videos/riverside_2025_11%2025%2019%2054%2059.mp4%20magic%20episode%20_%20nov%2026,%202_the_weekly%20recap.mp4?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV9iNmYyMTI4MC04NmY3LTQ3NDgtYTUxZC02M2RhNmRmNjBiYzQiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJwdWJsaWMgdmlkZW9zL3JpdmVyc2lkZV8yMDI1XzExIDI1IDE5IDU0IDU5Lm1wNCBtYWdpYyBlcGlzb2RlIF8gbm92IDI2LCAyX3RoZV93ZWVrbHkgcmVjYXAubXA0IiwiaWF0IjoxNzY0MTI2MjI5LCJleHAiOjIwNzk0ODYyMjl9.Ik77t63UnAnbZF9P0F8zcGV8uX0a7Jyq_gSCVKQUAEo" type="video/mp4" />
+                  Your browser does not support the video tag.
+                </video>
               </div>
 
-              <Button onClick={currentStep === steps.length - 1 ? handleComplete : () => setCurrentStep(currentStep + 1)} disabled={!isStepValid()}>
-                {currentStep === steps.length - 1 ? (
-                  <>
-                    <CheckCircle className="h-4 w-4 mr-2" />
-                    Complete Setup
-                  </>
-                ) : (
-                  <>
-                    Next
-                    <ArrowRight className="h-4 w-4 ml-2" />
-                  </>
-                )}
-              </Button>
+              <div className="flex w-full justify-between items-center">
+                <Button
+                  variant="ghost"
+                  onClick={() => router.push("/dashboard")}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  Skip for now
+                </Button>
+
+                <Button
+                  size="lg"
+                  onClick={handleComplete}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+                >
+                  Get Started <ArrowRight className="ml-2 h-5 w-5" />
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>
