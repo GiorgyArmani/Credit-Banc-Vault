@@ -19,7 +19,7 @@ import { Progress } from "@/components/ui/progress";
  */
 const REQUIRED_DOCS = [
   {
-    code: "bank_statements_6mo",
+    code: "business_bank_statements",
     label: "Bank Statements (last 6 months)",
     multiple: true,
     maxFiles: 12

@@ -3,12 +3,12 @@
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
-import { 
-  Card, 
-  CardContent, 
-  CardDescription, 
-  CardHeader, 
-  CardTitle 
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,31 +16,35 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-export function AdvisorSignUpForm({ 
-  className, 
-  ...props 
+export function AdvisorSignUpForm({
+  className,
+  ...props
 }: React.ComponentPropsWithoutRef<"div">) {
   // Form state management
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [profilePic, setProfilePic] = useState<File | null>(null);
   const [password, setPassword] = useState("");
   const [repeatPassword, setRepeatPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  
+
   const router = useRouter();
 
   /**
    * Handles the advisor signup process
    * - Creates auth user via Supabase
+   * - Uploads profile picture to Supabase Storage
    * - Assigns 'advisor' role in public.users table
+   * - Creates entry in public.advisors table
    * - Creates contact in GHL with advisor tag
    */
   const handleAdvisorSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
     const supabase = createClient();
-    
+
     setIsLoading(true);
     setError(null);
 
@@ -85,7 +89,32 @@ export function AdvisorSignUpForm({
       // Step 3: Normalize last name (set to null if empty)
       const normalizedLastName = lastName.trim() === "" ? null : lastName.trim();
 
-      // Step 4: Call API to create user record with 'advisor' role and GHL contact
+      // Step 4: Upload profile picture if provided
+      let profilePicUrl: string | null = null;
+      if (profilePic) {
+        const fileExt = profilePic.name.split('.').pop();
+        const fileName = `${userId}-${Date.now()}.${fileExt}`;
+        const filePath = `advisor-profiles/${fileName}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from('advisor-profiles')
+          .upload(filePath, profilePic, {
+            cacheControl: '3600',
+            upsert: false
+          });
+
+        if (uploadError) {
+          console.error("Profile picture upload error:", uploadError);
+          // Continue without profile picture rather than failing
+        } else {
+          const { data: { publicUrl } } = supabase.storage
+            .from('advisor-profiles')
+            .getPublicUrl(filePath);
+          profilePicUrl = publicUrl;
+        }
+      }
+
+      // Step 5: Call API to create user record with 'advisor' role and GHL contact
       const res = await fetch("/api/post-signup-advisor", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -94,19 +123,21 @@ export function AdvisorSignUpForm({
           firstName: firstName.trim(),
           lastName: normalizedLastName,
           email: email.trim().toLowerCase(),
+          phone: phone.trim() || null,
+          profilePicUrl,
           // Add advisor-specific tags for GHL
           tags: ["creditbanc-advisor", "advisor-signup"],
         }),
       });
 
       if (!res.ok) {
-        const { message } = await res.json().catch(() => ({ 
-          message: "Server error" 
+        const { message } = await res.json().catch(() => ({
+          message: "Server error"
         }));
         throw new Error(message || "Failed advisor signup flow");
       }
 
-      // Step 5: Redirect to success page
+      // Step 6: Redirect to success page
       router.push("/auth/advisor-signup-success");
     } catch (err: any) {
       setError(err?.message || "An error occurred during signup");
@@ -166,6 +197,34 @@ export function AdvisorSignUpForm({
                 />
               </div>
 
+              {/* Phone Input */}
+              <div className="grid gap-2">
+                <Label htmlFor="phone">Phone (Optional)</Label>
+                <Input
+                  id="phone"
+                  type="tel"
+                  placeholder="+1 (555) 123-4567"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                />
+              </div>
+
+              {/* Profile Picture Input */}
+              <div className="grid gap-2">
+                <Label htmlFor="profile-pic">Profile Picture (Optional)</Label>
+                <Input
+                  id="profile-pic"
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => setProfilePic(e.target.files?.[0] || null)}
+                />
+                {profilePic && (
+                  <p className="text-sm text-muted-foreground">
+                    Selected: {profilePic.name}
+                  </p>
+                )}
+              </div>
+
               {/* Password Input */}
               <div className="grid gap-2">
                 <Label htmlFor="password">Password</Label>
@@ -198,9 +257,9 @@ export function AdvisorSignUpForm({
               )}
 
               {/* Submit Button */}
-              <Button 
-                type="submit" 
-                className="w-full" 
+              <Button
+                type="submit"
+                className="w-full"
                 disabled={isLoading}
               >
                 {isLoading ? "Creating advisor account..." : "Create Advisor Account"}
@@ -210,8 +269,8 @@ export function AdvisorSignUpForm({
             {/* Login Link */}
             <div className="mt-4 text-center text-sm">
               Already have an account?{" "}
-              <Link 
-                href="/auth/login" 
+              <Link
+                href="/auth/login"
                 className="underline underline-offset-4 hover:text-primary"
               >
                 Login

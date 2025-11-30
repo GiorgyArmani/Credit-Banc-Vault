@@ -13,7 +13,7 @@ const admin = createClient(
  */
 const DOC_CODE_TO_GHL_FIELD_MAP: Record<string, { fieldId: string; fieldKey: string }> = {
   // Bank statements (last 6 months)
-  bank_statements_6mo: {
+  business_bank_statements: {
     fieldId: process.env.GHL_CF_BANK_STATEMENTS || "gdpBhJJ5RKtLYbWlFXhI",
     fieldKey: "contact.data_vault_files_bank_statements",
   },

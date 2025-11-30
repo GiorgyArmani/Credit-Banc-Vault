@@ -103,7 +103,7 @@ interface UserDocument {
  * required-doc-types: Standard document types required from clients
  */
 const REQUIRED_DOC_TYPES = [
-    { code: "bank_statements_6mo", label: "Bank Statements (6 months)" },
+    { code: "business_bank_statements", label: "Bank Statements (6 months)" },
     { code: "drivers_license_front", label: "Driver's License - Front" },
     { code: "drivers_license_back", label: "Driver's License - Back" },
     { code: "voided_check", label: "Voided Business Check" },

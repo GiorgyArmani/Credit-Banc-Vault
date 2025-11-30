@@ -10,12 +10,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { 
-  ChevronRight, 
-  ChevronLeft, 
-  Building2, 
-  DollarSign, 
-  FileText, 
+import {
+  ChevronRight,
+  ChevronLeft,
+  Building2,
+  DollarSign,
+  FileText,
   CheckCircle2,
   Sparkles,
   TrendingUp,
@@ -40,9 +40,9 @@ const US_STATES = [
 // GHL field name: "[Data Vault] What Is Their Credit Score?"
 const CREDIT_SCORE_OPTIONS = [
   { value: '700+', label: '700+' },
-  { value: '650-700', label: '650-700' },
-  { value: '600-650', label: '600-650' },
-  { value: '550-600', label: '550-600' },
+  { value: '650 - 700', label: '650 - 700' },
+  { value: '600 - 650', label: '600 - 650' },
+  { value: '550 - 600', label: '550 - 600' },
   { value: 'Below 550', label: 'Below 550' },
 ];
 
@@ -180,7 +180,7 @@ export default function ClientSignupForm() {
   };
 
   // ===== PASO 4: Propietarios =====
-  const [number_of_owners, set_number_of_owners] = useState("Just one");
+  const [number_of_owners, set_number_of_owners] = useState("One");
   const [owner_1_name, set_owner_1_name] = useState("");
   const [owner_1_ownership_pct, set_owner_1_ownership_pct] = useState("100");
   const [owner_2_name, set_owner_2_name] = useState("");
@@ -195,38 +195,38 @@ export default function ClientSignupForm() {
   // ===== PASO 5: Crédito y Situaciones Especiales =====
   const [credit_score, set_credit_score] = useState("");
   const [has_existing_loans, set_has_existing_loans] = useState(false);
-  
+
   // ===== Detailed Application Flags (matching application_flags table) =====
   // These flags capture risk assessment information about the client
-  
+
   // MCA defaults and reductions
   const [has_defaulted_mca, set_has_defaulted_mca] = useState(false);
   const [mca_was_satisfied, set_mca_was_satisfied] = useState(false);
   const [has_reduced_mca_payments, set_has_reduced_mca_payments] = useState(false);
   const [reduced_payments_months_ago, set_reduced_payments_months_ago] = useState<number | "">("");
-  
+
   // Asset ownership
   const [owns_real_estate, set_owns_real_estate] = useState(false);
-  
+
   // Personal credit card debt
   const [has_personal_debt_over_75k, set_has_personal_debt_over_75k] = useState(false);
   const [personal_cc_debt_amount, set_personal_cc_debt_amount] = useState<number | "">("");
-  
+
   // Bankruptcy and foreclosure history
   const [has_bankruptcy_foreclosure_3y, set_has_bankruptcy_foreclosure_3y] = useState(false);
   const [bk_fc_months_ago, set_bk_fc_months_ago] = useState<number | "">("");
   const [bk_fc_type, set_bk_fc_type] = useState("");
-  
+
   // Tax liens
   const [has_tax_liens, set_has_tax_liens] = useState(false);
   const [tax_liens_type, set_tax_liens_type] = useState("");
   const [tax_liens_amount, set_tax_liens_amount] = useState<number | "">("");
   const [tax_liens_on_plan, set_tax_liens_on_plan] = useState(false);
-  
+
   // Judgements
   const [has_active_judgements, set_has_active_judgements] = useState(false);
   const [judgements_explain, set_judgements_explain] = useState("");
-  
+
   // Zero balance letter
   const [has_zbl, set_has_zbl] = useState(false);
 
@@ -259,9 +259,22 @@ export default function ClientSignupForm() {
           .select("role")
           .eq("id", user.id)
           .maybeSingle();
-        
+
         if (user_data?.role === "advisor") {
           set_is_advisor_context(true);
+
+          // Auto-assign advisor if they are logged in
+          if (user.email) {
+            const { data: advisor_record } = await supabase
+              .from("advisors")
+              .select("id")
+              .eq("email", user.email)
+              .maybeSingle();
+
+            if (advisor_record) {
+              set_advisor_id(advisor_record.id);
+            }
+          }
         }
       }
     }
@@ -296,15 +309,28 @@ export default function ClientSignupForm() {
     if (owner_3_ownership_pct) total += parseFloat(owner_3_ownership_pct);
     if (owner_4_ownership_pct) total += parseFloat(owner_4_ownership_pct);
     if (owner_5_ownership_pct) total += parseFloat(owner_5_ownership_pct);
-    
+
     return Math.abs(total - 100) < 0.01;
+  };
+
+  // Mapping of document labels to their internal codes (must match vault.tsx)
+  const DOC_TAG_MAP: Record<string, string> = {
+    "Funding Application": "funding_application",
+    "Business Bank Statements": "business_bank_statements",
+    "Business/Personal Tax Returns": "tax_returns",
+    "Profit & Loss Statement": "profit_loss",
+    "Balance Sheet": "balance_sheets",
+    "Debt Schedule": "debt_schedule",
+    "A/R Report": "ar_report",
+    "Driver's License": "drivers_license",
+    "Voided Check": "voided_check",
   };
 
   // Helper function to generate GHL (Go High Level) tags based on application flags
   // These tags help categorize and flag risk factors in the CRM
   const generate_ghl_tags = () => {
     const tags: string[] = [];
-    
+
     // Add tags based on risk flags
     if (has_defaulted_mca) tags.push("defaulted-mca");
     if (mca_was_satisfied) tags.push("mca-satisfied");
@@ -317,7 +343,7 @@ export default function ClientSignupForm() {
     if (has_active_judgements) tags.push("active-judgements");
     if (has_zbl) tags.push("has-zbl");
     if (has_previous_debt) tags.push("existing-debt");
-    
+
     // Add credit score category tag - values now match GHL exactly
     if (credit_score) {
       if (credit_score === "700+") tags.push("credit-excellent");
@@ -326,31 +352,32 @@ export default function ClientSignupForm() {
       else if (credit_score === "550-600") tags.push("credit-fair");
       else if (credit_score === "Below 550") tags.push("credit-poor");
     }
-    
+
     // Add funding urgency tag
     if (funding_eta) {
       if (funding_eta === "Immediately") tags.push("urgent-funding");
       else if (funding_eta === "1–3 Weeks") tags.push("moderate-timeline");
       else tags.push("flexible-timeline");
     }
-    
+
     // Add document request tags
-    // Each requested document gets a "requested_{doc_name}" tag
-    // When the document is uploaded, the tag should be changed to "submitted_{doc_name}"
+    // Each requested document gets a "requested_{doc_code}" tag
+    // When the document is uploaded, the tag should be changed to "submitted_{doc_code}"
     // and the "requested_" tag should be removed
     documents_requested.forEach((doc) => {
-      // Convert document name to tag-friendly format
-      // "Driver's License" -> "requested_drivers_license"
-      // "Business Bank Statements" -> "requested_business_bank_statements"
-      const tag_name = doc
-        .toLowerCase()
-        .replace(/[^a-z0-9\s]/g, '') // Remove special characters
-        .replace(/\s+/g, '_')         // Replace spaces with underscores
-        .replace(/_+/g, '_');         // Remove duplicate underscores
-      
-      tags.push(`requested_${tag_name}`);
+      const doc_code = DOC_TAG_MAP[doc];
+      if (doc_code) {
+        tags.push(`requested_${doc_code}`);
+      } else {
+        // Fallback for unknown documents (shouldn't happen if map is complete)
+        const tag_name = doc
+          .toLowerCase()
+          .replace(/[^a-z0-9\s]/g, '')
+          .replace(/\s+/g, '_');
+        tags.push(`requested_${tag_name}`);
+      }
     });
-    
+
     return tags;
   };
 
@@ -367,7 +394,7 @@ export default function ClientSignupForm() {
 
       // Obtener nombre del advisor
       const selected_advisor = advisors.find(a => a.id === advisor_id);
-      const advisor_name = selected_advisor 
+      const advisor_name = selected_advisor
         ? `${selected_advisor.first_name} ${selected_advisor.last_name}`
         : "Unknown";
 
@@ -446,7 +473,7 @@ export default function ClientSignupForm() {
         // Timeline y notas
         funding_eta,
         additional_notes,
-        
+
         // Advisor
         advisor_name,
         advisor_id,
@@ -472,14 +499,14 @@ export default function ClientSignupForm() {
       }
 
       const result = await res.json();
-      
+
       // Handle success based on context
       if (is_advisor_context) {
         // Advisor context: Show success modal and stay on page
         set_created_client_email(client_email);
         set_created_client_name(client_name);
         set_show_success(true);
-        
+
         // Reset form for next client
         setTimeout(() => {
           window.location.reload(); // Reload to reset all form fields
@@ -520,7 +547,7 @@ export default function ClientSignupForm() {
                 <CheckCircle2 className="w-6 h-6" />
                 Client Login Credentials
               </h3>
-              
+
               <div className="space-y-3">
                 <div className="bg-white rounded-lg p-4 border border-blue-200">
                   <p className="text-sm font-semibold text-gray-600 mb-1">Email Address</p>
@@ -606,8 +633,8 @@ export default function ClientSignupForm() {
                   <div className="flex flex-col items-center">
                     <div
                       className={`w-10 h-10 md:w-12 md:h-12 rounded-full flex items-center justify-center font-bold text-sm transition-all shadow-lg
-                        ${step === s.num ? "bg-gradient-to-br from-emerald-500 to-teal-600 text-white ring-4 ring-emerald-100 scale-110" : 
-                        step > s.num ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-400"}`}
+                        ${step === s.num ? "bg-gradient-to-br from-emerald-500 to-teal-600 text-white ring-4 ring-emerald-100 scale-110" :
+                          step > s.num ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-400"}`}
                     >
                       {step > s.num ? <CheckCircle2 className="w-5 h-5 md:w-6 md:h-6" /> : <s.icon className="w-5 h-5 md:w-6 md:h-6" />}
                     </div>
@@ -641,11 +668,11 @@ export default function ClientSignupForm() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
                     <div>
                       <Label htmlFor="client_name" className="text-sm font-semibold text-gray-700">Client Full Name *</Label>
-                      <Input 
-                        id="client_name" 
-                        value={client_name} 
-                        onChange={(e) => set_client_name(e.target.value)} 
-                        className="mt-2" 
+                      <Input
+                        id="client_name"
+                        value={client_name}
+                        onChange={(e) => set_client_name(e.target.value)}
+                        className="mt-2"
                         placeholder="John Doe"
                         required
                       />
@@ -653,11 +680,11 @@ export default function ClientSignupForm() {
 
                     <div>
                       <Label htmlFor="company_name" className="text-sm font-semibold text-gray-700">Company Name *</Label>
-                      <Input 
-                        id="company_name" 
-                        value={company_name} 
-                        onChange={(e) => set_company_name(e.target.value)} 
-                        className="mt-2" 
+                      <Input
+                        id="company_name"
+                        value={company_name}
+                        onChange={(e) => set_company_name(e.target.value)}
+                        className="mt-2"
                         placeholder="Acme Corp LLC"
                         required
                       />
@@ -665,12 +692,12 @@ export default function ClientSignupForm() {
 
                     <div>
                       <Label htmlFor="client_email" className="text-sm font-semibold text-gray-700">Email Address *</Label>
-                      <Input 
-                        id="client_email" 
+                      <Input
+                        id="client_email"
                         type="email"
-                        value={client_email} 
-                        onChange={(e) => set_client_email(e.target.value)} 
-                        className="mt-2" 
+                        value={client_email}
+                        onChange={(e) => set_client_email(e.target.value)}
+                        className="mt-2"
                         placeholder="john@example.com"
                         required
                       />
@@ -678,12 +705,12 @@ export default function ClientSignupForm() {
 
                     <div>
                       <Label htmlFor="client_phone" className="text-sm font-semibold text-gray-700">Phone Number *</Label>
-                      <Input 
-                        id="client_phone" 
+                      <Input
+                        id="client_phone"
                         type="tel"
-                        value={client_phone} 
-                        onChange={(e) => set_client_phone(e.target.value)} 
-                        className="mt-2" 
+                        value={client_phone}
+                        onChange={(e) => set_client_phone(e.target.value)}
+                        className="mt-2"
                         placeholder="(555) 123-4567"
                         required
                       />
@@ -691,8 +718,8 @@ export default function ClientSignupForm() {
                   </div>
 
                   <div className="flex justify-end pt-6">
-                    <Button 
-                      onClick={() => set_step(2)} 
+                    <Button
+                      onClick={() => set_step(2)}
                       className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white px-8 py-6 shadow-lg"
                     >
                       Next: Location
@@ -729,22 +756,22 @@ export default function ClientSignupForm() {
 
                     <div>
                       <Label htmlFor="company_city" className="text-sm font-semibold text-gray-700">City</Label>
-                      <Input 
-                        id="company_city" 
-                        value={company_city} 
-                        onChange={(e) => set_company_city(e.target.value)} 
-                        className="mt-2" 
+                      <Input
+                        id="company_city"
+                        value={company_city}
+                        onChange={(e) => set_company_city(e.target.value)}
+                        className="mt-2"
                         placeholder="Los Angeles"
                       />
                     </div>
 
                     <div>
                       <Label htmlFor="company_zip_code" className="text-sm font-semibold text-gray-700">ZIP Code *</Label>
-                      <Input 
-                        id="company_zip_code" 
-                        value={company_zip_code} 
-                        onChange={(e) => set_company_zip_code(e.target.value)} 
-                        className="mt-2" 
+                      <Input
+                        id="company_zip_code"
+                        value={company_zip_code}
+                        onChange={(e) => set_company_zip_code(e.target.value)}
+                        className="mt-2"
                         placeholder="90210"
                         required
                       />
@@ -768,11 +795,11 @@ export default function ClientSignupForm() {
 
                     <div>
                       <Label htmlFor="business_start_date" className="text-sm font-semibold text-gray-700">Business Start Date *</Label>
-                      <Input 
-                        id="business_start_date" 
+                      <Input
+                        id="business_start_date"
                         type="date"
-                        value={business_start_date} 
-                        onChange={(e) => set_business_start_date(e.target.value)} 
+                        value={business_start_date}
+                        onChange={(e) => set_business_start_date(e.target.value)}
                         className="mt-2"
                         required
                       />
@@ -780,12 +807,12 @@ export default function ClientSignupForm() {
 
                     <div>
                       <Label htmlFor="employees_count" className="text-sm font-semibold text-gray-700">Number of Employees *</Label>
-                      <Input 
-                        id="employees_count" 
+                      <Input
+                        id="employees_count"
                         type="number"
-                        value={employees_count} 
-                        onChange={(e) => set_employees_count(e.target.value)} 
-                        className="mt-2" 
+                        value={employees_count}
+                        onChange={(e) => set_employees_count(e.target.value)}
+                        className="mt-2"
                         placeholder="5"
                         required
                       />
@@ -793,11 +820,11 @@ export default function ClientSignupForm() {
                   </div>
 
                   <div className="flex items-start space-x-3 p-4 hover:bg-gray-50 rounded-lg transition-colors">
-                    <Checkbox 
-                      id="is_home_based" 
-                      checked={is_home_based} 
-                      onCheckedChange={(checked) => set_is_home_based(checked as boolean)} 
-                      className="mt-1" 
+                    <Checkbox
+                      id="is_home_based"
+                      checked={is_home_based}
+                      onCheckedChange={(checked) => set_is_home_based(checked as boolean)}
+                      className="mt-1"
                     />
                     <Label htmlFor="is_home_based" className="text-sm text-gray-700 cursor-pointer">
                       This is a home-based business
@@ -805,16 +832,16 @@ export default function ClientSignupForm() {
                   </div>
 
                   <div className="flex flex-col sm:flex-row justify-between gap-4 pt-6">
-                    <Button 
-                      onClick={() => set_step(1)} 
-                      variant="outline" 
+                    <Button
+                      onClick={() => set_step(1)}
+                      variant="outline"
                       className="border-2 border-emerald-600 text-emerald-600 hover:bg-emerald-50 px-8 py-6"
                     >
                       <ChevronLeft className="mr-2 w-5 h-5" />
                       Previous
                     </Button>
-                    <Button 
-                      onClick={() => set_step(3)} 
+                    <Button
+                      onClick={() => set_step(3)}
                       className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white px-8 py-6 shadow-lg"
                     >
                       Next: Financials
@@ -837,12 +864,12 @@ export default function ClientSignupForm() {
                       <Label htmlFor="capital_requested" className="text-sm font-semibold text-gray-700">Capital Requested *</Label>
                       <div className="relative mt-2">
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-medium">$</span>
-                        <Input 
-                          id="capital_requested" 
+                        <Input
+                          id="capital_requested"
                           type="number"
-                          value={capital_requested} 
-                          onChange={(e) => set_capital_requested(e.target.value)} 
-                          className="pl-7" 
+                          value={capital_requested}
+                          onChange={(e) => set_capital_requested(e.target.value)}
+                          className="pl-7"
                           placeholder="50000"
                           required
                         />
@@ -867,11 +894,11 @@ export default function ClientSignupForm() {
 
                     <div className="md:col-span-2">
                       <Label htmlFor="loan_purpose" className="text-sm font-semibold text-gray-700">What will the funds be used for? *</Label>
-                      <Textarea 
-                        id="loan_purpose" 
-                        value={loan_purpose} 
-                        onChange={(e) => set_loan_purpose(e.target.value)} 
-                        className="mt-2" 
+                      <Textarea
+                        id="loan_purpose"
+                        value={loan_purpose}
+                        onChange={(e) => set_loan_purpose(e.target.value)}
+                        className="mt-2"
                         placeholder="Equipment purchase, inventory, expansion, etc."
                         rows={3}
                         required
@@ -882,12 +909,12 @@ export default function ClientSignupForm() {
                       <Label htmlFor="avg_monthly_deposits" className="text-sm font-semibold text-gray-700">Average Monthly Deposits *</Label>
                       <div className="relative mt-2">
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-medium">$</span>
-                        <Input 
-                          id="avg_monthly_deposits" 
+                        <Input
+                          id="avg_monthly_deposits"
                           type="number"
-                          value={avg_monthly_deposits} 
-                          onChange={(e) => set_avg_monthly_deposits(e.target.value)} 
-                          className="pl-7" 
+                          value={avg_monthly_deposits}
+                          onChange={(e) => set_avg_monthly_deposits(e.target.value)}
+                          className="pl-7"
                           placeholder="10000"
                           required
                         />
@@ -898,12 +925,12 @@ export default function ClientSignupForm() {
                       <Label htmlFor="avg_annual_revenue" className="text-sm font-semibold text-gray-700">Average Annual Revenue *</Label>
                       <div className="relative mt-2">
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-medium">$</span>
-                        <Input 
-                          id="avg_annual_revenue" 
+                        <Input
+                          id="avg_annual_revenue"
                           type="number"
-                          value={avg_annual_revenue} 
-                          onChange={(e) => set_avg_annual_revenue(e.target.value)} 
-                          className="pl-7" 
+                          value={avg_annual_revenue}
+                          onChange={(e) => set_avg_annual_revenue(e.target.value)}
+                          className="pl-7"
                           placeholder="120000"
                           required
                         />
@@ -916,16 +943,16 @@ export default function ClientSignupForm() {
                   <div className="space-y-4 mt-6 p-6 bg-amber-50 rounded-lg border border-amber-200">
                     <h3 className="text-lg font-semibold text-gray-900">Existing Debt</h3>
                     <div className="flex items-center space-x-2">
-                      <Checkbox 
-                        id="has_previous_debt" 
-                        checked={has_previous_debt} 
-                        onCheckedChange={(checked) => set_has_previous_debt(checked as boolean)} 
+                      <Checkbox
+                        id="has_previous_debt"
+                        checked={has_previous_debt}
+                        onCheckedChange={(checked) => set_has_previous_debt(checked as boolean)}
                       />
                       <Label htmlFor="has_previous_debt" className="cursor-pointer text-gray-700">
                         Has Previous Debt
                       </Label>
                     </div>
-                    
+
                     {/* Conditional rendering: Show loan input fields only if client has previous debt */}
                     {has_previous_debt && (
                       <div className="space-y-4 border rounded-lg p-4 bg-white">
@@ -943,11 +970,11 @@ export default function ClientSignupForm() {
                                   <Label className="text-xs text-gray-600">Balance</Label>
                                   <div className="relative mt-1">
                                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">$</span>
-                                    <Input 
-                                      type="number" 
-                                      value={outstanding_loans[loan_key]?.balance || ""} 
-                                      onChange={(e) => update_loan(loan_key, "balance", Number(e.target.value))} 
-                                      placeholder="Amount" 
+                                    <Input
+                                      type="number"
+                                      value={outstanding_loans[loan_key]?.balance || ""}
+                                      onChange={(e) => update_loan(loan_key, "balance", Number(e.target.value))}
+                                      placeholder="Amount"
                                       className="pl-7"
                                     />
                                   </div>
@@ -955,20 +982,20 @@ export default function ClientSignupForm() {
                                 {/* Lender name field: captures who the loan is with */}
                                 <div>
                                   <Label className="text-xs text-gray-600">Lender Name</Label>
-                                  <Input 
-                                    value={outstanding_loans[loan_key]?.lender_name || ""} 
-                                    onChange={(e) => update_loan(loan_key, "lender_name", e.target.value)} 
-                                    placeholder="Lender" 
+                                  <Input
+                                    value={outstanding_loans[loan_key]?.lender_name || ""}
+                                    onChange={(e) => update_loan(loan_key, "lender_name", e.target.value)}
+                                    placeholder="Lender"
                                     className="mt-1"
                                   />
                                 </div>
                                 {/* Term field: captures the loan term (e.g., "12 months") */}
                                 <div>
                                   <Label className="text-xs text-gray-600">Term</Label>
-                                  <Input 
-                                    value={outstanding_loans[loan_key]?.term || ""} 
-                                    onChange={(e) => update_loan(loan_key, "term", e.target.value)} 
-                                    placeholder="12 months" 
+                                  <Input
+                                    value={outstanding_loans[loan_key]?.term || ""}
+                                    onChange={(e) => update_loan(loan_key, "term", e.target.value)}
+                                    placeholder="12 months"
                                     className="mt-1"
                                   />
                                 </div>
@@ -981,16 +1008,16 @@ export default function ClientSignupForm() {
                   </div>
 
                   <div className="flex flex-col sm:flex-row justify-between gap-4 pt-6">
-                    <Button 
-                      onClick={() => set_step(2)} 
-                      variant="outline" 
+                    <Button
+                      onClick={() => set_step(2)}
+                      variant="outline"
                       className="border-2 border-emerald-600 text-emerald-600 hover:bg-emerald-50 px-8 py-6"
                     >
                       <ChevronLeft className="mr-2 w-5 h-5" />
                       Previous
                     </Button>
-                    <Button 
-                      onClick={() => set_step(4)} 
+                    <Button
+                      onClick={() => set_step(4)}
                       className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white px-8 py-6 shadow-lg"
                     >
                       Next: Owners
@@ -1015,7 +1042,7 @@ export default function ClientSignupForm() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="Just one">Just one</SelectItem>
+                        <SelectItem value="One">One</SelectItem>
                         <SelectItem value="More than one">More than one</SelectItem>
                       </SelectContent>
                     </Select>
@@ -1027,26 +1054,26 @@ export default function ClientSignupForm() {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
                         <Label htmlFor="owner_1_name" className="text-sm font-semibold text-gray-700">Full Name *</Label>
-                        <Input 
-                          id="owner_1_name" 
-                          value={owner_1_name} 
-                          onChange={(e) => set_owner_1_name(e.target.value)} 
-                          className="mt-2" 
+                        <Input
+                          id="owner_1_name"
+                          value={owner_1_name}
+                          onChange={(e) => set_owner_1_name(e.target.value)}
+                          className="mt-2"
                           placeholder="John Doe"
                           required
                         />
                       </div>
                       <div>
                         <Label htmlFor="owner_1_ownership_pct" className="text-sm font-semibold text-gray-700">Ownership % *</Label>
-                        <Input 
-                          id="owner_1_ownership_pct" 
+                        <Input
+                          id="owner_1_ownership_pct"
                           type="number"
                           min="0"
                           max="100"
                           step="0.01"
-                          value={owner_1_ownership_pct} 
-                          onChange={(e) => set_owner_1_ownership_pct(e.target.value)} 
-                          className="mt-2" 
+                          value={owner_1_ownership_pct}
+                          onChange={(e) => set_owner_1_ownership_pct(e.target.value)}
+                          className="mt-2"
                           placeholder="100"
                           required
                         />
@@ -1063,25 +1090,25 @@ export default function ClientSignupForm() {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
                             <Label htmlFor="owner_2_name" className="text-sm font-semibold text-gray-700">Full Name</Label>
-                            <Input 
-                              id="owner_2_name" 
-                              value={owner_2_name} 
-                              onChange={(e) => set_owner_2_name(e.target.value)} 
-                              className="mt-2" 
+                            <Input
+                              id="owner_2_name"
+                              value={owner_2_name}
+                              onChange={(e) => set_owner_2_name(e.target.value)}
+                              className="mt-2"
                               placeholder="Jane Smith"
                             />
                           </div>
                           <div>
                             <Label htmlFor="owner_2_ownership_pct" className="text-sm font-semibold text-gray-700">Ownership %</Label>
-                            <Input 
-                              id="owner_2_ownership_pct" 
+                            <Input
+                              id="owner_2_ownership_pct"
                               type="number"
                               min="0"
                               max="100"
                               step="0.01"
-                              value={owner_2_ownership_pct} 
-                              onChange={(e) => set_owner_2_ownership_pct(e.target.value)} 
-                              className="mt-2" 
+                              value={owner_2_ownership_pct}
+                              onChange={(e) => set_owner_2_ownership_pct(e.target.value)}
+                              className="mt-2"
                               placeholder="0"
                             />
                           </div>
@@ -1094,25 +1121,25 @@ export default function ClientSignupForm() {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
                             <Label htmlFor="owner_3_name" className="text-sm font-semibold text-gray-700">Full Name</Label>
-                            <Input 
-                              id="owner_3_name" 
-                              value={owner_3_name} 
-                              onChange={(e) => set_owner_3_name(e.target.value)} 
-                              className="mt-2" 
+                            <Input
+                              id="owner_3_name"
+                              value={owner_3_name}
+                              onChange={(e) => set_owner_3_name(e.target.value)}
+                              className="mt-2"
                               placeholder="Optional"
                             />
                           </div>
                           <div>
                             <Label htmlFor="owner_3_ownership_pct" className="text-sm font-semibold text-gray-700">Ownership %</Label>
-                            <Input 
-                              id="owner_3_ownership_pct" 
+                            <Input
+                              id="owner_3_ownership_pct"
                               type="number"
                               min="0"
                               max="100"
                               step="0.01"
-                              value={owner_3_ownership_pct} 
-                              onChange={(e) => set_owner_3_ownership_pct(e.target.value)} 
-                              className="mt-2" 
+                              value={owner_3_ownership_pct}
+                              onChange={(e) => set_owner_3_ownership_pct(e.target.value)}
+                              className="mt-2"
                               placeholder="0"
                             />
                           </div>
@@ -1125,25 +1152,25 @@ export default function ClientSignupForm() {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
                             <Label htmlFor="owner_4_name" className="text-sm font-semibold text-gray-700">Full Name</Label>
-                            <Input 
-                              id="owner_4_name" 
-                              value={owner_4_name} 
-                              onChange={(e) => set_owner_4_name(e.target.value)} 
-                              className="mt-2" 
+                            <Input
+                              id="owner_4_name"
+                              value={owner_4_name}
+                              onChange={(e) => set_owner_4_name(e.target.value)}
+                              className="mt-2"
                               placeholder="Optional"
                             />
                           </div>
                           <div>
                             <Label htmlFor="owner_4_ownership_pct" className="text-sm font-semibold text-gray-700">Ownership %</Label>
-                            <Input 
-                              id="owner_4_ownership_pct" 
+                            <Input
+                              id="owner_4_ownership_pct"
                               type="number"
                               min="0"
                               max="100"
                               step="0.01"
-                              value={owner_4_ownership_pct} 
-                              onChange={(e) => set_owner_4_ownership_pct(e.target.value)} 
-                              className="mt-2" 
+                              value={owner_4_ownership_pct}
+                              onChange={(e) => set_owner_4_ownership_pct(e.target.value)}
+                              className="mt-2"
                               placeholder="0"
                             />
                           </div>
@@ -1156,25 +1183,25 @@ export default function ClientSignupForm() {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
                             <Label htmlFor="owner_5_name" className="text-sm font-semibold text-gray-700">Full Name</Label>
-                            <Input 
-                              id="owner_5_name" 
-                              value={owner_5_name} 
-                              onChange={(e) => set_owner_5_name(e.target.value)} 
-                              className="mt-2" 
+                            <Input
+                              id="owner_5_name"
+                              value={owner_5_name}
+                              onChange={(e) => set_owner_5_name(e.target.value)}
+                              className="mt-2"
                               placeholder="Optional"
                             />
                           </div>
                           <div>
                             <Label htmlFor="owner_5_ownership_pct" className="text-sm font-semibold text-gray-700">Ownership %</Label>
-                            <Input 
-                              id="owner_5_ownership_pct" 
+                            <Input
+                              id="owner_5_ownership_pct"
                               type="number"
                               min="0"
                               max="100"
                               step="0.01"
-                              value={owner_5_ownership_pct} 
-                              onChange={(e) => set_owner_5_ownership_pct(e.target.value)} 
-                              className="mt-2" 
+                              value={owner_5_ownership_pct}
+                              onChange={(e) => set_owner_5_ownership_pct(e.target.value)}
+                              className="mt-2"
                               placeholder="0"
                             />
                           </div>
@@ -1184,16 +1211,16 @@ export default function ClientSignupForm() {
                   )}
 
                   <div className="flex flex-col sm:flex-row justify-between gap-4 pt-6">
-                    <Button 
-                      onClick={() => set_step(3)} 
-                      variant="outline" 
+                    <Button
+                      onClick={() => set_step(3)}
+                      variant="outline"
                       className="border-2 border-emerald-600 text-emerald-600 hover:bg-emerald-50 px-8 py-6"
                     >
                       <ChevronLeft className="mr-2 w-5 h-5" />
                       Previous
                     </Button>
-                    <Button 
-                      onClick={() => set_step(5)} 
+                    <Button
+                      onClick={() => set_step(5)}
                       className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white px-8 py-6 shadow-lg"
                     >
                       Next: Credit
@@ -1218,9 +1245,8 @@ export default function ClientSignupForm() {
                       {CREDIT_SCORE_OPTIONS.map((opt) => (
                         <label
                           key={opt.value}
-                          className={`flex items-center p-3 rounded-lg border cursor-pointer transition-colors ${
-                            credit_score === opt.value ? "bg-emerald-50 border-emerald-300" : "bg-white border-gray-200"
-                          }`}
+                          className={`flex items-center p-3 rounded-lg border cursor-pointer transition-colors ${credit_score === opt.value ? "bg-emerald-50 border-emerald-300" : "bg-white border-gray-200"
+                            }`}
                         >
                           <input
                             type="radio"
@@ -1241,16 +1267,16 @@ export default function ClientSignupForm() {
                     <h3 className="text-md font-semibold text-gray-800 border-b pb-2">
                       Risk Assessment Questions
                     </h3>
-                    
+
                     {/* Main risk assessment checkboxes - displayed in a grid */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       {/* Has existing loans checkbox */}
                       <div className="flex items-start space-x-3 p-3 hover:bg-blue-100 rounded-lg transition-colors">
-                        <Checkbox 
-                          id="has_existing_loans" 
-                          checked={has_existing_loans} 
-                          onCheckedChange={(checked) => set_has_existing_loans(checked as boolean)} 
-                          className="mt-1" 
+                        <Checkbox
+                          id="has_existing_loans"
+                          checked={has_existing_loans}
+                          onCheckedChange={(checked) => set_has_existing_loans(checked as boolean)}
+                          className="mt-1"
                         />
                         <Label htmlFor="has_existing_loans" className="text-sm text-gray-700 cursor-pointer">
                           Has existing loans or advances
@@ -1259,11 +1285,11 @@ export default function ClientSignupForm() {
 
                       {/* Defaulted on MCA checkbox */}
                       <div className="flex items-start space-x-3 p-3 hover:bg-blue-100 rounded-lg transition-colors">
-                        <Checkbox 
-                          id="has_defaulted_mca" 
-                          checked={has_defaulted_mca} 
-                          onCheckedChange={(checked) => set_has_defaulted_mca(checked as boolean)} 
-                          className="mt-1" 
+                        <Checkbox
+                          id="has_defaulted_mca"
+                          checked={has_defaulted_mca}
+                          onCheckedChange={(checked) => set_has_defaulted_mca(checked as boolean)}
+                          className="mt-1"
                         />
                         <Label htmlFor="has_defaulted_mca" className="text-sm text-gray-700 cursor-pointer">
                           Defaulted on MCA
@@ -1272,11 +1298,11 @@ export default function ClientSignupForm() {
 
                       {/* Reduced MCA payments checkbox */}
                       <div className="flex items-start space-x-3 p-3 hover:bg-blue-100 rounded-lg transition-colors">
-                        <Checkbox 
-                          id="has_reduced_mca_payments" 
-                          checked={has_reduced_mca_payments} 
-                          onCheckedChange={(checked) => set_has_reduced_mca_payments(checked as boolean)} 
-                          className="mt-1" 
+                        <Checkbox
+                          id="has_reduced_mca_payments"
+                          checked={has_reduced_mca_payments}
+                          onCheckedChange={(checked) => set_has_reduced_mca_payments(checked as boolean)}
+                          className="mt-1"
                         />
                         <Label htmlFor="has_reduced_mca_payments" className="text-sm text-gray-700 cursor-pointer">
                           Reduced MCA payments
@@ -1285,11 +1311,11 @@ export default function ClientSignupForm() {
 
                       {/* Owns real estate checkbox */}
                       <div className="flex items-start space-x-3 p-3 hover:bg-blue-100 rounded-lg transition-colors">
-                        <Checkbox 
-                          id="owns_real_estate" 
-                          checked={owns_real_estate} 
-                          onCheckedChange={(checked) => set_owns_real_estate(checked as boolean)} 
-                          className="mt-1" 
+                        <Checkbox
+                          id="owns_real_estate"
+                          checked={owns_real_estate}
+                          onCheckedChange={(checked) => set_owns_real_estate(checked as boolean)}
+                          className="mt-1"
                         />
                         <Label htmlFor="owns_real_estate" className="text-sm text-gray-700 cursor-pointer">
                           Owns real estate
@@ -1298,11 +1324,11 @@ export default function ClientSignupForm() {
 
                       {/* Personal CC debt over $75k checkbox */}
                       <div className="flex items-start space-x-3 p-3 hover:bg-blue-100 rounded-lg transition-colors">
-                        <Checkbox 
-                          id="has_personal_debt_over_75k" 
-                          checked={has_personal_debt_over_75k} 
-                          onCheckedChange={(checked) => set_has_personal_debt_over_75k(checked as boolean)} 
-                          className="mt-1" 
+                        <Checkbox
+                          id="has_personal_debt_over_75k"
+                          checked={has_personal_debt_over_75k}
+                          onCheckedChange={(checked) => set_has_personal_debt_over_75k(checked as boolean)}
+                          className="mt-1"
                         />
                         <Label htmlFor="has_personal_debt_over_75k" className="text-sm text-gray-700 cursor-pointer">
                           Personal CC debt over $75k
@@ -1314,11 +1340,11 @@ export default function ClientSignupForm() {
                     {has_defaulted_mca && (
                       <div className="mt-4 p-4 bg-yellow-50 rounded-lg border border-yellow-200">
                         <div className="flex items-start space-x-3">
-                          <Checkbox 
-                            id="mca_was_satisfied" 
-                            checked={mca_was_satisfied} 
-                            onCheckedChange={(checked) => set_mca_was_satisfied(checked as boolean)} 
-                            className="mt-1" 
+                          <Checkbox
+                            id="mca_was_satisfied"
+                            checked={mca_was_satisfied}
+                            onCheckedChange={(checked) => set_mca_was_satisfied(checked as boolean)}
+                            className="mt-1"
                           />
                           <Label htmlFor="mca_was_satisfied" className="text-sm text-gray-700 cursor-pointer">
                             MCA was satisfied (debt has been paid off)
@@ -1333,13 +1359,13 @@ export default function ClientSignupForm() {
                         <Label htmlFor="reduced_payments_months_ago" className="text-sm font-semibold text-gray-700">
                           How many months ago did payments reduce?
                         </Label>
-                        <Input 
-                          id="reduced_payments_months_ago" 
-                          type="number" 
-                          value={reduced_payments_months_ago} 
-                          onChange={(e) => set_reduced_payments_months_ago(e.target.value ? Number(e.target.value) : "")} 
-                          className="mt-2" 
-                          placeholder="Number of months" 
+                        <Input
+                          id="reduced_payments_months_ago"
+                          type="number"
+                          value={reduced_payments_months_ago}
+                          onChange={(e) => set_reduced_payments_months_ago(e.target.value ? Number(e.target.value) : "")}
+                          className="mt-2"
+                          placeholder="Number of months"
                         />
                       </div>
                     )}
@@ -1352,13 +1378,13 @@ export default function ClientSignupForm() {
                         </Label>
                         <div className="relative mt-2">
                           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-medium">$</span>
-                          <Input 
-                            id="personal_cc_debt_amount" 
-                            type="number" 
-                            value={personal_cc_debt_amount} 
-                            onChange={(e) => set_personal_cc_debt_amount(e.target.value ? Number(e.target.value) : "")} 
-                            className="pl-7" 
-                            placeholder="Amount" 
+                          <Input
+                            id="personal_cc_debt_amount"
+                            type="number"
+                            value={personal_cc_debt_amount}
+                            onChange={(e) => set_personal_cc_debt_amount(e.target.value ? Number(e.target.value) : "")}
+                            className="pl-7"
+                            placeholder="Amount"
                           />
                         </div>
                       </div>
@@ -1367,11 +1393,11 @@ export default function ClientSignupForm() {
                     {/* Bankruptcy/Foreclosure checkbox */}
                     <div className="grid grid-cols-1 gap-3 mt-3">
                       <div className="flex items-start space-x-3 p-3 hover:bg-blue-100 rounded-lg transition-colors">
-                        <Checkbox 
-                          id="has_bankruptcy_foreclosure_3y" 
-                          checked={has_bankruptcy_foreclosure_3y} 
-                          onCheckedChange={(checked) => set_has_bankruptcy_foreclosure_3y(checked as boolean)} 
-                          className="mt-1" 
+                        <Checkbox
+                          id="has_bankruptcy_foreclosure_3y"
+                          checked={has_bankruptcy_foreclosure_3y}
+                          onCheckedChange={(checked) => set_has_bankruptcy_foreclosure_3y(checked as boolean)}
+                          className="mt-1"
                         />
                         <Label htmlFor="has_bankruptcy_foreclosure_3y" className="text-sm text-gray-700 cursor-pointer">
                           Foreclosures or bankruptcies in past 3 years
@@ -1388,13 +1414,13 @@ export default function ClientSignupForm() {
                             <Label htmlFor="bk_fc_months_ago" className="text-sm font-semibold text-gray-700">
                               How many months ago?
                             </Label>
-                            <Input 
-                              id="bk_fc_months_ago" 
-                              type="number" 
-                              value={bk_fc_months_ago} 
-                              onChange={(e) => set_bk_fc_months_ago(e.target.value ? Number(e.target.value) : "")} 
-                              className="mt-2" 
-                              placeholder="Months" 
+                            <Input
+                              id="bk_fc_months_ago"
+                              type="number"
+                              value={bk_fc_months_ago}
+                              onChange={(e) => set_bk_fc_months_ago(e.target.value ? Number(e.target.value) : "")}
+                              className="mt-2"
+                              placeholder="Months"
                             />
                           </div>
                           {/* Type selection field */}
@@ -1420,11 +1446,11 @@ export default function ClientSignupForm() {
                     {/* Tax liens checkbox */}
                     <div className="grid grid-cols-1 gap-3 mt-3">
                       <div className="flex items-start space-x-3 p-3 hover:bg-blue-100 rounded-lg transition-colors">
-                        <Checkbox 
-                          id="has_tax_liens" 
-                          checked={has_tax_liens} 
-                          onCheckedChange={(checked) => set_has_tax_liens(checked as boolean)} 
-                          className="mt-1" 
+                        <Checkbox
+                          id="has_tax_liens"
+                          checked={has_tax_liens}
+                          onCheckedChange={(checked) => set_has_tax_liens(checked as boolean)}
+                          className="mt-1"
                         />
                         <Label htmlFor="has_tax_liens" className="text-sm text-gray-700 cursor-pointer">
                           Tax liens
@@ -1458,24 +1484,24 @@ export default function ClientSignupForm() {
                             </Label>
                             <div className="relative mt-2">
                               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-medium">$</span>
-                              <Input 
-                                id="tax_liens_amount" 
-                                type="number" 
-                                value={tax_liens_amount} 
-                                onChange={(e) => set_tax_liens_amount(e.target.value ? Number(e.target.value) : "")} 
-                                className="pl-7" 
-                                placeholder="Amount" 
+                              <Input
+                                id="tax_liens_amount"
+                                type="number"
+                                value={tax_liens_amount}
+                                onChange={(e) => set_tax_liens_amount(e.target.value ? Number(e.target.value) : "")}
+                                className="pl-7"
+                                placeholder="Amount"
                               />
                             </div>
                           </div>
                         </div>
                         {/* Payment plan checkbox */}
                         <div className="flex items-start space-x-3 p-3 hover:bg-gray-50 rounded-lg transition-colors">
-                          <Checkbox 
-                            id="tax_liens_on_plan" 
-                            checked={tax_liens_on_plan} 
-                            onCheckedChange={(checked) => set_tax_liens_on_plan(checked as boolean)} 
-                            className="mt-1" 
+                          <Checkbox
+                            id="tax_liens_on_plan"
+                            checked={tax_liens_on_plan}
+                            onCheckedChange={(checked) => set_tax_liens_on_plan(checked as boolean)}
+                            className="mt-1"
                           />
                           <Label htmlFor="tax_liens_on_plan" className="text-sm text-gray-700 cursor-pointer">
                             On payment plan
@@ -1487,11 +1513,11 @@ export default function ClientSignupForm() {
                     {/* Judgements checkbox */}
                     <div className="grid grid-cols-1 gap-3 mt-3">
                       <div className="flex items-start space-x-3 p-3 hover:bg-blue-100 rounded-lg transition-colors">
-                        <Checkbox 
-                          id="has_active_judgements" 
-                          checked={has_active_judgements} 
-                          onCheckedChange={(checked) => set_has_active_judgements(checked as boolean)} 
-                          className="mt-1" 
+                        <Checkbox
+                          id="has_active_judgements"
+                          checked={has_active_judgements}
+                          onCheckedChange={(checked) => set_has_active_judgements(checked as boolean)}
+                          className="mt-1"
                         />
                         <Label htmlFor="has_active_judgements" className="text-sm text-gray-700 cursor-pointer">
                           Judgements
@@ -1505,13 +1531,13 @@ export default function ClientSignupForm() {
                         <Label htmlFor="judgements_explain" className="text-sm font-semibold text-gray-700">
                           Explain
                         </Label>
-                        <Textarea 
-                          id="judgements_explain" 
-                          value={judgements_explain} 
-                          onChange={(e) => set_judgements_explain(e.target.value)} 
-                          className="mt-2" 
-                          placeholder="Explain any judgements..." 
-                          rows={3} 
+                        <Textarea
+                          id="judgements_explain"
+                          value={judgements_explain}
+                          onChange={(e) => set_judgements_explain(e.target.value)}
+                          className="mt-2"
+                          placeholder="Explain any judgements..."
+                          rows={3}
                         />
                       </div>
                     )}
@@ -1519,11 +1545,11 @@ export default function ClientSignupForm() {
                     {/* ZBL (Zero Balance Letter) checkbox */}
                     <div className="grid grid-cols-1 gap-3 mt-3">
                       <div className="flex items-start space-x-3 p-3 hover:bg-blue-100 rounded-lg transition-colors">
-                        <Checkbox 
-                          id="has_zbl" 
-                          checked={has_zbl} 
-                          onCheckedChange={(checked) => set_has_zbl(checked as boolean)} 
-                          className="mt-1" 
+                        <Checkbox
+                          id="has_zbl"
+                          checked={has_zbl}
+                          onCheckedChange={(checked) => set_has_zbl(checked as boolean)}
+                          className="mt-1"
                         />
                         <Label htmlFor="has_zbl" className="text-sm text-gray-700 cursor-pointer">
                           Has ZBL (Zero Balance Letter)
@@ -1533,16 +1559,16 @@ export default function ClientSignupForm() {
                   </div>
 
                   <div className="flex flex-col sm:flex-row justify-between gap-4 pt-6">
-                    <Button 
-                      onClick={() => set_step(4)} 
-                      variant="outline" 
+                    <Button
+                      onClick={() => set_step(4)}
+                      variant="outline"
                       className="border-2 border-emerald-600 text-emerald-600 hover:bg-emerald-50 px-8 py-6"
                     >
                       <ChevronLeft className="mr-2 w-5 h-5" />
                       Previous
                     </Button>
-                    <Button 
-                      onClick={() => set_step(6)} 
+                    <Button
+                      onClick={() => set_step(6)}
                       className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white px-8 py-6 shadow-lg"
                     >
                       Next: Final Details
@@ -1578,11 +1604,11 @@ export default function ClientSignupForm() {
 
                   <div>
                     <Label htmlFor="additional_notes" className="text-sm font-semibold text-gray-700">Additional Information *</Label>
-                    <Textarea 
-                      id="additional_notes" 
-                      value={additional_notes} 
-                      onChange={(e) => set_additional_notes(e.target.value)} 
-                      className="mt-2" 
+                    <Textarea
+                      id="additional_notes"
+                      value={additional_notes}
+                      onChange={(e) => set_additional_notes(e.target.value)}
+                      className="mt-2"
                       placeholder="Any additional information we should know..."
                       rows={5}
                       required
@@ -1599,21 +1625,21 @@ export default function ClientSignupForm() {
                         Select all documents that need to be collected from this client
                       </p>
                     </div>
-                    
+
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 bg-gray-50 p-4 md:p-6 rounded-xl border-2 border-gray-200">
                       {DOC_OPTIONS.map((doc) => (
-                        <div 
-                          key={doc} 
+                        <div
+                          key={doc}
                           className="flex items-start space-x-3 p-3 hover:bg-white rounded-lg transition-colors border border-transparent hover:border-blue-200"
                         >
-                          <Checkbox 
-                            id={`doc-${doc}`} 
-                            checked={documents_requested.includes(doc)} 
-                            onCheckedChange={() => toggle_document(doc)} 
-                            className="mt-1" 
+                          <Checkbox
+                            id={`doc-${doc}`}
+                            checked={documents_requested.includes(doc)}
+                            onCheckedChange={() => toggle_document(doc)}
+                            className="mt-1"
                           />
-                          <Label 
-                            htmlFor={`doc-${doc}`} 
+                          <Label
+                            htmlFor={`doc-${doc}`}
                             className="text-sm text-gray-700 cursor-pointer leading-tight font-medium"
                           >
                             {doc}
@@ -1621,7 +1647,7 @@ export default function ClientSignupForm() {
                         </div>
                       ))}
                     </div>
-                    
+
                     {/* Show selected documents count */}
                     {documents_requested.length > 0 && (
                       <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
@@ -1632,59 +1658,61 @@ export default function ClientSignupForm() {
                     )}
                   </div>
 
-                  {/* Advisor Selection */}
-                  <div className="space-y-4">
-                    <h3 className="text-lg font-semibold">Advisor Assignment *</h3>
-                    <p className="text-sm text-gray-600">Select the advisor who will work with this client</p>
-                    {loading_advisors ? (
-                      <div className="text-sm text-gray-500">Loading advisors...</div>
-                    ) : advisors.length === 0 ? (
-                      <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded">
-                        No active advisors found
-                      </div>
-                    ) : (
-                      <Select value={advisor_id} onValueChange={set_advisor_id}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select an advisor" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {advisors.map((advisor) => (
-                            <SelectItem key={advisor.id} value={advisor.id}>
-                              {advisor.first_name} {advisor.last_name} ({advisor.email})
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
-                    {advisor_id && (
-                      <div className="bg-emerald-50 border border-emerald-200 rounded p-4">
-                        <p className="text-sm font-semibold text-emerald-900">Selected Advisor:</p>
-                        {(() => {
-                          const selected = advisors.find(a => a.id === advisor_id);
-                          return selected ? (
-                            <div className="mt-2 text-sm text-emerald-800">
-                              <p><strong>Name:</strong> {selected.first_name} {selected.last_name}</p>
-                              <p><strong>Email:</strong> {selected.email}</p>
-                              {selected.phone && <p><strong>Phone:</strong> {selected.phone}</p>}
-                            </div>
-                          ) : null;
-                        })()}
-                      </div>
-                    )}
-                  </div>
+                  {/* Advisor Selection - Only show if NOT an advisor (advisors are auto-assigned) */}
+                  {!is_advisor_context && (
+                    <div className="space-y-4">
+                      <h3 className="text-lg font-semibold">Advisor Assignment *</h3>
+                      <p className="text-sm text-gray-600">Select the advisor who will work with this client</p>
+                      {loading_advisors ? (
+                        <div className="text-sm text-gray-500">Loading advisors...</div>
+                      ) : advisors.length === 0 ? (
+                        <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded">
+                          No active advisors found
+                        </div>
+                      ) : (
+                        <Select value={advisor_id} onValueChange={set_advisor_id}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select an advisor" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {advisors.map((advisor) => (
+                              <SelectItem key={advisor.id} value={advisor.id}>
+                                {advisor.first_name} {advisor.last_name} ({advisor.email})
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                      {advisor_id && (
+                        <div className="bg-emerald-50 border border-emerald-200 rounded p-4">
+                          <p className="text-sm font-semibold text-emerald-900">Selected Advisor:</p>
+                          {(() => {
+                            const selected = advisors.find(a => a.id === advisor_id);
+                            return selected ? (
+                              <div className="mt-2 text-sm text-emerald-800">
+                                <p><strong>Name:</strong> {selected.first_name} {selected.last_name}</p>
+                                <p><strong>Email:</strong> {selected.email}</p>
+                                {selected.phone && <p><strong>Phone:</strong> {selected.phone}</p>}
+                              </div>
+                            ) : null;
+                          })()}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   <div className="flex flex-col sm:flex-row justify-between gap-4 pt-8 border-t-2 border-gray-200">
-                    <Button 
-                      onClick={() => set_step(5)} 
-                      variant="outline" 
+                    <Button
+                      onClick={() => set_step(5)}
+                      variant="outline"
                       className="border-2 border-emerald-600 text-emerald-600 hover:bg-emerald-50 px-8 py-6"
                     >
                       <ChevronLeft className="mr-2 w-5 h-5" />
                       Previous
                     </Button>
-                    <Button 
-                      onClick={handle_submit} 
-                      disabled={submitting} 
+                    <Button
+                      onClick={handle_submit}
+                      disabled={submitting}
                       className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white px-12 py-6 shadow-lg disabled:opacity-50"
                     >
                       {submitting ? (

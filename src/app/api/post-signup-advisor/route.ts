@@ -29,7 +29,7 @@ async function upsertGHLContact({
   tags?: string[];
 }) {
   const endpoint = "https://services.leadconnectorhq.com/contacts/upsert";
-  
+
   // Prepare the payload for GHL API
   const payload = {
     firstName,
@@ -65,12 +65,13 @@ async function upsertGHLContact({
  * POST /api/post-signup-advisor
  * Handles advisor signup process:
  * 1. Creates user record in public.users with 'advisor' role
- * 2. Creates contact in GHL with advisor tags
+ * 2. Creates advisor record in public.advisors table
+ * 3. Creates contact in GHL with advisor tags
  */
 export async function POST(req: NextRequest) {
   try {
     // Parse request body
-    const { userId, firstName, lastName, email, tags } = await req.json();
+    const { userId, firstName, lastName, email, phone, profilePicUrl, tags } = await req.json();
 
     // Validate required fields
     if (!userId || !firstName || !lastName || !email) {
@@ -97,22 +98,41 @@ export async function POST(req: NextRequest) {
 
     // Handle database errors
     if (dbError) {
-      console.error("Database error:", dbError);
+      console.error("Database error (users table):", dbError);
       throw dbError;
     }
 
-    // Step 2: Create or update contact in GHL with advisor tags
-    await upsertGHLContact({ 
-      firstName, 
-      lastName, 
-      email, 
-      tags: tags || ["creditbanc-advisor"] 
+    // Step 2: Insert into public.advisors table
+    const { error: advisorError } = await supabaseAdmin
+      .from("advisors")
+      .insert({
+        user_id: userId,
+        first_name: String(firstName).trim(),
+        last_name: String(lastName).trim(),
+        email: String(email).trim().toLowerCase(),
+        phone: phone ? String(phone).trim() : null,
+        profile_pic_url: profilePicUrl || null,
+        is_active: true,
+      });
+
+    // Handle advisor table errors
+    if (advisorError) {
+      console.error("Database error (advisors table):", advisorError);
+      throw advisorError;
+    }
+
+    // Step 3: Create or update contact in GHL with advisor tags
+    await upsertGHLContact({
+      firstName,
+      lastName,
+      email,
+      tags: tags || ["creditbanc-advisor"]
     });
 
     // Return success response
-    return NextResponse.json({ 
+    return NextResponse.json({
       ok: true,
-      message: "Advisor account created successfully" 
+      message: "Advisor account created successfully"
     });
 
   } catch (err: any) {
