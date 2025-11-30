@@ -54,7 +54,7 @@ export function Sidebar({
   const navItems = [
     { label: 'Dashboard', href: '/advisor/dashboard', icon: BookCheck },
     // { label: 'AI Chat', href: '/dashboard/chat', icon: MessageSquare },
-    
+
     //{ label: 'Credit Report Assistant', href: '/dashboard/credit-report-assistant', icon: FileSearch },
     //{ label: 'Book Consultation', href: '/dashboard/book-consultation', icon: Calendar },
     // { label: 'Business Vault', href: '/dashboard/business-vault', icon: BookMarked },
@@ -68,9 +68,8 @@ export function Sidebar({
     <>
       {/* Overlay (mobile) */}
       <div
-        className={`fixed inset-0 z-40 bg-black/40 transition-opacity md:hidden ${
-          mobileOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
-        }`}
+        className={`fixed inset-0 z-40 bg-black/40 transition-opacity md:hidden ${mobileOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
+          }`}
         onClick={onMobileClose}
       />
 
@@ -92,7 +91,7 @@ export function Sidebar({
           <div className="flex items-center justify-between px-4 py-3 md:justify-center border-b">
             {/* En desktop colapsado: ocultar branding totalmente */}
             <div className={collapsed ? 'hidden' : 'block'}>
-              <img src="vaultlogo.svg" alt="Logo" className="h-60 w-100 mb-1" />
+              <img src="/vaultlogo.svg" alt="Logo" className="h-60 w-100 mb-1" />
               <p className="text-sm text-gray-500">Business Document Hub</p>
             </div>
             <button
