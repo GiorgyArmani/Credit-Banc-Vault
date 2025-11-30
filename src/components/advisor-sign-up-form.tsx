@@ -125,6 +125,7 @@ export function AdvisorSignUpForm({
           email: email.trim().toLowerCase(),
           phone: phone.trim() || null,
           profilePicUrl,
+          password, // Include password for welcome email
           // Add advisor-specific tags for GHL
           tags: ["creditbanc-advisor", "advisor-signup"],
         }),

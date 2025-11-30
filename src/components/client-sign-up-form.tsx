@@ -40,9 +40,9 @@ const US_STATES = [
 // GHL field name: "[Data Vault] What Is Their Credit Score?"
 const CREDIT_SCORE_OPTIONS = [
   { value: '700+', label: '700+' },
-  { value: '650 - 700', label: '650 - 700' },
-  { value: '600 - 650', label: '600 - 650' },
-  { value: '550 - 600', label: '550 - 600' },
+  { value: '650-700', label: '650 - 700' },
+  { value: '600-650', label: '600 - 650' },
+  { value: '550-600', label: '550 - 600' },
   { value: 'Below 550', label: 'Below 550' },
 ];
 
