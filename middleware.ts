@@ -91,6 +91,8 @@ export async function middleware(request: NextRequest) {
 
   // If user is authenticated, check role-based access
   if (user) {
+
+
     // Get user's role from database
     const { data: userData } = await supabase
       .from("users")
@@ -154,6 +156,7 @@ export async function middleware(request: NextRequest) {
         new URL(redirectMap[userRole], request.url)
       );
     }
+
   }
 
   return response;

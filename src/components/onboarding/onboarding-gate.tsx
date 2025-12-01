@@ -6,7 +6,7 @@ import { useOnboardingStatus } from './use-onboarding-status'
 type OnboardingGateProps = { children: ReactNode }
 
 export default function OnboardingGate({ children }: OnboardingGateProps) {
-  const { needsOnboarding, loading } = useOnboardingStatus()
+  const { needsOnboarding, dataVaultCompleted, loading } = useOnboardingStatus()
   const [open, setOpen] = useState(false)
 
   useEffect(() => {
@@ -25,18 +25,13 @@ export default function OnboardingGate({ children }: OnboardingGateProps) {
     }
   }, [open])
 
-  const handleSkipThisSession = () => {
-    sessionStorage.setItem('skipOnboarding', 'true')
-    setOpen(false)
-  }
-
   return (
     <>
       {children}
       <OnboardingModal
         open={open}
         onClose={() => setOpen(false)}
-        onSkipThisSession={handleSkipThisSession}
+        dataVaultCompleted={dataVaultCompleted}
       />
     </>
   )

@@ -6,6 +6,7 @@ import { Sidebar } from '@/components/layout/sidebar'
 import { useProtectedRoute } from '@/hooks/use-protected-route'
 import { usePathname } from 'next/navigation'
 import OnboardingGate from '@/components/onboarding/onboarding-gate'
+
 import { Menu } from 'lucide-react'
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {

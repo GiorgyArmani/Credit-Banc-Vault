@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client"
 
 export function useOnboardingStatus() {
   const [needsOnboarding, setNeedsOnboarding] = useState(false)
+  const [dataVaultCompleted, setDataVaultCompleted] = useState(false)
   const [loading, setLoading] = useState(true)
   const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null)
   const timeoutRef = useRef<number | null>(null)
@@ -22,6 +23,26 @@ export function useOnboardingStatus() {
         return
       }
 
+      // Check user role - skip onboarding for advisors
+      const { data: userData, error: userError } = await supabase
+        .from("users")
+        .select("role")
+        .eq("id", user.id)
+        .maybeSingle()
+
+      if (userError) {
+        console.warn("[onboarding] error fetching user role:", userError)
+      }
+
+      // If user is an advisor, skip onboarding entirely
+      if (userData?.role === "advisor" || userData?.role === "underwriting") {
+        setNeedsOnboarding(false)
+        setDataVaultCompleted(true) // Mark as completed to prevent any checks
+        setLoading(false)
+        return
+      }
+
+      // Check business profile completion
       const { data, error } = await supabase
         .from("business_profiles")
         .select("completion_level")
@@ -33,6 +54,20 @@ export function useOnboardingStatus() {
         setNeedsOnboarding(true) // default to showing modal on error
       } else {
         setNeedsOnboarding(!data || (data?.completion_level ?? 0) < 100)
+      }
+
+      // Check if data vault has been submitted
+      const { data: vaultData, error: vaultError } = await supabase
+        .from("client_data_vault")
+        .select("data_vault_submitted_at")
+        .eq("user_id", user.id)
+        .maybeSingle()
+
+      if (vaultError) {
+        console.warn("[onboarding] vault status error:", vaultError)
+        setDataVaultCompleted(false)
+      } else {
+        setDataVaultCompleted(!!vaultData?.data_vault_submitted_at)
       }
     } finally {
       setLoading(false)
@@ -87,5 +122,5 @@ export function useOnboardingStatus() {
     }
   }, [loading])
 
-  return { needsOnboarding, loading, refetch }
+  return { needsOnboarding, dataVaultCompleted, loading, refetch }
 }
