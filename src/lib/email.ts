@@ -21,7 +21,7 @@ interface ClientWelcomeEmailData {
 export interface AdvisorWelcomeEmailData {
   advisor_name: string;
   advisor_email: string;
-  advisor_password: string;
+  advisor_password?: string; // Optional - not sent in email for security
   login_url: string;
 }
 
@@ -301,13 +301,12 @@ export async function send_client_welcome_email(data: ClientWelcomeEmailData) {
 
 /**
  * Generates HTML for advisor welcome email
- * Simpler version of client email - just welcome message, credentials, and login link
+ * Simple welcome message without password for security
  */
 export function generate_advisor_welcome_email_html(data: AdvisorWelcomeEmailData): string {
   const {
     advisor_name,
     advisor_email,
-    advisor_password,
     login_url,
   } = data;
 
@@ -346,28 +345,22 @@ export function generate_advisor_welcome_email_html(data: AdvisorWelcomeEmailDat
             </td>
           </tr>
 
-          <!-- Credentials Box -->
+
+          <!-- Welcome Info Box -->
           <tr>
             <td style="padding: 0 40px 20px;">
               <table role="presentation" style="width: 100%; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border-radius: 12px; padding: 24px;">
                 <tr>
                   <td>
-                    <h3 style="margin: 0 0 20px; color: #ffffff; font-size: 20px; font-weight: 600;">🔐 Your Login Credentials</h3>
+                    <h3 style="margin: 0 0 20px; color: #ffffff; font-size: 20px; font-weight: 600;">🚀 Get Started</h3>
                     
-                    <div style="margin-bottom: 16px;">
-                      <p style="margin: 0 0 4px; color: rgba(255, 255, 255, 0.9); font-size: 14px; font-weight: 600;">Email:</p>
-                      <p style="margin: 0; color: #ffffff; font-size: 18px; font-weight: 700; font-family: monospace; background-color: rgba(255, 255, 255, 0.2); padding: 12px; border-radius: 6px;">${advisor_email}</p>
-                    </div>
-                    
-                    <div style="margin-bottom: 16px;">
-                      <p style="margin: 0 0 4px; color: rgba(255, 255, 255, 0.9); font-size: 14px; font-weight: 600;">Password:</p>
-                      <p style="margin: 0; color: #ffffff; font-size: 18px; font-weight: 700; font-family: monospace; background-color: rgba(255, 255, 255, 0.2); padding: 12px; border-radius: 6px;">${advisor_password}</p>
-                    </div>
+                    <p style="margin: 0 0 16px; color: rgba(255, 255, 255, 0.95); font-size: 16px; line-height: 1.6;">
+                      Your advisor account is ready! Use the email address you signed up with and the password you created to log in.
+                    </p>
 
-                    <div style="background-color: #fef3c7; border-radius: 8px; padding: 12px; margin-top: 16px;">
-                      <p style="margin: 0; color: #92400e; font-size: 14px; line-height: 1.5;">
-                        ⚠️ <strong>Important:</strong> Please change your password after logging in for security.
-                      </p>
+                    <div style="margin-bottom: 16px;">
+                      <p style="margin: 0 0 4px; color: rgba(255, 255, 255, 0.9); font-size: 14px; font-weight: 600;">Login Email:</p>
+                      <p style="margin: 0; color: #ffffff; font-size: 18px; font-weight: 700; font-family: monospace; background-color: rgba(255, 255, 255, 0.2); padding: 12px; border-radius: 6px;">${advisor_email}</p>
                     </div>
                   </td>
                 </tr>
@@ -416,7 +409,6 @@ export function generate_advisor_welcome_email_text(data: AdvisorWelcomeEmailDat
   const {
     advisor_name,
     advisor_email,
-    advisor_password,
     login_url,
   } = data;
 
@@ -427,11 +419,10 @@ Hi ${advisor_name},
 
 Your advisor account has been successfully created! You now have access to the Credit Banc Vault platform.
 
-Your Login Credentials:
-Email: ${advisor_email}
-Password: ${advisor_password}
+Get Started:
+Use the email address you signed up with and the password you created to log in.
 
-IMPORTANT: Please change your password after logging in for security.
+Login Email: ${advisor_email}
 
 Login here: ${login_url}
 
@@ -458,6 +449,152 @@ export async function send_advisor_welcome_email(data: AdvisorWelcomeEmailData) 
     from: `${from_name} <${from_email}>`,
     to: data.advisor_email,
     subject: 'Welcome to Credit Banc Vault - Advisor Account Created!',
+    text: text_content,
+    html: html_content,
+  };
+
+  const result = await transporter.sendMail(mail_options);
+
+  return result;
+}
+
+/**
+ * ============================================================================
+ * PASSWORD RESET EMAIL FUNCTIONS
+ * ============================================================================
+ */
+
+/**
+ * Interface for password reset email data
+ */
+export interface PasswordResetEmailData {
+  email: string;
+  reset_link: string;
+}
+
+/**
+ * Generates HTML for password reset email
+ */
+export function generate_password_reset_email_html(data: PasswordResetEmailData): string {
+  const { email, reset_link } = data;
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reset Your Password</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f6f9fc;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse;">
+    <tr>
+      <td align="center" style="padding: 40px 0;">
+        <table role="presentation" style="width: 600px; max-width: 100%; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+          
+          <!-- Logo Section -->
+          <tr>
+            <td style="padding: 40px 40px 20px; text-align: center; background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
+              <h1 style="margin: 0; color: #ffffff; font-size: 28px; font-weight: 700;">Credit Banc Vault</h1>
+            </td>
+          </tr>
+
+          <!-- Message -->
+          <tr>
+            <td style="padding: 40px 40px 20px;">
+              <h2 style="margin: 0 0 16px; color: #1e293b; font-size: 24px; font-weight: 600;">Reset Your Password 🔒</h2>
+              <p style="margin: 0 0 16px; color: #475569; font-size: 16px; line-height: 1.6;">
+                Hello,
+              </p>
+              <p style="margin: 0 0 16px; color: #475569; font-size: 16px; line-height: 1.6;">
+                We received a request to reset the password for your Credit Banc Vault account associated with <strong>${email}</strong>.
+              </p>
+              <p style="margin: 0 0 16px; color: #475569; font-size: 16px; line-height: 1.6;">
+                Click the button below to reset your password. This link will expire in 24 hours.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Reset Button -->
+          <tr>
+            <td style="padding: 20px 40px;" align="center">
+              <a href="${reset_link}" style="display: inline-block; background-color: #10b981; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-size: 16px; font-weight: 600;">
+                Reset Password
+              </a>
+            </td>
+          </tr>
+
+          <!-- Warning -->
+          <tr>
+            <td style="padding: 20px 40px;">
+              <p style="margin: 0; color: #64748b; font-size: 14px; line-height: 1.6; text-align: center;">
+                If you didn't request a password reset, you can safely ignore this email. Your password will not be changed.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding: 40px; text-align: center; color: #94a3b8; font-size: 13px; line-height: 1.6;">
+              <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 0 0 20px;">
+              <p style="margin: 0 0 8px;">© ${new Date().getFullYear()} Credit Banc. All rights reserved.</p>
+              <p style="margin: 0;">
+                <a href="https://creditbanc.io/privacy" style="color: #64748b; text-decoration: underline;">Privacy Policy</a>
+                ·
+                <a href="https://creditbanc.io/terms" style="color: #64748b; text-decoration: underline;">Terms of Service</a>
+                ·
+                <a href="https://creditbanc.io/support" style="color: #64748b; text-decoration: underline;">Support</a>
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `;
+}
+
+/**
+ * Generates plain text version of password reset email
+ */
+export function generate_password_reset_email_text(data: PasswordResetEmailData): string {
+  const { email, reset_link } = data;
+
+  return `
+Reset Your Password
+
+Hello,
+
+We received a request to reset the password for your Credit Banc Vault account associated with ${email}.
+
+Click the link below to reset your password:
+${reset_link}
+
+If you didn't request a password reset, you can safely ignore this email.
+
+© ${new Date().getFullYear()} Credit Banc. All rights reserved.
+  `.trim();
+}
+
+/**
+ * Sends password reset email
+ */
+export async function send_password_reset_email(data: PasswordResetEmailData) {
+  const transporter = create_smtp_transporter();
+
+  const from_email = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  const from_name = process.env.SMTP_FROM_NAME || 'Credit Banc';
+
+  const html_content = generate_password_reset_email_html(data);
+  const text_content = generate_password_reset_email_text(data);
+
+  const mail_options = {
+    from: `${from_name} <${from_email}>`,
+    to: data.email,
+    subject: 'Reset Your Credit Banc Vault Password',
     text: text_content,
     html: html_content,
   };
