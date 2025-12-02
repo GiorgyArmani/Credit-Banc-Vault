@@ -79,7 +79,7 @@ export default function LoginForm({
 
       // Step 5: Redirect to the appropriate dashboard based on role
       const redirectPath = roleRedirects[userData.role] || "/dashboard";
-      
+
       console.log(`✅ User logged in with role: ${userData.role}`);
       console.log(`➡️  Redirecting to: ${redirectPath}`);
 
@@ -147,8 +147,8 @@ export default function LoginForm({
               </Button>
             </div>
 
-            {/* Sign Up Link */}
-            <div className="mt-4 text-center text-sm">
+            {/* Sign Up Link Removed for Private Access */}
+            {/* <div className="mt-4 text-center text-sm">
               Don&apos;t have an account?{" "}
               <Link
                 href="/auth/sign-up"
@@ -156,7 +156,7 @@ export default function LoginForm({
               >
                 Sign up
               </Link>
-            </div>
+            </div> */}
           </form>
         </CardContent>
       </Card>

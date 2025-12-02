@@ -76,7 +76,6 @@ export async function middleware(request: NextRequest) {
   // Define public paths that don't require authentication
   const publicPaths = [
     "/auth/login",
-    "/auth/signup",
     "/auth/advisor-signup",
     "/auth/callback",
     "/auth/sign-up-success",

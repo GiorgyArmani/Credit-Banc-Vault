@@ -17,20 +17,20 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url);
-  
+
   // Get the auth code from the URL (sent by Supabase)
   const code = requestUrl.searchParams.get("code");
-  
+
   // Get the origin for building redirect URLs
   const origin = requestUrl.origin;
 
   if (code) {
     const supabase = await createClient();
-    
+
     try {
       // Step 1: Exchange the code for a session
       const { data: { session }, error: sessionError } = await supabase.auth.exchangeCodeForSession(code);
-      
+
       if (sessionError) {
         console.error("Session exchange error:", sessionError);
         // Redirect to login with error message
@@ -54,6 +54,12 @@ export async function GET(request: NextRequest) {
         return NextResponse.redirect(`${origin}/dashboard`);
       }
 
+      // Check for 'next' param to redirect to specific page (e.g. update-password)
+      const next = requestUrl.searchParams.get("next");
+      if (next) {
+        return NextResponse.redirect(`${origin}${next}`);
+      }
+
       // Step 3: Redirect based on user role
       const roleRedirects: Record<string, string> = {
         "advisor": "/advisor/dashboard",
@@ -63,7 +69,7 @@ export async function GET(request: NextRequest) {
       };
 
       const redirectPath = roleRedirects[userData.role] || "/dashboard";
-      
+
       console.log(`✅ User ${session.user.email} authenticated with role: ${userData.role}`);
       console.log(`➡️  Redirecting to: ${redirectPath}`);
 
