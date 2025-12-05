@@ -6,6 +6,7 @@ import { ghlUpdateContact, ghlAddTags } from '@/lib/ghl-api';
 const GHL_FIELDS = {
     EIN: process.env.GHL_CF_EIN_NUMBER!,
     SSN: process.env.GHL_CF_SSN!,
+    INDUSTRY: process.env.GHL_CF_INDUSTRY!,
     APPLICANT_1_SIGNATURE: process.env.GHL_CF_APPLICANT_1_SIGNATURE!,
     CO_APPLICANT_SIGNATURE: process.env.GHL_CF_CO_APPLICANT_SIGNATURE!,
 };
@@ -13,7 +14,7 @@ const GHL_FIELDS = {
 export async function POST(request: Request) {
     try {
         // Validate Env Vars
-        if (!GHL_FIELDS.EIN || !GHL_FIELDS.SSN || !GHL_FIELDS.APPLICANT_1_SIGNATURE || !GHL_FIELDS.CO_APPLICANT_SIGNATURE) {
+        if (!GHL_FIELDS.EIN || !GHL_FIELDS.SSN || !GHL_FIELDS.INDUSTRY || !GHL_FIELDS.APPLICANT_1_SIGNATURE || !GHL_FIELDS.CO_APPLICANT_SIGNATURE) {
             console.error("❌ Missing GHL Environment Variables");
             return NextResponse.json({ message: "Server Configuration Error" }, { status: 500 });
         }
@@ -26,10 +27,10 @@ export async function POST(request: Request) {
         }
 
         const body = await request.json();
-        const { ein, ssn, applicant1Signature, coApplicantSignature } = body;
+        const { ein, ssn, industry, applicant1Signature, coApplicantSignature } = body;
 
         // Basic validation
-        if (!ein || !ssn || !applicant1Signature || !coApplicantSignature) {
+        if (!ein || !ssn || !industry || !applicant1Signature || !coApplicantSignature) {
             return NextResponse.json(
                 { message: 'Missing required fields' },
                 { status: 400 }
@@ -139,6 +140,7 @@ export async function POST(request: Request) {
             .update({
                 ein,
                 ssn,
+                industry,
                 applicant_1_signature: applicant1Signature,
                 co_applicant_signature: coApplicantSignature,
                 data_vault_submitted_at: new Date().toISOString(),
@@ -189,10 +191,11 @@ export async function POST(request: Request) {
             });
         }
 
-        // 5. Sync EIN, SSN, and signature metadata to GHL
+        // 5. Sync EIN, SSN, Industry, and signature metadata to GHL
         const allFields = [
             { id: GHL_FIELDS.EIN, value: ein },
             { id: GHL_FIELDS.SSN, value: ssn },
+            { id: GHL_FIELDS.INDUSTRY, value: industry },
             ...signatureFields
         ];
 

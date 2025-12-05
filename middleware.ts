@@ -80,6 +80,8 @@ export async function middleware(request: NextRequest) {
     "/auth/callback",
     "/auth/sign-up-success",
     "/auth/advisor-signup-success",
+    "/auth/update-password",
+    "/auth/forgot-password",
     "/",
   ];
 

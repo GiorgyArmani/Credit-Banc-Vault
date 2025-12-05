@@ -21,8 +21,19 @@ export async function GET(request: NextRequest) {
   // Get the auth code from the URL (sent by Supabase)
   const code = requestUrl.searchParams.get("code");
 
+  // Check for 'next' param to detect password reset flow
+  const next = requestUrl.searchParams.get("next");
+
   // Get the origin for building redirect URLs
   const origin = requestUrl.origin;
+
+  // Special handling for password reset flow
+  // Password reset uses PKCE flow with tokens in hash fragment, not code exchange
+  if (next === "/auth/update-password") {
+    console.log("🔐 Password reset flow detected, redirecting to update-password page");
+    // Redirect to update-password page - hash fragment will be preserved by browser
+    return NextResponse.redirect(`${origin}/auth/update-password`);
+  }
 
   if (code) {
     const supabase = await createClient();
@@ -54,9 +65,9 @@ export async function GET(request: NextRequest) {
         return NextResponse.redirect(`${origin}/dashboard`);
       }
 
-      // Check for 'next' param to redirect to specific page (e.g. update-password)
-      const next = requestUrl.searchParams.get("next");
+      // Check for 'next' param to redirect to specific page
       if (next) {
+        console.log(`✅ Redirecting to: ${next}`);
         return NextResponse.redirect(`${origin}${next}`);
       }
 
@@ -82,5 +93,6 @@ export async function GET(request: NextRequest) {
   }
 
   // If no code is present, redirect to login
+  console.log("❌ No auth code found in callback");
   return NextResponse.redirect(`${origin}/auth/login?error=no_code`);
 }

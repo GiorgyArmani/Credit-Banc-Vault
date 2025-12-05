@@ -19,6 +19,7 @@ export function DataVaultForm({ onComplete }: DataVaultFormProps) {
     const [formData, setFormData] = useState({
         ein: "",
         ssn: "",
+        industry: "",
         applicant1Signature: "",
         coApplicantSignature: "",
     })
@@ -26,7 +27,7 @@ export function DataVaultForm({ onComplete }: DataVaultFormProps) {
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
 
-        if (!formData.ein || !formData.ssn || !formData.applicant1Signature || !formData.coApplicantSignature) {
+        if (!formData.ein || !formData.ssn || !formData.industry || !formData.applicant1Signature || !formData.coApplicantSignature) {
             toast.error("Please fill in all required fields and provide both signatures.")
             return
         }
@@ -92,6 +93,17 @@ export function DataVaultForm({ onComplete }: DataVaultFormProps) {
                                 required
                             />
                         </div>
+                    </div>
+
+                    <div className="space-y-2">
+                        <Label htmlFor="industry">Industry <span className="text-red-500">*</span></Label>
+                        <Input
+                            id="industry"
+                            placeholder="e.g., Healthcare, Retail, Technology"
+                            value={formData.industry}
+                            onChange={(e) => setFormData(prev => ({ ...prev, industry: e.target.value }))}
+                            required
+                        />
                     </div>
 
                     <div className="space-y-2">
