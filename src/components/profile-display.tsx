@@ -33,6 +33,7 @@ type VaultData = {
   business_start_date: string;    // Business start date
   avg_monthly_deposits: number;   // Monthly revenue
   credit_score: string;           // Credit score
+  industry: string;               // Industry
 };
 
 /**
@@ -48,7 +49,7 @@ type VaultData = {
  * FIELDS DISPLAYED:
  * 1. Funding goal (capital_requested - formatted as currency)
  * 2. Type of entity (legal_entity_type)
- * 3. Industry (not in client_data_vault - shows "—")
+ * 3. Industry (industry)
  * 4. Business start date (business_start_date)
  * 5. Monthly revenue (avg_monthly_deposits)
  * 6. Credit score (credit_score)
@@ -60,18 +61,18 @@ export default function ProfileDisplay() {
   // STATE MANAGEMENT
   // Using enum for better state control
   // ============================================
-  
+
   // supabase-client: Database client for queries
   const supabase = createClient();
-  
+
   // component-state: Single source of truth for component state
   const [component_state, set_component_state] = useState<ComponentState>(
     ComponentState.LOADING
   );
-  
+
   // vault-data-state: Stores fetched vault information
   const [vault_data, set_vault_data] = useState<VaultData | null>(null);
-  
+
   // error-message-state: Stores specific error message
   const [error_message, set_error_message] = useState<string>("");
 
@@ -90,13 +91,13 @@ export default function ProfileDisplay() {
     async function fetch_profile_data() {
       try {
         set_component_state(ComponentState.LOADING);
-        
+
         // ============================================
         // STEP 1: AUTHENTICATION
         // Get the currently logged-in user from Supabase Auth
         // ============================================
         const { data: { user }, error: user_error } = await supabase.auth.getUser();
-        
+
         // user-error-handling: Check for authentication errors
         if (user_error) {
           console.error("❌ Authentication error:", user_error);
@@ -104,7 +105,7 @@ export default function ProfileDisplay() {
           set_component_state(ComponentState.ERROR);
           return;
         }
-        
+
         // user-null-check: Ensure user exists
         if (!user) {
           console.warn("⚠️ No authenticated user found");
@@ -128,11 +129,12 @@ export default function ProfileDisplay() {
             legal_entity_type,
             business_start_date,
             avg_monthly_deposits,
-            credit_score
+            credit_score,
+            industry
           `)
           .eq("user_id", user.id)
           .maybeSingle(); // ✅ Returns null if 0 rows, prevents PGRST116 error
-        
+
         // vault-error-handling: Check for database errors
         if (vault_error) {
           console.error("❌ Client data vault query error:", vault_error);
@@ -140,7 +142,7 @@ export default function ProfileDisplay() {
           set_component_state(ComponentState.ERROR);
           return;
         }
-        
+
         // vault-null-check: Ensure vault record exists
         if (!vault) {
           console.warn("⚠️ No client data vault found for user:", user.id);
@@ -152,11 +154,11 @@ export default function ProfileDisplay() {
         console.log("✅ Profile data loaded successfully");
         console.log("   Funding amount:", format_currency(vault.capital_requested));
         console.log("   Legal entity:", vault.legal_entity_type);
-        
+
         // success-state-update: Store vault data and update state
         set_vault_data(vault);
         set_component_state(ComponentState.SUCCESS);
-        
+
       } catch (err: any) {
         // unexpected-error-handler: Catch any unexpected errors
         console.error("❌ Unexpected error in fetch_profile_data:", err);
@@ -173,7 +175,7 @@ export default function ProfileDisplay() {
   // HELPER FUNCTIONS
   // Utility functions for data formatting
   // ============================================
-  
+
   /**
    * format-currency: Format number as USD currency
    * @param amount - Number to format
@@ -211,47 +213,45 @@ export default function ProfileDisplay() {
   const build_profile_fields = (vault: VaultData): ProfileField[] => {
     return [
       // funding-goal: Capital amount requested (formatted as currency)
-      { 
-        label: "Funding goal", 
-        value: vault.capital_requested 
-          ? format_currency(vault.capital_requested) 
+      {
+        label: "Funding goal",
+        value: vault.capital_requested
+          ? format_currency(vault.capital_requested)
           : "—"
       },
-      
+
       // entity-type: Legal structure of the business
-      { 
-        label: "Type of entity", 
-        value: vault.legal_entity_type || "—" 
+      {
+        label: "Type of entity",
+        value: vault.legal_entity_type || "—"
       },
-      
-      // industry: Business industry category
-      // NOTE: Industry field is not in client_data_vault table
-      // Showing placeholder until industry is added to the schema
-      { 
-        label: "Industry", 
-        value: "—" 
+
+
+      {
+        label: "Industry",
+        value: vault.industry || "—"
       },
-      
+
       // start-date: When the business was established
-      { 
-        label: "Business start date", 
-        value: vault.business_start_date 
-          ? format_date(vault.business_start_date) 
+      {
+        label: "Business start date",
+        value: vault.business_start_date
+          ? format_date(vault.business_start_date)
           : "—"
       },
-      
+
       // monthly-revenue: Average monthly deposits/revenue
-      { 
-        label: "Monthly revenue", 
-        value: vault.avg_monthly_deposits 
-          ? format_currency(vault.avg_monthly_deposits) 
+      {
+        label: "Monthly revenue",
+        value: vault.avg_monthly_deposits
+          ? format_currency(vault.avg_monthly_deposits)
           : "—"
       },
-      
+
       // credit-score: Client's credit score range
-      { 
-        label: "Credit score", 
-        value: vault.credit_score || "—" 
+      {
+        label: "Credit score",
+        value: vault.credit_score || "—"
       },
     ];
   };
@@ -344,8 +344,8 @@ export default function ProfileDisplay() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {fields.map((field) => (
               // field-card: Individual field display card
-              <div 
-                key={field.label} 
+              <div
+                key={field.label}
                 className="rounded-lg border p-3 bg-white"
               >
                 {/* field-label: Small uppercase label */}
@@ -376,16 +376,16 @@ export default function ProfileDisplay() {
   switch (component_state) {
     case ComponentState.LOADING:
       return render_loading_state();
-    
+
     case ComponentState.ERROR:
       return render_error_state();
-    
+
     case ComponentState.SUCCESS:
       return render_success_state();
-    
+
     case ComponentState.NO_DATA:
       return null;
-    
+
     default:
       // exhaustive-check: TypeScript ensures all cases are handled
       console.error("❌ Unknown component state:", component_state);

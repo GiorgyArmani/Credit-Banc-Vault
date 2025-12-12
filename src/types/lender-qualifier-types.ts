@@ -14,13 +14,16 @@ export interface ClientProfile {
   capital_requested: number;
   loan_purpose: string;
   proposed_loan_type: string;
-  avg_monthly_deposits: number;
+  avg_monthly_deposits: number; // This is the $ amount
+  avg_monthly_deposit_count?: number; // This is the count (number of deposits)
   avg_annual_revenue: number;
   legal_entity_type: string;
   business_start_date: string; // ISO date string
   is_home_based: boolean;
   employees_count: number;
   credit_score: '700+' | '650-700' | '600-650' | '550-600' | 'Below 550';
+  exact_credit_score?: number; // For more precise calculation
+  industry?: string; // For restricted industry checks
   has_existing_loans: boolean;
   has_defaulted_mca: boolean;
   mca_was_satisfied: boolean | null;
