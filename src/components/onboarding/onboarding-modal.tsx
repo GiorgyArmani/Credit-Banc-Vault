@@ -44,7 +44,11 @@ export default function OnboardingModal({
     window.dispatchEvent(new Event("onboarding-completed"));
     // Clear session storage to skip next time
     sessionStorage.removeItem("skipOnboarding");
-    // Close the modal
+
+    // Refresh the page to ensure all components (like profile-display) update with new data
+    window.location.reload();
+
+    // Close the modal (though reload will likely happen first)
     onClose?.();
   };
 

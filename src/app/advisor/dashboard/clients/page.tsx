@@ -215,6 +215,21 @@ export default function AdvisorClientsListPage() {
 
                 advisor_data = email_query.data;
                 advisor_error = email_query.error;
+
+                // Self-healing: If found by email but not linked, link it now!
+                if (advisor_data) {
+                    console.log("⚠️ Advisor found by email but not linked. Linking now...");
+                    const { error: update_error } = await supabase
+                        .from("advisors")
+                        .update({ user_id: user.id })
+                        .eq("id", advisor_data.id);
+
+                    if (update_error) {
+                        console.error("❌ Failed to link advisor profile:", update_error);
+                    } else {
+                        console.log("✅ Automatically linked advisor profile to user:", user.id);
+                    }
+                }
             }
 
             if (advisor_error) {
