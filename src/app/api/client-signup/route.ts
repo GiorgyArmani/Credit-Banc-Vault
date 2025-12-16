@@ -127,18 +127,19 @@ async function ghl_add_tags(contact_id: string, tags: string[]): Promise<void> {
  * Crea un objeto de custom field para GHL si el valor existe
  * @param field_id_env - Nombre de la variable de entorno con el field ID
  * @param value - Valor del campo
+ * @param fallback_id - ID opcional en caso de que falte la variable de entorno
  * @returns Objeto de custom field o null
  */
-function create_custom_field(field_id_env: string, value: any) {
+function create_custom_field(field_id_env: string, value: any, fallback_id?: string) {
   // Si el valor es null, undefined o string vacío, no crear el campo
   if (value === undefined || value === null || value === '') {
     return null;
   }
 
-  const field_id = process.env[field_id_env];
+  const field_id = process.env[field_id_env] || fallback_id;
 
   if (!field_id) {
-    console.warn(`⚠️ Custom field ID no encontrado en .env: ${field_id_env}`);
+    console.warn(`⚠️ Custom field ID no encontrado en .env y sin fallback: ${field_id_env}`);
     return null;
   }
 
@@ -146,6 +147,25 @@ function create_custom_field(field_id_env: string, value: any) {
     id: field_id,
     value: String(value) // GHL siempre espera strings en custom fields
   };
+}
+
+/**
+ * Mapea valores del frontend a los valores específicos que espera GHL (dropdowns)
+ */
+function map_ghl_value(field_name: string, value: any): string {
+  if (!value) return value;
+
+  // Mapping específico para Funding ETA due to GHL typos/formatting
+  if (field_name === 'funding_eta') {
+    const map: Record<string, string> = {
+      'Immediately': 'Inmediately', // GHL has a typo
+      '1–3 Weeks': '1-3 Weeks',     // Frontend uses en-dash, GHL uses hyphen
+      '3 Weeks +': '3 Weeks +'
+    };
+    return map[value] || value;
+  }
+
+  return value;
 }
 
 /**
@@ -314,58 +334,59 @@ export async function POST(request: Request) {
     // ========== PASO 3: PREPARAR CUSTOM FIELDS PARA GHL ==========
     const custom_fields = [
       // Información Básica
-      create_custom_field('GHL_CF_CLIENTS_NAME', body.client_name),
-      create_custom_field('GHL_CF_BUSINESS_NAME', body.company_name),
-      create_custom_field('GHL_CF_CLIENTS_PHONE', body.client_phone),
-      create_custom_field('GHL_CF_CLIENT_EMAIL', body.client_email),
+      create_custom_field('GHL_CF_CLIENTS_NAME', body.client_name, 'htTNeG6SjgBb816NXzrM'),
+      create_custom_field('GHL_CF_BUSINESS_NAME', body.company_name, '4wCc6YtOB59baJTrMOsZ'),
+      create_custom_field('GHL_CF_CLIENTS_PHONE', body.client_phone, 'BUdnGXCgH53LOYqZdEam'),
+      create_custom_field('GHL_CF_CLIENT_EMAIL', body.client_email, 'QSNzz62RcqhaEgqyP8hg'),
 
       // Ubicación
-      create_custom_field('GHL_CF_COMPANY_STATE', body.company_state),
-      create_custom_field('GHL_CF_COMPANY_CITY', body.company_city),
-      create_custom_field('GHL_CF_COMPANY_ZIP', body.company_zip_code),
+      create_custom_field('GHL_CF_COMPANY_STATE', body.company_state, 'qjSxhRyhQUzlGkyCHeV4'),
+      create_custom_field('GHL_CF_COMPANY_CITY', body.company_city, 'sD6tg1NRCj9uHsc7xdZW'),
+      create_custom_field('GHL_CF_COMPANY_ZIP', body.company_zip_code, 'el0Wrlnb8pH30cfMkEhw'),
 
       // Información Financiera
-      create_custom_field('GHL_CF_CAPITAL_REQUESTED', body.capital_requested),
-      create_custom_field('GHL_CF_LOAN_PURPOSE', body.loan_purpose),
-      create_custom_field('GHL_CF_PROPOSED_LOAN_TYPE', body.proposed_loan_type),
-      create_custom_field('GHL_CF_AVG_MONTHLY_DEPOSITS', body.avg_monthly_deposits),
-      create_custom_field('GHL_CF_ANNUAL_REVENUE', body.avg_annual_revenue),
+      create_custom_field('GHL_CF_CAPITAL_REQUESTED', body.capital_requested, 'e3a1kLHpSXOtJcXvch9E'),
+      create_custom_field('GHL_CF_LOAN_PURPOSE', body.loan_purpose, 'bI6KKdbP0spHXNOa463U'),
+      create_custom_field('GHL_CF_PROPOSED_LOAN_TYPE', body.proposed_loan_type, 'geBSb3HaQsXl7mTjKkH6'),
+      create_custom_field('GHL_CF_AVG_MONTHLY_DEPOSITS', body.avg_monthly_deposits, 'jO6EKKiJWP0WhJG5TnGS'),
+      create_custom_field('GHL_CF_ANNUAL_REVENUE', body.avg_annual_revenue, '3rXoSHebmerVIqMA1l8X'),
 
       // Estructura del Negocio
-      create_custom_field('GHL_CF_LEGAL_ENTITY_TYPE', body.legal_entity_type),
-      create_custom_field('GHL_CF_BUSINESS_START_DATE', body.business_start_date),
-      create_custom_field('GHL_CF_IS_HOME_BASED', body.is_home_based ? 'Yes' : 'No'),
-      create_custom_field('GHL_CF_EMPLOYEES_COUNT', body.employees_count),
+      create_custom_field('GHL_CF_LEGAL_ENTITY_TYPE', body.legal_entity_type, 'FugwTFOGp9pKo5SwHesK'),
+      create_custom_field('GHL_CF_BUSINESS_START_DATE', body.business_start_date, '4qvVNBqq2ZSz0MtaUwdy'),
+      create_custom_field('GHL_CF_IS_HOME_BASED', body.is_home_based ? 'Yes' : 'No', '7Scr3pomfCvkEdcBlN6p'),
+      create_custom_field('GHL_CF_EMPLOYEES_COUNT', body.employees_count, 'ZXrrNCDpyqNJsrUgNYwZ'),
+      create_custom_field('GHL_CF_INDUSTRY', body.industry, 'lATbnmBRyYEqCEIsrlpK'),
 
       // Propietarios
-      create_custom_field('GHL_CF_NUMBER_OF_OWNERS', body.number_of_owners),
-      create_custom_field('GHL_CF_OWNER_1_NAME', body.owner_1_name),
-      create_custom_field('GHL_CF_OWNER_1_PCT', body.owner_1_ownership_pct),
-      create_custom_field('GHL_CF_OWNER_2_NAME', body.owner_2_name),
-      create_custom_field('GHL_CF_OWNER_2_PCT', body.owner_2_ownership_pct),
-      create_custom_field('GHL_CF_OWNER_3_NAME', body.owner_3_name),
-      create_custom_field('GHL_CF_OWNER_3_PCT', body.owner_3_ownership_pct),
-      create_custom_field('GHL_CF_OWNER_4_NAME', body.owner_4_name),
-      create_custom_field('GHL_CF_OWNER_4_PCT', body.owner_4_ownership_pct),
-      create_custom_field('GHL_CF_OWNER_5_NAME', body.owner_5_name),
-      create_custom_field('GHL_CF_OWNER_5_PCT', body.owner_5_ownership_pct),
+      create_custom_field('GHL_CF_NUMBER_OF_OWNERS', body.number_of_owners, 'wfXQNMs2DhSqrYYqq5A7'),
+      create_custom_field('GHL_CF_OWNER_1_NAME', body.owner_1_name, 'PaOPABkLZL3ZWxZxFrTV'),
+      create_custom_field('GHL_CF_OWNER_1_PCT', body.owner_1_ownership_pct, 'DsjleQk3ABfV8AjtNTD1'),
+      create_custom_field('GHL_CF_OWNER_2_NAME', body.owner_2_name, 'PWvgRVEVnoOXZqlwHGlk'),
+      create_custom_field('GHL_CF_OWNER_2_PCT', body.owner_2_ownership_pct, 'kOhIqvXiFoApVe11JpgW'),
+      create_custom_field('GHL_CF_OWNER_3_NAME', body.owner_3_name, 'n5f1L6TCW28CU176AnGC'),
+      create_custom_field('GHL_CF_OWNER_3_PCT', body.owner_3_ownership_pct, 'hVVmYAp1ky4wnQaDnLgz'),
+      create_custom_field('GHL_CF_OWNER_4_NAME', body.owner_4_name, 'djN3KXuxznGF4DwQnBC7'),
+      create_custom_field('GHL_CF_OWNER_4_PCT', body.owner_4_ownership_pct, 'WsU2lLJXhZKEyGyPYuXt'),
+      create_custom_field('GHL_CF_OWNER_5_NAME', body.owner_5_name, '6amEjPznOPWASM3LD2Cg'),
+      create_custom_field('GHL_CF_OWNER_5_PCT', body.owner_5_ownership_pct, 'dwrTeoM9FCh19ut009kp'),
 
       // Crédito y Situaciones Especiales
-      create_custom_field('GHL_CF_CREDIT_SCORE', body.credit_score),
-      create_custom_field('GHL_CF_HAS_EXISTING_LOANS', body.has_existing_loans ? 'Yes' : 'No'),
-      create_custom_field('GHL_CF_HAS_DEFAULTED_MCA', body.has_defaulted_mca ? 'Yes' : 'No'),
-      create_custom_field('GHL_CF_MCA_WAS_SATISFIED', body.mca_was_satisfied ? 'Yes' : 'No'),
-      create_custom_field('GHL_CF_OWNS_REAL_ESTATE', body.owns_real_estate ? 'Yes' : 'No'),
-      create_custom_field('GHL_CF_HAS_REDUCED_MCA_PAYMENTS', body.has_reduced_mca_payments ? 'Yes' : 'No'),
-      create_custom_field('GHL_CF_HAS_PERSONAL_DEBT_OVER_75K', body.has_personal_debt_over_75k ? 'Yes' : 'No'),
-      create_custom_field('GHL_CF_HAS_BANKRUPTCY_FORECLOSURE_3Y', body.has_bankruptcy_foreclosure_3y ? 'Yes' : 'No'),
-      create_custom_field('GHL_CF_HAS_TAX_LIENS', body.has_tax_liens ? 'Yes' : 'No'),
-      create_custom_field('GHL_CF_HAS_ACTIVE_JUDGEMENTS', body.has_active_judgements ? 'Yes' : 'No'),
-      create_custom_field('GHL_CF_HAS_ZBL', body.has_zbl ? 'Yes' : 'No'),
+      create_custom_field('GHL_CF_CREDIT_SCORE', body.credit_score, 'G8suhHNaeaujGmC0fvk8'),
+      create_custom_field('GHL_CF_HAS_EXISTING_LOANS', body.has_existing_loans ? 'Yes' : 'No', 'bhzqtlWJ5iNjaAGCRKX1'),
+      create_custom_field('GHL_CF_HAS_DEFAULTED_MCA', body.has_defaulted_mca ? 'Yes' : 'No', '9rJtNSsOsuFm74HQAU7T'),
+      create_custom_field('GHL_CF_MCA_WAS_SATISFIED', body.mca_was_satisfied ? 'Yes' : 'No', 'NpgVJVz3j3oNuRKHNV1l'),
+      create_custom_field('GHL_CF_OWNS_REAL_ESTATE', body.owns_real_estate ? 'Yes' : 'No', 'C9Inq1rXMjuUWtZd1jxH'),
+      create_custom_field('GHL_CF_HAS_REDUCED_MCA_PAYMENTS', body.has_reduced_mca_payments ? 'Yes' : 'No', 'Vg4frGmISs2DPCUOX2xj'),
+      create_custom_field('GHL_CF_HAS_PERSONAL_DEBT_OVER_75K', body.has_personal_debt_over_75k ? 'Yes' : 'No', 'p4FwJHQTezeVSHBXJgk7'),
+      create_custom_field('GHL_CF_HAS_BANKRUPTCY_FORECLOSURE_3Y', body.has_bankruptcy_foreclosure_3y ? 'Yes' : 'No', 'E89lUpkjbxAD0BX6C9w4'),
+      create_custom_field('GHL_CF_HAS_TAX_LIENS', body.has_tax_liens ? 'Yes' : 'No', 'qL8ZFm5dCNHTn5he8lXm'),
+      create_custom_field('GHL_CF_HAS_ACTIVE_JUDGEMENTS', body.has_active_judgements ? 'Yes' : 'No', 'uyP4EnoflSd4AcPEewq2'),
+      create_custom_field('GHL_CF_HAS_ZBL', body.has_zbl ? 'Yes' : 'No', 'MhPWorNSUnzm6z5u29sk'),
 
       // Timeline y Notas
-      create_custom_field('GHL_CF_FUNDING_ETA', body.funding_eta),
-      create_custom_field('GHL_CF_ADDITIONAL_NOTES', body.additional_notes),
+      create_custom_field('GHL_CF_FUNDING_ETA', map_ghl_value('funding_eta', body.funding_eta), '3NLSSMdhnCRbV8zggguo'),
+      create_custom_field('GHL_CF_ADDITIONAL_NOTES', body.additional_notes, 'FML6V2dctE8ffwvqOTrp'),
 
     ].filter(Boolean); // Eliminar campos null
 

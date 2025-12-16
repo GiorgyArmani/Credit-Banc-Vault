@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
+import { Send } from "lucide-react";
 
 /**
  * REQUIRED_DOCS: Array of document types that clients must upload
@@ -464,7 +465,38 @@ export default function Vault({ onChecklist }: { onChecklist?: (info: ChecklistI
   const [userId, setUserId] = useState<string | null>(null);
   const [documents, setDocuments] = useState<UserDocument[]>([]);
   const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [editDoc, setEditDoc] = useState<UserDocument | null>(null);
+  const [isSubmitted, setIsSubmitted] = useState(false);
+
+  /**
+   * handleSubmission: Submits the vault and tags the user in GHL
+   */
+  const handleSubmission = async () => {
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/vault/submit", {
+        method: "POST",
+      });
+      const data = await res.json();
+
+      if (!res.ok) throw new Error(data.error || "Failed to submit vault");
+
+      toast({
+        title: "Vault Submitted",
+        description: "Your documents have been submitted successfully.",
+      });
+      setIsSubmitted(true);
+    } catch (error: any) {
+      toast({
+        title: "Submission Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   /**
    * Initialize component: Get authenticated user and fetch their documents
@@ -725,6 +757,32 @@ export default function Vault({ onChecklist }: { onChecklist?: (info: ChecklistI
             </span>
           )}
         </div>
+
+        {allComplete && !isSubmitted && (
+          <div className="mt-6 flex justify-end">
+            <Button
+              onClick={handleSubmission}
+              disabled={submitting}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            >
+              {submitting ? (
+                <>Submitting...</>
+              ) : (
+                <>
+                  <Send className="w-4 h-4 mr-2" />
+                  Submit Vault
+                </>
+              )}
+            </Button>
+          </div>
+        )}
+
+        {isSubmitted && (
+          <div className="mt-4 p-4 bg-emerald-100 border border-emerald-200 rounded-lg flex items-center gap-2 text-emerald-800">
+            <CheckCircle2 className="h-5 w-5" />
+            <span className="font-medium">Vault Submitted Successfully!</span>
+          </div>
+        )}
       </div>
 
       {/* Document Cards Grid - Individual card for each required document type */}
