@@ -12,30 +12,47 @@ import {
 } from "@/components/ui/dialog";
 import { ArrowRight } from "lucide-react";
 import { DataVaultForm } from "@/components/onboarding/data-vault-form";
+import { ContractCheckStep } from "@/components/onboarding/contract-check-step"; // Import new component
 
 type OnboardingModalProps = {
   open: boolean;
   onClose?: () => void;
   dataVaultCompleted?: boolean;
+  contractCompleted?: boolean; // Add prop
 };
 
 export default function OnboardingModal({
   open,
   onClose,
   dataVaultCompleted = false,
+  contractCompleted = false, // Add default
 }: OnboardingModalProps) {
-  const [step, setStep] = useState<"form" | "video">("form");
+  const [step, setStep] = useState<"form" | "contract_check" | "video">("form");
 
-  // Skip to video step if data vault is already completed
+  // Determine initial step based on completion status
   useEffect(() => {
     if (dataVaultCompleted) {
-      setStep("video");
+      if (contractCompleted) {
+        setStep("video");
+      } else {
+        setStep("contract_check");
+      }
     } else {
       setStep("form");
     }
-  }, [dataVaultCompleted]);
+  }, [dataVaultCompleted, contractCompleted]);
 
   const handleFormComplete = () => {
+    // If contract is not done, go to check step
+    // (Assuming logically if they just finished form, they haven't signed yet)
+    if (!contractCompleted) {
+      setStep("contract_check");
+    } else {
+      setStep("video");
+    }
+  };
+
+  const handleContractComplete = () => {
     setStep("video");
   };
 
@@ -52,9 +69,10 @@ export default function OnboardingModal({
     onClose?.();
   };
 
-  // Prevent closing if on form step
+  // Prevent closing if we are on mandatory steps (form or contract check)
   const handleOpenChange = (v: boolean) => {
-    if (!v && step === "form") return; // Block closing on form step
+    // Block closing on mandatory steps
+    if (!v && (step === "form" || step === "contract_check")) return;
     if (!v && onClose) onClose();
   };
 
@@ -65,6 +83,12 @@ export default function OnboardingModal({
           <div className="p-6">
             {/* DataVaultForm handles its own header/title */}
             <DataVaultForm onComplete={handleFormComplete} />
+          </div>
+        )}
+
+        {step === "contract_check" && (
+          <div className="p-6">
+            <ContractCheckStep onComplete={handleContractComplete} />
           </div>
         )}
 
@@ -106,3 +130,4 @@ export default function OnboardingModal({
     </Dialog>
   );
 }
+

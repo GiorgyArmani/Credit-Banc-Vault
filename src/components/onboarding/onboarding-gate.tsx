@@ -6,7 +6,7 @@ import { useOnboardingStatus } from './use-onboarding-status'
 type OnboardingGateProps = { children: ReactNode }
 
 export default function OnboardingGate({ children }: OnboardingGateProps) {
-  const { needsOnboarding, dataVaultCompleted, loading } = useOnboardingStatus()
+  const { needsOnboarding, dataVaultCompleted, contractCompleted, loading } = useOnboardingStatus()
   const [open, setOpen] = useState(false)
 
   useEffect(() => {
@@ -32,6 +32,7 @@ export default function OnboardingGate({ children }: OnboardingGateProps) {
         open={open}
         onClose={() => setOpen(false)}
         dataVaultCompleted={dataVaultCompleted}
+        contractCompleted={contractCompleted}
       />
     </>
   )
