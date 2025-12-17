@@ -44,20 +44,7 @@ export function useOnboardingStatus() {
         return
       }
 
-      // Check business profile completion
-      const { data, error } = await supabase
-        .from("business_profiles")
-        .select("completion_level")
-        .eq("user_id", user.id)
-        .maybeSingle()
-
-      let profileIncomplete = false
-      if (error) {
-        console.warn("[onboarding] status error:", error)
-        profileIncomplete = true
-      } else {
-        profileIncomplete = !data || (data?.completion_level ?? 0) < 100
-      }
+      // (Removed business_profiles check)
 
       // Check if data vault has been submitted and contract is signed
       const { data: vaultData, error: vaultError } = await supabase
@@ -88,7 +75,7 @@ export function useOnboardingStatus() {
       // We should probably ensure it opens if vault or contract are missing too.
       // For now, let's keep the boolean simple: if any step is missing, we need onboarding.
 
-      setNeedsOnboarding(profileIncomplete || !isVaultDone || !isContractDone)
+      setNeedsOnboarding(!isVaultDone || !isContractDone)
 
     } finally {
       setLoading(false)

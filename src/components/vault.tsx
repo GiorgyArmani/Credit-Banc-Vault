@@ -515,8 +515,8 @@ export default function Vault({ onChecklist }: { onChecklist?: (info: ChecklistI
    * fetchDocuments: Retrieves all documents for the authenticated user
    * Maps database metadata to include tags array for easier manipulation
    */
-  const fetchDocuments = async (uid: string) => {
-    setLoading(true);
+  const fetchDocuments = async (uid: string, silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const { data, error } = await supabase
         .from("user_documents")
@@ -539,7 +539,7 @@ export default function Vault({ onChecklist }: { onChecklist?: (info: ChecklistI
         variant: "destructive"
       });
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -793,7 +793,7 @@ export default function Vault({ onChecklist }: { onChecklist?: (info: ChecklistI
             docType={docType}
             documents={documents}
             userId={userId || ""}
-            onUploadComplete={() => fetchDocuments(userId || "")}
+            onUploadComplete={() => fetchDocuments(userId || "", true)}
             onDelete={handleDelete}
             onEdit={setEditDoc}
             onToggleFavorite={toggleFavorite}
