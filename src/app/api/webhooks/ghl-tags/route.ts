@@ -20,25 +20,38 @@ export async function POST(request: Request) {
         const supabase = await createClient();
         const payload = await request.json();
 
-        // 1. Verify webhook secret (optional but recommended)
+        const { contactId, tags: rawTags, secret } = payload;
+
+        // 1. Verify webhook secret
         const webhookSecret = process.env.GHL_WEBHOOK_SECRET;
-        if (webhookSecret && payload.secret !== webhookSecret) {
+        if (webhookSecret && secret !== webhookSecret) {
+            console.error("Webhook Unauthorized: Secret mismatch", {
+                received: secret ? "PRESENT" : "MISSING",
+                expected: "CONFIGURED"
+            });
             return NextResponse.json(
                 { error: "Unauthorized" },
                 { status: 401 }
             );
         }
 
-        const { contactId, tags } = payload;
+        // 2. Normalize tags (GHL can send them as string or array)
+        let tags: string[] = [];
+        if (Array.isArray(rawTags)) {
+            tags = rawTags;
+        } else if (typeof rawTags === "string") {
+            tags = rawTags.split(",").map(t => t.trim());
+        }
 
-        if (!contactId || !Array.isArray(tags)) {
+        if (!contactId || tags.length === 0) {
+            console.error("Invalid Webhook Payload:", { contactId, tagsCount: tags.length });
             return NextResponse.json(
-                { error: "Invalid payload: contactId and tags array required" },
+                { error: "Invalid payload: contactId and tags required" },
                 { status: 400 }
             );
         }
 
-        // 2. Find user by ghl_contact_id in client_data_vault table
+        // 3. Find user by ghl_contact_id in client_data_vault table
         const { data: clientData, error: clientError } = await supabase
             .from("client_data_vault")
             .select("user_id")
