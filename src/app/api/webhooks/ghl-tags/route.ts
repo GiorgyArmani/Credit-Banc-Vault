@@ -18,7 +18,25 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: Request) {
     try {
         const supabase = await createClient();
-        const payload = await request.json();
+
+        // Handle different content types (GHL can send JSON or Form-UrlEncoded)
+        const contentType = request.headers.get("content-type") || "";
+        let payload: any;
+
+        if (contentType.includes("application/json")) {
+            payload = await request.json();
+        } else {
+            // Assume form-urlencoded or similar
+            const text = await request.text();
+            try {
+                // Try JSON first just in case
+                payload = JSON.parse(text);
+            } catch {
+                // Fallback to URL search params parsing
+                const params = new URLSearchParams(text);
+                payload = Object.fromEntries(params.entries());
+            }
+        }
 
         const { contactId, tags: rawTags, secret } = payload;
 
