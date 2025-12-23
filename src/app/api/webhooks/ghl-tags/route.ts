@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = 'force-dynamic';
 
@@ -8,16 +8,10 @@ export const dynamic = 'force-dynamic';
  * 
  * Receives notifications from GHL when contact tags change.
  * Syncs dynamic document requirements based on 'requested_*' tags.
- * 
- * Payload example:
- * {
- *   "contactId": "ghl_contact_123",
- *   "tags": ["requested_invoice_copies", "requested_lease_agreement", "vault_submitted"]
- * }
  */
 export async function POST(request: Request) {
     try {
-        const supabase = await createClient();
+        const supabase = createAdminClient();
 
         // Handle different content types (GHL can send JSON or Form-UrlEncoded)
         const contentType = request.headers.get("content-type") || "";
@@ -38,12 +32,19 @@ export async function POST(request: Request) {
             }
         }
 
-        const { contactId, tags: rawTags, secret } = payload;
+        let { contactId, tags: rawTags, secret } = payload;
 
-        // 1. Verify webhook secret
+        // 1. Sanitize contactId (Zapier/GHL sometimes wrap in quotes or add whitespace)
+        if (typeof contactId === "string") {
+            contactId = contactId.trim().replace(/^["']|["']$/g, "");
+        }
+
+        console.log(`🔍 Webhook search: contactId="${contactId}"`);
+
+        // 2. Verify webhook secret
         const webhookSecret = process.env.GHL_WEBHOOK_SECRET;
         if (webhookSecret && secret !== webhookSecret) {
-            console.error("Webhook Unauthorized: Secret mismatch", {
+            console.error("❌ Webhook Unauthorized: Secret mismatch", {
                 received: secret ? "PRESENT" : "MISSING",
                 expected: "CONFIGURED"
             });
@@ -53,7 +54,7 @@ export async function POST(request: Request) {
             );
         }
 
-        // 2. Normalize tags (GHL can send them as string or array)
+        // 3. Normalize tags (GHL can send them as string or array)
         let tags: string[] = [];
         if (Array.isArray(rawTags)) {
             tags = rawTags;
@@ -62,14 +63,14 @@ export async function POST(request: Request) {
         }
 
         if (!contactId || tags.length === 0) {
-            console.error("Invalid Webhook Payload:", { contactId, tagsCount: tags.length });
+            console.error("❌ Invalid Webhook Payload:", { contactId, tagsCount: tags.length });
             return NextResponse.json(
                 { error: "Invalid payload: contactId and tags required" },
                 { status: 400 }
             );
         }
 
-        // 3. Find user by ghl_contact_id in client_data_vault table
+        // 4. Find user by ghl_contact_id in client_data_vault table
         const { data: clientData, error: clientError } = await supabase
             .from("client_data_vault")
             .select("user_id")
@@ -77,9 +78,9 @@ export async function POST(request: Request) {
             .single();
 
         if (clientError || !clientData) {
-            console.warn(`No user found for GHL contact ID: ${contactId}`);
+            console.warn(`⚠️ No user found for GHL contact ID: "${contactId}"`);
             return NextResponse.json(
-                { error: "User not found" },
+                { error: `User not found for ID: ${contactId}` },
                 { status: 404 }
             );
         }
