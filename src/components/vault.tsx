@@ -15,15 +15,16 @@ import { Progress } from "@/components/ui/progress";
 import { Send } from "lucide-react";
 
 /**
- * REQUIRED_DOCS: Array of document types that clients must upload
- * Each document type will have its own card with upload functionality
+ * REQUIRED_DOCS: Core 9 documents that ALL clients must upload
+ * These are always required regardless of GHL tags
  */
 const REQUIRED_DOCS = [
   {
     code: "business_bank_statements",
     label: "Bank Statements (last 6 months)",
     multiple: true,
-    maxFiles: 12
+    maxFiles: 12,
+    isCore: true
   },
   {
     code: "drivers_license",
@@ -31,36 +32,57 @@ const REQUIRED_DOCS = [
     multiple: true,
     minFiles: 2,
     maxFiles: 2,
-    legacyCodes: ["drivers_license_front", "drivers_license_back"]
+    legacyCodes: ["drivers_license_front", "drivers_license_back"],
+    isCore: true
   },
   {
     code: "voided_check", label: "Voided Business Check",
     multiple: true,
-    maxFiles: 12
+    maxFiles: 12,
+    isCore: true
   },
   {
     code: "balance_sheets", label: "Balance Sheets",
     multiple: true,
-    maxFiles: 12
+    maxFiles: 12,
+    isCore: true
   },
   {
     code: "profit_loss", label: "Profit & Loss",
     multiple: true,
-    maxFiles: 12
+    maxFiles: 12,
+    isCore: true
   },
   {
     code: "tax_returns", label: "Tax Returns",
     multiple: true,
-    maxFiles: 12
+    maxFiles: 12,
+    isCore: true
   },
-  { code: "funding_application", label: "Funding Application" },
-  { code: "ar_report", label: "A/R Report" },
+  { code: "funding_application", label: "Funding Application", isCore: true },
+  { code: "ar_report", label: "A/R Report", isCore: true },
   {
     code: "debt_schedule", label: "Debt Schedule",
     multiple: true,
-    maxFiles: 12
+    maxFiles: 12,
+    isCore: true
   },
 ] as const;
+
+/**
+ * DocumentType: Interface for both core and dynamic documents
+ */
+interface DocumentType {
+  code: string;
+  label: string;
+  multiple?: boolean;
+  minFiles?: number;
+  maxFiles?: number;
+  legacyCodes?: readonly string[];
+  isCore?: boolean;
+  ghlTag?: string;
+}
+
 type RequiredCode = typeof REQUIRED_DOCS[number]["code"];
 
 /**
@@ -88,7 +110,7 @@ type ChecklistInfo = { progress: number; complete: boolean };
  * Handles file selection, upload, and display of uploaded files for a specific document type
  */
 interface DocumentCardProps {
-  docType: typeof REQUIRED_DOCS[number];
+  docType: DocumentType;
   documents: UserDocument[];
   userId: string;
   onUploadComplete: () => void;
@@ -229,6 +251,19 @@ function DocumentCard({
             });
           } catch (apiError) {
             console.error("API notification failed:", apiError);
+          }
+
+          // Add submitted tag to GHL for dynamic documents
+          if (!docType.isCore) {
+            try {
+              await fetch("/api/vault/mark-submitted", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ doc_code: docType.code }),
+              });
+            } catch (ghlError) {
+              console.error("Failed to update GHL tag:", ghlError);
+            }
           }
 
           successCount++;
@@ -469,6 +504,10 @@ export default function Vault({ onChecklist }: { onChecklist?: (info: ChecklistI
   const [editDoc, setEditDoc] = useState<UserDocument | null>(null);
   const [isSubmitted, setIsSubmitted] = useState(false);
 
+  // Dynamic documents state
+  const [dynamicDocs, setDynamicDocs] = useState<DocumentType[]>([]);
+  const [loadingDynamic, setLoadingDynamic] = useState(true);
+
   /**
    * handleSubmission: Submits the vault and tags the user in GHL
    */
@@ -507,9 +546,47 @@ export default function Vault({ onChecklist }: { onChecklist?: (info: ChecklistI
       if (!user) return;
       setUserId(user.id);
       await fetchDocuments(user.id);
+      await fetchDynamicRequirements();
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /**
+   * fetchDynamicRequirements: Fetches dynamic documents from API
+   * These are in addition to the core 9 documents
+   */
+  const fetchDynamicRequirements = async () => {
+    try {
+      const res = await fetch('/api/vault/requirements');
+      if (!res.ok) throw new Error('Failed to fetch requirements');
+
+      const data = await res.json();
+
+      // Filter to only dynamic documents (API returns core + dynamic)
+      const onlyDynamic = (data.requirements || []).filter(
+        (doc: any) => !doc.isCore
+      ).map((doc: any) => ({
+        code: doc.code,
+        label: doc.label,
+        multiple: doc.multiple,
+        minFiles: doc.minFiles,
+        maxFiles: doc.maxFiles,
+        isCore: false,
+        ghlTag: doc.ghlTag,
+      }));
+
+      setDynamicDocs(onlyDynamic);
+    } catch (error: any) {
+      console.error('Failed to load dynamic documents:', error);
+      toast({
+        title: "Warning",
+        description: "Could not load dynamic documents. Showing core documents only.",
+        variant: "default"
+      });
+    } finally {
+      setLoadingDynamic(false);
+    }
+  };
 
   /**
    * fetchDocuments: Retrieves all documents for the authenticated user
@@ -678,11 +755,18 @@ export default function Vault({ onChecklist }: { onChecklist?: (info: ChecklistI
   }, [documents]);
 
   /**
-   * checklist: Array showing status of each required document
+   * allRequiredDocs: Merge core 9 documents with dynamic documents
+   */
+  const allRequiredDocs = useMemo(() => {
+    return [...REQUIRED_DOCS, ...dynamicDocs] as DocumentType[];
+  }, [dynamicDocs]);
+
+  /**
+   * checklist: Array showing status of each required document (core + dynamic)
    * Includes count of uploaded files for each document type
    */
   const checklist = useMemo(() => {
-    return REQUIRED_DOCS.map((r) => {
+    return allRequiredDocs.map((r) => {
       // @ts-ignore
       const legacyCount = r.legacyCodes?.reduce((acc, code) => acc + (uploadedByCode.get(code) || 0), 0) || 0;
       const count = (uploadedByCode.get(r.code) || 0) + legacyCount;
@@ -695,11 +779,12 @@ export default function Vault({ onChecklist }: { onChecklist?: (info: ChecklistI
         has: count >= minRequired,
       };
     });
-  }, [uploadedByCode]);
+  }, [allRequiredDocs, uploadedByCode]);
 
   /**
    * progressPct: Percentage of required documents that have been uploaded
    * Used for progress bar and dashboard notifications
+   * Note: Only counts core 9 documents for progress (dynamic docs are optional)
    */
   const progressPct = useMemo(() => {
     const total = REQUIRED_DOCS.length;
@@ -785,21 +870,27 @@ export default function Vault({ onChecklist }: { onChecklist?: (info: ChecklistI
         )}
       </div>
 
-      {/* Document Cards Grid - Individual card for each required document type */}
+      {/* Document Cards Grid - Core 9 + Dynamic documents */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {REQUIRED_DOCS.map((docType) => (
-          <DocumentCard
-            key={docType.code}
-            docType={docType}
-            documents={documents}
-            userId={userId || ""}
-            onUploadComplete={() => fetchDocuments(userId || "", true)}
-            onDelete={handleDelete}
-            onEdit={setEditDoc}
-            onToggleFavorite={toggleFavorite}
-            onDownload={handleDownload}
-          />
-        ))}
+        {loadingDynamic ? (
+          <div className="col-span-2 text-center py-8">
+            <p className="text-gray-500">Loading document requirements...</p>
+          </div>
+        ) : (
+          allRequiredDocs.map((docType) => (
+            <DocumentCard
+              key={docType.code}
+              docType={docType}
+              documents={documents}
+              userId={userId || ""}
+              onUploadComplete={() => fetchDocuments(userId || "", true)}
+              onDelete={handleDelete}
+              onEdit={setEditDoc}
+              onToggleFavorite={toggleFavorite}
+              onDownload={handleDownload}
+            />
+          ))
+        )}
       </div>
 
       {/* Edit Document Modal - Allows editing of document metadata and tags */}

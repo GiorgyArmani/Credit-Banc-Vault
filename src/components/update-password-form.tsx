@@ -59,9 +59,9 @@ export function UpdatePasswordForm({
       }
 
       // Verify we have a valid session
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: { user } } = await supabase.auth.getUser();
 
-      if (!session) {
+      if (!user) {
         setError('No active session found. Please request a new password reset link.');
       } else {
         console.log('✅ Valid session found for password reset');
