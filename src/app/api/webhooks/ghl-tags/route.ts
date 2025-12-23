@@ -80,47 +80,14 @@ export async function POST(request: Request) {
 
         for (const tag of requestedTags) {
             // Look up document in required_documents by ghl_tag
-            let { data: docData, error: docError } = await supabase
+            const { data: docData, error: docError } = await supabase
                 .from("required_documents")
                 .select("id")
                 .eq("ghl_tag", tag)
                 .eq("is_core", false) // Only dynamic documents
                 .maybeSingle();
 
-            // If document type doesn't exist, create it on the fly!
-            if (!docData) {
-                console.log(`Creating new document type for tag: ${tag}`);
-
-                // Extract code from tag (requested_invoice_copies -> invoice_copies)
-                const code = tag.replace("requested_", "");
-
-                // Generate a pretty label (invoice_copies -> Invoice Copies)
-                const label = code
-                    .split("_")
-                    .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1))
-                    .join(" ");
-
-                const { data: newDoc, error: createError } = await supabase
-                    .from("required_documents")
-                    .insert({
-                        code: code,
-                        label: label,
-                        ghl_tag: tag,
-                        is_core: false,
-                        is_multiple: true, // Default to multiple for safety
-                        min_files: 1,
-                        max_files: 10,
-                    })
-                    .select("id")
-                    .single();
-
-                if (createError) {
-                    console.error(`Error creating new document type for ${tag}:`, createError.message);
-                    continue;
-                }
-                docData = newDoc;
-            }
-
+            // Only process if document type exists in our database
             if (docData) {
                 documentIds.push(docData.id);
 
@@ -143,6 +110,8 @@ export async function POST(request: Request) {
                 if (insertError) {
                     console.error(`Error inserting dynamic document: ${insertError.message}`);
                 }
+            } else {
+                console.warn(`Tag ignored: ${tag} does not exist in required_documents table.`);
             }
         }
 
