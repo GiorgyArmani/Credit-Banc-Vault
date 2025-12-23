@@ -552,37 +552,51 @@ export default function Vault({ onChecklist }: { onChecklist?: (info: ChecklistI
   }, []);
 
   /**
-   * fetchDynamicRequirements: Fetches dynamic documents from API
-   * These are in addition to the core 9 documents
+   * fetchDynamicRequirements: Fetches ALL document requirements from API
+   * This includes both core documents and dynamic documents requested via GHL tags
    */
   const fetchDynamicRequirements = async () => {
     try {
+      console.log('🔄 Fetching dynamic document requirements...');
       const res = await fetch('/api/vault/requirements');
       if (!res.ok) throw new Error('Failed to fetch requirements');
 
       const data = await res.json();
+      console.log('📥 Received requirements data:', {
+        coreCount: data.coreCount,
+        dynamicCount: data.dynamicCount,
+        totalRequirements: data.requirements?.length,
+        requirements: data.requirements
+      });
 
-      // Filter to only dynamic documents (API returns core + dynamic)
-      const onlyDynamic = (data.requirements || []).filter(
-        (doc: any) => !doc.isCore
-      ).map((doc: any) => ({
+      // Use ALL requirements from API (both core and dynamic)
+      const allDocs = (data.requirements || []).map((doc: any) => ({
         code: doc.code,
         label: doc.label,
         multiple: doc.multiple,
         minFiles: doc.minFiles,
         maxFiles: doc.maxFiles,
-        isCore: false,
+        isCore: doc.isCore,
         ghlTag: doc.ghlTag,
       }));
 
-      setDynamicDocs(onlyDynamic);
+      console.log('✅ Using API requirements:', {
+        count: allDocs.length,
+        coreCount: allDocs.filter((d: any) => d.isCore).length,
+        dynamicCount: allDocs.filter((d: any) => !d.isCore).length,
+        documents: allDocs.map((d: any) => ({ code: d.code, label: d.label, isCore: d.isCore }))
+      });
+
+      setDynamicDocs(allDocs);
     } catch (error: any) {
-      console.error('Failed to load dynamic documents:', error);
+      console.error('❌ Failed to load dynamic documents:', error);
       toast({
         title: "Warning",
-        description: "Could not load dynamic documents. Showing core documents only.",
+        description: "Could not load document requirements. Please refresh the page.",
         variant: "default"
       });
+      // Set empty array on error instead of using hardcoded fallback
+      setDynamicDocs([]);
     } finally {
       setLoadingDynamic(false);
     }
@@ -755,10 +769,11 @@ export default function Vault({ onChecklist }: { onChecklist?: (info: ChecklistI
   }, [documents]);
 
   /**
-   * allRequiredDocs: Merge core 9 documents with dynamic documents
+   * allRequiredDocs: All documents from API (core + dynamic)
+   * Previously merged hardcoded REQUIRED_DOCS with API data, now uses only API
    */
   const allRequiredDocs = useMemo(() => {
-    return [...REQUIRED_DOCS, ...dynamicDocs] as DocumentType[];
+    return dynamicDocs as DocumentType[];
   }, [dynamicDocs]);
 
   /**
@@ -784,13 +799,13 @@ export default function Vault({ onChecklist }: { onChecklist?: (info: ChecklistI
   /**
    * progressPct: Percentage of required documents that have been uploaded
    * Used for progress bar and dashboard notifications
-   * Note: Only counts core 9 documents for progress (dynamic docs are optional)
+   * Includes both core documents and dynamic documents requested via GHL tags
    */
   const progressPct = useMemo(() => {
-    const total = REQUIRED_DOCS.length;
+    const total = allRequiredDocs.length;
     const have = checklist.filter((c) => c.has).length;
-    return Math.round((have / total) * 100);
-  }, [checklist]);
+    return total > 0 ? Math.round((have / total) * 100) : 0;
+  }, [checklist, allRequiredDocs]);
 
   const allComplete = checklist.every((c) => c.has);
 
@@ -833,7 +848,7 @@ export default function Vault({ onChecklist }: { onChecklist?: (info: ChecklistI
         <Progress value={progressPct} className="h-3" />
         <div className="mt-4 flex items-center justify-between text-sm">
           <span className="text-gray-600">
-            {checklist.filter(c => c.has).length} of {REQUIRED_DOCS.length} documents uploaded
+            {checklist.filter(c => c.has).length} of {allRequiredDocs.length} documents uploaded
           </span>
           {allComplete && (
             <span className="flex items-center gap-2 text-emerald-600 font-medium">

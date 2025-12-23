@@ -43,5 +43,6 @@ yarn-error.log*
 next-env.d.ts
 
 /private-data
-DB_FIXES.SQL
-DBLAYOUT.SQL
+
+# sql
+*.sql

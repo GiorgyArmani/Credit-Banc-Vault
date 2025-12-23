@@ -101,17 +101,23 @@ export async function POST(request: Request) {
             // Look up document in required_documents by ghl_tag
             const { data: docData, error: docError } = await supabase
                 .from("required_documents")
-                .select("id")
+                .select("id, code, label, ghl_tag")
                 .eq("ghl_tag", tag)
                 .eq("is_core", false) // Only dynamic documents
                 .maybeSingle();
+
+            console.log(`🔍 Tag lookup: "${tag}"`, {
+                found: !!docData,
+                docData: docData ? { id: docData.id, code: docData.code, label: docData.label } : null,
+                error: docError?.message
+            });
 
             // Only process if document type exists in our database
             if (docData) {
                 documentIds.push(docData.id);
 
                 // Insert into client_dynamic_documents (upsert to avoid duplicates)
-                const { error: insertError } = await supabase
+                const { data: insertedData, error: insertError } = await supabase
                     .from("client_dynamic_documents")
                     .upsert(
                         {
@@ -124,13 +130,22 @@ export async function POST(request: Request) {
                             onConflict: "user_id,document_id",
                             ignoreDuplicates: false,
                         }
-                    );
+                    )
+                    .select("*");
 
                 if (insertError) {
-                    console.error(`Error inserting dynamic document: ${insertError.message}`);
+                    console.error(`❌ Error inserting dynamic document for tag "${tag}":`, insertError.message);
+                } else {
+                    console.log(`✅ Successfully inserted/updated dynamic document:`, {
+                        tag,
+                        documentCode: docData.code,
+                        documentLabel: docData.label,
+                        userId,
+                        insertedData
+                    });
                 }
             } else {
-                console.warn(`Tag ignored: ${tag} does not exist in required_documents table.`);
+                console.warn(`⚠️ Tag ignored: "${tag}" does not exist in required_documents table or is not a dynamic document (is_core=false).`);
             }
         }
 

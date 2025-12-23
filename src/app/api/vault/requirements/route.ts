@@ -29,7 +29,14 @@ export async function GET() {
             .eq("is_core", true)
             .order("code");
 
+        console.log(`🔍 Core documents query for user ${user.id}:`, {
+            found: coreDocsData?.length || 0,
+            error: coreError?.message,
+            data: coreDocsData?.map(d => ({ code: d.code, label: d.label, is_core: d.is_core }))
+        });
+
         if (coreError) {
+            console.error(`❌ Error querying core documents:`, coreError);
             throw coreError;
         }
 
@@ -54,7 +61,14 @@ export async function GET() {
             .eq("user_id", user.id)
             .eq("is_active", true);
 
+        console.log(`🔍 Dynamic documents query for user ${user.id}:`, {
+            found: dynamicDocsData?.length || 0,
+            error: dynamicError?.message,
+            rawData: dynamicDocsData
+        });
+
         if (dynamicError) {
+            console.error(`❌ Error querying dynamic documents:`, dynamicError);
             throw dynamicError;
         }
 
@@ -75,6 +89,13 @@ export async function GET() {
             ghlTag: doc.ghl_tag,
             isCore: doc.is_core,
         }));
+
+        console.log(`📋 Vault requirements for user ${user.id}:`, {
+            coreCount: coreDocs.length,
+            dynamicCount: dynamicDocs.length,
+            dynamicDocs: dynamicDocs.map(d => ({ code: d.code, label: d.label, ghlTag: d.ghl_tag })),
+            totalRequirements: allRequirements.length
+        });
 
         return NextResponse.json({
             requirements: allRequirements,
