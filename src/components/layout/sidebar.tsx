@@ -16,6 +16,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
 } from 'lucide-react'
+import { useOnboardingStatus } from '@/components/onboarding/use-onboarding-status'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -33,6 +34,7 @@ export function Sidebar({
   collapsed = false,
   onToggleCollapsed,
 }: SidebarProps) {
+  const { clientName } = useOnboardingStatus()
   const pathname = usePathname()
   const supabase = createClient()
   const [userEmail, setUserEmail] = useState<string | null>(null)
@@ -52,6 +54,7 @@ export function Sidebar({
 
   const navItems = [
     { label: 'CB Vault', href: '/dashboard', icon: BookMarked },
+    { label: 'Templates', href: '/dashboard?tab=templates', icon: FileSearch },
     // { label: 'AI Chat', href: '/dashboard/chat', icon: MessageSquare },
     //{ label: 'Credit Report Assistant', href: '/dashboard/credit-report-assistant', icon: FileSearch },
     //{ label: 'Book Consultation', href: '/dashboard/book-consultation', icon: Calendar },
@@ -66,9 +69,8 @@ export function Sidebar({
     <>
       {/* Overlay (mobile) */}
       <div
-        className={`fixed inset-0 z-40 bg-black/40 transition-opacity md:hidden ${
-          mobileOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
-        }`}
+        className={`fixed inset-0 z-40 bg-black/40 transition-opacity md:hidden ${mobileOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
+          }`}
         onClick={onMobileClose}
       />
 
@@ -89,8 +91,8 @@ export function Sidebar({
         <div className="sticky top-0 bg-white">
           <div className="flex items-center justify-between px-4 py-3 md:justify-center border-b">
             {/* En desktop colapsado: ocultar branding totalmente */}
-           <div className={collapsed ? 'hidden' : 'block'}>
-              <img src="vaultlogo.svg" alt="Logo" className="h-60 w-100 mb-1" />
+            <div className={collapsed ? 'hidden' : 'block'}>
+              <img src="vaultlogo.svg" alt="Logo" className="h-auto w-40 mb-1" />
               <p className="text-sm text-gray-500">Business Document Hub</p>
             </div>
             <button
@@ -137,7 +139,7 @@ export function Sidebar({
               <User className="h-5 w-5 text-emerald-600" />
             </div>
             <div className="min-w-0">
-              <p className="font-medium text-gray-800 truncate">{userEmail?.split('@')[0] || 'User'}</p>
+              <p className="font-medium text-gray-800 truncate">{clientName || userEmail?.split('@')[0] || 'User'}</p>
               <Badge className="bg-green-100 text-green-800 text-xs">Free Plan</Badge>
             </div>
           </div>

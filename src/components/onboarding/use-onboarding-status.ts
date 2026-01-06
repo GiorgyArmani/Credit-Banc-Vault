@@ -7,6 +7,7 @@ export function useOnboardingStatus() {
   const [needsOnboarding, setNeedsOnboarding] = useState(false)
   const [dataVaultCompleted, setDataVaultCompleted] = useState(false)
   const [contractCompleted, setContractCompleted] = useState(false)
+  const [clientName, setClientName] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null)
   const timeoutRef = useRef<number | null>(null)
@@ -24,35 +25,50 @@ export function useOnboardingStatus() {
         return
       }
 
-      // Check user role - skip onboarding for advisors
-      const { data: userData, error: userError } = await supabase
-        .from("users")
-        .select("role")
-        .eq("id", user.id)
-        .maybeSingle()
+      // Check user role and vault status in parallel
+      const [userResult, vaultResult] = await Promise.all([
+        supabase
+          .from("users")
+          .select("role")
+          .eq("id", user.id)
+          .maybeSingle(),
+        supabase
+          .from("client_data_vault")
+          .select("data_vault_submitted_at, contract_completed, client_name")
+          .eq("user_id", user.id)
+          .maybeSingle()
+      ])
+
+      const { data: userData, error: userError } = userResult
+      const { data: vaultData, error: vaultError } = vaultResult
 
       if (userError) {
         console.warn("[onboarding] error fetching user role:", userError)
       }
 
+      // ALWAYS set the client name if we got data, regardless of onboarding status
+      setClientName(vaultData?.client_name || null)
+
       // If user is an advisor, skip onboarding entirely
       if (userData?.role === "advisor" || userData?.role === "underwriting") {
         setNeedsOnboarding(false)
-        setDataVaultCompleted(true) // Mark as completed to prevent any checks
+        setDataVaultCompleted(true)
         setContractCompleted(true)
         setLoading(false)
         return
       }
 
-      // (Removed business_profiles check)
+      // 0. Check Auth Metadata first (Fast path)
+      const isMetadataComplete = user.user_metadata?.onboarding_complete === true
+      if (isMetadataComplete) {
+        setNeedsOnboarding(false)
+        setDataVaultCompleted(true)
+        setContractCompleted(true)
+        setLoading(false)
+        return
+      }
 
-      // Check if data vault has been submitted and contract is signed
-      const { data: vaultData, error: vaultError } = await supabase
-        .from("client_data_vault")
-        .select("data_vault_submitted_at, contract_completed")
-        .eq("user_id", user.id)
-        .maybeSingle()
-
+      // Check vault status
       let isVaultDone = false
       let isContractDone = false
 
@@ -75,7 +91,9 @@ export function useOnboardingStatus() {
       // We should probably ensure it opens if vault or contract are missing too.
       // For now, let's keep the boolean simple: if any step is missing, we need onboarding.
 
-      setNeedsOnboarding(!isVaultDone || !isContractDone)
+      // Needs onboarding if Vault is not done.
+      // Ignoring isContractDone because user removed signature requirements.
+      setNeedsOnboarding(!isVaultDone)
 
     } finally {
       setLoading(false)
@@ -115,20 +133,9 @@ export function useOnboardingStatus() {
     }
   }, [refetch])
 
-  // SAFETY TIMEOUT: if we still loading after 3s but user is likely logged in, open anyway
-  useEffect(() => {
-    if (loading && timeoutRef.current == null) {
-      timeoutRef.current = window.setTimeout(() => {
-        // only force if we’re still loading (e.g., slow RLS or network)
-        setNeedsOnboarding(true)
-        setLoading(false)
-      }, 3000)
-    }
-    return () => {
-      if (timeoutRef.current) window.clearTimeout(timeoutRef.current)
-      timeoutRef.current = null
-    }
-  }, [loading])
+  // SAFETY TIMEOUT removed because it was causing "fail-active" behavior on slow networks
+  // We trust the refetch() and auth listeners to handle state correctly.
 
-  return { needsOnboarding, dataVaultCompleted, contractCompleted, loading, refetch }
+
+  return { needsOnboarding, dataVaultCompleted, contractCompleted, clientName, loading, refetch }
 }

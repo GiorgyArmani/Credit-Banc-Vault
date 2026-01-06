@@ -20,15 +20,15 @@ export function DataVaultForm({ onComplete }: DataVaultFormProps) {
         ein: "",
         ssn: "",
         industry: "",
-        applicant1Signature: "",
-        coApplicantSignature: "",
+        homeAddress: "",
+        businessAddress: "",
     })
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
 
-        if (!formData.ein || !formData.ssn || !formData.industry || !formData.applicant1Signature || !formData.coApplicantSignature) {
-            toast.error("Please fill in all required fields and provide both signatures.")
+        if (!formData.ein || !formData.ssn || !formData.industry || !formData.homeAddress || !formData.businessAddress) {
+            toast.error("Please fill in all required fields.")
             return
         }
 
@@ -107,21 +107,25 @@ export function DataVaultForm({ onComplete }: DataVaultFormProps) {
                     </div>
 
                     <div className="space-y-2">
-                        <Label>Applicant 1 Signature <span className="text-red-500">*</span></Label>
-                        <SignaturePad
-                            onChange={(base64) => setFormData(prev => ({ ...prev, applicant1Signature: base64 || "" }))}
-                            className="w-full"
+                        <Label htmlFor="homeAddress">Home Address <span className="text-red-500">*</span></Label>
+                        <Input
+                            id="homeAddress"
+                            placeholder="Full Home Address"
+                            value={formData.homeAddress}
+                            onChange={(e) => setFormData(prev => ({ ...prev, homeAddress: e.target.value }))}
+                            required
                         />
-                        <p className="text-xs text-muted-foreground">Sign above using your mouse or finger.</p>
                     </div>
 
                     <div className="space-y-2">
-                        <Label>Co-applicant Signature <span className="text-red-500">*</span></Label>
-                        <SignaturePad
-                            onChange={(base64) => setFormData(prev => ({ ...prev, coApplicantSignature: base64 || "" }))}
-                            className="w-full"
+                        <Label htmlFor="businessAddress">Business Address <span className="text-red-500">*</span></Label>
+                        <Input
+                            id="businessAddress"
+                            placeholder="Full Business Address"
+                            value={formData.businessAddress}
+                            onChange={(e) => setFormData(prev => ({ ...prev, businessAddress: e.target.value }))}
+                            required
                         />
-                        <p className="text-xs text-muted-foreground">Sign above using your mouse or finger.</p>
                     </div>
 
                     <Button type="submit" className="w-full" disabled={loading}>

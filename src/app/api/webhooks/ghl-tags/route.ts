@@ -62,6 +62,9 @@ export async function POST(request: Request) {
             tags = rawTags.split(",").map(t => t.trim());
         }
 
+        // Normalize tags to lowercase for consistent matching
+        tags = tags.map(t => t.toLowerCase());
+
         if (!contactId || tags.length === 0) {
             console.error("❌ Invalid Webhook Payload:", { contactId, tagsCount: tags.length });
             return NextResponse.json(
@@ -93,6 +96,8 @@ export async function POST(request: Request) {
         );
 
         console.log(`Processing ${requestedTags.length} requested tags for user ${userId}`);
+        console.log(`📋 All incoming tags:`, tags);
+        console.log(`📋 Filtered requested_ tags:`, requestedTags);
 
         // 4. For each requested tag, look up document and insert into client_dynamic_documents
         const documentIds: string[] = [];

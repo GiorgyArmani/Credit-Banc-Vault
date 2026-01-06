@@ -137,6 +137,24 @@ export function ContractCheckStep({ onComplete }: ContractCheckStepProps) {
                     )}
                 </Button>
             </div>
+            {process.env.NODE_ENV === "development" && (
+                <div className="mt-8 pt-8 border-t">
+                    <p className="text-xs text-muted-foreground mb-2">Development Mode Only</p>
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={async () => {
+                            setChecking(true);
+                            await fetch("/api/onboarding/bypass-contract", { method: "POST" });
+                            await checkStatus(false);
+                            setChecking(false);
+                        }}
+                        className="text-amber-600 hover:text-amber-700 hover:bg-amber-50"
+                    >
+                        Simulate Signature (Bypass)
+                    </Button>
+                </div>
+            )}
         </div>
     );
 }

@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
+import { PremiumLoader } from "./ui/premium-loader";
 import { Send } from "lucide-react";
 
 /**
@@ -817,12 +818,8 @@ export default function Vault({ onChecklist }: { onChecklist?: (info: ChecklistI
     onChecklist?.({ progress: progressPct, complete: allComplete });
   }, [progressPct, allComplete, onChecklist]);
 
-  if (loading) {
-    return (
-      <div className="w-full py-12 text-center">
-        <p className="text-gray-500">Loading your document vault...</p>
-      </div>
-    );
+  if (loading || loadingDynamic) {
+    return <PremiumLoader message="Syncing your document vault..." fullScreen={false} />;
   }
 
   return (
