@@ -53,7 +53,7 @@ export function PremiumLoader({ message = "Loading your secure vault...", fullSc
                     <p className="text-sm font-semibold tracking-widest text-emerald-600 uppercase mb-3">{message}</p>
 
                     {/* Charging progress bar */}
-                    <div className="w-48 h-1 bg-emerald-100 rounded-full overflow-hidden relative">
+                    <div className="w-48 h-1 bg-emerald-100 rounded-full overflow-hidden relative mx-auto">
                         <motion.div
                             initial={{ left: "-100%" }}
                             animate={{ left: "100%" }}
