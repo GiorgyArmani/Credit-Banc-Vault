@@ -14,7 +14,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, useRef } from "react";
+import { Camera, User, Pencil } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 export function AdvisorSignUpForm({
   className,
@@ -30,8 +32,33 @@ export function AdvisorSignUpForm({
   const [repeatPassword, setRepeatPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const router = useRouter();
+
+  /**
+   * Handles file selection and preview generation
+   */
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    setProfilePic(file);
+
+    if (file) {
+      const url = URL.createObjectURL(file);
+      setPreviewUrl(url);
+    } else {
+      setPreviewUrl(null);
+    }
+  };
+
+  /**
+   * Triggers the hidden file input
+   */
+  const triggerUpload = () => {
+    fileInputRef.current?.click();
+  };
 
   /**
    * Handles the advisor signup process
@@ -186,20 +213,51 @@ export function AdvisorSignUpForm({
                 />
               </div>
 
-              {/* Profile Picture Input */}
-              <div className="grid gap-2">
-                <Label htmlFor="profile-pic">Profile Picture (Optional)</Label>
+              {/* Profile Picture Upload Space */}
+              <div className="flex flex-col items-center gap-4 py-4">
+                <Label className="text-center font-medium">Profile Picture</Label>
+                <div
+                  onClick={triggerUpload}
+                  className="group relative cursor-pointer outline-none transition-all hover:scale-105 active:scale-95"
+                >
+                  <Avatar className="h-32 w-32 border-4 border-muted shadow-xl transition-colors group-hover:border-primary/50">
+                    <AvatarImage src={previewUrl || undefined} className="object-cover" />
+                    <AvatarFallback className="bg-muted text-muted-foreground">
+                      <User className="h-16 w-16" />
+                    </AvatarFallback>
+                  </Avatar>
+
+                  {/* Overlay Icon */}
+                  <div className="absolute inset-0 flex items-center justify-center rounded-full bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
+                    {previewUrl ? (
+                      <Pencil className="h-8 w-8 text-white" />
+                    ) : (
+                      <Camera className="h-8 w-8 text-white" />
+                    )}
+                  </div>
+
+                  {/* Plus Badge if empty */}
+                  {!previewUrl && (
+                    <div className="absolute bottom-1 right-1 flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg">
+                      <Camera className="h-4 h-4" />
+                    </div>
+                  )}
+                </div>
+
+                <p className="text-xs text-muted-foreground text-center">
+                  Click to upload a professional profile picture.<br />
+                  JPG, PNG or WEBP. Max 2MB.
+                </p>
+
+                {/* Hidden File Input */}
                 <Input
+                  ref={fileInputRef}
                   id="profile-pic"
                   type="file"
                   accept="image/*"
-                  onChange={(e) => setProfilePic(e.target.files?.[0] || null)}
+                  onChange={handleFileChange}
+                  className="hidden"
                 />
-                {profilePic && (
-                  <p className="text-sm text-muted-foreground">
-                    Selected: {profilePic.name}
-                  </p>
-                )}
               </div>
 
               {/* Password Input */}
