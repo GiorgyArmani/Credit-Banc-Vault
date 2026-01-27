@@ -105,16 +105,13 @@ export async function POST(request: Request) {
 
             console.log(`✅ Successfully synced Step 1 data and added tag to GHL for contact ${ghlContactId}`);
 
-            // 6. Update User Metadata
+            // 6. User Metadata update removed - we only mark complete after contract is signed
+            /*
             const { error: updateError } = await supabase.auth.updateUser({
                 data: { onboarding_complete: true }
             });
-
-            if (updateError) {
-                console.error('❌ Error updating user metadata:', updateError);
-            } else {
-                console.log('✅ User metadata updated: onboarding_complete = true');
-            }
+            */
+            console.log('✅ Step 1 complete - waiting for contract signature');
 
         } catch (ghlError) {
             console.error('❌ Error syncing to GHL:', ghlError);

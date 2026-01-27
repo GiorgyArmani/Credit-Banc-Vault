@@ -55,11 +55,12 @@ export function Sidebar({
   const navItems = [
     { label: 'CB Vault', href: '/dashboard', icon: BookMarked },
     { label: 'Templates', href: '/dashboard?tab=templates', icon: FileSearch },
-    // { label: 'AI Chat', href: '/dashboard/chat', icon: MessageSquare },
+    //{ label: 'AI Chat', href: '/dashboard/chat', icon: MessageSquare },
     //{ label: 'Credit Report Assistant', href: '/dashboard/credit-report-assistant', icon: FileSearch },
-    //{ label: 'Book Consultation', href: '/dashboard/book-consultation', icon: Calendar },
+    // { label: 'Finance Academy', href: '/dashboard/finance-academy', icon: FileSearch },
+    // { label: 'Book Consultation', href: '/dashboard/book-consultation', icon: Calendar },
     // { label: 'Business Vault', href: '/dashboard/business-vault', icon: BookMarked },
-    //{ label: 'Business Profile', href: '/dashboard/business-profile', icon: User },
+    // { label: 'Business Profile', href: '/dashboard/business-profile', icon: User },
   ]
 
   // Ancho: en mobile siempre w-72; en desktop depende de "collapsed"

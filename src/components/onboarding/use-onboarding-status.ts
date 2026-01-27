@@ -91,9 +91,20 @@ export function useOnboardingStatus() {
       // We should probably ensure it opens if vault or contract are missing too.
       // For now, let's keep the boolean simple: if any step is missing, we need onboarding.
 
-      // Needs onboarding if Vault is not done.
-      // Ignoring isContractDone because user removed signature requirements.
-      setNeedsOnboarding(!isVaultDone)
+      // Needs onboarding if:
+      // 1. Profile is incomplete (Step 1)
+      // 2. OR Data Vault is not submitted (Step 2)
+      // 3. OR Contract is not signed (Step 3)
+      // 4. OR Metadata says not complete (Step 4 - Video)
+
+      // Even if vault and contract are done, we might still be showing the video step.
+      // So we should say needsOnboarding = true if !isMetadataComplete regardless of the intermediate steps?
+      // Yes, provided the "fast path" hasn't already returned false.
+
+      // If we are here, isMetadataComplete is false (or undefined).
+      // So if (isVaultDone && isContractDone) we STILL need onboarding (for video) until metadata is set.
+
+      setNeedsOnboarding(true); // Since we haven't hit the fast path return, we assume incomplete.
 
     } finally {
       setLoading(false)

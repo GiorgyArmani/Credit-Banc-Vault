@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { syncOutstandingDocuments } from "@/lib/outstanding-documents";
 
 const admin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -490,6 +491,20 @@ export async function POST(req: Request) {
               doc_code,
               process.env.GHL_TOKEN
             );
+
+            // Sync outstanding documents to GHL and Supabase
+            console.log(`🔄 Syncing outstanding documents for user ${doc.user_id}...`);
+            const syncResult = await syncOutstandingDocuments(
+              doc.user_id,
+              vaultRecord.ghl_contact_id,
+              process.env.GHL_TOKEN
+            );
+
+            if (syncResult.success) {
+              console.log(`✅ Outstanding documents synced successfully`);
+            } else {
+              console.error(`⚠️ Failed to sync outstanding documents:`, syncResult.error);
+            }
           } else {
             console.warn(
               `⚠️ No GHL field mapping found for doc_code: ${doc_code}`

@@ -32,6 +32,13 @@ export function DataVaultForm({ onComplete }: DataVaultFormProps) {
             return
         }
 
+        // Validate EIN is exactly 9 digits
+        const einDigitsOnly = formData.ein.replace(/\D/g, '')
+        if (einDigitsOnly.length !== 9) {
+            toast.error("EIN Number must be exactly 9 digits.")
+            return
+        }
+
         setLoading(true)
 
         try {
@@ -79,9 +86,23 @@ export function DataVaultForm({ onComplete }: DataVaultFormProps) {
                                 id="ein"
                                 placeholder="XX-XXXXXXX"
                                 value={formData.ein}
-                                onChange={(e) => setFormData(prev => ({ ...prev, ein: e.target.value }))}
+                                onChange={(e) => {
+                                    // Only allow digits
+                                    const value = e.target.value.replace(/\D/g, '')
+                                    // Limit to 9 digits
+                                    if (value.length <= 9) {
+                                        // Format as XX-XXXXXXX
+                                        let formatted = value
+                                        if (value.length > 2) {
+                                            formatted = value.slice(0, 2) + '-' + value.slice(2)
+                                        }
+                                        setFormData(prev => ({ ...prev, ein: formatted }))
+                                    }
+                                }}
+                                maxLength={10}
                                 required
                             />
+                            <p className="text-xs text-gray-500">Must be exactly 9 digits</p>
                         </div>
                         <div className="space-y-2">
                             <Label htmlFor="ssn">SSN <span className="text-red-500">*</span></Label>

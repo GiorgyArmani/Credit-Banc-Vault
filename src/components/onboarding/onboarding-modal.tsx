@@ -12,28 +12,33 @@ import {
 } from "@/components/ui/dialog";
 import { ArrowRight } from "lucide-react";
 import { DataVaultForm } from "@/components/onboarding/data-vault-form";
-import { ContractCheckStep } from "@/components/onboarding/contract-check-step"; // Import new component
+import { ContractCheckStep } from "@/components/onboarding/contract-check-step";
 
 type OnboardingModalProps = {
   open: boolean;
   onClose?: () => void;
   dataVaultCompleted?: boolean;
-  contractCompleted?: boolean; // Add prop
+  contractCompleted?: boolean;
 };
 
 export default function OnboardingModal({
   open,
   onClose,
   dataVaultCompleted = false,
-  contractCompleted = false, // Add default
+  contractCompleted = false,
 }: OnboardingModalProps) {
   const [step, setStep] = useState<"form" | "contract_check" | "video">("form");
+  const [signWellActive, setSignWellActive] = useState(false);
 
   // Determine initial step based on completion status
   useEffect(() => {
     if (dataVaultCompleted) {
       if (contractCompleted) {
-        setStep("video");
+        setStep((current) => {
+          // If we are already on contract_check, wait for manual "Continue"
+          if (current === "contract_check") return current;
+          return "video";
+        });
       } else {
         setStep("contract_check");
       }
@@ -43,8 +48,6 @@ export default function OnboardingModal({
   }, [dataVaultCompleted, contractCompleted]);
 
   const handleFormComplete = () => {
-    // If contract is not done, go to check step
-    // (Assuming logically if they just finished form, they haven't signed yet)
     if (!contractCompleted) {
       setStep("contract_check");
     } else {
@@ -53,42 +56,52 @@ export default function OnboardingModal({
   };
 
   const handleContractComplete = () => {
+    setSignWellActive(false); // Show modal again
     setStep("video");
   };
 
-  const handleVideoComplete = () => {
-    // Emit event to close the modal
-    window.dispatchEvent(new Event("onboarding-completed"));
-    // Clear session storage to skip next time
-    sessionStorage.removeItem("skipOnboarding");
-
-    // Refresh the page to ensure all components (like profile-display) update with new data
-    window.location.reload();
-
-    // Close the modal (though reload will likely happen first)
-    onClose?.();
+  const handleVideoComplete = async () => {
+    try {
+      await fetch('/api/onboarding/complete', { method: 'POST' });
+      window.dispatchEvent(new Event("onboarding-completed"));
+      sessionStorage.removeItem("skipOnboarding");
+      window.location.reload();
+      onClose?.();
+    } catch (error) {
+      console.error("Error completing onboarding:", error);
+    }
   };
 
-  // Prevent closing if we are on mandatory steps (form or contract check)
   const handleOpenChange = (v: boolean) => {
-    // Block closing on mandatory steps
     if (!v && (step === "form" || step === "contract_check")) return;
     if (!v && onClose) onClose();
   };
 
+  const handleSignWellOpen = () => {
+    setSignWellActive(true); // Hide modal when SignWell opens
+  };
+
+  const handleSignWellClose = () => {
+    setSignWellActive(false); // Show modal again when SignWell closes
+  };
+
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-4xl w-full p-0 overflow-hidden bg-background border-border max-h-[90vh] overflow-y-auto">
+    <Dialog open={open && !signWellActive} onOpenChange={handleOpenChange}>
+      <DialogContent className={`w-full p-0 overflow-hidden bg-background border-border ${step === "contract_check" ? "max-w-[95vw] max-h-[95vh]" : "max-w-4xl max-h-[90vh]"
+        } overflow-y-auto`}>
         {step === "form" && (
           <div className="p-6">
-            {/* DataVaultForm handles its own header/title */}
             <DataVaultForm onComplete={handleFormComplete} />
           </div>
         )}
 
         {step === "contract_check" && (
-          <div className="p-6">
-            <ContractCheckStep onComplete={handleContractComplete} />
+          <div className="p-6 h-full">
+            <ContractCheckStep
+              onComplete={handleContractComplete}
+              onSignWellOpen={handleSignWellOpen}
+              onSignWellClose={handleSignWellClose}
+            />
           </div>
         )}
 
@@ -129,4 +142,3 @@ export default function OnboardingModal({
     </Dialog>
   );
 }
-

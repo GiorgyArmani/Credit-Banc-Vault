@@ -37,8 +37,8 @@ export default function OnboardingGate({ children }: OnboardingGateProps) {
 
   useEffect(() => {
     if (loading) return
-    const skipped = sessionStorage.getItem('skipOnboarding') === 'true'
-    setOpen(needsOnboarding && !skipped)
+    // Contract signing is MANDATORY - no skip allowed
+    setOpen(needsOnboarding)
   }, [needsOnboarding, loading])
 
   // Lock del body solo mientras el modal está abierto o durante la carga inicial

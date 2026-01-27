@@ -7,9 +7,10 @@ import { Card, CardContent } from "@/components/ui/card"
 interface VideoPlayerProps {
   videoUrl: string
   title: string
+  description?: string | null
 }
 
-export default function VideoPlayer({ videoUrl, title }: VideoPlayerProps) {
+export default function VideoPlayer({ videoUrl, title, description }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [isPlaying, setIsPlaying] = useState(false)
 
@@ -43,8 +44,7 @@ export default function VideoPlayer({ videoUrl, title }: VideoPlayerProps) {
         <CardContent className="p-4">
           <h3 className="text-slate-900 font-medium mb-2">{title}</h3>
           <p className="text-slate-600 text-sm">
-            {/* Aquí podrías insertar una descripción que venga de la base de datos */}
-            Enjoy this lesson and apply it to your business growth!
+            {description || "Enjoy this lesson and apply it to your business growth!"}
           </p>
         </CardContent>
       </Card>

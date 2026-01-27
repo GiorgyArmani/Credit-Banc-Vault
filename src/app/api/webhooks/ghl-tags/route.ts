@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { syncOutstandingDocuments } from "@/lib/outstanding-documents";
 
 export const dynamic = 'force-dynamic';
 
@@ -174,6 +175,26 @@ export async function POST(request: Request) {
                 .update({ is_active: false })
                 .eq("user_id", userId)
                 .eq("is_active", true);
+        }
+
+        // 6. Sync outstanding documents to GHL and Supabase
+        // This ensures the outstanding documents list is updated when tags change
+        console.log(`🔄 Syncing outstanding documents after tag change for user ${userId}...`);
+
+        if (process.env.GHL_TOKEN) {
+            const syncResult = await syncOutstandingDocuments(
+                userId,
+                contactId,
+                process.env.GHL_TOKEN
+            );
+
+            if (syncResult.success) {
+                console.log(`✅ Outstanding documents synced successfully`);
+            } else {
+                console.error(`⚠️ Failed to sync outstanding documents:`, syncResult.error);
+            }
+        } else {
+            console.warn(`⚠️ GHL_TOKEN not configured, skipping outstanding documents sync`);
         }
 
         return NextResponse.json({

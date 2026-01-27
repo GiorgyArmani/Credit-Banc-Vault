@@ -48,6 +48,7 @@ body {
     --sidebar-border: 220 13% 91%;
     --sidebar-ring: 217.2 91.2% 59.8%;
   }
+
   .dark {
     --background: 0 0% 3.9%;
     --foreground: 0 0% 98%;
@@ -88,7 +89,35 @@ body {
   * {
     @apply border-border;
   }
+
   body {
     @apply bg-background text-foreground;
   }
+}
+
+
+/* SignWell Modal Z-Index Override */
+/* Ensure SignWell modals appear above everything else including dialogs (z-50) */
+#wistia_chrome_23,
+.w-css-reset,
+.w-vulcan-v2-button,
+[id^="wistia_"],
+[class*="wistia"],
+[id*="signwell"],
+[class*="signwell"],
+.signwell-modal,
+.signwell-embed,
+[data-signwell],
+/* Target all Wistia modal/overlay elements */
+.w-vulcan--visible,
+.w-vulcan-overlays-table,
+.w-vulcan-overlays-table__cell,
+[class*="w-vulcan"] {
+  z-index: 9999 !important;
+}
+
+/* Ensure SignWell backdrop/overlay is also above */
+[id^="wistia_"] [class*="overlay"],
+[id^="wistia_"] [class*="backdrop"] {
+  z-index: 9998 !important;
 }
