@@ -307,7 +307,7 @@ function DocumentCard({
   };
 
   return (
-    <div className={clsx(
+    <div id={docType.code === "funding_application" ? "tour-funding-app" : undefined} className={clsx(
       "border rounded-xl p-6 transition-all",
       isComplete ? "bg-emerald-50 border-emerald-200" : "bg-white border-gray-200"
     )}>
@@ -825,7 +825,7 @@ export default function Vault({ onChecklist }: { onChecklist?: (info: ChecklistI
   return (
     <div className="w-full space-y-8">
       {/* Progress Overview - Shows overall completion status */}
-      <div className="bg-gradient-to-br from-emerald-50 to-blue-50 border border-emerald-200 rounded-xl p-6">
+      <div id="tour-progress" className="bg-gradient-to-br from-emerald-50 to-blue-50 border border-emerald-200 rounded-xl p-6">
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="text-xl font-semibold text-gray-900">
@@ -883,7 +883,7 @@ export default function Vault({ onChecklist }: { onChecklist?: (info: ChecklistI
       </div>
 
       {/* Document Cards Grid - Core 9 + Dynamic documents */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div id="tour-vault" className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {loadingDynamic ? (
           <div className="col-span-2 text-center py-8">
             <p className="text-gray-500">Loading document requirements...</p>

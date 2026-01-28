@@ -332,7 +332,7 @@ export default function ProfileDisplay() {
     const fields = build_profile_fields(vault_data);
 
     return (
-      <Card className="bg-white/90 border-slate-200">
+      <Card id="tour-profile" className="bg-white/90 border-slate-200">
         <CardHeader>
           <CardTitle className="text-slate-900">Your Profile</CardTitle>
           <CardDescription className="text-slate-600">

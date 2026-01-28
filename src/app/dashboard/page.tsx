@@ -11,8 +11,10 @@ import TemplatesView from '@/components/templates-view';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Shield, Clock, UploadCloud, LayoutDashboard, FileText } from 'lucide-react';
+import { Shield, Clock, UploadCloud, LayoutDashboard, FileText, Sparkles } from 'lucide-react';
 import { useOnboardingStatus } from '@/components/onboarding/use-onboarding-status';
+import WebsiteTour from '@/components/tour/website-tour';
+import { Button } from '@/components/ui/button';
 
 import { Suspense } from 'react';
 
@@ -93,7 +95,7 @@ function DashboardContent() {
             <Badge className="bg-emerald-50 text-emerald-700 border border-emerald-200">
               BETA
             </Badge>
-            <div className="hidden sm:flex items-center text-slate-600 text-sm gap-3">
+            <div className="hidden sm:flex items-center text-slate-600 text-sm gap-3 mr-4">
               <span className="inline-flex items-center gap-1">
                 <Shield className="h-4 w-4" /> Secure
               </span>
@@ -101,15 +103,27 @@ function DashboardContent() {
                 <Clock className="h-4 w-4" /> 24–48h underwriting
               </span>
             </div>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => (window as any).startWebsiteTour?.()}
+              className="bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 flex items-center gap-2 font-medium"
+            >
+              <Sparkles className="h-4 w-4" />
+              Website Tour
+            </Button>
           </div>
         </div>
       </header>
+
+      <WebsiteTour />
 
       {/* MAIN CONTENT SECTION */}
       <div className="container mx-auto px-4 py-8 space-y-8 animate-in fade-in-50 duration-500">
 
         {/* WELCOME SECTION */}
-        <div>
+        <div id="tour-welcome">
           <h2 className="text-3xl font-bold text-slate-900 mb-1">
             Welcome{clientName ? `, ${clientName}` : (userEmail ? `, ${userEmail}` : '')}!
           </h2>

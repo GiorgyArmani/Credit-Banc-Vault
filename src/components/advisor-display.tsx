@@ -57,19 +57,19 @@ export default function AdvisorDisplay(): React.ReactElement {
   // STATE MANAGEMENT
   // Using enum for better state control
   // ============================================
-  
+
   // supabase-client: Database client for queries
   const supabase = createClient();
-  
+
   // component-state: Single source of truth for component state
   // Uses enum instead of multiple boolean flags
   const [component_state, set_component_state] = useState<ComponentState>(
     ComponentState.LOADING
   );
-  
+
   // advisor-state: Stores fetched advisor information
   const [advisor, setAdvisor] = useState<AdvisorInfo | null>(null);
-  
+
   // error-message-state: Stores specific error message
   const [error_message, set_error_message] = useState<string>("");
 
@@ -91,13 +91,13 @@ export default function AdvisorDisplay(): React.ReactElement {
     async function fetch_advisor_info() {
       try {
         set_component_state(ComponentState.LOADING);
-        
+
         // ============================================
         // STEP 1: AUTHENTICATION
         // Get the currently logged-in user from Supabase Auth
         // ============================================
         const { data: { user }, error: user_error } = await supabase.auth.getUser();
-        
+
         // user-error-handling: Check for authentication errors
         if (user_error) {
           console.error("❌ Authentication error:", user_error);
@@ -105,7 +105,7 @@ export default function AdvisorDisplay(): React.ReactElement {
           set_component_state(ComponentState.ERROR);
           return;
         }
-        
+
         // user-null-check: Ensure user exists
         if (!user) {
           console.warn("⚠️ No authenticated user found");
@@ -128,7 +128,7 @@ export default function AdvisorDisplay(): React.ReactElement {
           .select("id, advisor_id, advisor_name")
           .eq("user_id", user.id)
           .maybeSingle(); // ✅ Returns null if 0 rows, prevents PGRST116 error
-        
+
         // vault-error-handling: Check for database errors
         if (vault_error) {
           console.error("❌ Client data vault query error:", vault_error);
@@ -136,7 +136,7 @@ export default function AdvisorDisplay(): React.ReactElement {
           set_component_state(ComponentState.ERROR);
           return;
         }
-        
+
         // vault-null-check: Ensure vault record exists
         if (!vault_data) {
           console.warn("⚠️ No client data vault found for user:", user.id);
@@ -171,7 +171,7 @@ export default function AdvisorDisplay(): React.ReactElement {
           .select("id, first_name, last_name, email, phone, profile_pic_url")
           .eq("id", vault_data.advisor_id)
           .maybeSingle(); // ✅ Returns null if advisor not found
-        
+
         // advisor-error-handling: Check for database errors
         if (advisor_error) {
           console.error("❌ Advisor query error:", advisor_error);
@@ -179,7 +179,7 @@ export default function AdvisorDisplay(): React.ReactElement {
           set_component_state(ComponentState.ERROR);
           return;
         }
-        
+
         // advisor-null-check: Ensure advisor exists
         if (!advisor_data) {
           console.error("❌ Advisor not found for ID:", vault_data.advisor_id);
@@ -192,11 +192,11 @@ export default function AdvisorDisplay(): React.ReactElement {
         console.log("   Advisor:", advisor_data.first_name, advisor_data.last_name);
         console.log("   Email:", advisor_data.email);
         console.log("   Phone:", advisor_data.phone || "Not provided");
-        
+
         // success-state-update: Store advisor data and update state
         setAdvisor(advisor_data);
         set_component_state(ComponentState.SUCCESS);
-        
+
       } catch (err: any) {
         // unexpected-error-handler: Catch any unexpected errors
         console.error("❌ Unexpected error in fetch_advisor_info:", err);
@@ -213,7 +213,7 @@ export default function AdvisorDisplay(): React.ReactElement {
   // HELPER FUNCTIONS
   // Utility functions for rendering
   // ============================================
-  
+
   /**
    * get-initials: Extract first letter of first and last name
    * Used as fallback avatar when no profile picture exists
@@ -311,14 +311,14 @@ export default function AdvisorDisplay(): React.ReactElement {
     }
 
     return (
-      <Card className="w-full hover:shadow-lg transition-shadow duration-200">
+      <Card id="tour-advisor" className="w-full hover:shadow-lg transition-shadow duration-200">
         <CardHeader className="pb-4">
           <CardTitle className="flex items-center gap-2 text-emerald-700">
             <User className="h-5 w-5" />
             Your Advisor
           </CardTitle>
         </CardHeader>
-        
+
         <CardContent className="space-y-6">
           {/* ============================================ */}
           {/* ADVISOR PROFILE SECTION */}
@@ -328,8 +328,8 @@ export default function AdvisorDisplay(): React.ReactElement {
             {/* avatar-component: Profile picture with initials fallback */}
             <Avatar className="h-16 w-16 border-2 border-emerald-100">
               {/* profile-image: Show photo if available */}
-              <AvatarImage 
-                src={advisor.profile_pic_url || undefined} 
+              <AvatarImage
+                src={advisor.profile_pic_url || undefined}
                 alt={`${advisor.first_name} ${advisor.last_name}`}
               />
               {/* initials-fallback: Show initials if no photo */}
@@ -369,7 +369,7 @@ export default function AdvisorDisplay(): React.ReactElement {
               {/* email-content: Label and clickable link */}
               <div className="flex-1 min-w-0">
                 <p className="text-xs text-slate-600 font-medium">Email</p>
-                <a 
+                <a
                   href={`mailto:${advisor.email}`}
                   className="text-sm text-emerald-600 hover:text-emerald-700 hover:underline truncate block"
                 >
@@ -388,7 +388,7 @@ export default function AdvisorDisplay(): React.ReactElement {
                 {/* phone-content: Label and clickable link */}
                 <div className="flex-1 min-w-0">
                   <p className="text-xs text-slate-600 font-medium">Phone</p>
-                  <a 
+                  <a
                     href={`tel:${advisor.phone}`}
                     className="text-sm text-emerald-600 hover:text-emerald-700 hover:underline"
                   >
@@ -405,17 +405,17 @@ export default function AdvisorDisplay(): React.ReactElement {
           {/* ============================================ */}
           <div className="flex gap-2 pt-2">
             {/* email-button: Primary action button */}
-            <Button 
+            <Button
               className="flex-1 bg-emerald-600 hover:bg-emerald-700"
               onClick={() => window.location.href = `mailto:${advisor.email}`}
             >
               <Mail className="h-4 w-4 mr-2" />
               Send Email
             </Button>
-            
+
             {/* call-button: Secondary action button (conditional) */}
             {advisor.phone && (
-              <Button 
+              <Button
                 variant="outline"
                 className="flex-1 border-emerald-600 text-emerald-600 hover:bg-emerald-50"
                 onClick={() => window.location.href = `tel:${advisor.phone}`}
@@ -448,16 +448,16 @@ export default function AdvisorDisplay(): React.ReactElement {
   switch (component_state) {
     case ComponentState.LOADING:
       return render_loading_state();
-    
+
     case ComponentState.ERROR:
       return render_error_state();
-    
+
     case ComponentState.SUCCESS:
       return render_success_state();
-    
+
     case ComponentState.NO_DATA:
       return <div></div>;
-    
+
     default:
       // exhaustive-check: TypeScript ensures all enum cases are handled
       // This should never be reached
