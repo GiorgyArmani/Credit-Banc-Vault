@@ -86,7 +86,7 @@ function DashboardContent() {
               <UploadCloud className="h-5 w-5 text-white" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-slate-900">CreditBanc Vault</h1>
+              <h1 className="text-xl font-bold text-slate-900">Credit Banc Vault</h1>
               <p className="text-xs text-slate-600">Easy • Fast • Secure</p>
             </div>
           </div>

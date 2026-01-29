@@ -19,8 +19,9 @@ import {
   AlertCircle,
   TrendingUp,
   LogOut,
-  Link
+  Sparkles
 } from "lucide-react";
+import AdvisorWebsiteTour from "@/components/tour/advisor-website-tour";
 
 /**
  * Stat Card Component
@@ -36,6 +37,7 @@ function StatCard({
   label: string;
   value: string | number;
   trend?: string;
+  id?: string;
 }) {
   return (
     <Card>
@@ -167,8 +169,9 @@ export default function AdvisorDashboard() {
 
   return (
     <div className="min-h-screen bg-background">
+      <AdvisorWebsiteTour />
       {/* Header */}
-      <header className="border-b">
+      <header className="border-b" id="tour-advisor-welcome">
         <div className="container mx-auto flex h-16 items-center justify-between px-4">
           <div>
             <h1 className="text-2xl font-bold">Advisor Dashboard</h1>
@@ -178,21 +181,32 @@ export default function AdvisorDashboard() {
                 : "Welcome back!"}
             </p>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleLogout}
-          >
-            <LogOut className="mr-2 h-4 w-4" />
-            Logout
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => (window as any).startAdvisorTour?.()}
+              className="bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 flex items-center gap-2 font-medium"
+            >
+              <Sparkles className="h-4 w-4" />
+              Website Tour
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleLogout}
+            >
+              <LogOut className="mr-2 h-4 w-4" />
+              Logout
+            </Button>
+          </div>
         </div>
       </header>
 
       {/* Main Content */}
       <main className="container mx-auto p-6">
         {/* Stats Grid */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-8">
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-8" id="tour-advisor-stats">
           <StatCard
             icon={Users}
             label="Total Clients"
@@ -220,7 +234,7 @@ export default function AdvisorDashboard() {
         </div>
 
         {/* Quick Actions */}
-        <Card className="mb-8">
+        <Card className="mb-8" id="tour-advisor-quick-actions">
           <CardHeader>
             <CardTitle>Quick Actions</CardTitle>
             <CardDescription>
@@ -260,7 +274,7 @@ export default function AdvisorDashboard() {
         </Card>
 
         {/* Recent Activity */}
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4 md:grid-cols-2" id="tour-advisor-activity">
           {/* Recent Applications */}
           <Card>
             <CardHeader>

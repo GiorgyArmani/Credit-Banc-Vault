@@ -20,7 +20,7 @@ export default function WebsiteTour({ onStart }: WebsiteTourProps) {
                 {
                     element: '#tour-welcome',
                     popover: {
-                        title: 'Welcome to CreditBanc Vault!',
+                        title: 'Welcome to Credit Banc Vault!',
                         description: 'This is your secure hub for managing business funding documents. Let\'s take a quick look around.',
                         side: "bottom",
                         align: 'start'

@@ -15,7 +15,7 @@ function SuccessContent() {
   const email = searchParams.get("email");
   const [copied, set_copied] = useState(false);
 
-  const default_password = "CBvault2025!";
+  const default_password = "CreditBanc2025!";
 
   const copy_password = async () => {
     await navigator.clipboard.writeText(default_password);
@@ -46,7 +46,7 @@ function SuccessContent() {
               <Lock className="w-6 h-6" />
               Your Login Credentials
             </h3>
-            
+
             <div className="space-y-4">
               <div className="bg-white rounded-lg p-4 border border-blue-200">
                 <Label className="text-sm font-semibold text-gray-600 flex items-center gap-2 mb-2">
@@ -151,7 +151,7 @@ function SuccessContent() {
 // Main page component with Suspense wrapper
 export default function SignUpSuccessPage() {
   return (
-    <Suspense 
+    <Suspense
       fallback={
         <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-blue-50 flex items-center justify-center">
           <div className="text-center">

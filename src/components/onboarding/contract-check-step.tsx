@@ -7,6 +7,8 @@ import { CardTitle, CardDescription } from "@/components/ui/card";
 import { Loader2, CheckCircle2, RefreshCw, Download } from "lucide-react";
 import { toast } from "sonner";
 
+import { PremiumLoader } from "@/components/ui/premium-loader";
+
 interface ContractCheckStepProps {
     onComplete: () => void;
     onSignWellOpen?: () => void;
@@ -26,6 +28,7 @@ export function ContractCheckStep({ onComplete, onSignWellOpen, onSignWellClose 
     const [downloading, setDownloading] = useState(false);
     const [downloaded, setDownloaded] = useState(false);
     const [contractCompleted, setContractCompleted] = useState(false);
+    const [isWaiting, setIsWaiting] = useState(false);
     const supabase = createClient();
 
     // Load SignWell Embed Script
@@ -87,7 +90,10 @@ export function ContractCheckStep({ onComplete, onSignWellOpen, onSignWellClose 
     };
 
     const checkStatus = async (silent = false) => {
-        if (!silent) setChecking(true);
+        if (!silent) {
+            setChecking(true);
+            setIsWaiting(true); // Enter waiting state when manually checking
+        }
         try {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) return;
@@ -109,13 +115,24 @@ export function ContractCheckStep({ onComplete, onSignWellOpen, onSignWellClose 
 
             if (data?.contract_completed) {
                 setContractCompleted(true);
+                setIsWaiting(false);
                 if (!silent) toast.success("Contract signed successfully!");
-                // Don't auto-proceed - let user download first
+            } else if (!silent) {
+                // If we were waiting but it's not done yet, maybe show a hint or just stay in waiting
+                toast.info("Still waiting for final status...");
             }
         } catch (err) {
             console.error("Error checking status:", err);
         } finally {
-            if (!silent) setChecking(false);
+            if (!silent) {
+                setChecking(false);
+                // Don't auto-disable isWaiting here if not completed, 
+                // let the user see the loader for a bit longer or wait for the next poll
+                // Actually, if it's NOT completed, we should probably stop the "foreground" waiting 
+                // so they can see the "I've Signed It" button again if they want.
+                // But the requirement says "While status is not complete, keep showing the loader"
+                // So if they click "I've Signed It", we should probably keep them in isWaiting until detected.
+            }
         }
     };
 
@@ -132,7 +149,6 @@ export function ContractCheckStep({ onComplete, onSignWellOpen, onSignWellClose 
         }
 
         try {
-            // Hide the onboarding modal before opening SignWell
             if (onSignWellOpen) onSignWellOpen();
 
             const embed = new window.SignWellEmbed({
@@ -141,8 +157,8 @@ export function ContractCheckStep({ onComplete, onSignWellOpen, onSignWellClose 
                 events: {
                     completed: (e: any) => {
                         console.log("✅ SignWell Document Completed:", e);
-                        toast.success("Contract signed successfully!");
-                        checkStatus(false); // Just update status, don't proceed
+                        setIsWaiting(true);
+                        if (onSignWellClose) onSignWellClose();
                     },
                     closed: (e: any) => {
                         console.log("ℹ️ SignWell Closed:", e);
@@ -169,7 +185,6 @@ export function ContractCheckStep({ onComplete, onSignWellOpen, onSignWellClose 
             const data = await res.json();
 
             if (data.downloadUrl) {
-                // Open download URL in new tab
                 window.open(data.downloadUrl, '_blank');
                 setDownloaded(true);
                 toast.success("Contract download started!");
@@ -184,106 +199,131 @@ export function ContractCheckStep({ onComplete, onSignWellOpen, onSignWellClose 
         }
     };
 
+    // Unified Premium Loader for different states
+    if (isWaiting || !contractUrl) {
+        return (
+            <div className="h-full w-full flex items-center justify-center min-h-[500px]">
+                <PremiumLoader
+                    fullScreen={false}
+                    message={!contractUrl ? "Preparing your personalized agreement..." : "Finalizing your signed document..."}
+                />
+            </div>
+        );
+    }
+
     return (
         <div className="w-full max-w-2xl mx-auto py-8">
-            <div className="text-center mb-8">
-                <div className="h-12 w-12 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                    {contractUrl ? <CheckCircle2 className="h-6 w-6" /> : <Loader2 className="h-6 w-6 animate-spin" />}
+            <div className="text-center mb-10">
+                <div className="h-16 w-16 bg-blue-100/50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-6 shadow-sm">
+                    {contractCompleted ? (
+                        <CheckCircle2 className="h-8 w-8 text-emerald-600" />
+                    ) : (
+                        <CheckCircle2 className="h-8 w-8" />
+                    )}
                 </div>
 
-                <CardTitle className="text-2xl mb-2">
-                    {contractUrl ? "Sign Your Contract" : "Preparing Your Contract"}
+                <CardTitle className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-emerald-600 mb-3">
+                    {contractCompleted ? "Congratulations!" : "Sign Your Contract"}
                 </CardTitle>
 
-                <CardDescription className="text-base max-w-md mx-auto">
-                    {contractUrl
-                        ? "Your personalized agreement is ready. Click below to review and sign."
-                        : "We are generating your personalized agreement. This usually takes less than a minute..."
+                <CardDescription className="text-lg max-w-md mx-auto text-gray-600">
+                    {contractCompleted
+                        ? "Your agreement is now finalized. Please download your copy below to complete your onboarding."
+                        : "Your personalized agreement is ready. Click below to review and sign it securely through SignWell."
                     }
                 </CardDescription>
             </div>
 
-            <div className="bg-white border rounded-xl p-6 shadow-sm mb-6 flex flex-col items-center justify-center min-h-[200px]">
-                {contractUrl ? (
-                    <div className="w-full max-w-md space-y-4">
+            <div className={`bg-white border rounded-2xl p-8 shadow-md mb-8 flex flex-col items-center justify-center min-h-[250px] transition-all duration-500 ${contractCompleted ? "border-emerald-200 bg-emerald-50/10" : "border-blue-100"}`}>
+                <div className="w-full max-w-md space-y-6">
+                    {!contractCompleted && (
                         <Button
                             size="lg"
-                            className="w-full text-lg h-12 bg-blue-600 hover:bg-blue-700"
+                            className="w-full text-lg h-14 bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all hover:scale-[1.02]"
                             onClick={handleSignClick}
-                            disabled={!embedLoaded || contractCompleted}
+                            disabled={!embedLoaded}
                         >
-                            {embedLoaded ? (contractCompleted ? "✓ Signed" : "Review & Sign") : "Loading..."}
+                            {embedLoaded ? "Review & Sign Document" : "Loading Embed..."}
                         </Button>
-                        {contractCompleted && (
+                    )}
+
+                    {contractCompleted && (
+                        <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-700">
                             <Button
                                 size="lg"
                                 variant="outline"
-                                className="w-full text-lg h-12 border-emerald-600 text-emerald-600 hover:bg-emerald-50"
+                                className="w-full text-lg h-14 border-2 border-emerald-600 text-emerald-600 hover:bg-emerald-50 font-bold transition-all hover:scale-[1.02]"
                                 onClick={handleDownload}
                                 disabled={downloading}
                             >
                                 {downloading ? (
                                     <>
-                                        <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                                        <Loader2 className="mr-3 h-6 w-6 animate-spin" />
                                         Downloading...
                                     </>
                                 ) : (
                                     <>
-                                        <Download className="mr-2 h-5 w-5" />
+                                        <Download className="mr-3 h-6 w-6" />
                                         Download Signed Contract
                                     </>
                                 )}
                             </Button>
-                        )}
-                        <p className="text-xs text-center text-gray-500">
-                            {embedLoaded ? (contractCompleted ? "Contract signed successfully!" : "Opens in a secure signing window") : "Preparing signing interface..."}
+
+                            {downloaded && (
+                                <p className="text-center text-emerald-600 font-medium flex items-center justify-center animate-in zoom-in duration-300">
+                                    <CheckCircle2 className="mr-2 h-4 w-4" /> Download Complete
+                                </p>
+                            )}
+                        </div>
+                    )}
+
+                    {!contractCompleted && (
+                        <p className="text-sm text-center text-gray-400">
+                            Securely powered by <span className="font-semibold">SignWell</span>
                         </p>
-                    </div>
-                ) : (
-                    <div className="text-center space-y-3">
-                        <Loader2 className="h-8 w-8 animate-spin text-blue-600 mx-auto" />
-                        <p className="text-sm text-gray-500">
-                            Waiting for contract...
-                        </p>
-                    </div>
-                )}
+                    )}
+                </div>
             </div>
 
             <div className="text-center">
                 {contractCompleted ? (
-                    <>
-                        <p className="text-sm text-gray-500 mb-4">Ready to continue?</p>
+                    <div className="space-y-5">
                         <Button
                             onClick={onComplete}
                             size="lg"
                             disabled={!downloaded}
-                            className="bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold h-14 px-10 shadow-lg shadow-emerald-200 disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:scale-[1.05]"
                         >
-                            {downloaded ? "Continue to Next Step →" : "Download Contract to Continue"}
+                            Complete Onboarding & Go to Dashboard →
                         </Button>
-                    </>
+                        {!downloaded && (
+                            <p className="text-sm text-gray-500 italic">
+                                Please download your contract to continue
+                            </p>
+                        )}
+                    </div>
                 ) : (
-                    <>
-                        <p className="text-sm text-gray-500 mb-4">Already signed it?</p>
+                    <div className="flex flex-col items-center space-y-4">
+                        <p className="text-sm text-gray-500 font-medium">Already signed the document?</p>
                         <Button
                             onClick={() => checkStatus(false)}
                             disabled={checking}
-                            variant="outline"
-                            className="border-emerald-600 text-emerald-600 hover:bg-emerald-50"
+                            variant="ghost"
+                            className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 underline decoration-2 underline-offset-4"
                         >
                             {checking ? (
                                 <>
                                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                    Checking...
+                                    Checking Status...
                                 </>
                             ) : (
                                 <>
                                     <RefreshCw className="mr-2 h-4 w-4" />
-                                    I've Signed It
+                                    I've already signed it
                                 </>
                             )}
                         </Button>
-                    </>
+                    </div>
                 )}
             </div>
 

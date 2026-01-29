@@ -16,7 +16,7 @@ const supabase_admin = createClient(
  * Contraseña por defecto para todos los nuevos clientes
  * Los usuarios deberán cambiarla en su primer inicio de sesión
  */
-const DEFAULT_PASSWORD = 'CBvault2025!';
+const DEFAULT_PASSWORD = 'CreditBanc2025!';
 
 /**
  * ============================================================================
@@ -230,7 +230,7 @@ function validate_ownership_percentages(body: any): { valid: boolean; message?: 
  */
 export async function POST(request: Request) {
   try {
-    console.log('🚀 Iniciando proceso de signup de cliente...');
+    console.log('🚀 Iniciando proceso de signup de cliente para Credit Banc...');
 
     // ========== PASO 1: PARSEAR Y VALIDAR REQUEST ==========
     const body = await request.json();

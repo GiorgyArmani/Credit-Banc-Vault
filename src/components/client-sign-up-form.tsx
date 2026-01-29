@@ -556,7 +556,7 @@ export default function ClientSignupForm() {
 
                 <div className="bg-white rounded-lg p-4 border border-blue-200">
                   <p className="text-sm font-semibold text-gray-600 mb-1">Temporary Password</p>
-                  <p className="text-lg font-mono text-gray-900">CBvault2025!</p>
+                  <p className="text-lg font-mono text-gray-900">CreditBanc2025!</p>
                 </div>
               </div>
             </div>

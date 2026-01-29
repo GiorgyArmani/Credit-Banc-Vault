@@ -20,7 +20,7 @@ export type CreditReportData = {
   installmentAccounts: string[][]
 }
 
-// Paleta simple (CreditBanc vibe)
+// Paleta simple (Credit Banc vibe)
 const colors = {
   brand: '#10B981',        // emerald-ish
   ink: '#0F172A',          // slate-900
@@ -274,7 +274,7 @@ export default function CreditReportPDF({
         <Text
           style={styles.footer}
           render={({ pageNumber, totalPages }) =>
-            `CreditBanc • Confidential • Page ${pageNumber} of ${totalPages}`
+            `Credit Banc • Confidential • Page ${pageNumber} of ${totalPages}`
           }
           fixed
         />

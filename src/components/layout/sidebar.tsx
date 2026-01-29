@@ -53,7 +53,7 @@ export function Sidebar({
   }
 
   const navItems = [
-    { label: 'CB Vault', href: '/dashboard', icon: BookMarked },
+    { label: 'Credit Banc Vault', href: '/dashboard', icon: BookMarked },
     { label: 'Templates', href: '/dashboard?tab=templates', icon: FileSearch },
     //{ label: 'AI Chat', href: '/dashboard/chat', icon: MessageSquare },
     //{ label: 'Credit Report Assistant', href: '/dashboard/credit-report-assistant', icon: FileSearch },
@@ -92,9 +92,9 @@ export function Sidebar({
         <div className="sticky top-0 bg-white">
           <div className="flex items-center justify-between px-4 py-3 md:justify-center border-b">
             {/* En desktop colapsado: ocultar branding totalmente */}
-            <div className={collapsed ? 'hidden' : 'block'}>
-              <img src="vaultlogo.svg" alt="Logo" className="h-auto w-40 mb-1" />
-              <p className="text-sm text-gray-500">Business Document Hub</p>
+            <div>
+              <h1 className="text-xl font-bold text-slate-900">Credit Banc Vault</h1>
+              <p className="text-xs text-slate-600">Easy • Fast • Secure</p>
             </div>
             <button
               onClick={onMobileClose}

@@ -32,7 +32,8 @@ export function PremiumLoader({ message = "Loading your secure vault...", fullSc
                         <div className="relative w-full h-full flex items-center justify-center">
                             <img
                                 src="/vaultlogo.svg"
-                                alt="CreditBanc Vault Logo"
+                                alt="Credit Banc Vault Logo"
+                                title="Welcome to Credit Banc Vault!"
                                 className="w-16 h-16 object-contain filter drop-shadow-xl"
                                 onError={(e) => {
                                     // Fallback to PNG if SVG fails or is not found
