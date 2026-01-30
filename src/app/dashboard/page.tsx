@@ -160,7 +160,7 @@ function DashboardContent() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="pt-6">
-                <Vault />
+                <Vault clientName={clientName} />
               </CardContent>
             </Card>
           </TabsContent>

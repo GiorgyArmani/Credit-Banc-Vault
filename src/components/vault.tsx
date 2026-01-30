@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import clsx from "clsx";
 import {
-  Upload, Trash2, Star, Download, FileText, Pencil, CheckCircle2, AlertCircle, X
+  Upload, Trash2, Star, Download, FileText, Pencil, CheckCircle2, AlertCircle, X, ChevronDown
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter
@@ -119,6 +119,7 @@ interface DocumentCardProps {
   onEdit: (doc: UserDocument) => void;
   onToggleFavorite: (doc: UserDocument) => void;
   onDownload: (doc: UserDocument) => void;
+  clientName: string | null;
 }
 
 function DocumentCard({
@@ -129,7 +130,8 @@ function DocumentCard({
   onDelete,
   onEdit,
   onToggleFavorite,
-  onDownload
+  onDownload,
+  clientName
 }: DocumentCardProps) {
   const supabase = createClient();
   const { toast } = useToast();
@@ -210,8 +212,9 @@ function DocumentCard({
     try {
       for (const file of selectedFiles) {
         try {
-          // Generate unique filename
+          // Generate unique filename with standardized pattern
           const ext = file.name.split(".").pop() || "bin";
+          const standardizedName = `${docType.label} - ${clientName || "Client"}`;
           const normalized = `${docType.code}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.${ext}`;
           const filePath = `${userId}/${normalized}`;
 
@@ -226,13 +229,14 @@ function DocumentCard({
             .from("user_documents")
             .insert({
               user_id: userId,
-              name: file.name,
+              name: `${standardizedName}.${ext}`,
               size: file.size,
               type: file.type,
               storage_path: filePath,
               category: docType.code,
-              // Use custom name only if single file and specified, otherwise filename
-              custom_label: (selectedFiles.length === 1 && customName) ? customName : file.name,
+              doc_code: docType.code, // Populate doc_code for backward compatibility
+              // Use standardized name as custom label
+              custom_label: standardizedName,
               metadata: { tags: [docType.code] },
             })
             .select("*")
@@ -321,11 +325,6 @@ function DocumentCard({
           )}
           <div>
             <h3 className="font-semibold text-gray-900">{docType.label}</h3>
-            <p className="text-sm text-gray-600">
-              {relevantDocs.length} file(s) uploaded
-              {/* @ts-ignore */}
-              {docType.minFiles && docType.minFiles > 1 && ` (Min: ${docType.minFiles})`}
-            </p>
           </div>
         </div>
       </div>
@@ -432,7 +431,7 @@ function DocumentCard({
                     {doc.custom_label || doc.name}
                   </p>
                   <p className="text-xs text-gray-500">
-                    {(doc.size / 1024).toFixed(1)} KB ΓÇó
+                    {(doc.size / 1024).toFixed(1)} KB •
                     Uploaded {new Date(doc.upload_date).toLocaleDateString()}
                   </p>
                 </div>
@@ -494,7 +493,13 @@ function DocumentCard({
  * Main Vault Component: Manages all client documents
  * Displays individual cards for each required document type
  */
-export default function Vault({ onChecklist }: { onChecklist?: (info: ChecklistInfo) => void }) {
+export default function Vault({
+  onChecklist,
+  clientName
+}: {
+  onChecklist?: (info: ChecklistInfo) => void;
+  clientName: string | null;
+}) {
   const supabase = createClient();
   const { toast } = useToast();
 
@@ -504,6 +509,8 @@ export default function Vault({ onChecklist }: { onChecklist?: (info: ChecklistI
   const [submitting, setSubmitting] = useState(false);
   const [editDoc, setEditDoc] = useState<UserDocument | null>(null);
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [expandedCore, setExpandedCore] = useState(true);
+  const [expandedAdditional, setExpandedAdditional] = useState(true);
 
   // Dynamic documents state
   const [dynamicDocs, setDynamicDocs] = useState<DocumentType[]>([]);
@@ -777,6 +784,14 @@ export default function Vault({ onChecklist }: { onChecklist?: (info: ChecklistI
     return dynamicDocs as DocumentType[];
   }, [dynamicDocs]);
 
+  const coreRequirements = useMemo(() => {
+    return allRequiredDocs.filter(d => d.isCore);
+  }, [allRequiredDocs]);
+
+  const additionalRequests = useMemo(() => {
+    return allRequiredDocs.filter(d => !d.isCore);
+  }, [allRequiredDocs]);
+
   /**
    * checklist: Array showing status of each required document (core + dynamic)
    * Includes count of uploaded files for each document type
@@ -883,25 +898,89 @@ export default function Vault({ onChecklist }: { onChecklist?: (info: ChecklistI
       </div>
 
       {/* Document Cards Grid - Core 9 + Dynamic documents */}
-      <div id="tour-vault" className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div id="tour-vault" className="space-y-8">
         {loadingDynamic ? (
-          <div className="col-span-2 text-center py-8">
+          <div className="text-center py-8">
             <p className="text-gray-500">Loading document requirements...</p>
           </div>
         ) : (
-          allRequiredDocs.map((docType) => (
-            <DocumentCard
-              key={docType.code}
-              docType={docType}
-              documents={documents}
-              userId={userId || ""}
-              onUploadComplete={() => fetchDocuments(userId || "", true)}
-              onDelete={handleDelete}
-              onEdit={setEditDoc}
-              onToggleFavorite={toggleFavorite}
-              onDownload={handleDownload}
-            />
-          ))
+          <>
+            {/* Core Requirements Section */}
+            {coreRequirements.length > 0 && (
+              <div className="space-y-4">
+                <button
+                  onClick={() => setExpandedCore(!expandedCore)}
+                  className="flex items-center gap-2 group hover:text-emerald-600 transition-colors"
+                >
+                  <ChevronDown className={clsx(
+                    "h-5 w-5 transition-transform duration-200",
+                    !expandedCore && "-rotate-90"
+                  )} />
+                  <h3 className="text-lg font-bold text-gray-900">Core Requirements</h3>
+                  <span className="text-sm font-normal text-gray-500">
+                    ({coreRequirements.length} documents)
+                  </span>
+                </button>
+
+                {expandedCore && (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-in fade-in slide-in-from-top-2 duration-300">
+                    {coreRequirements.map((docType) => (
+                      <DocumentCard
+                        key={docType.code}
+                        docType={docType}
+                        documents={documents}
+                        userId={userId || ""}
+                        clientName={clientName}
+                        onUploadComplete={() => fetchDocuments(userId || "", true)}
+                        onDelete={handleDelete}
+                        onEdit={setEditDoc}
+                        onToggleFavorite={toggleFavorite}
+                        onDownload={handleDownload}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Additional Requests Section */}
+            {additionalRequests.length > 0 && (
+              <div className="space-y-4 border-t pt-8">
+                <button
+                  onClick={() => setExpandedAdditional(!expandedAdditional)}
+                  className="flex items-center gap-2 group hover:text-blue-600 transition-colors"
+                >
+                  <ChevronDown className={clsx(
+                    "h-5 w-5 transition-transform duration-200",
+                    !expandedAdditional && "-rotate-90"
+                  )} />
+                  <h3 className="text-lg font-bold text-gray-900">Additional Requests</h3>
+                  <span className="text-sm font-normal text-gray-500">
+                    ({additionalRequests.length} documents)
+                  </span>
+                </button>
+
+                {expandedAdditional && (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-in fade-in slide-in-from-top-2 duration-300">
+                    {additionalRequests.map((docType) => (
+                      <DocumentCard
+                        key={docType.code}
+                        docType={docType}
+                        documents={documents}
+                        userId={userId || ""}
+                        clientName={clientName}
+                        onUploadComplete={() => fetchDocuments(userId || "", true)}
+                        onDelete={handleDelete}
+                        onEdit={setEditDoc}
+                        onToggleFavorite={toggleFavorite}
+                        onDownload={handleDownload}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </>
         )}
       </div>
 

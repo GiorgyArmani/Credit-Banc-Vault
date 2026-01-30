@@ -1,36 +1,69 @@
 
-import { createClient } from "@/lib/supabase/server";
-
-export const REQUIRED_DOCUMENTS = [
-    { code: "business_bank_statements", label: "Business Bank Statements (Last 6 Months)" },
-    { code: "drivers_license_front", label: "Driver's License (Front)" },
-    { code: "drivers_license_back", label: "Driver's License (Back)" },
-    { code: "voided_check", label: "Voided Business Check" },
-    { code: "tax_returns", label: "Tax Returns (Last Year)" },
-];
+import { createAdminClient } from "@/lib/supabase/admin";
 
 // Map for GHL Custom Field ID
 const GHL_CF_OUTSTANDING_DOCUMENTS = process.env.GHL_CF_OUTSTANDING_DOCUMENTS || "YydQFzZd5IJO0NCbsz9D";
 
 export async function calculateOutstandingDocuments(userId: string): Promise<string[]> {
-    const supabase = await createClient();
+    const supabase = createAdminClient();
 
-    // 1. Fetch uploaded documents for the user
-    const { data: uploadedDocs, error } = await supabase
+    // 1. Fetch Core Requirements
+    const { data: coreDocs, error: coreError } = await supabase
+        .from("required_documents")
+        .select("code, label")
+        .eq("is_core", true);
+
+    if (coreError) throw new Error(`Error fetching core documents: ${coreError.message}`);
+
+    // 2. Fetch Active Dynamic Requirements for user
+    const { data: dynamicDocs, error: dynamicError } = await supabase
+        .from("client_dynamic_documents")
+        .select(`
+            required_documents (
+                code,
+                label
+            )
+        `)
+        .eq("user_id", userId)
+        .eq("is_active", true);
+
+    if (dynamicError) throw new Error(`Error fetching dynamic documents: ${dynamicError.message}`);
+
+    // 3. Fetch Uploaded Documents for user
+    const { data: uploadedDocs, error: uploadError } = await supabase
         .from("user_documents")
-        .select("doc_code")
+        .select("category, doc_code")
         .eq("user_id", userId);
 
-    if (error) throw new Error(`Error fetching user documents: ${error.message}`);
+    if (uploadError) throw new Error(`Error fetching user documents: ${uploadError.message}`);
 
-    const uploadedCodes = new Set(uploadedDocs?.map((d) => d.doc_code) || []);
+    // 4. Combine all requirements
+    const allRequirements = [
+        ...(coreDocs || []),
+        ...(dynamicDocs?.map((d: any) => d.required_documents).filter(Boolean) || [])
+    ];
 
-    // 2. Identify missing documents
-    const missingDocs = REQUIRED_DOCUMENTS.filter(
-        (req) => !uploadedCodes.has(req.code)
-    ).map((req) => req.label);
+    // Use a Map to ensure uniqueness by code
+    const uniqueRequirements = new Map<string, string>();
+    allRequirements.forEach(req => {
+        uniqueRequirements.set(req.code, req.label);
+    });
 
-    return missingDocs;
+    // 5. Filter out uploaded ones
+    // Check both category and doc_code for compatibility
+    const uploadedCodes = new Set([
+        ...(uploadedDocs?.map((d) => d.category).filter(Boolean) || []),
+        ...(uploadedDocs?.map((d) => d.doc_code).filter(Boolean) || [])
+    ]);
+
+    const missingLabels: string[] = [];
+    uniqueRequirements.forEach((label, code) => {
+        if (!uploadedCodes.has(code)) {
+            missingLabels.push(label);
+        }
+    });
+
+    return missingLabels;
 }
 
 export async function syncOutstandingDocuments(
@@ -40,11 +73,15 @@ export async function syncOutstandingDocuments(
 ): Promise<{ success: boolean; error?: string }> {
     try {
         const missingDocs = await calculateOutstandingDocuments(userId);
-        const outstandingListText = missingDocs.join("\n");
 
-        console.log(`Checking outstanding docs for ${userId}:`, missingDocs);
+        // Format the list for GHL
+        const value = missingDocs.length > 0
+            ? missingDocs.join(", ")
+            : "All documents submitted";
 
-        // 3. Update GHL Custom Field
+        console.log(`Syncing outstanding docs for user ${userId} to GHL:`, missingDocs);
+
+        // Update GHL Contact
         const response = await fetch(
             `https://services.leadconnectorhq.com/contacts/${ghlContactId}`,
             {
@@ -58,7 +95,7 @@ export async function syncOutstandingDocuments(
                     customFields: [
                         {
                             id: GHL_CF_OUTSTANDING_DOCUMENTS,
-                            value: outstandingListText,
+                            value: value,
                         },
                     ],
                 }),
@@ -77,3 +114,4 @@ export async function syncOutstandingDocuments(
         return { success: false, error: error.message };
     }
 }
+
