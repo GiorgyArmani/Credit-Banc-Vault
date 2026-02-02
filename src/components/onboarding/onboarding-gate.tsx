@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect, type ReactNode } from 'react'
-import OnboardingModal from './onboarding-modal'
+import { useRouter, usePathname } from 'next/navigation'
 import { useOnboardingStatus } from './use-onboarding-status'
 import { PremiumLoader } from '../ui/premium-loader'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -8,24 +8,20 @@ import { motion, AnimatePresence } from 'framer-motion'
 type OnboardingGateProps = { children: ReactNode }
 
 export default function OnboardingGate({ children }: OnboardingGateProps) {
-  const { needsOnboarding, dataVaultCompleted, contractCompleted, loading } = useOnboardingStatus()
-  const [open, setOpen] = useState(false)
+  const { needsOnboarding, loading } = useOnboardingStatus()
   const [showLoader, setShowLoader] = useState(true)
   const [animationFinished, setAnimationFinished] = useState(false)
+  const router = useRouter()
+  const pathname = usePathname()
 
   // Manage loader persistence and ease-out
   useEffect(() => {
     if (!loading) {
-      // Add extra 1.5s for that premium "ease out" / "charging complete" feel
       const timer = setTimeout(() => {
         setShowLoader(false)
-
-        // Wait for the CSS transition (1000ms) plus a small buffer before 
-        // completely removing the classes that break fixed positioning
         const finishTimer = setTimeout(() => {
           setAnimationFinished(true)
         }, 1200)
-
         return () => clearTimeout(finishTimer)
       }, 1500)
       return () => clearTimeout(timer)
@@ -37,19 +33,22 @@ export default function OnboardingGate({ children }: OnboardingGateProps) {
 
   useEffect(() => {
     if (loading) return
-    // Contract signing is MANDATORY - no skip allowed
-    setOpen(needsOnboarding)
-  }, [needsOnboarding, loading])
 
-  // Lock del body solo mientras el modal está abierto o durante la carga inicial
+    // If onboarding is needed and we are NOT already on the onboarding page, redirect
+    if (needsOnboarding && pathname !== '/onboarding') {
+      router.push('/onboarding')
+    }
+  }, [needsOnboarding, loading, pathname, router])
+
+  // Lock body scroll only during initial loading
   useEffect(() => {
-    if (!open && !showLoader) return
+    if (!showLoader) return
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     return () => {
       document.body.style.overflow = prev
     }
-  }, [open, showLoader])
+  }, [showLoader])
 
   return (
     <>
@@ -76,18 +75,11 @@ export default function OnboardingGate({ children }: OnboardingGateProps) {
 
       <div className={
         animationFinished
-          ? "opacity-100" // No transform or filter to allow stable fixed positioning
+          ? "opacity-100"
           : `transition-all duration-1000 min-h-screen flex flex-col ${showLoader ? "opacity-0 scale-95 blur-md" : "opacity-100 scale-100 blur-0"}`
       }>
         {children}
       </div>
-
-      <OnboardingModal
-        open={open}
-        onClose={() => setOpen(false)}
-        dataVaultCompleted={dataVaultCompleted}
-        contractCompleted={contractCompleted}
-      />
     </>
   )
 }
