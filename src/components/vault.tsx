@@ -847,14 +847,25 @@ export default function Vault({
               Document Checklist
             </h2>
             <p className="text-sm text-gray-600 mt-1">
-              Upload all required documents to complete your application
+              Everything underwriting needs, in one place.
+              <br />
+              Upload bank statements, ID, a voided business check, and any additional documents requested.
+              <br />
+              You don’t need to do this all at once. Upload what you have and come back anytime.
             </p>
           </div>
           <div className="text-right">
             <div className="text-3xl font-bold text-emerald-600">
-              {progressPct}%
+              {progressPct}% Complete
             </div>
-            <div className="text-sm text-gray-600">Complete</div>
+            <div className="text-sm text-gray-600">
+              {progressPct === 0 && "Don’t worry. Everyone starts here."}
+              {progressPct > 0 && progressPct < 25 && "Good start."}
+              {progressPct >= 25 && progressPct < 50 && "Good start."}
+              {progressPct >= 50 && progressPct < 75 && "Halfway there."}
+              {progressPct >= 75 && progressPct < 100 && "Almost done."}
+              {progressPct === 100 && "Ready for underwriting."}
+            </div>
           </div>
         </div>
         <Progress value={progressPct} className="h-3" />

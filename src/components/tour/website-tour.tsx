@@ -20,8 +20,8 @@ export default function WebsiteTour({ onStart }: WebsiteTourProps) {
                 {
                     element: '#tour-welcome',
                     popover: {
-                        title: 'Welcome to Credit Banc Vault!',
-                        description: 'This is your secure hub for managing business funding documents. Let\'s take a quick look around.',
+                        title: '1. Welcome to the Credit Banc Vault',
+                        description: 'This is your secure hub for everything needed to move your funding forward. We’ll show you where things live and how to use the Vault in just a minute.',
                         side: "bottom",
                         align: 'start'
                     }
@@ -29,8 +29,8 @@ export default function WebsiteTour({ onStart }: WebsiteTourProps) {
                 {
                     element: '#tour-advisor',
                     popover: {
-                        title: 'Your Dedicated Advisor',
-                        description: 'Meet your funding expert. You can contact them directly via email or phone for any assistance.',
+                        title: '2. Your Dedicated Advisor',
+                        description: 'This is your point person from start to finish. Reach out anytime by email or phone if you have questions or need help along the way.',
                         side: "bottom",
                         align: 'start'
                     }
@@ -38,8 +38,8 @@ export default function WebsiteTour({ onStart }: WebsiteTourProps) {
                 {
                     element: '#tour-profile',
                     popover: {
-                        title: 'Funding Information',
-                        description: 'View your business profile details, including funding goals and industry information.',
+                        title: '3. Your Funding Profile',
+                        description: 'This is where your business details live. Review your funding goals, industry information, and other key details used during underwriting.',
                         side: "top",
                         align: 'start'
                     }
@@ -47,8 +47,8 @@ export default function WebsiteTour({ onStart }: WebsiteTourProps) {
                 {
                     element: '#tour-vault',
                     popover: {
-                        title: 'The Document Vault',
-                        description: 'This is where you upload and manage all your required documents securely.',
+                        title: '4. The Document Vault',
+                        description: 'All required documents, organized in one secure place. Upload, review, and manage everything underwriting needs, without the email chains.',
                         side: "top",
                         align: 'start'
                     }
@@ -56,8 +56,8 @@ export default function WebsiteTour({ onStart }: WebsiteTourProps) {
                 {
                     element: '#tour-progress',
                     popover: {
-                        title: 'Track Your Progress',
-                        description: 'Monitor your onboarding completion percentage. We aim for a 24-48h underwriting once complete!',
+                        title: '5. Track Your Progress',
+                        description: 'You’ll always know where things stand. Watch your completion progress in real time. Once everything’s in, underwriting typically moves within 24–48 hours.',
                         side: "bottom",
                         align: 'start'
                     }
@@ -65,8 +65,8 @@ export default function WebsiteTour({ onStart }: WebsiteTourProps) {
                 {
                     element: '#tour-funding-app',
                     popover: {
-                        title: 'Final Step: Funding Application',
-                        description: 'Your first step to completion is uploading the funding application. You can find the template in the "Templates" tab above!',
+                        title: '6. Final Step: Application Upload',
+                        description: 'This is where things officially begin. Upload your completed and signed funding application from onboarding to the Vault to proceed.',
                         side: "top",
                         align: 'start'
                     }

@@ -336,7 +336,7 @@ export default function ProfileDisplay() {
         <CardHeader>
           <CardTitle className="text-slate-900">Your Profile</CardTitle>
           <CardDescription className="text-slate-600">
-            Basic information used for your application
+            Used by underwriting to review your business and funding goals. This information helps move your application forward.
           </CardDescription>
         </CardHeader>
         <CardContent>

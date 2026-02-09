@@ -49,7 +49,7 @@ export default function OnboardingPage() {
       await fetch('/api/onboarding/complete', { method: 'POST' });
       window.dispatchEvent(new Event("onboarding-completed"));
       sessionStorage.removeItem("skipOnboarding");
-      router.push("/dashboard");
+      router.push("/dashboard?tour=true");
     } catch (error) {
       console.error("Error completing onboarding:", error);
       setIsFinishing(false);

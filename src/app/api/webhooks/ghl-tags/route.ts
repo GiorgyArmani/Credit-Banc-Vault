@@ -44,10 +44,17 @@ export async function POST(request: Request) {
 
         // 2. Verify webhook secret
         const webhookSecret = process.env.GHL_WEBHOOK_SECRET;
-        if (webhookSecret && secret !== webhookSecret) {
+        if (!webhookSecret) {
+            console.error("❌ Webhook Configuration Error: GHL_WEBHOOK_SECRET is not defined");
+            return NextResponse.json(
+                { error: "Configuration Error" },
+                { status: 500 }
+            );
+        }
+
+        if (secret !== webhookSecret) {
             console.error("❌ Webhook Unauthorized: Secret mismatch", {
-                received: secret ? "PRESENT" : "MISSING",
-                expected: "CONFIGURED"
+                received: secret ? "PRESENT" : "MISSING"
             });
             return NextResponse.json(
                 { error: "Unauthorized" },
@@ -162,7 +169,7 @@ export async function POST(request: Request) {
                 .from("client_dynamic_documents")
                 .update({ is_active: false })
                 .eq("user_id", userId)
-                .not("document_id", "in", `(${documentIds.join(",")})`)
+                .not("document_id", "in", documentIds)
                 .eq("is_active", true);
 
             if (deactivateError) {

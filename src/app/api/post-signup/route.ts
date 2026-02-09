@@ -1,6 +1,7 @@
 // app/api/post-signup/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { syncUnifiedClientData } from "@/lib/user-management";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -59,21 +60,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ message: "Missing fields" }, { status: 400 });
     }
 
-    // 1) Upsert en public.users (id = auth.user.id)
-    const { error: dbError } = await supabaseAdmin
-      .from("users")
-      .upsert(
-        {
-          id: userId,
-          first_name: String(firstName).trim(),
-          last_name: String(lastName).trim(),
-          email: String(email).trim().toLowerCase(),
-          role: "free",
-        },
-        { onConflict: "id" }
-      );
-
-    if (dbError) throw dbError;
+    // 1) Sync to Unified Tables (users, client_data_vault, business_profiles)
+    await syncUnifiedClientData(supabaseAdmin, {
+      userId,
+      email: email.toLowerCase(),
+      clientName: `${firstName} ${lastName}`.trim(),
+      companyName: firstName + "'s Business", // Fallback name
+      role: 'free',
+    });
+    console.log(`✅ Unified sync completed for user: ${userId}`);
 
     // 2) Upsert contacto en GHL
     await upsertGHLContact({ firstName, lastName, email, tags });

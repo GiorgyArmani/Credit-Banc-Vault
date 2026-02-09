@@ -28,34 +28,34 @@ export function LandingPage() {
     {
       icon: Zap,
       title: "Easy",
-      description: "Guided upload by document type (bank statements, ID, voided check, etc.).",
+      description: "The Vault tells you what it needs. Documents are organized by type so you’re not guessing, renaming files, or sending things twice.",
     },
     {
       icon: Clock,
       title: "Fast",
-      description: "Real-time progress and one-click submission to underwriting (24–48h).",
+      description: "No waiting. No wondering. Track progress live and submit directly to underwriting when you’re ready.",
     },
     {
       icon: Shield,
       title: "Secure",
-      description: "Encrypted at rest and in transit. Access protected by Supabase Auth.",
+      description: "Private means private. Encrypted storage and protected access. Nothing moves without your say-so.",
     },
   ]
 
   const steps = [
-    { icon: Upload, title: "Upload", desc: "Drag-and-drop or select files by category." },
-    { icon: FolderCheck, title: "Track", desc: "Follow your checklist and see what's missing." },
-    { icon: Send, title: "Submit", desc: "Lock and send everything when complete." },
+    { icon: Upload, title: "Upload", desc: "Put everything where it belongs. Drag and drop files or upload by category. The Vault keeps things organized from the start." },
+    { icon: FolderCheck, title: "Track", desc: "See what’s done and what’s not. A live checklist shows what’s complete and what’s still missing." },
+    { icon: Send, title: "Submit", desc: "Make it official. When everything’s complete, submit once and send your file straight to underwriting." },
   ]
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-blue-50">
-      
+
       {/* header-navigation: Fixed navigation bar with logo and menu */}
       <header className="sticky top-0 z-50 w-full border-b bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/60">
         <div className="container mx-auto px-4">
           <div className="flex h-16 items-center justify-between">
-            
+
             {/* logo-section: Company logo on the left */}
             <div className="flex items-center">
               <Link href="/" className="flex items-center space-x-2">
@@ -94,7 +94,7 @@ export function LandingPage() {
               <Button variant="ghost" size="sm" asChild>
                 <Link href="/auth/login">Log In</Link>
               </Button>
-              
+
             </div>
 
             {/* mobile-menu-button: Hamburger menu for mobile */}
@@ -115,22 +115,22 @@ export function LandingPage() {
           {mobileMenuOpen && (
             <div className="md:hidden border-t py-4">
               <nav className="flex flex-col space-y-3">
-                <Link 
-                  href="#features" 
+                <Link
+                  href="#features"
                   className="text-sm font-medium text-gray-700 hover:text-emerald-600 transition-colors px-2 py-2"
                   onClick={() => setMobileMenuOpen(false)}
                 >
                   Features
                 </Link>
-                <Link 
-                  href="#how-it-works" 
+                <Link
+                  href="#how-it-works"
                   className="text-sm font-medium text-gray-700 hover:text-emerald-600 transition-colors px-2 py-2"
                   onClick={() => setMobileMenuOpen(false)}
                 >
                   How It Works
                 </Link>
-                <Link 
-                  href="#" 
+                <Link
+                  href="#"
                   className="text-sm font-medium text-gray-700 hover:text-emerald-600 transition-colors px-2 py-2"
                   onClick={() => setMobileMenuOpen(false)}
                 >
@@ -152,7 +152,7 @@ export function LandingPage() {
         <div className="container mx-auto px-4 py-2 text-center text-sm">
           <Badge className="mr-2 bg-emerald-600 text-white hover:bg-emerald-600">BETA</Badge>
           <span className="text-gray-700">
-            Introducing <span className="font-semibold">Credit Banc Vault</span> — Easy · Fast · Secure document collection.
+            Introducing <span className="font-semibold text-emerald-700 uppercase">THE Credit Banc Vault</span> — Easy · Fast · Secure.
           </span>
         </div>
       </div>
@@ -161,27 +161,26 @@ export function LandingPage() {
       <section className="relative w-full bg-gradient-to-br from-emerald-200 via-emerald-300 to-blue-300">
         <div className="container mx-auto px-4 pt-20 pb-16 text-center text-white">
           <div className="max-w-4xl mx-auto">
-            
+
             {/* headline: Main value proposition */}
             <h1 className="text-5xl md:text-6xl font-bold mb-6">
               Upload. Track. <span className="text-gray-900 bg-white/60 px-2 rounded">Get Funded.</span>
             </h1>
-            
+
             {/* subheadline: Detailed description of the service */}
             <p className="text-xl mb-8 max-w-2xl mx-auto">
-              A simple portal to upload your <b>6 bank statements</b>, <b>Driver's License</b>, <b>voided check</b>, 
-              and more. Live progress and direct submission to underwriting in <b>24–48h</b>.
+              Built to move things forward, not bury you in paperwork. Upload, track progress, and submit directly to underwriting in <b>24–48 hours.</b>
             </p>
 
             {/* cta-buttons: Primary and secondary call-to-action buttons */}
             <div className="flex flex-col sm:flex-row gap-3 justify-center">
               <Button size="lg" className="text-lg px-7 bg-white text-emerald-700 hover:bg-gray-100" asChild>
-                <Link href="/client-signup">
+                <a href="https://creditbanc.io/schedule-a-call" target="_blank" rel="noopener noreferrer">
                   Get Started
                   <ArrowRight className="ml-2 h-5 w-5" />
-                </Link>
+                </a>
               </Button>
-              <Button size="lg" variant="outline" className="text-lg px-7 border-white text-white hover:bg-white/10" asChild>
+              <Button size="lg" variant="outline" className="text-lg px-7 border-white text-emerald-700 bg-white hover:bg-white/90" asChild>
                 <Link href="#demo">
                   <Play className="mr-2 h-5 w-5" />
                   Watch Demo
@@ -225,7 +224,7 @@ export function LandingPage() {
           {/* section-header: Title and subtitle for the steps section */}
           <div className="text-center mb-10">
             <h2 className="text-3xl md:text-4xl font-bold text-gray-900">How It Works</h2>
-            <p className="text-lg text-gray-600">Three simple steps to complete your application</p>
+            <p className="text-lg text-gray-600">Three steps. No surprises.</p>
           </div>
 
           {/* steps-grid: Interactive cards showing the process */}
@@ -252,14 +251,32 @@ export function LandingPage() {
           </div>
 
           {/* required-docs-callout: Highlighted information about required documents */}
-          <div className="mt-8 max-w-3xl mx-auto rounded-xl border p-6 bg-emerald-50/60">
-            <div className="flex items-start space-x-3">
-              <CheckCircle className="h-5 w-5 text-emerald-700 mt-1" />
-              <p className="text-emerald-900 text-sm">
-                Required docs to start: <b>6 months of bank statements</b>, <b>Driver's License (front & back)</b>,
-                <b> voided business check</b>, and if applicable, <b>Debt Schedule</b>. The checklist will guide you.
-              </p>
+          <div className="mt-8 max-w-3xl mx-auto rounded-xl border p-6 bg-emerald-50/60 shadow-sm">
+            <div className="mb-4 text-center">
+              <h3 className="text-lg font-bold text-emerald-900">Required Documents to Start</h3>
+              <p className="text-sm text-emerald-800">To get started, you’ll need:</p>
             </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+              <div className="flex items-center space-x-2 text-emerald-900 text-sm">
+                <CheckCircle className="h-4 w-4 text-emerald-700" />
+                <span>6 months of business bank statements</span>
+              </div>
+              <div className="flex items-center space-x-2 text-emerald-900 text-sm">
+                <CheckCircle className="h-4 w-4 text-emerald-700" />
+                <span>Driver’s License (front and back)</span>
+              </div>
+              <div className="flex items-center space-x-2 text-emerald-900 text-sm">
+                <CheckCircle className="h-4 w-4 text-emerald-700" />
+                <span>Voided business check</span>
+              </div>
+              <div className="flex items-center space-x-2 text-emerald-900 text-sm">
+                <CheckCircle className="h-4 w-4 text-emerald-700" />
+                <span>Debt schedule (if applicable)</span>
+              </div>
+            </div>
+            <p className="text-emerald-900 text-sm text-center italic border-t pt-4">
+              The Vault tells you what’s needed, flags what’s missing, and skips everything that isn’t.
+            </p>
           </div>
         </div>
       </section>
@@ -267,17 +284,18 @@ export function LandingPage() {
       {/* final-cta-section: Last call-to-action before footer */}
       <section className="container mx-auto px-4 py-16 text-center">
         <div className="max-w-3xl mx-auto">
-          <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">Ready to Upload?</h2>
+          <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">Ready to get things moving?</h2>
           <p className="text-lg text-gray-600 mb-6">
-            Create your profile in minutes and start uploading documents with the Credit Banc Vault.
+            Schedule a call with our advisors to get your account created and start uploading documents to the Credit Banc Vault.
           </p>
           <Button size="lg" className="text-lg px-8 py-3" asChild>
-            <Link href="/client-signup">
+            <a href="https://creditbanc.io/schedule-a-call" target="_blank" rel="noopener noreferrer" className="flex items-center">
               Start Now
               <ArrowRight className="ml-2 h-5 w-5" />
-            </Link>
+            </a>
           </Button>
-          <div className="mt-3">
+
+          <div className="mt-6">
             <Link href="/auth/login" className="text-sm text-emerald-700 hover:underline">
               Already registered? Log in
             </Link>

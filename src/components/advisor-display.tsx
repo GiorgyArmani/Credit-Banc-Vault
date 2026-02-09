@@ -245,13 +245,14 @@ export default function AdvisorDisplay(): React.ReactElement {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex items-center justify-center py-8">
+          <div className="flex flex-col items-center justify-center py-8 space-y-4">
             {/* skeleton-animation: Pulsing placeholder */}
-            <div className="animate-pulse flex space-x-4">
+            <div className="animate-pulse flex flex-col items-center space-y-4 w-full">
               {/* avatar-skeleton: Circle placeholder for profile picture */}
-              <div className="rounded-full bg-slate-200 h-16 w-16"></div>
-              <div className="flex-1 space-y-3 py-1">
+              <div className="rounded-full bg-slate-200 h-24 w-24"></div>
+              <div className="flex flex-col items-center space-y-3 w-full">
                 {/* text-skeleton: Line placeholders for text */}
+                <div className="h-5 bg-slate-200 rounded w-40"></div>
                 <div className="h-4 bg-slate-200 rounded w-32"></div>
                 <div className="h-3 bg-slate-200 rounded w-48"></div>
               </div>
@@ -324,32 +325,32 @@ export default function AdvisorDisplay(): React.ReactElement {
           {/* ADVISOR PROFILE SECTION */}
           {/* Avatar, name, title, and description */}
           {/* ============================================ */}
-          <div className="flex items-start gap-4">
+          <div className="flex flex-col items-center text-center gap-4">
             {/* avatar-component: Profile picture with initials fallback */}
-            <Avatar className="h-16 w-16 border-2 border-emerald-100">
+            <Avatar className="h-24 w-24 border-4 border-emerald-100 shadow-sm transition-transform hover:scale-105 duration-200">
               {/* profile-image: Show photo if available */}
               <AvatarImage
                 src={advisor.profile_pic_url || undefined}
                 alt={`${advisor.first_name} ${advisor.last_name}`}
               />
               {/* initials-fallback: Show initials if no photo */}
-              <AvatarFallback className="bg-emerald-100 text-emerald-700 font-semibold text-lg">
+              <AvatarFallback className="bg-emerald-100 text-emerald-700 font-bold text-2xl">
                 {get_initials(advisor.first_name, advisor.last_name)}
               </AvatarFallback>
             </Avatar>
 
             {/* advisor-details: Name and role information */}
-            <div className="flex-1">
+            <div className="space-y-1">
               {/* advisor-name: Full name display */}
-              <h3 className="text-lg font-semibold text-slate-900">
+              <h3 className="text-xl font-bold text-slate-900">
                 {advisor.first_name} {advisor.last_name}
               </h3>
               {/* advisor-title: Job title */}
-              <p className="text-sm text-slate-600">
+              <p className="text-sm font-medium text-emerald-600">
                 Business Funding Advisor
               </p>
               {/* advisor-tagline: Brief description */}
-              <p className="text-xs text-slate-500 mt-1">
+              <p className="text-xs text-slate-500">
                 Your dedicated advisor for all funding needs
               </p>
             </div>
@@ -433,7 +434,7 @@ export default function AdvisorDisplay(): React.ReactElement {
           <div className="bg-slate-50 rounded-lg p-3 mt-4">
             {/* help-message: Friendly support text */}
             <p className="text-xs text-slate-600 text-center">
-              Have questions? Your advisor is here to help you through every step of the funding process.
+              Reach out anytime by email or phone if questions come up.
             </p>
           </div>
         </CardContent>

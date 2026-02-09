@@ -1,12 +1,7 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { createClient as createBrowserClient } from "@/lib/supabase/server";
 import { syncOutstandingDocuments } from "@/lib/outstanding-documents";
-
-const admin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { persistSession: false } }
-);
+import { SupabaseClient } from "@supabase/supabase-js";
 
 /**
  * DOC_CODE_TO_GHL_FIELD_MAP: Maps internal doc_code values to GHL custom field IDs
@@ -199,6 +194,7 @@ async function updateContact(contactId: string, customFields: any[], authToken: 
  * Returns the full file metadata needed for the custom field value
  */
 async function uploadFileToGHL(
+  admin: SupabaseClient,
   contactId: string,
   locationId: string,
   fieldId: string,
@@ -344,6 +340,20 @@ async function updateGHLTags(
  */
 export async function POST(req: Request) {
   try {
+    const supabase = await createBrowserClient();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { createClient: createAdminClient } = await import("@supabase/supabase-js");
+    const admin = createAdminClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      { auth: { persistSession: false } }
+    );
+
     const body = await req.json();
     const { document_id, storage_path, doc_code } = body;
 
@@ -354,7 +364,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // 1. Get document details from database
+    // 1. Get document details from database and verify ownership
     const { data: doc, error: docError } = await admin
       .from("user_documents")
       .select("user_id, name, storage_path")
@@ -364,6 +374,12 @@ export async function POST(req: Request) {
     if (docError || !doc) {
       console.error("Document not found:", docError);
       return NextResponse.json({ error: "Document not found" }, { status: 404 });
+    }
+
+    // Security check: Ensure the document belongs to the authenticated user
+    if (doc.user_id !== user.id) {
+      console.error(`❌ Security Violation: User ${user.id} attempted to process document ${document_id} belonging to ${doc.user_id}`);
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     // 2. Get client_data_vault record for this user (Primary source for GHL info)
@@ -428,6 +444,7 @@ export async function POST(req: Request) {
 
             // B. Upload new file
             const uploadResult = await uploadFileToGHL(
+              admin,
               vaultRecord.ghl_contact_id,
               ghlLocationId,
               ghlFieldMapping.fieldId,

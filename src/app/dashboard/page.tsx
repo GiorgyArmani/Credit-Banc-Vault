@@ -10,8 +10,7 @@ import Vault from '@/components/vault';
 import TemplatesView from '@/components/templates-view';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Shield, Clock, UploadCloud, LayoutDashboard, FileText, Sparkles } from 'lucide-react';
+import { Shield, Clock, Sparkles } from 'lucide-react';
 import { useOnboardingStatus } from '@/components/onboarding/use-onboarding-status';
 import WebsiteTour from '@/components/tour/website-tour';
 import { Button } from '@/components/ui/button';
@@ -57,18 +56,6 @@ function DashboardContent() {
     }
   }, [tabParam]);
 
-  // Handle tab change to update URL
-  const handleTabChange = (val: string) => {
-    setActiveTab(val);
-    const url = new URL(window.location.href);
-    if (val === 'templates') {
-      url.searchParams.set('tab', 'templates');
-    } else {
-      url.searchParams.delete('tab');
-    }
-    window.history.pushState({}, '', url.toString());
-  };
-
   useEffect(() => {
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -76,32 +63,57 @@ function DashboardContent() {
     })();
   }, [supabase]);
 
+  // Handle tour auto-start
+  useEffect(() => {
+    const isTourRequested = searchParams?.get('tour') === 'true';
+    if (isTourRequested) {
+      // Small delay to ensure components are rendered
+      const timer = setTimeout(() => {
+        if (typeof (window as any).startWebsiteTour === 'function') {
+          (window as any).startWebsiteTour();
+
+          // Clear the parameter from the URL without refresh
+          const url = new URL(window.location.href);
+          url.searchParams.delete('tour');
+          window.history.replaceState({}, '', url.pathname + url.search);
+        }
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [searchParams]);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-blue-50">
-      {/* HEADER SECTION */}
-      <header className="border-b bg-white/80 backdrop-blur-sm sticky top-0 z-10 transition-all duration-200">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 flex items-center justify-center">
-              <UploadCloud className="h-5 w-5 text-white" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold text-slate-900">Credit Banc Vault</h1>
-              <p className="text-xs text-slate-600">Easy • Fast • Secure</p>
-            </div>
+
+      <WebsiteTour />
+
+      {/* MAIN CONTENT SECTION */}
+      <div className="container mx-auto px-4 py-8 space-y-8 animate-in fade-in-50 duration-500">
+
+        {/* WELCOME & ACTIONS HEADER */}
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b pb-6">
+          <div id="tour-welcome">
+            <h2 className="text-3xl font-bold text-slate-900 mb-1">
+              Welcome{clientName ? `, ${clientName}` : (userEmail ? `, ${userEmail}` : '')}!
+            </h2>
+            <p className="text-slate-600">
+              This is your home base. Manage documents, access templates, and keep everything in one place until underwriting is complete.
+            </p>
           </div>
 
-          <div className="flex items-center gap-2">
-            <Badge className="bg-emerald-50 text-emerald-700 border border-emerald-200">
-              BETA
-            </Badge>
-            <div className="hidden sm:flex items-center text-slate-600 text-sm gap-3 mr-4">
-              <span className="inline-flex items-center gap-1">
-                <Shield className="h-4 w-4" /> Secure
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <Clock className="h-4 w-4" /> 24–48h underwriting
-              </span>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
+              <Badge className="bg-emerald-50 text-emerald-700 border border-emerald-200">
+                BETA
+              </Badge>
+              <div className="hidden xl:flex items-center text-slate-600 text-sm gap-3">
+                <span className="inline-flex items-center gap-1">
+                  <Shield className="h-4 w-4" /> Secure
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <Clock className="h-4 w-4" /> 24–48h underwriting
+                </span>
+              </div>
             </div>
 
             <Button
@@ -115,38 +127,10 @@ function DashboardContent() {
             </Button>
           </div>
         </div>
-      </header>
 
-      <WebsiteTour />
-
-      {/* MAIN CONTENT SECTION */}
-      <div className="container mx-auto px-4 py-8 space-y-8 animate-in fade-in-50 duration-500">
-
-        {/* WELCOME SECTION */}
-        <div id="tour-welcome">
-          <h2 className="text-3xl font-bold text-slate-900 mb-1">
-            Welcome{clientName ? `, ${clientName}` : (userEmail ? `, ${userEmail}` : '')}!
-          </h2>
-          <p className="text-slate-600">
-            Manage your documents and download templates.
-          </p>
-        </div>
-
-        {/* TABS INTERFACE */}
-        <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
-          <TabsList className="grid w-full grid-cols-2 max-w-[400px] mb-8 bg-slate-100 p-1">
-            <TabsTrigger value="dashboard" className="flex items-center gap-2 data-[state=active]:bg-white data-[state=active]:shadow-sm transition-all duration-200">
-              <LayoutDashboard className="h-4 w-4" />
-              Dashboard
-            </TabsTrigger>
-            <TabsTrigger value="templates" className="flex items-center gap-2 data-[state=active]:bg-white data-[state=active]:shadow-sm transition-all duration-200">
-              <FileText className="h-4 w-4" />
-              Templates
-            </TabsTrigger>
-          </TabsList>
-
-          {/* TAB 1: DASHBOARD (Original Content) */}
-          <TabsContent value="dashboard" className="space-y-8 focus-visible:outline-none focus-visible:ring-0">
+        {/* CONTENT AREA */}
+        {activeTab === 'dashboard' && (
+          <div className="space-y-8">
             <div className="grid gap-8">
               <AdvisorDisplay />
               <ProfileDisplay />
@@ -154,26 +138,26 @@ function DashboardContent() {
 
             <Card className="bg-white border-slate-200 overflow-hidden">
               <CardHeader className="pb-0">
-                <CardTitle className="text-slate-900">Document Vault</CardTitle>
-                <CardDescription className="text-slate-600">
-                  Upload your 6 months bank statements, ID (front & back), voided business check, and if applicable, a debt schedule.
-                </CardDescription>
+                <CardTitle className="text-slate-900">DOCUMENT VAULT</CardTitle>
+
               </CardHeader>
               <CardContent className="pt-6">
                 <Vault clientName={clientName} />
               </CardContent>
             </Card>
-          </TabsContent>
+          </div>
+        )}
 
-          {/* TAB 2: TEMPLATES (New Content) */}
-          <TabsContent value="templates" className="space-y-6 focus-visible:outline-none focus-visible:ring-0">
+        {activeTab === 'templates' && (
+          <div className="space-y-6">
             <div className="mb-6">
               <h3 className="text-2xl font-bold text-slate-900">Document Templates</h3>
               <p className="text-slate-600">Download the templates you need to complete your application.</p>
             </div>
             <TemplatesView />
-          </TabsContent>
-        </Tabs>
+          </div>
+        )}
+
       </div>
     </div>
   );

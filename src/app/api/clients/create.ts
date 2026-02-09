@@ -19,6 +19,7 @@
 
 import { NextApiRequest, NextApiResponse } from 'next';
 import { createClient } from '@supabase/supabase-js';
+import { generateSecurePassword } from '@/lib/user-management';
 
 // Cliente de Supabase con service role
 const supabase = createClient(
@@ -40,11 +41,11 @@ const supabase = createClient(
 async function create_or_update_ghl_contact(client_data: any): Promise<string> {
   const ghl_api_key = process.env.GHL_API_KEY;
   const ghl_location_id = process.env.GHL_LOCATION_ID;
-  
+
   if (!ghl_api_key || !ghl_location_id) {
     throw new Error('GHL credentials not configured');
   }
-  
+
   // Buscar contacto existente por email
   const search_response = await fetch(
     `https://rest.gohighlevel.com/v1/contacts/?locationId=${ghl_location_id}&email=${encodeURIComponent(client_data.client_email)}`,
@@ -55,14 +56,14 @@ async function create_or_update_ghl_contact(client_data: any): Promise<string> {
       }
     }
   );
-  
+
   if (!search_response.ok) {
     throw new Error('Error searching GHL contact');
   }
-  
+
   const search_data = await search_response.json();
   const existing_contact = search_data.contacts?.[0];
-  
+
   // Preparar custom fields para GHL
   // Mapeo: campo_db → GHL Custom Field Key
   const custom_fields = {
@@ -108,7 +109,7 @@ async function create_or_update_ghl_contact(client_data: any): Promise<string> {
     '[Data Vault] Additional Notes': client_data.additional_notes,
     '[Data Vault] Advisor Name': client_data.advisor_name
   };
-  
+
   // Payload base del contacto
   const contact_payload = {
     locationId: ghl_location_id,
@@ -119,9 +120,9 @@ async function create_or_update_ghl_contact(client_data: any): Promise<string> {
     companyName: client_data.company_name,
     customFields: custom_fields
   };
-  
+
   let ghl_contact_id: string;
-  
+
   if (existing_contact) {
     // Actualizar contacto existente
     const update_response = await fetch(
@@ -135,15 +136,15 @@ async function create_or_update_ghl_contact(client_data: any): Promise<string> {
         body: JSON.stringify(contact_payload)
       }
     );
-    
+
     if (!update_response.ok) {
       const error_data = await update_response.json();
       throw new Error(`Error updating GHL contact: ${JSON.stringify(error_data)}`);
     }
-    
+
     ghl_contact_id = existing_contact.id;
     console.log(`✅ GHL contact updated: ${ghl_contact_id}`);
-    
+
   } else {
     // Crear nuevo contacto
     const create_response = await fetch(
@@ -157,17 +158,17 @@ async function create_or_update_ghl_contact(client_data: any): Promise<string> {
         body: JSON.stringify(contact_payload)
       }
     );
-    
+
     if (!create_response.ok) {
       const error_data = await create_response.json();
       throw new Error(`Error creating GHL contact: ${JSON.stringify(error_data)}`);
     }
-    
+
     const create_data = await create_response.json();
     ghl_contact_id = create_data.contact.id;
     console.log(`✅ GHL contact created: ${ghl_contact_id}`);
   }
-  
+
   return ghl_contact_id;
 }
 
@@ -178,10 +179,8 @@ async function create_or_update_ghl_contact(client_data: any): Promise<string> {
  */
 async function create_auth_user(client_data: any): Promise<string> {
   // Generar password temporal seguro
-  const temp_password = Array.from(crypto.getRandomValues(new Uint8Array(32)))
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join('');
-  
+  const temp_password = generateSecurePassword();
+
   // Crear usuario en Auth
   const { data: auth_data, error: auth_error } = await supabase.auth.admin.createUser({
     email: client_data.client_email,
@@ -195,15 +194,15 @@ async function create_auth_user(client_data: any): Promise<string> {
       requires_password_setup: true
     }
   });
-  
+
   if (auth_error) {
     throw new Error(`Error creating auth user: ${auth_error.message}`);
   }
-  
+
   if (!auth_data.user) {
     throw new Error('No user returned from auth creation');
   }
-  
+
   console.log(`✅ Auth user created: ${auth_data.user.id}`);
   return auth_data.user.id;
 }
@@ -215,23 +214,23 @@ async function create_auth_user(client_data: any): Promise<string> {
  */
 async function get_or_create_advisor(advisor_name: string): Promise<string | null> {
   if (!advisor_name) return null;
-  
+
   // Buscar advisor existente
   const { data: existing_advisor } = await supabase
     .from('advisors')
     .select('id')
     .ilike('first_name', `%${advisor_name}%`)
     .single();
-  
+
   if (existing_advisor) {
     return existing_advisor.id;
   }
-  
+
   // Crear nuevo advisor
   const name_parts = advisor_name.split(' ');
   const first_name = name_parts[0];
   const last_name = name_parts.slice(1).join(' ') || '';
-  
+
   const { data: new_advisor, error } = await supabase
     .from('advisors')
     .insert({
@@ -242,12 +241,12 @@ async function get_or_create_advisor(advisor_name: string): Promise<string | nul
     })
     .select('id')
     .single();
-  
+
   if (error) {
     console.error('Error creating advisor:', error);
     return null;
   }
-  
+
   return new_advisor?.id || null;
 }
 
@@ -265,35 +264,35 @@ async function insert_client_data(
 ): Promise<string> {
   // Obtener o crear advisor
   const advisor_id = await get_or_create_advisor(client_data.advisor_name);
-  
+
   // Preparar datos para inserción
   const insert_data = {
     user_id,
-    
+
     // Información básica
     client_name: client_data.client_name,
     company_name: client_data.company_name,
     client_phone: client_data.client_phone,
     client_email: client_data.client_email,
-    
+
     // Ubicación
     company_state: client_data.company_state,
     company_city: client_data.company_city,
     company_zip_code: client_data.company_zip_code,
-    
+
     // Financiero
     capital_requested: parseFloat(client_data.capital_requested),
     loan_purpose: client_data.loan_purpose,
     proposed_loan_type: client_data.proposed_loan_type,
     avg_monthly_deposits: parseFloat(client_data.avg_monthly_deposits),
     avg_annual_revenue: parseFloat(client_data.avg_annual_revenue),
-    
+
     // Estructura
     legal_entity_type: client_data.legal_entity_type,
     business_start_date: client_data.business_start_date,
     is_home_based: client_data.is_home_based,
     employees_count: parseInt(client_data.employees_count),
-    
+
     // Propietarios
     number_of_owners: client_data.number_of_owners,
     owner_1_name: client_data.owner_1_name,
@@ -306,10 +305,10 @@ async function insert_client_data(
     owner_4_ownership_pct: client_data.owner_4_ownership_pct ? parseFloat(client_data.owner_4_ownership_pct) : null,
     owner_5_name: client_data.owner_5_name || null,
     owner_5_ownership_pct: client_data.owner_5_ownership_pct ? parseFloat(client_data.owner_5_ownership_pct) : null,
-    
+
     // Crédito
     credit_score: client_data.credit_score,
-    
+
     // Flags
     has_existing_loans: client_data.has_existing_loans,
     has_defaulted_mca: client_data.has_defaulted_mca,
@@ -321,39 +320,39 @@ async function insert_client_data(
     has_tax_liens: client_data.has_tax_liens,
     has_active_judgements: client_data.has_active_judgements,
     has_zbl: client_data.has_zbl,
-    
+
     // Timeline
     funding_eta: client_data.funding_eta,
     additional_notes: client_data.additional_notes,
-    
+
     // Advisor
     advisor_name: client_data.advisor_name,
     advisor_id,
-    
+
     // GHL
     ghl_contact_id,
     ghl_last_sync_at: new Date().toISOString(),
-    
+
     // Metadata
     status: 'active',
     submitted_at: new Date().toISOString()
   };
-  
+
   // Insertar en client_data_vault
   const { data, error } = await supabase
     .from('client_data_vault')
     .insert(insert_data)
     .select('id')
     .single();
-  
+
   if (error) {
     throw new Error(`Error inserting client data: ${error.message}`);
   }
-  
+
   if (!data) {
     throw new Error('No data returned from client insert');
   }
-  
+
   console.log(`✅ Client data inserted: ${data.id}`);
   return data.id;
 }
@@ -372,16 +371,16 @@ export default async function handler(
       message: 'Only POST requests are accepted'
     });
   }
-  
+
   try {
     const client_data = req.body;
-    
+
     console.log('📥 Creating new client:', client_data.client_email);
-    
+
     // ========================================================================
     // 1. VALIDAR CAMPOS REQUERIDOS
     // ========================================================================
-    
+
     const required_fields = [
       'client_name', 'company_name', 'client_phone', 'client_email',
       'company_state', 'company_zip_code',
@@ -391,34 +390,34 @@ export default async function handler(
       'owner_1_name', 'owner_1_ownership_pct',
       'credit_score', 'funding_eta', 'additional_notes', 'advisor_name'
     ];
-    
+
     const missing_fields = required_fields.filter(field => !client_data[field]);
-    
+
     if (missing_fields.length > 0) {
       return res.status(400).json({
         error: 'Missing required fields',
         missing_fields
       });
     }
-    
+
     console.log('✅ Validation passed');
-    
+
     // ========================================================================
     // 2. VERIFICAR SI EL CLIENTE YA EXISTE
     // ========================================================================
-    
+
     const { data: existing_client } = await supabase
       .from('client_data_vault')
       .select('id, user_id')
       .eq('client_email', client_data.client_email)
       .single();
-    
+
     if (existing_client) {
       console.log('⚠️  Client already exists:', existing_client.user_id);
-      
+
       // Actualizar contacto en GHL
       const ghl_contact_id = await create_or_update_ghl_contact(client_data);
-      
+
       // Actualizar datos existentes
       const { error: update_error } = await supabase
         .from('client_data_vault')
@@ -429,11 +428,11 @@ export default async function handler(
           ghl_last_sync_at: new Date().toISOString()
         })
         .eq('id', existing_client.id);
-      
+
       if (update_error) {
         throw new Error(`Error updating client: ${update_error.message}`);
       }
-      
+
       return res.status(200).json({
         success: true,
         message: 'Client updated successfully',
@@ -442,34 +441,34 @@ export default async function handler(
         action: 'updated'
       });
     }
-    
+
     // ========================================================================
     // 3. CREAR CONTACTO EN GHL
     // ========================================================================
-    
+
     console.log('📤 Creating GHL contact...');
     const ghl_contact_id = await create_or_update_ghl_contact(client_data);
-    
+
     // ========================================================================
     // 4. CREAR USUARIO EN AUTH
     // ========================================================================
-    
+
     console.log('👤 Creating auth user...');
     const user_id = await create_auth_user(client_data);
-    
+
     // ========================================================================
     // 5. INSERTAR DATOS EN CLIENT_DATA_VAULT
     // ========================================================================
-    
+
     console.log('💾 Inserting client data...');
     const client_id = await insert_client_data(user_id, client_data, ghl_contact_id);
-    
+
     // ========================================================================
     // 6. RESPONDER ÉXITO
     // ========================================================================
-    
+
     console.log('🎉 Client created successfully');
-    
+
     return res.status(201).json({
       success: true,
       message: 'Client created successfully',
@@ -478,10 +477,10 @@ export default async function handler(
       ghl_contact_id,
       action: 'created'
     });
-    
+
   } catch (error: any) {
     console.error('💥 Error creating client:', error);
-    
+
     return res.status(500).json({
       error: 'Internal server error',
       message: error.message || 'Error creating client',

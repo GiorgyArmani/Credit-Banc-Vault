@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { ghlUpdateContact, ghlAddTags } from '@/lib/ghl-api';
+import { syncUnifiedClientData } from '@/lib/user-management';
 
 // GHL Custom Field IDs
 const GHL_FIELDS = {
@@ -40,7 +41,7 @@ export async function POST(request: Request) {
         // 1. Get user's GHL Contact ID from client_data_vault
         const { data: vaultData, error: vaultError } = await supabase
             .from('client_data_vault')
-            .select('ghl_contact_id')
+            .select('ghl_contact_id, client_email, client_name, company_name, client_phone, company_state, company_city, company_zip_code')
             .eq('user_id', user.id)
             .single();
 
@@ -53,8 +54,6 @@ export async function POST(request: Request) {
         }
 
         const ghlContactId = vaultData.ghl_contact_id;
-
-
 
         // 2. Store in Supabase client_data_vault
         const { error: vaultUpdateError } = await supabase
@@ -71,12 +70,23 @@ export async function POST(request: Request) {
 
         if (vaultUpdateError) {
             console.error('❌ Error updating client_data_vault:', vaultUpdateError);
-            // Continue anyway to sync to GHL
         } else {
             console.log('✅ Successfully stored data in client_data_vault');
         }
 
-
+        // 3. Sync to business_profiles and users
+        await syncUnifiedClientData(supabase, {
+            userId: user.id,
+            email: vaultData.client_email,
+            clientName: vaultData.client_name,
+            companyName: vaultData.company_name,
+            industry: industry, // updated value
+            phone: vaultData.client_phone,
+            state: vaultData.company_state,
+            city: vaultData.company_city,
+            zipCode: vaultData.company_zip_code,
+        });
+        console.log('✅ Synchronized onboarding update to unified tables');
 
         // 5. Sync EIN, SSN, Industry, Addresses, and signature metadata to GHL
         const allFields = [
@@ -92,31 +102,18 @@ export async function POST(request: Request) {
             fieldCount: allFields.length,
         });
 
-        try {
-            const ghlResponse = await ghlUpdateContact(ghlContactId, {
-                customFields: allFields,
-            });
+        const ghlResponse = await ghlUpdateContact(ghlContactId, {
+            customFields: allFields,
+        });
 
-            console.log('✅ GHL Update Response:', ghlResponse);
+        console.log('✅ GHL Update Response:', ghlResponse);
 
-            // Add tag
-            const tagResponse = await ghlAddTags(ghlContactId, ['application_submitted']);
-            console.log('✅ GHL Tag Response:', tagResponse);
+        // Add tag
+        const tagResponse = await ghlAddTags(ghlContactId, ['application_submitted']);
+        console.log('✅ GHL Tag Response:', tagResponse);
 
-            console.log(`✅ Successfully synced Step 1 data and added tag to GHL for contact ${ghlContactId}`);
-
-            // 6. User Metadata update removed - we only mark complete after contract is signed
-            /*
-            const { error: updateError } = await supabase.auth.updateUser({
-                data: { onboarding_complete: true }
-            });
-            */
-            console.log('✅ Step 1 complete - waiting for contract signature');
-
-        } catch (ghlError) {
-            console.error('❌ Error syncing to GHL:', ghlError);
-            throw new Error('Failed to sync data to external system');
-        }
+        console.log(`✅ Successfully synced Step 1 data and added tag to GHL for contact ${ghlContactId}`);
+        console.log('✅ Step 1 complete - waiting for contract signature');
 
         return NextResponse.json({ success: true });
 

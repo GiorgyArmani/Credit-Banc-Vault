@@ -30,6 +30,14 @@ export async function POST(request: NextRequest) {
         });
 
         // 2. Validar el token de seguridad
+        if (!WEBHOOK_SECRET) {
+            console.error('❌ Error de configuración: SIGNWELL_WEBHOOK_SECRET no está definido');
+            return NextResponse.json(
+                { success: false, error: 'Configuration Error' },
+                { status: 500 }
+            );
+        }
+
         if (!payload.secret || payload.secret !== WEBHOOK_SECRET) {
             console.error('❌ Token de seguridad inválido');
             return NextResponse.json(

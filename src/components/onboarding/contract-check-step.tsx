@@ -223,13 +223,13 @@ export function ContractCheckStep({ onComplete, onSignWellOpen, onSignWellClose 
                 </div>
 
                 <CardTitle className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-emerald-600 mb-3">
-                    {contractCompleted ? "Congratulations!" : "Sign Your Contract"}
+                    {contractCompleted ? "Congratulations!" : "Sign Your Agreement"}
                 </CardTitle>
 
                 <CardDescription className="text-lg max-w-md mx-auto text-gray-600">
                     {contractCompleted
                         ? "Your agreement is now finalized. Please download your copy below to complete your onboarding."
-                        : "Your personalized agreement is ready. Click below to review and sign it securely through SignWell."
+                        : "Your personalized agreement is ready. Review and sign securely through SignWell to keep things moving."
                     }
                 </CardDescription>
             </div>
@@ -243,7 +243,7 @@ export function ContractCheckStep({ onComplete, onSignWellOpen, onSignWellClose 
                             onClick={handleSignClick}
                             disabled={!embedLoaded}
                         >
-                            {embedLoaded ? "Review & Sign Document" : "Loading Embed..."}
+                            {embedLoaded ? "Review & Sign Agreement" : "Loading Embed..."}
                         </Button>
                     )}
 
@@ -304,7 +304,7 @@ export function ContractCheckStep({ onComplete, onSignWellOpen, onSignWellClose 
                     </div>
                 ) : (
                     <div className="flex flex-col items-center space-y-4">
-                        <p className="text-sm text-gray-500 font-medium">Already signed the document?</p>
+                        <p className="text-sm text-gray-500 font-medium">Already signed? Click here.</p>
                         <Button
                             onClick={() => checkStatus(false)}
                             disabled={checking}

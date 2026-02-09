@@ -3,6 +3,8 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { send_client_welcome_email } from '@/lib/email';
 import { syncOutstandingDocuments } from '@/lib/outstanding-documents';
+import { syncUnifiedClientData, generateSecurePassword } from '@/lib/user-management';
+
 /**
  * Supabase admin client with elevated privileges
  * Necessary for creating users and writing to protected tables
@@ -13,11 +15,6 @@ const supabase_admin = createClient(
   { auth: { persistSession: false } }
 );
 
-/**
- * Default password for all new clients
- * Users must change this upon their first login
- */
-const DEFAULT_PASSWORD = 'CreditBanc2025!';
 
 /**
  * ============================================================================
@@ -292,11 +289,14 @@ export async function POST(request: Request) {
 
     let user_id = existing_user?.id;
 
+    // Generar password temporal seguro para este cliente
+    const temporary_password = generateSecurePassword();
+
     if (!user_id) {
       // CREATE new user
       const { data: created_user, error: create_error } = await supabase_admin.auth.admin.createUser({
         email: body.client_email.toLowerCase(),
-        password: DEFAULT_PASSWORD,
+        password: temporary_password,
         email_confirm: true, // Auto-confirm email
         user_metadata: {
           full_name: body.client_name,
@@ -318,7 +318,7 @@ export async function POST(request: Request) {
     } else {
       // UPDATE existing user
       await supabase_admin.auth.admin.updateUserById(user_id, {
-        password: DEFAULT_PASSWORD,
+        password: temporary_password,
         email_confirm: true,
         user_metadata: {
           should_change_password: true,
@@ -331,6 +331,22 @@ export async function POST(request: Request) {
 
       console.log(`✅ Existing user updated in Auth: ${user_id}`);
     }
+
+    // ========== STEP 2.5: SYNC TO UNIFIED TABLES ==========
+    // Ensures record exists in public.users (RBAC) and business_profiles (AI Coach)
+    await syncUnifiedClientData(supabase_admin, {
+      userId: user_id,
+      email: body.client_email,
+      clientName: body.client_name,
+      companyName: body.company_name,
+      role: 'free',
+      industry: body.industry,
+      phone: body.client_phone,
+      state: body.company_state,
+      city: body.company_city,
+      zipCode: body.company_zip_code,
+    });
+    console.log(`✅ User sync completed for ${user_id}`);
 
     // ========== STEP 3: PREPARE GHL CUSTOM FIELDS ==========
     const custom_fields = [
@@ -564,7 +580,7 @@ export async function POST(request: Request) {
       await send_client_welcome_email({
         client_name: body.client_name,
         client_email: body.client_email.toLowerCase(),
-        client_password: DEFAULT_PASSWORD,
+        client_password: temporary_password,
         advisor_name: body.advisor_name || 'Your Advisor',
         advisor_email: advisor_email || 'support@creditbanc.io',
         advisor_phone: advisor_phone || undefined,
@@ -600,7 +616,7 @@ export async function POST(request: Request) {
       },
       credentials: {
         email: body.client_email.toLowerCase(),
-        password: DEFAULT_PASSWORD,
+        password: temporary_password,
         login_url: `${process.env.NEXT_PUBLIC_APP_URL}/auth/login`
       },
       message: 'Client registered successfully'
