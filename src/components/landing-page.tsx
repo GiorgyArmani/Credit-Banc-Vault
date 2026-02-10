@@ -49,23 +49,23 @@ export function LandingPage() {
   ]
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-blue-50">
+    <div className="min-h-screen bg-white font-sans selection:bg-emerald-100 selection:text-emerald-900">
 
       {/* header-navigation: Fixed navigation bar with logo and menu */}
-      <header className="sticky top-0 z-50 w-full border-b bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/60">
+      <header className="sticky top-0 z-50 w-full border-b bg-white/80 backdrop-blur-md">
         <div className="container mx-auto px-4">
-          <div className="flex h-16 items-center justify-between">
+          <div className="flex h-20 items-center justify-between">
 
             {/* logo-section: Company logo on the left */}
             <div className="flex items-center">
-              <Link href="/" className="flex items-center space-x-2">
+              <Link href="/" className="flex items-center space-x-2 group">
                 <Image
                   src="/vaultlogo.svg"
                   alt="Credit Banc Vault"
-                  width={140}
-                  height={60}
+                  width={150}
+                  height={65}
                   priority
-                  className="h-20 w-auto"
+                  className="h-10 w-auto transition-transform group-hover:scale-105"
                   onError={(e) => {
                     // fallback-to-png: If SVG fails, try PNG
                     const target = e.target as HTMLImageElement;
@@ -76,25 +76,26 @@ export function LandingPage() {
             </div>
 
             {/* desktop-navigation: Navigation links for desktop */}
-            <nav className="hidden md:flex items-center space-x-6">
-              <Link href="#features" className="text-sm font-medium text-gray-700 hover:text-emerald-600 transition-colors">
+            <nav className="hidden md:flex items-center space-x-8">
+              <Link href="#features" className="text-sm font-semibold text-gray-600 hover:text-emerald-600 transition-colors">
                 Features
               </Link>
-              <Link href="#how-it-works" className="text-sm font-medium text-gray-700 hover:text-emerald-600 transition-colors">
+              <Link href="#how-it-works" className="text-sm font-semibold text-gray-600 hover:text-emerald-600 transition-colors">
                 How It Works
               </Link>
-
-              <Link href="#" className="text-sm font-medium text-gray-700 hover:text-emerald-600 transition-colors">
+              <Link href="#" className="text-sm font-semibold text-gray-600 hover:text-emerald-600 transition-colors">
                 Support
               </Link>
             </nav>
 
             {/* desktop-cta-buttons: Action buttons for desktop */}
-            <div className="hidden md:flex items-center space-x-3">
-              <Button variant="ghost" size="sm" asChild>
+            <div className="hidden md:flex items-center space-x-4">
+              <Button variant="ghost" size="sm" className="font-bold text-gray-700" asChild>
                 <Link href="/auth/login">Log In</Link>
               </Button>
-
+              <Button size="sm" className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold px-6 shadow-md shadow-emerald-500/10" asChild>
+                <a href="https://creditbanc.io/schedule-a-call" target="_blank" rel="noopener noreferrer">Schedule Call</a>
+              </Button>
             </div>
 
             {/* mobile-menu-button: Hamburger menu for mobile */}
@@ -113,32 +114,35 @@ export function LandingPage() {
 
           {/* mobile-menu: Dropdown menu for mobile devices */}
           {mobileMenuOpen && (
-            <div className="md:hidden border-t py-4">
-              <nav className="flex flex-col space-y-3">
+            <div className="md:hidden border-t py-6 animate-in slide-in-from-top duration-300">
+              <nav className="flex flex-col space-y-4">
                 <Link
                   href="#features"
-                  className="text-sm font-medium text-gray-700 hover:text-emerald-600 transition-colors px-2 py-2"
+                  className="text-base font-bold text-gray-700 hover:text-emerald-600 transition-colors px-2 py-2"
                   onClick={() => setMobileMenuOpen(false)}
                 >
                   Features
                 </Link>
                 <Link
                   href="#how-it-works"
-                  className="text-sm font-medium text-gray-700 hover:text-emerald-600 transition-colors px-2 py-2"
+                  className="text-base font-bold text-gray-700 hover:text-emerald-600 transition-colors px-2 py-2"
                   onClick={() => setMobileMenuOpen(false)}
                 >
                   How It Works
                 </Link>
                 <Link
                   href="#"
-                  className="text-sm font-medium text-gray-700 hover:text-emerald-600 transition-colors px-2 py-2"
+                  className="text-base font-bold text-gray-700 hover:text-emerald-600 transition-colors px-2 py-2"
                   onClick={() => setMobileMenuOpen(false)}
                 >
                   Support
                 </Link>
-                <div className="flex flex-col space-y-2 pt-2 border-t">
-                  <Button variant="outline" size="sm" className="w-full" asChild>
+                <div className="flex flex-col space-y-3 pt-4 border-t">
+                  <Button variant="outline" size="lg" className="w-full font-bold" asChild>
                     <Link href="/auth/login" onClick={() => setMobileMenuOpen(false)}>Log In</Link>
+                  </Button>
+                  <Button size="lg" className="w-full bg-emerald-500 hover:bg-emerald-600 font-bold" asChild>
+                    <a href="https://creditbanc.io/schedule-a-call" target="_blank" rel="noopener noreferrer">Get Started</a>
                   </Button>
                 </div>
               </nav>
@@ -147,71 +151,74 @@ export function LandingPage() {
         </div>
       </header>
 
-      {/* beta-strip: Announcement banner */}
-      <div className="w-full border-b bg-gradient-to-r from-emerald-50 to-blue-50">
-        <div className="container mx-auto px-4 py-2 text-center text-sm">
-          <Badge className="mr-2 bg-emerald-600 text-white hover:bg-emerald-600">BETA</Badge>
-          <span className="text-gray-700">
-            Introducing <span className="font-semibold text-emerald-700 uppercase">THE Credit Banc Vault</span> — Easy · Fast · Secure.
-          </span>
-        </div>
-      </div>
-
       {/* hero-section: Main landing section with headline and CTAs */}
-      <section className="relative w-full bg-gradient-to-br from-emerald-200 via-emerald-300 to-blue-300">
-        <div className="container mx-auto px-4 pt-20 pb-16 text-center text-white">
+      <section className="relative w-full bg-[#f0fdf7] overflow-hidden">
+        {/* mint aurora-glow effect for clarity */}
+        <div className="absolute inset-0 bg-gradient-to-br from-emerald-100/50 via-white/80 to-white" />
+        <div className="absolute top-0 left-1/4 w-[60%] h-[60%] bg-emerald-300/10 blur-[130px] rounded-full animate-aurora" />
+        <div className="absolute bottom-0 right-1/4 w-[50%] h-[50%] bg-blue-200/5 blur-[130px] rounded-full animate-aurora" style={{ animationDelay: '-4s' }} />
+
+        <div className="container relative z-10 mx-auto px-4 pt-28 pb-24 text-center">
           <div className="max-w-4xl mx-auto">
+            {/* beta-tag-inline */}
+            <div className="inline-flex items-center space-x-2 bg-white/80 border border-emerald-100 rounded-full px-4 py-2 mb-10 shadow-sm">
+              <Badge className="bg-emerald-500 text-white hover:bg-emerald-400 font-bold border-none shadow-sm">NEW</Badge>
+              <span className="text-sm text-emerald-900/40 font-bold uppercase tracking-[0.2em]">THE Credit Banc Vault</span>
+            </div>
 
             {/* headline: Main value proposition */}
-            <h1 className="text-5xl md:text-6xl font-bold mb-6">
-              Upload. Track. <span className="text-gray-900 bg-white/60 px-2 rounded">Get Funded.</span>
+            <h1 className="text-5xl md:text-8xl font-black mb-10 leading-[1.05] tracking-tight text-emerald-950">
+              Upload. Track. <br className="sm:hidden" />
+              <span className="text-emerald-500">Get Funded.</span>
             </h1>
 
             {/* subheadline: Detailed description of the service */}
-            <p className="text-xl mb-8 max-w-2xl mx-auto">
-              Built to move things forward, not bury you in paperwork. Upload, track progress, and submit directly to underwriting in <b>24–48 hours.</b>
+            <p className="text-xl md:text-2xl mb-14 max-w-2xl mx-auto text-emerald-900/60 leading-relaxed font-medium">
+              The fastest way to manage your funding documents. Upload in seconds, track progress live, and get your file to underwriting in <span className="text-emerald-600 font-bold italic underline decoration-emerald-500/30 underline-offset-[12px]">24–48 hours.</span>
             </p>
 
             {/* cta-buttons: Primary and secondary call-to-action buttons */}
-            <div className="flex flex-col sm:flex-row gap-3 justify-center">
-              <Button size="lg" className="text-lg px-7 bg-white text-emerald-700 hover:bg-gray-100" asChild>
+            <div className="flex flex-col sm:flex-row gap-5 justify-center items-center">
+              <Button size="lg" className="text-xl px-12 py-9 h-auto bg-emerald-500 text-white hover:bg-emerald-400 font-bold transition-all hover:scale-105 shadow-2xl shadow-emerald-500/30 active:scale-95" asChild>
                 <a href="https://creditbanc.io/schedule-a-call" target="_blank" rel="noopener noreferrer">
-                  Get Started
-                  <ArrowRight className="ml-2 h-5 w-5" />
+                  Start Now
+                  <ArrowRight className="ml-3 h-6 w-6" />
                 </a>
               </Button>
-              <Button size="lg" variant="outline" className="text-lg px-7 border-white text-emerald-700 bg-white hover:bg-white/90" asChild>
-                <Link href="#demo">
-                  <Play className="mr-2 h-5 w-5" />
-                  Watch Demo
+              <Button size="lg" variant="ghost" className="text-xl px-10 py-9 h-auto text-emerald-950 hover:bg-white/50 transition-all font-bold" asChild>
+                <Link href="#how-it-works">
+                  See How It Works
                 </Link>
               </Button>
             </div>
 
             {/* login-link: Link for existing users */}
-            <div className="mt-4">
-              <Link href="/auth/login" className="text-sm underline hover:text-white/90 transition-colors">
-                Already have an account? Log in
+            <div className="mt-12">
+              <Link href="/auth/login" className="text-emerald-900/40 hover:text-emerald-600 transition-colors text-base font-bold border-b-2 border-transparent hover:border-emerald-500/20 pb-1">
+                Already registered? <span className="text-emerald-600">Log in</span>
               </Link>
             </div>
           </div>
         </div>
+
+        {/* subtle divider */}
+        <div className="absolute bottom-0 left-0 w-full h-32 bg-gradient-to-t from-white to-transparent" />
       </section>
 
       {/* pillars-section: Three key value propositions */}
-      <section id="features" className="container mx-auto px-4 py-12">
-        <div className="grid md:grid-cols-3 gap-6">
+      <section id="features" className="container mx-auto px-4 py-24 relative">
+        <div className="grid md:grid-cols-3 gap-10">
           {pillars.map((p, i) => (
-            <Card key={i} className="text-center hover:shadow-lg transition-shadow">
-              <CardHeader>
+            <Card key={i} className="text-center border border-emerald-50 shadow-sm hover:shadow-2xl transition-all duration-500 group hover:-translate-y-2 bg-white rounded-[2rem] overflow-hidden">
+              <CardHeader className="pt-12">
                 {/* pillar-icon: Icon representing each value proposition */}
-                <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100">
-                  <p.icon className="h-6 w-6 text-emerald-600" />
+                <div className="mx-auto mb-8 flex h-20 w-20 items-center justify-center rounded-3xl bg-emerald-50 group-hover:bg-emerald-500 transition-all duration-500 shadow-inner group-hover:shadow-emerald-500/50">
+                  <p.icon className="h-10 w-10 text-emerald-600 group-hover:text-white transition-colors duration-500" />
                 </div>
-                <CardTitle className="text-xl">{p.title}</CardTitle>
+                <CardTitle className="text-2xl font-black text-emerald-950 tracking-tight">{p.title}</CardTitle>
               </CardHeader>
-              <CardContent>
-                <CardDescription className="text-base">{p.description}</CardDescription>
+              <CardContent className="pb-12 px-8">
+                <CardDescription className="text-lg text-emerald-900/60 leading-relaxed font-bold">{p.description}</CardDescription>
               </CardContent>
             </Card>
           ))}
@@ -219,101 +226,134 @@ export function LandingPage() {
       </section>
 
       {/* how-it-works-section: Step-by-step process explanation */}
-      <section id="how-it-works" className="bg-white py-14">
+      <section id="how-it-works" className="bg-[#f8fdfb]/80 py-32 border-y border-emerald-100/30">
         <div className="container mx-auto px-4">
           {/* section-header: Title and subtitle for the steps section */}
-          <div className="text-center mb-10">
-            <h2 className="text-3xl md:text-4xl font-bold text-gray-900">How It Works</h2>
-            <p className="text-lg text-gray-600">Three steps. No surprises.</p>
+          <div className="text-center mb-20">
+            <h2 className="text-5xl md:text-6xl font-black text-emerald-950 mb-6 tracking-tighter">How It Works</h2>
+            <div className="inline-block h-1.5 w-20 bg-emerald-500 rounded-full mb-6" />
+            <p className="text-xl text-emerald-900/40 font-bold uppercase tracking-widest">Three steps. No surprises.</p>
           </div>
 
           {/* steps-grid: Interactive cards showing the process */}
-          <div className="grid lg:grid-cols-3 gap-6">
+          <div className="grid lg:grid-cols-3 gap-10">
             {steps.map((s, idx) => (
               <Card
                 key={idx}
-                className={`hover:shadow-lg transition-shadow ${activeStep === idx ? "ring-2 ring-emerald-500" : ""}`}
+                className={`border-none shadow-xl transition-all duration-500 rounded-[2.5rem] p-4 ${activeStep === idx ? " ring-8 ring-emerald-500/5 bg-white scale-[1.05]" : "bg-white/60 opacity-80"}`}
                 onMouseEnter={() => setActiveStep(idx)}
-                onFocus={() => setActiveStep(idx)}
               >
-                <CardHeader className="space-y-3">
+                <CardHeader className="space-y-6 p-10 text-left">
                   {/* step-header: Icon and title for each step */}
-                  <div className="flex items-center space-x-3">
-                    <div className="rounded-full bg-emerald-100 p-2">
-                      <s.icon className="h-5 w-5 text-emerald-600" />
+                  <div className="flex items-center space-x-5">
+                    <div className="rounded-2xl bg-emerald-500 p-4 shadow-lg shadow-emerald-500/20">
+                      <s.icon className="h-7 w-7 text-white" />
                     </div>
-                    <CardTitle>{s.title}</CardTitle>
+                    <CardTitle className="text-3xl font-black text-emerald-950 tracking-tight">{s.title}</CardTitle>
                   </div>
-                  <CardDescription>{s.desc}</CardDescription>
+                  <CardDescription className="text-xl text-emerald-900/60 leading-relaxed font-bold">{s.desc}</CardDescription>
                 </CardHeader>
               </Card>
             ))}
           </div>
 
           {/* required-docs-callout: Highlighted information about required documents */}
-          <div className="mt-8 max-w-3xl mx-auto rounded-xl border p-6 bg-emerald-50/60 shadow-sm">
-            <div className="mb-4 text-center">
-              <h3 className="text-lg font-bold text-emerald-900">Required Documents to Start</h3>
-              <p className="text-sm text-emerald-800">To get started, you’ll need:</p>
+          <div className="mt-24 max-w-5xl mx-auto rounded-[3rem] border border-emerald-100 p-12 md:p-16 bg-white shadow-2xl relative overflow-hidden group">
+            <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-50 rounded-full -mr-32 -mt-32 transition-transform duration-700 group-hover:scale-110" />
+
+            <div className="relative z-10">
+              <div className="mb-12 text-center">
+                <h3 className="text-3xl font-black text-emerald-950 mb-4 tracking-tight">Required Documents to Start</h3>
+                <p className="text-xl text-emerald-700/60 font-bold">Everything you need to get moving today:</p>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-12">
+                {[
+                  "6 months of business bank statements",
+                  "Driver’s License (front and back)",
+                  "Voided business check",
+                  "Debt schedule (if applicable)"
+                ].map((item, i) => (
+                  <div key={i} className="flex items-center space-x-5 text-emerald-950 text-xl group/item">
+                    <div className="h-10 w-10 rounded-2xl bg-emerald-50 flex items-center justify-center shrink-0 group-hover/item:bg-emerald-500 transition-all duration-300">
+                      <CheckCircle className="h-6 w-6 text-emerald-500 group-hover/item:text-white" />
+                    </div>
+                    <span className="font-black tracking-tight">{item}</span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-emerald-900/40 text-lg text-center italic border-t border-emerald-50 pt-10 font-bold tracking-tight">
+                The Vault tells you what’s needed, flags what’s missing, and skips everything that isn’t.
+              </p>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
-              <div className="flex items-center space-x-2 text-emerald-900 text-sm">
-                <CheckCircle className="h-4 w-4 text-emerald-700" />
-                <span>6 months of business bank statements</span>
-              </div>
-              <div className="flex items-center space-x-2 text-emerald-900 text-sm">
-                <CheckCircle className="h-4 w-4 text-emerald-700" />
-                <span>Driver’s License (front and back)</span>
-              </div>
-              <div className="flex items-center space-x-2 text-emerald-900 text-sm">
-                <CheckCircle className="h-4 w-4 text-emerald-700" />
-                <span>Voided business check</span>
-              </div>
-              <div className="flex items-center space-x-2 text-emerald-900 text-sm">
-                <CheckCircle className="h-4 w-4 text-emerald-700" />
-                <span>Debt schedule (if applicable)</span>
-              </div>
-            </div>
-            <p className="text-emerald-900 text-sm text-center italic border-t pt-4">
-              The Vault tells you what’s needed, flags what’s missing, and skips everything that isn’t.
-            </p>
           </div>
         </div>
       </section>
 
       {/* final-cta-section: Last call-to-action before footer */}
-      <section className="container mx-auto px-4 py-16 text-center">
-        <div className="max-w-3xl mx-auto">
-          <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">Ready to get things moving?</h2>
-          <p className="text-lg text-gray-600 mb-6">
-            Schedule a call with our advisors to get your account created and start uploading documents to the Credit Banc Vault.
+      <section className="container mx-auto px-4 py-32 text-center">
+        <div className="max-w-5xl mx-auto bg-emerald-900 rounded-[4rem] p-16 md:p-24 shadow-2xl relative overflow-hidden">
+          {/* visual punch */}
+          <div className="absolute top-0 right-0 w-96 h-96 bg-emerald-500/20 blur-[100px] rounded-full -mr-48 -mt-48 animate-pulse" />
+          <div className="absolute bottom-0 left-0 w-96 h-96 bg-emerald-500/10 blur-[100px] rounded-full -ml-48 -mb-48" />
+
+          <h2 className="text-4xl md:text-7xl font-black text-white mb-8 tracking-tighter leading-tight">Ready to get <br />things moving?</h2>
+          <p className="text-xl md:text-2xl text-emerald-100/60 mb-14 max-w-3xl mx-auto leading-relaxed font-bold">
+            Schedule a call with our advisors to get your account created and start uploading documents to the <span className="text-emerald-400 font-extrabold uppercase tracking-widest">Credit Banc Vault</span>.
           </p>
-          <Button size="lg" className="text-lg px-8 py-3" asChild>
+          <Button size="lg" className="text-2xl px-14 py-10 h-auto bg-emerald-500 text-white hover:bg-emerald-400 font-black transition-all hover:scale-105 shadow-2xl shadow-emerald-500/40 active:scale-95" asChild>
             <a href="https://creditbanc.io/schedule-a-call" target="_blank" rel="noopener noreferrer" className="flex items-center">
               Start Now
-              <ArrowRight className="ml-2 h-5 w-5" />
+              <ArrowRight className="ml-4 h-8 w-8" />
             </a>
           </Button>
 
-          <div className="mt-6">
-            <Link href="/auth/login" className="text-sm text-emerald-700 hover:underline">
-              Already registered? Log in
+          <div className="mt-14">
+            <Link href="/auth/login" className="text-emerald-300/60 hover:text-white transition-colors text-lg font-black tracking-tight border-b-2 border-emerald-300/10 hover:border-white/20 pb-1">
+              Already registered? <span className="text-emerald-300 underline">Log in</span>
             </Link>
           </div>
         </div>
       </section>
 
-      {/* footer: Site footer with links and copyright */}
-      <footer className="bg-gray-900 text-white py-10">
-        <div className="container mx-auto px-4 text-center">
-          {/* footer-links: Navigation links */}
-          <div className="flex justify-center gap-6 text-gray-400 text-sm mb-4">
-            <Link href="#" className="hover:text-white transition-colors">Privacy</Link>
-            <Link href="#" className="hover:text-white transition-colors">Terms</Link>
-            <Link href="#" className="hover:text-white transition-colors">Support</Link>
+      {/* footer: Strictly simplified footer per USER request */}
+      <footer className="bg-emerald-950 text-white py-20 relative overflow-hidden">
+        {/* color grading/shine from CTA */}
+        <div className="absolute inset-0 bg-gradient-to-b from-emerald-900/50 to-transparent pointer-events-none" />
+        <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-emerald-500/30 to-transparent" />
+
+        <div className="container mx-auto px-4 relative z-10 flex flex-col items-center space-y-12">
+          <Link href="/" className="transition-all hover:scale-110 active:scale-95 group">
+            <Image
+              src="/vaultlogo.svg"
+              alt="Credit Banc Vault"
+              width={180}
+              height={80}
+              priority
+              className="h-14 w-auto brightness-0 invert opacity-90 group-hover:opacity-100 transition-opacity"
+              onError={(e) => {
+                const target = e.target as HTMLImageElement;
+                target.src = '/vaultlogo.png';
+              }}
+            />
+          </Link>
+
+          <div className="flex flex-col items-center space-y-8">
+            <a
+              href="https://creditbanc.io"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="group flex items-center space-x-3 text-emerald-400 hover:text-white transition-all text-3xl font-black tracking-tighter"
+            >
+              <span>creditbanc.io</span>
+              <ArrowRight className="h-7 w-7 transform group-hover:translate-x-2 transition-transform" />
+            </a>
+
+            <div className="h-px w-24 bg-emerald-800/50" />
+
+            <p className="text-emerald-100/20 text-xs font-black uppercase tracking-[0.4em]">
+              © {new Date().getFullYear()} Credit Banc. All rights reserved.
+            </p>
           </div>
-          {/* copyright: Copyright notice */}
-          <p className="text-gray-400">© {new Date().getFullYear()} Credit Banc. All rights reserved.</p>
         </div>
       </footer>
     </div>
