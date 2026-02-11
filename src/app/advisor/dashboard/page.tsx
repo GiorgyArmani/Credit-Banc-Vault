@@ -19,9 +19,13 @@ import {
   AlertCircle,
   TrendingUp,
   LogOut,
-  Sparkles
+  Sparkles,
+  ArrowRight,
+  Shield,
+  Activity
 } from "lucide-react";
 import AdvisorWebsiteTour from "@/components/tour/advisor-website-tour";
+import { Badge } from "@/components/ui/badge";
 
 /**
  * Stat Card Component
@@ -40,17 +44,21 @@ function StatCard({
   id?: string;
 }) {
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between pb-2">
-        <CardTitle className="text-sm font-medium text-muted-foreground">
+    <Card className="rounded-[2rem] border-emerald-50 bg-white/50 backdrop-blur-sm hover:shadow-2xl hover:shadow-emerald-500/5 transition-all duration-500 group overflow-hidden border-2 hover:border-emerald-100">
+      <CardHeader className="flex flex-row items-center justify-between pb-2 px-6 pt-6">
+        <CardTitle className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40">
           {label}
         </CardTitle>
-        <Icon className="h-4 w-4 text-muted-foreground" />
+        <div className="p-2 bg-emerald-50 rounded-xl group-hover:bg-emerald-500 group-hover:text-white transition-all duration-500">
+          <Icon className="h-4 w-4" />
+        </div>
       </CardHeader>
-      <CardContent>
-        <div className="text-2xl font-bold">{value}</div>
+      <CardContent className="px-6 pb-6 pt-2">
+        <div className="text-3xl font-black text-emerald-950 tracking-tighter uppercase">{value}</div>
         {trend && (
-          <p className="text-xs text-muted-foreground mt-1">{trend}</p>
+          <p className="text-[10px] font-black uppercase tracking-wider text-emerald-500 mt-2 flex items-center gap-1">
+            {trend}
+          </p>
         )}
       </CardContent>
     </Card>
@@ -128,13 +136,9 @@ export default function AdvisorDashboard() {
 
   /**
    * Load advisor statistics from database
-   * This is a placeholder - adjust based on your actual data model
    */
   async function loadStats() {
     try {
-      // TODO: Replace with actual queries based on your data model
-      // Example: Count applications, clients, etc.
-
       // For now, using placeholder data
       setStats({
         totalClients: 12,
@@ -158,55 +162,68 @@ export default function AdvisorDashboard() {
   // Loading state
   if (isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="text-center">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent mx-auto"></div>
-          <p className="mt-4 text-muted-foreground">Loading dashboard...</p>
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="flex flex-col items-center gap-4">
+          <div className="h-12 w-12 rounded-full border-4 border-emerald-500 border-t-transparent animate-spin" />
+          <p className="text-slate-600 animate-pulse font-bold">Initializing Advisor Dashboard...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-white relative overflow-hidden">
+      {/* Aurora glow effects */}
+      <div className="absolute top-0 right-0 w-[50%] h-[50%] bg-emerald-50/50 blur-[120px] rounded-full pointer-events-none" />
+      <div className="absolute bottom-0 left-0 w-[40%] h-[40%] bg-blue-50/30 blur-[120px] rounded-full pointer-events-none" />
+
       <AdvisorWebsiteTour />
-      {/* Header */}
-      <header className="border-b" id="tour-advisor-welcome">
-        <div className="container mx-auto flex h-16 items-center justify-between px-4">
+
+      {/* Main Content Area */}
+      <div className="container mx-auto px-4 py-8 space-y-8 animate-in fade-in-50 duration-500 relative z-10">
+
+        {/* Header Section */}
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 border-b border-emerald-50 pb-8" id="tour-advisor-welcome">
           <div>
-            <h1 className="text-2xl font-bold">Advisor Dashboard</h1>
-            <p className="text-sm text-muted-foreground">
-              {userData
-                ? `Welcome back, ${userData.first_name}!`
-                : "Welcome back!"}
+            <h1 className="text-4xl md:text-5xl font-black text-emerald-950 mb-3 tracking-tighter uppercase leading-none">
+              Advisor Dashboard
+            </h1>
+            <p className="text-emerald-900/60 text-lg font-bold">
+              {userData ? `Welcome back, ${userData.first_name}!` : "Welcome back!"}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2 mr-2">
+              <Badge className="bg-emerald-50 text-emerald-700 border border-emerald-200 font-black px-3 py-1">
+                ADVISOR PORTAL
+              </Badge>
+            </div>
+
             <Button
               variant="outline"
               size="sm"
               onClick={() => (window as any).startAdvisorTour?.()}
-              className="bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 flex items-center gap-2 font-medium"
+              className="bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 flex items-center gap-2 font-black rounded-full px-6 h-11"
             >
               <Sparkles className="h-4 w-4" />
               Website Tour
             </Button>
+
             <Button
               variant="outline"
               size="sm"
               onClick={handleLogout}
+              className="bg-white text-emerald-950 border-emerald-100 hover:bg-emerald-50 flex items-center gap-2 font-black rounded-full px-6 h-11"
             >
-              <LogOut className="mr-2 h-4 w-4" />
-              Logout
+              <LogOut className="h-4 w-4" />
+              Sign Out
             </Button>
           </div>
         </div>
-      </header>
 
-      {/* Main Content */}
-      <main className="container mx-auto p-6">
         {/* Stats Grid */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-8" id="tour-advisor-stats">
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4" id="tour-advisor-stats">
           <StatCard
             icon={Users}
             label="Total Clients"
@@ -233,58 +250,72 @@ export default function AdvisorDashboard() {
           />
         </div>
 
-        {/* Quick Actions */}
-        <Card className="mb-8" id="tour-advisor-quick-actions">
-          <CardHeader>
-            <CardTitle>Quick Actions</CardTitle>
-            <CardDescription>
+        {/* Quick Actions Card */}
+        <Card className="bg-white border-emerald-50 overflow-hidden rounded-[3rem] shadow-sm relative group" id="tour-advisor-quick-actions">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50/50 blur-[60px] rounded-full pointer-events-none" />
+          <CardHeader className="px-10 pt-10 pb-6">
+            <CardTitle className="text-2xl font-black text-emerald-950 tracking-tighter uppercase">Quick Actions</CardTitle>
+            <CardDescription className="text-emerald-900/40 font-bold">
               Common tasks and shortcuts for your workflow
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <div className="grid gap-4 md:grid-cols-3">
+          <CardContent className="px-10 pb-10 pt-0">
+            <div className="grid gap-6 md:grid-cols-3">
               <Button
-                className="h-auto flex-col items-start p-4"
+                className="h-auto flex-col items-start p-6 bg-emerald-50/50 border-emerald-100 hover:bg-emerald-500 hover:text-white transition-all duration-500 rounded-[2rem] border-2 shadow-none group/btn"
                 variant="outline"
                 onClick={() => router.push("/advisor/dashboard/clients/new")}
               >
-                <FileText className="mb-2 h-6 w-6" />
-                <span className="font-semibold">New Client Application</span>
+                <div className="p-3 bg-white rounded-2xl mb-4 group-hover/btn:bg-white/20 transition-colors">
+                  <FileText className="h-6 w-6 text-emerald-500 group-hover/btn:text-white" />
+                </div>
+                <span className="font-black uppercase tracking-tighter text-lg mb-1">New Client Application</span>
+                <span className="text-xs font-bold opacity-60 group-hover/btn:opacity-100">Start a new funding request</span>
               </Button>
+
               <Button
-                className="h-auto flex-col items-start p-4"
+                className="h-auto flex-col items-start p-6 bg-emerald-50/50 border-emerald-100 hover:bg-emerald-500 hover:text-white transition-all duration-500 rounded-[2rem] border-2 shadow-none group/btn"
                 variant="outline"
                 onClick={() => router.push("/advisor/dashboard/clients")}
               >
-                <Users className="mb-2 h-6 w-6" />
-                <span className="font-semibold">View Clients</span>
-                <span className="text-xs text-muted-foreground">
-                  Manage your client list
-                </span>
+                <div className="p-3 bg-white rounded-2xl mb-4 group-hover/btn:bg-white/20 transition-colors">
+                  <Users className="h-6 w-6 text-emerald-500 group-hover/btn:text-white" />
+                </div>
+                <span className="font-black uppercase tracking-tighter text-lg mb-1">View Clients</span>
+                <span className="text-xs font-bold opacity-60 group-hover/btn:opacity-100">Manage your active client list</span>
               </Button>
-              <Button className="h-auto flex-col items-start p-4" variant="outline">
-                <AlertCircle className="mb-2 h-6 w-6" />
-                <span className="font-semibold">Pending Reviews</span>
-                <span className="text-xs text-muted-foreground">
-                  Applications awaiting review
-                </span>
+
+              <Button
+                className="h-auto flex-col items-start p-6 bg-emerald-50/50 border-emerald-100 hover:bg-emerald-500 hover:text-white transition-all duration-500 rounded-[2rem] border-2 shadow-none group/btn"
+                variant="outline"
+              >
+                <div className="p-3 bg-white rounded-2xl mb-4 group-hover/btn:bg-white/20 transition-colors">
+                  <AlertCircle className="h-6 w-6 text-emerald-500 group-hover/btn:text-white" />
+                </div>
+                <span className="font-black uppercase tracking-tighter text-lg mb-1">Pending Reviews</span>
+                <span className="text-xs font-bold opacity-60 group-hover/btn:opacity-100">Applications awaiting your review</span>
               </Button>
             </div>
           </CardContent>
         </Card>
 
-        {/* Recent Activity */}
-        <div className="grid gap-4 md:grid-cols-2" id="tour-advisor-activity">
+        {/* Bottom Grid: Activity & Applications */}
+        <div className="grid gap-8 md:grid-cols-2" id="tour-advisor-activity">
           {/* Recent Applications */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Recent Applications</CardTitle>
-              <CardDescription>Latest client submissions</CardDescription>
+          <Card className="bg-white border-emerald-50 rounded-[3rem] shadow-sm overflow-hidden">
+            <CardHeader className="px-10 pt-10 pb-6 flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="text-xl font-black text-emerald-950 tracking-tighter uppercase">Recent Applications</CardTitle>
+                <CardDescription className="text-emerald-900/40 font-bold">Latest client submissions</CardDescription>
+              </div>
+              <div className="p-3 bg-blue-50 text-blue-500 rounded-2xl">
+                <Activity className="h-5 w-5" />
+              </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="px-10 pb-10">
               <div className="space-y-4">
-                {/* Placeholder for recent applications */}
-                <div className="text-sm text-muted-foreground text-center py-8">
+                <div className="text-sm font-bold text-emerald-900/30 text-center py-12 bg-emerald-50/20 rounded-[2rem] border-2 border-dashed border-emerald-100/50">
+                  <FileText className="h-8 w-8 mx-auto mb-3 opacity-20" />
                   No recent applications
                 </div>
               </div>
@@ -292,22 +323,27 @@ export default function AdvisorDashboard() {
           </Card>
 
           {/* Activity Feed */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Activity Feed</CardTitle>
-              <CardDescription>Recent updates and notifications</CardDescription>
+          <Card className="bg-white border-emerald-50 rounded-[3rem] shadow-sm overflow-hidden">
+            <CardHeader className="px-10 pt-10 pb-6 flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="text-xl font-black text-emerald-950 tracking-tighter uppercase">Activity Feed</CardTitle>
+                <CardDescription className="text-emerald-900/40 font-bold">Recent updates and notifications</CardDescription>
+              </div>
+              <div className="p-3 bg-emerald-50 text-emerald-500 rounded-2xl">
+                <Activity className="h-5 w-5" />
+              </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="px-10 pb-10">
               <div className="space-y-4">
-                {/* Placeholder for activity feed */}
-                <div className="text-sm text-muted-foreground text-center py-8">
+                <div className="text-sm font-bold text-emerald-900/30 text-center py-12 bg-emerald-50/20 rounded-[2rem] border-2 border-dashed border-emerald-100/50">
+                  <Sparkles className="h-8 w-8 mx-auto mb-3 opacity-20" />
                   No recent activity
                 </div>
               </div>
             </CardContent>
           </Card>
         </div>
-      </main>
+      </div>
     </div>
   );
 }
