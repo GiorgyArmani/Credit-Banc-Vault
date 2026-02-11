@@ -83,7 +83,10 @@ function DashboardContent() {
   }, [searchParams]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-blue-50">
+    <div className="min-h-screen bg-white relative overflow-hidden">
+      {/* subtle mint glow */}
+      <div className="absolute top-0 right-0 w-[50%] h-[50%] bg-emerald-50/50 blur-[120px] rounded-full pointer-events-none" />
+      <div className="absolute bottom-0 left-0 w-[40%] h-[40%] bg-blue-50/30 blur-[120px] rounded-full pointer-events-none" />
 
       <WebsiteTour />
 
@@ -91,12 +94,12 @@ function DashboardContent() {
       <div className="container mx-auto px-4 py-8 space-y-8 animate-in fade-in-50 duration-500">
 
         {/* WELCOME & ACTIONS HEADER */}
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b pb-6">
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 border-b border-emerald-50 pb-8">
           <div id="tour-welcome">
-            <h2 className="text-3xl font-bold text-slate-900 mb-1">
+            <h2 className="text-4xl md:text-5xl font-black text-emerald-950 mb-3 tracking-tighter uppercase">
               Welcome{clientName ? `, ${clientName}` : (userEmail ? `, ${userEmail}` : '')}!
             </h2>
-            <p className="text-slate-600">
+            <p className="text-emerald-900/60 text-lg font-bold">
               This is your home base. Manage documents, access templates, and keep everything in one place until underwriting is complete.
             </p>
           </div>
@@ -120,7 +123,7 @@ function DashboardContent() {
               variant="outline"
               size="sm"
               onClick={() => (window as any).startWebsiteTour?.()}
-              className="bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 flex items-center gap-2 font-medium"
+              className="bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 flex items-center gap-2 font-bold rounded-full px-5"
             >
               <Sparkles className="h-4 w-4" />
               Website Tour
@@ -136,12 +139,11 @@ function DashboardContent() {
               <ProfileDisplay />
             </div>
 
-            <Card className="bg-white border-slate-200 overflow-hidden">
-              <CardHeader className="pb-0">
-                <CardTitle className="text-slate-900">DOCUMENT VAULT</CardTitle>
-
+            <Card className="bg-white border-emerald-50 overflow-hidden rounded-[2.5rem] shadow-sm">
+              <CardHeader className="pb-0 pt-10 px-10">
+                <CardTitle className="text-2xl font-black text-emerald-950 tracking-tighter uppercase">DOCUMENT VAULT</CardTitle>
               </CardHeader>
-              <CardContent className="pt-6">
+              <CardContent className="p-10 pt-6">
                 <Vault clientName={clientName} />
               </CardContent>
             </Card>
@@ -149,10 +151,10 @@ function DashboardContent() {
         )}
 
         {activeTab === 'templates' && (
-          <div className="space-y-6">
-            <div className="mb-6">
-              <h3 className="text-2xl font-bold text-slate-900">Document Templates</h3>
-              <p className="text-slate-600">Download the templates you need to complete your application.</p>
+          <div className="space-y-8 animate-in slide-in-from-bottom-4 duration-500">
+            <div className="border-b border-emerald-50 pb-6">
+              <h3 className="text-3xl font-black text-emerald-950 uppercase tracking-tighter">Document Templates</h3>
+              <p className="text-emerald-900/60 font-bold mt-2">Download the templates you need to complete your application.</p>
             </div>
             <TemplatesView />
           </div>

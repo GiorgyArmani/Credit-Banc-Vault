@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Lock, ArrowRight } from "lucide-react";
 
 export default function SetPasswordPage() {
   const supabase = createClient();
@@ -76,33 +77,46 @@ export default function SetPasswordPage() {
 
   if (loading) {
     return (
-      <div className="min-h-[50vh] flex items-center justify-center text-gray-600">
-        Loading…
+      <div className="min-h-screen bg-[#f0fdf7] relative overflow-hidden flex items-center justify-center">
+        {/* aurora-glow effect for consistency */}
+        <div className="absolute inset-0 bg-gradient-to-br from-emerald-100/30 via-white/80 to-white pointer-events-none" />
+        <div className="text-center relative z-10">
+          <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-emerald-500 mx-auto mb-6"></div>
+          <p className="text-emerald-950/40 text-lg font-black uppercase tracking-widest">Verifying session...</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-blue-50 flex items-center justify-center p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle>Set your password</CardTitle>
-          <CardDescription>
-            {email ? <>Account for <b>{email}</b></> : "You're authenticated via a secure link."}
+    <div className="min-h-screen bg-[#f0fdf7] relative overflow-hidden flex items-center justify-center p-4">
+      {/* aurora-glow effect for consistency */}
+      <div className="absolute inset-0 bg-gradient-to-br from-emerald-100/30 via-white/80 to-white pointer-events-none" />
+      <div className="absolute top-0 right-0 w-[50%] h-[50%] bg-emerald-200/10 blur-[120px] rounded-full pointer-events-none animate-aurora" />
+      <div className="absolute bottom-0 left-0 w-[40%] h-[40%] bg-blue-100/5 blur-[120px] rounded-full pointer-events-none animate-aurora" style={{ animationDelay: '-3s' }} />
+
+      <Card className="w-full max-w-md shadow-2xl border-emerald-50 rounded-[3rem] overflow-hidden relative z-10 bg-white/80 backdrop-blur-xl">
+        <CardHeader className="p-10">
+          <CardTitle className="text-3xl font-black text-emerald-950 uppercase tracking-tighter">Set Password</CardTitle>
+          <CardDescription className="text-sm font-bold text-emerald-900/40 mt-2">
+            {email ? <>Account for <b className="text-emerald-950 font-black">{email}</b></> : "You're authenticated via a secure link."}
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="p-10 pt-0">
           {!mustSet ? (
-            <div className="text-sm text-gray-700">
+            <div className="text-sm font-bold text-emerald-950/60 leading-relaxed text-center">
               Your password is already set. Continue to your{" "}
-              <a className="underline" href="/dashboard">dashboard</a>.
+              <a className="text-emerald-600 underline font-black" href="/dashboard">dashboard</a>.
             </div>
           ) : ok ? (
-            <div className="text-emerald-700">Password updated. Redirecting…</div>
+            <div className="text-emerald-600 font-bold text-center flex items-center justify-center gap-2">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-emerald-600"></div>
+              Password updated. Redirecting…
+            </div>
           ) : (
-            <form onSubmit={onSubmit} className="space-y-4">
-              <div className="grid gap-2">
-                <Label htmlFor="pwd1">New password</Label>
+            <form onSubmit={onSubmit} className="space-y-6">
+              <div className="grid gap-4">
+                <Label htmlFor="pwd1" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 ml-1">New password</Label>
                 <Input
                   id="pwd1"
                   type="password"
@@ -110,10 +124,11 @@ export default function SetPasswordPage() {
                   value={pwd1}
                   onChange={(e) => setPwd1(e.target.value)}
                   required
+                  className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
                 />
               </div>
-              <div className="grid gap-2">
-                <Label htmlFor="pwd2">Repeat password</Label>
+              <div className="grid gap-4">
+                <Label htmlFor="pwd2" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 ml-1">Repeat password</Label>
                 <Input
                   id="pwd2"
                   type="password"
@@ -121,14 +136,15 @@ export default function SetPasswordPage() {
                   value={pwd2}
                   onChange={(e) => setPwd2(e.target.value)}
                   required
+                  className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
                 />
               </div>
-              {err && <p className="text-sm text-red-600">{err}</p>}
-              <Button type="submit" className="w-full" disabled={submitting}>
+              {err && <p className="text-sm font-bold text-red-600 bg-red-50 p-4 rounded-2xl border border-red-100">{err}</p>}
+              <Button type="submit" className="h-14 w-full bg-emerald-500 hover:bg-emerald-600 text-white font-black rounded-2xl shadow-xl shadow-emerald-500/20 transition-all active:scale-95" disabled={submitting}>
                 {submitting ? "Saving…" : "Save password"}
               </Button>
-              <p className="text-xs text-gray-500">
-                Minimum 8 characters. You’ll be redirected to your dashboard after saving.
+              <p className="text-[10px] font-bold text-emerald-900/30 text-center uppercase tracking-widest leading-relaxed">
+                Minimum 8 characters. You’ll be redirected to your dashboard.
               </p>
             </form>
           )}

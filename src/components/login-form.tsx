@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { ArrowRight, Lock, Mail } from "lucide-react";
 
 export default function LoginForm({
   className,
@@ -28,11 +29,6 @@ export default function LoginForm({
 
   /**
    * Handles login with role-based redirect
-   * 
-   * Flow:
-   * 1. Authenticate user with Supabase
-   * 2. Get user's role from the database
-   * 3. Redirect to role-specific dashboard
    */
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,7 +60,6 @@ export default function LoginForm({
 
       if (userError) {
         console.error("Error fetching user role:", userError);
-        // If we can't get the role, default to /dashboard
         router.push("/dashboard");
         return;
       }
@@ -79,10 +74,6 @@ export default function LoginForm({
 
       // Step 5: Redirect to the appropriate dashboard based on role
       const redirectPath = roleRedirects[userData.role] || "/dashboard";
-
-      console.log(`✅ User logged in with role: ${userData.role}`);
-      console.log(`➡️  Redirecting to: ${redirectPath}`);
-
       router.push(redirectPath);
 
     } catch (error: unknown) {
@@ -94,69 +85,90 @@ export default function LoginForm({
 
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-2xl">Login</CardTitle>
-          <CardDescription>
-            Enter your email below to login to your account
+      <Card className="shadow-2xl border-emerald-50 rounded-[3rem] overflow-hidden bg-white/80 backdrop-blur-xl">
+        <CardHeader className="p-10 text-center">
+          <CardTitle className="text-4xl font-black text-emerald-950 uppercase tracking-tighter mb-2 leading-none">Login</CardTitle>
+          <CardDescription className="text-sm font-bold text-emerald-900/40 uppercase tracking-widest mt-2">
+            Access the Credit Banc Vault
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="p-10 pt-0">
           <form onSubmit={handleLogin}>
-            <div className="flex flex-col gap-6">
+            <div className="flex flex-col gap-8">
               {/* Email Input Field */}
-              <div className="grid gap-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="m@example.com"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
+              <div className="grid gap-3">
+                <Label htmlFor="email" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 ml-1">Email Address</Label>
+                <div className="relative">
+                  <Mail className="absolute left-5 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-900/20" />
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="name@company.com"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold pl-12 pr-6"
+                  />
+                </div>
               </div>
 
               {/* Password Input Field */}
-              <div className="grid gap-2">
-                <div className="flex items-center">
-                  <Label htmlFor="password">Password</Label>
+              <div className="grid gap-3">
+                <div className="flex items-center justify-between px-1">
+                  <Label htmlFor="password" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 ml-1">Password</Label>
                   <Link
                     href="/auth/forgot-password"
-                    className="ml-auto inline-block text-sm underline-offset-4 hover:underline"
+                    className="text-[10px] font-black uppercase tracking-widest text-emerald-600 hover:text-emerald-500 transition-colors"
                   >
-                    Forgot your password?
+                    Forgot Password?
                   </Link>
                 </div>
-                <Input
-                  id="password"
-                  type="password"
-                  required
-                  value={password}
-                  name="password"
-                  onChange={(e) => setPassword(e.target.value)}
-                />
+                <div className="relative">
+                  <Lock className="absolute left-5 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-900/20" />
+                  <Input
+                    id="password"
+                    type="password"
+                    required
+                    value={password}
+                    name="password"
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold pl-12 pr-6"
+                  />
+                </div>
               </div>
 
               {/* Error Message Display */}
-              {error && <p className="text-sm text-red-500">{error}</p>}
+              {error && (
+                <div className="rounded-2xl bg-red-50 p-4 border border-red-100">
+                  <p className="text-sm font-bold text-red-500">{error}</p>
+                </div>
+              )}
 
               {/* Submit Button */}
-              <Button type="submit" className="w-full" disabled={isLoading}>
-                {isLoading ? "Logging in..." : "Login"}
+              <Button type="submit" className="h-16 bg-emerald-500 hover:bg-emerald-600 text-white font-black rounded-2xl shadow-xl shadow-emerald-500/20 transition-all active:scale-95 text-lg" disabled={isLoading}>
+                {isLoading ? (
+                  <div className="flex items-center gap-3">
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                    <span>Signing in...</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center gap-2">
+                    <span>Sign In</span>
+                    <ArrowRight className="w-6 h-6" />
+                  </div>
+                )}
               </Button>
             </div>
 
-            {/* Sign Up Link Removed for Private Access */}
-            {/* <div className="mt-4 text-center text-sm">
-              Don&apos;t have an account?{" "}
+            <div className="mt-10 text-center">
+              <span className="text-emerald-900/40 font-bold text-sm">New to the vault? </span>
               <Link
-                href="/auth/sign-up"
-                className="underline underline-offset-4"
+                href="/client-signup"
+                className="text-emerald-600 font-black uppercase tracking-widest text-xs hover:underline"
               >
-                Sign up
+                Sign Up
               </Link>
-            </div> */}
+            </div>
           </form>
         </CardContent>
       </Card>

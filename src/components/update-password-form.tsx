@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
+import { Lock, Check, Copy } from "lucide-react";
 
 export function UpdatePasswordForm({
   className,
@@ -114,9 +115,12 @@ export function UpdatePasswordForm({
   if (!sessionChecked) {
     return (
       <div className={cn("flex flex-col gap-6", className)} {...props}>
-        <Card>
-          <CardContent className="pt-6">
-            <p className="text-center text-muted-foreground">Verifying reset link...</p>
+        <Card className="shadow-2xl border-emerald-50 rounded-[3rem] overflow-hidden bg-white/80 backdrop-blur-xl">
+          <CardContent className="p-10">
+            <div className="flex flex-col items-center gap-4">
+              <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-emerald-500"></div>
+              <p className="text-center text-emerald-900/40 font-bold">Verifying reset link...</p>
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -125,18 +129,18 @@ export function UpdatePasswordForm({
 
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-2xl">Reset Your Password</CardTitle>
-          <CardDescription>
+      <Card className="shadow-2xl border-emerald-50 rounded-[3rem] overflow-hidden bg-white/80 backdrop-blur-xl">
+        <CardHeader className="p-10">
+          <CardTitle className="text-3xl font-black text-emerald-950 uppercase tracking-tighter">Reset Your Password</CardTitle>
+          <CardDescription className="text-sm font-bold text-emerald-900/40 mt-2">
             Please enter your new password below.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="p-10 pt-0">
           <form onSubmit={handlePasswordUpdate}>
             <div className="flex flex-col gap-6">
-              <div className="grid gap-2">
-                <Label htmlFor="password">New password</Label>
+              <div className="grid gap-4">
+                <Label htmlFor="password" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 ml-1">New password</Label>
                 <Input
                   id="password"
                   type="password"
@@ -146,10 +150,11 @@ export function UpdatePasswordForm({
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   disabled={!!error}
+                  className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
                 />
               </div>
-              <div className="grid gap-2">
-                <Label htmlFor="confirmPassword">Confirm password</Label>
+              <div className="grid gap-4">
+                <Label htmlFor="confirmPassword" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 ml-1">Confirm password</Label>
                 <Input
                   id="confirmPassword"
                   type="password"
@@ -159,21 +164,22 @@ export function UpdatePasswordForm({
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   disabled={!!error}
+                  className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
                 />
               </div>
               {error && (
-                <div className="rounded-lg bg-red-50 p-3 text-sm text-red-600">
+                <div className="rounded-2xl bg-red-50 p-4 text-sm font-bold text-red-600 border border-red-100">
                   {error}
                 </div>
               )}
-              <Button type="submit" className="w-full" disabled={isLoading || !!error}>
+              <Button type="submit" className="h-14 bg-emerald-500 hover:bg-emerald-600 text-white font-black rounded-2xl shadow-xl shadow-emerald-500/20 transition-all active:scale-95" disabled={isLoading || !!error}>
                 {isLoading ? "Updating password..." : "Update password"}
               </Button>
               {error && (
                 <Button
                   type="button"
                   variant="outline"
-                  className="w-full"
+                  className="h-14 border-2 border-emerald-100 text-emerald-950 font-black rounded-2xl hover:bg-emerald-50 transition-all active:scale-95"
                   onClick={() => router.push("/auth/forgot-password")}
                 >
                   Request new reset link

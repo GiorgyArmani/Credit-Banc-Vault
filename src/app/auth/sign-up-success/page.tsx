@@ -24,54 +24,59 @@ function SuccessContent() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-blue-50 flex items-center justify-center p-4">
-      <Card className="max-w-2xl w-full shadow-2xl border-0">
-        <CardHeader className="text-center pb-8 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-t-lg">
-          <div className="flex justify-center mb-4">
-            <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center">
-              <CheckCircle2 className="w-12 h-12 text-emerald-600" />
+    <div className="min-h-screen bg-[#f0fdf7] relative overflow-hidden flex items-center justify-center p-4">
+      {/* aurora-glow effect for consistency */}
+      <div className="absolute inset-0 bg-gradient-to-br from-emerald-100/30 via-white/80 to-white pointer-events-none" />
+      <div className="absolute top-0 right-0 w-[50%] h-[50%] bg-emerald-200/10 blur-[120px] rounded-full pointer-events-none animate-aurora" />
+      <div className="absolute bottom-0 left-0 w-[40%] h-[40%] bg-blue-100/5 blur-[120px] rounded-full pointer-events-none animate-aurora" style={{ animationDelay: '-3s' }} />
+
+      <Card className="max-w-2xl w-full shadow-2xl border-emerald-50 rounded-[3rem] overflow-hidden relative z-10 bg-white">
+        <CardHeader className="text-center p-10 md:p-14 border-b border-emerald-50 bg-white">
+          <div className="flex justify-center mb-8">
+            <div className="w-24 h-24 bg-emerald-50 rounded-[2rem] flex items-center justify-center border border-emerald-100 shadow-inner">
+              <CheckCircle2 className="w-12 h-12 text-emerald-500" />
             </div>
           </div>
-          <CardTitle className="text-3xl font-bold">
-            🎉 Account Created Successfully!
+          <CardTitle className="text-4xl md:text-5xl font-black text-emerald-950 uppercase tracking-tighter mb-4 leading-tight">
+            Account Created!
           </CardTitle>
-          <p className="text-emerald-50 mt-2 text-lg">
+          <p className="text-emerald-900/40 text-xl font-bold uppercase tracking-widest">
             Welcome to Credit Banc Vault
           </p>
         </CardHeader>
 
-        <CardContent className="pt-8 space-y-6">
-          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-xl p-6">
-            <h3 className="text-lg font-bold text-blue-900 mb-4 flex items-center gap-2">
-              <Lock className="w-6 h-6" />
+        <CardContent className="p-8 md:p-12 space-y-8">
+          <div className="bg-emerald-50/50 rounded-[2.5rem] p-8 border border-emerald-50">
+            <h3 className="text-xs font-black text-emerald-900/40 uppercase tracking-[0.2em] mb-8 flex items-center gap-2">
+              <Lock className="w-4 h-4" />
               Your Login Credentials
             </h3>
 
             <div className="space-y-4">
-              <div className="bg-white rounded-lg p-4 border border-blue-200">
-                <Label className="text-sm font-semibold text-gray-600 flex items-center gap-2 mb-2">
-                  <Mail className="w-4 h-4" />
+              <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-6 border border-emerald-50">
+                <Label className="text-[10px] font-black uppercase tracking-widest text-emerald-900/30 mb-2 flex items-center gap-2">
+                  <Mail className="w-3 h-3" />
                   Email Address
                 </Label>
-                <p className="text-lg font-mono text-gray-900">{email}</p>
+                <p className="text-xl font-black text-emerald-950">{email}</p>
               </div>
 
-              <div className="bg-white rounded-lg p-4 border border-blue-200">
-                <Label className="text-sm font-semibold text-gray-600 flex items-center gap-2 mb-2">
-                  <Lock className="w-4 h-4" />
+              <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-6 border border-emerald-50">
+                <Label className="text-[10px] font-black uppercase tracking-widest text-emerald-900/30 mb-2 flex items-center gap-2">
+                  <Lock className="w-3 h-3" />
                   Temporary Password
                 </Label>
                 <div className="flex items-center justify-between gap-3">
-                  <p className="text-lg font-mono text-gray-900">{default_password}</p>
+                  <p className="text-xl font-black text-emerald-950 tracking-tight">{default_password}</p>
                   <Button
                     onClick={copy_password}
                     variant="outline"
                     size="sm"
-                    className="border-emerald-600 text-emerald-600 hover:bg-emerald-50"
+                    className="h-10 px-4 border-2 border-emerald-100 text-emerald-950 font-black rounded-xl hover:bg-emerald-50 transition-all active:scale-95"
                   >
                     {copied ? (
                       <>
-                        <Check className="w-4 h-4 mr-1" />
+                        <Check className="w-4 h-4 mr-1 text-emerald-500" />
                         Copied!
                       </>
                     ) : (
@@ -86,59 +91,58 @@ function SuccessContent() {
             </div>
           </div>
 
-          <div className="bg-yellow-50 border-2 border-yellow-200 rounded-xl p-6">
-            <h3 className="text-lg font-bold text-yellow-900 mb-3 flex items-center gap-2">
-              🔒 Important Security Notice
+          <div className="bg-emerald-950 rounded-[2.5rem] p-8 text-white relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50/5 rounded-full blur-3xl -mr-16 -mt-16" />
+            <h3 className="text-lg font-black uppercase tracking-tight mb-4 flex items-center gap-2 relative z-10">
+              <Lock className="w-5 h-5 text-emerald-400" />
+              Security Notice
             </h3>
-            <ul className="space-y-2 text-sm text-yellow-800">
-              <li className="flex items-start gap-2">
-                <span className="text-yellow-600 mt-0.5">•</span>
-                <span>This is a <strong>temporary password</strong> for initial access</span>
+            <ul className="space-y-3 text-emerald-50/60 font-medium relative z-10">
+              <li className="flex items-start gap-3">
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 mt-1.5 shrink-0" />
+                <span>This is a <strong>temporary password</strong> for initial access.</span>
               </li>
-              <li className="flex items-start gap-2">
-                <span className="text-yellow-600 mt-0.5">•</span>
-                <span>We strongly recommend changing your password after logging in</span>
+              <li className="flex items-start gap-3">
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 mt-1.5 shrink-0" />
+                <span>We strongly recommend changing your password after logging in.</span>
               </li>
-              <li className="flex items-start gap-2">
-                <span className="text-yellow-600 mt-0.5">•</span>
-                <span>You can update your password anytime from your account settings</span>
+              <li className="flex items-start gap-3">
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 mt-1.5 shrink-0" />
+                <span>Update your password anytime from settings.</span>
               </li>
             </ul>
           </div>
 
-          <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-200 rounded-xl p-6">
-            <h3 className="text-lg font-bold text-green-900 mb-3">✅ What's Next?</h3>
-            <ol className="space-y-3 text-sm text-green-800">
-              <li className="flex items-start gap-3">
-                <span className="flex-shrink-0 w-6 h-6 bg-green-600 text-white rounded-full flex items-center justify-center text-xs font-bold">1</span>
-                <span>Use the credentials above to log into your account</span>
-              </li>
-              <li className="flex items-start gap-3">
-                <span className="flex-shrink-0 w-6 h-6 bg-green-600 text-white rounded-full flex items-center justify-center text-xs font-bold">2</span>
-                <span>Complete your business profile and upload required documents</span>
-              </li>
-              <li className="flex items-start gap-3">
-                <span className="flex-shrink-0 w-6 h-6 bg-green-600 text-white rounded-full flex items-center justify-center text-xs font-bold">3</span>
-                <span>Track your funding application progress in real-time</span>
-              </li>
-              <li className="flex items-start gap-3">
-                <span className="flex-shrink-0 w-6 h-6 bg-green-600 text-white rounded-full flex items-center justify-center text-xs font-bold">4</span>
-                <span>Update your password from Settings for enhanced security</span>
-              </li>
-            </ol>
+          <div className="bg-emerald-50/30 rounded-[2.5rem] p-8 border border-emerald-50">
+            <h3 className="text-xs font-black text-emerald-900/40 uppercase tracking-[0.2em] mb-6">✅ Next Steps</h3>
+            <div className="space-y-4">
+              {[
+                "Log into your account with the credentials above",
+                "Complete your business profile and upload documents",
+                "Track your funding application in real-time",
+                "Update your password for enhanced security"
+              ].map((step, i) => (
+                <div key={i} className="flex items-start gap-4 group">
+                  <span className="flex-shrink-0 w-8 h-8 bg-emerald-100 text-emerald-600 rounded-xl flex items-center justify-center text-xs font-black group-hover:bg-emerald-500 group-hover:text-white transition-all duration-300">
+                    {i + 1}
+                  </span>
+                  <span className="text-emerald-950/80 font-bold group-hover:text-emerald-950 transition-colors">{step}</span>
+                </div>
+              ))}
+            </div>
           </div>
 
           <Button
             onClick={() => router.push("/auth/login")}
-            className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white py-6 text-lg shadow-lg"
+            className="w-full h-16 bg-emerald-500 hover:bg-emerald-600 text-white font-black rounded-2xl shadow-xl shadow-emerald-500/20 transition-all active:scale-95 text-lg"
           >
-            Go to Login Page
-            <ArrowRight className="ml-2 w-5 h-5" />
+            Continue to Login
+            <ArrowRight className="ml-2 w-6 h-6" />
           </Button>
 
-          <p className="text-center text-sm text-gray-500">
+          <p className="text-center text-sm font-bold text-emerald-900/30">
             Need help? Contact support at{" "}
-            <a href="mailto:support@creditbanc.io" className="text-emerald-600 font-semibold hover:underline">
+            <a href="mailto:support@creditbanc.io" className="text-emerald-500 hover:underline">
               support@creditbanc.io
             </a>
           </p>
@@ -153,10 +157,12 @@ export default function SignUpSuccessPage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-blue-50 flex items-center justify-center">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-emerald-600 mx-auto mb-4"></div>
-            <p className="text-gray-600 text-lg font-medium">Loading your credentials...</p>
+        <div className="min-h-screen bg-[#f0fdf7] relative overflow-hidden flex items-center justify-center">
+          {/* aurora-glow effect for consistency */}
+          <div className="absolute inset-0 bg-gradient-to-br from-emerald-100/30 via-white/80 to-white pointer-events-none" />
+          <div className="text-center relative z-10">
+            <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-emerald-500 mx-auto mb-6"></div>
+            <p className="text-emerald-950/40 text-lg font-black uppercase tracking-widest">Loading credentials...</p>
           </div>
         </div>
       }

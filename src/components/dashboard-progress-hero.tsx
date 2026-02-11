@@ -36,10 +36,10 @@ export default function DashboardProgressHero({
   const started = courseProgress > 0
   const startOrContinueLabel = started
     ? (nextLessonHref
-        ? `Continue: ${nextLessonTitle ?? 'Current lesson'}`
-        : nextModule
-          ? `Continue: ${nextModule.title ?? 'Next Module'}`
-          : 'Open Academy')
+      ? `Continue: ${nextLessonTitle ?? 'Current lesson'}`
+      : nextModule
+        ? `Continue: ${nextModule.title ?? 'Next Module'}`
+        : 'Open Academy')
     : 'Start Course'
 
   const courseHref =
@@ -70,11 +70,11 @@ export default function DashboardProgressHero({
   const milestones = [0, 25, 50, 75, 100]
 
   return (
-    <Card className="bg-white/80 border-slate-200 shadow-sm">
-      <CardHeader className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+    <Card className="bg-white/80 border-emerald-50 shadow-sm rounded-[2.5rem] overflow-hidden">
+      <CardHeader className="flex flex-col md:flex-row md:items-center md:justify-between gap-6 p-10 pb-4">
         <div>
-          <CardTitle className="text-slate-900">Your Growth Journey</CardTitle>
-          <CardDescription className="text-slate-600">One focus. One button. Keep momentum.</CardDescription>
+          <CardTitle className="text-3xl font-black text-emerald-950 tracking-tighter uppercase">Your Growth Journey</CardTitle>
+          <CardDescription className="text-emerald-900/60 text-lg font-bold">One focus. One button. Keep momentum.</CardDescription>
         </div>
 
         <div className="flex gap-2 flex-wrap">
@@ -88,96 +88,96 @@ export default function DashboardProgressHero({
       </CardHeader>
 
       {/* Layout: centro = ring + milestones; derecha = botones apilados */}
-     <CardContent className="grid grid-cols-1 md:grid-cols-[220px_1fr_220px] items-start gap-6 md:gap-8">
-  {/* Columna fantasma para simetría (mismo ancho que la botonera) */}
-  <div className="hidden md:block" aria-hidden />
+      <CardContent className="grid grid-cols-1 md:grid-cols-[220px_1fr_220px] items-start gap-6 md:gap-8">
+        {/* Columna fantasma para simetría (mismo ancho que la botonera) */}
+        <div className="hidden md:block" aria-hidden />
 
-  {/* ── COLUMNA CENTRAL: Ring + Milestones + Counters ── */}
-  <div className="w-full flex flex-col items-center justify-self-center">
-    {/* Ring centrado */}
-    <div className="relative h-56 md:h-64 w-full max-w-[320px]">
-      <ResponsiveContainer width="100%" height="100%">
-        <RadialBarChart cx="50%" cy="50%" innerRadius="70%" outerRadius="100%" barSize={14} data={data} startAngle={90} endAngle={-270}>
-          <PolarAngleAxis type="number" domain={[0, 100]} tick={false} />
-          <RadialBar dataKey="value" background={{}} />
-        </RadialBarChart>
-      </ResponsiveContainer>
-      <div className="absolute inset-0 flex items-center justify-center flex-col">
-        <div className="text-4xl font-extrabold text-slate-900">{blended}%</div>
-        <div className="text-xs uppercase tracking-wider text-slate-500">Program Progress</div>
-      </div>
-    </div>
+        {/* ── COLUMNA CENTRAL: Ring + Milestones + Counters ── */}
+        <div className="w-full flex flex-col items-center justify-self-center">
+          {/* Ring centrado */}
+          <div className="relative h-56 md:h-64 w-full max-w-[320px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <RadialBarChart cx="50%" cy="50%" innerRadius="70%" outerRadius="100%" barSize={14} data={data} startAngle={90} endAngle={-270}>
+                <PolarAngleAxis type="number" domain={[0, 100]} tick={false} />
+                <RadialBar dataKey="value" background={{}} />
+              </RadialBarChart>
+            </ResponsiveContainer>
+            <div className="absolute inset-0 flex items-center justify-center flex-col">
+              <div className="text-5xl font-black text-emerald-950 tracking-tighter">{blended}%</div>
+              <div className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40">Program Progress</div>
+            </div>
+          </div>
 
-    {/* Milestones debajo del ring */}
-    <div className="mt-6 w-full max-w-md">
-      <div className="flex justify-between text-xs text-slate-500 mb-2">
-        <span>Milestones</span>
-        <span>Next: {milestones.find(m => m > blended) ?? '—'}%</span>
-      </div>
-      <div className="relative h-2 bg-slate-200 rounded">
-        <div className="absolute h-2 bg-emerald-500 rounded" style={{ width: `${blended}%` }} />
-        {milestones.map((m, i) => (
-          <div
-            key={i}
-            className={clsx(
-              'absolute top-1/2 -translate-y-1/2 h-3 w-3 rounded-full border',
-              m <= blended ? 'bg-emerald-500 border-emerald-600' : 'bg-white border-slate-300'
-            )}
-            style={{ left: `calc(${m}% - 6px)` }}
-            title={`${m}%`}
-          />
-        ))}
-      </div>
-    </div>
+          {/* Milestones debajo del ring */}
+          <div className="mt-6 w-full max-w-md">
+            <div className="flex justify-between text-xs text-slate-500 mb-2">
+              <span>Milestones</span>
+              <span>Next: {milestones.find(m => m > blended) ?? '—'}%</span>
+            </div>
+            <div className="relative h-2 bg-slate-200 rounded">
+              <div className="absolute h-2 bg-emerald-500 rounded" style={{ width: `${blended}%` }} />
+              {milestones.map((m, i) => (
+                <div
+                  key={i}
+                  className={clsx(
+                    'absolute top-1/2 -translate-y-1/2 h-3 w-3 rounded-full border',
+                    m <= blended ? 'bg-emerald-500 border-emerald-600' : 'bg-white border-slate-300'
+                  )}
+                  style={{ left: `calc(${m}% - 6px)` }}
+                  title={`${m}%`}
+                />
+              ))}
+            </div>
+          </div>
 
-    {/* Contadores compactos */}
-    <div className="mt-4 grid grid-cols-2 gap-3 w-full max-w-md">
-      <div className="p-3 rounded-lg border border-slate-200 bg-white">
-        <div className="text-xs text-slate-500 mb-1">Assessment</div>
-        <div className="flex items-center gap-2">
-          <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-          <div className="text-sm">{remainingAssessment} item{remainingAssessment === 1 ? '' : 's'} left</div>
+          {/* Contadores compactos */}
+          <div className="mt-6 grid grid-cols-2 gap-4 w-full max-w-md">
+            <div className="p-4 rounded-3xl border border-emerald-50 bg-white">
+              <div className="text-[10px] font-black uppercase tracking-widest text-emerald-900/40 mb-2">Assessment</div>
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+                <div className="text-sm font-bold text-emerald-950">{remainingAssessment} item{remainingAssessment === 1 ? '' : 's'} left</div>
+              </div>
+            </div>
+            <div className="p-4 rounded-3xl border border-emerald-50 bg-white">
+              <div className="text-[10px] font-black uppercase tracking-widest text-emerald-900/40 mb-2">Next Module</div>
+              <div className="text-sm font-bold text-emerald-950">
+                {nextModule ? `${Math.max(courseLessonsRemaining, 0)} lesson${courseLessonsRemaining === 1 ? '' : 's'} left` : 'All caught up'}
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
-      <div className="p-3 rounded-lg border border-slate-200 bg-white">
-        <div className="text-xs text-slate-500 mb-1">Next Module</div>
-        <div className="text-sm">
-          {nextModule ? `${Math.max(courseLessonsRemaining, 0)} lesson${courseLessonsRemaining === 1 ? '' : 's'} left` : 'All caught up'}
+
+        {/* ── COLUMNA DERECHA: Botones apilados ── */}
+        <div className="w-full md:w-[220px] justify-self-end flex flex-col items-stretch gap-2">
+          <div className="hidden md:flex self-end items-center gap-1 text-[10px] font-black uppercase tracking-widest text-emerald-600/60">
+            <Sparkles className="h-3 w-3" />
+            <span>Recommended next step</span>
+          </div>
+
+          <Link href={primary.href} aria-label={primary.label} className="w-full">
+            <Button className="h-14 w-full rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-black shadow-xl shadow-emerald-500/20 justify-center text-base tracking-tight transition-transform hover:scale-[1.02] active:scale-95 px-6">
+              <PrimaryIcon className="h-5 w-5 mr-3" />
+              {primary.label}
+            </Button>
+          </Link>
+
+          <Link href={secondary.href} aria-label={secondary.label} className="w-full">
+            <Button variant="outline" className="h-14 w-full rounded-2xl border-emerald-100 text-emerald-950 font-black hover:bg-emerald-50 justify-center text-base tracking-tight transition-all px-6">
+              <SecondaryIcon className="h-5 w-5 mr-3" />
+              {secondary.label}
+            </Button>
+          </Link>
+
+          {nextLessonHref && (
+            <Link href={nextLessonHref} className="self-end">
+              <Button variant="ghost" className="h-10 px-4 rounded-full text-slate-600 hover:text-slate-800">
+                Go to current lesson
+              </Button>
+            </Link>
+          )}
         </div>
-      </div>
-    </div>
-  </div>
-
-  {/* ── COLUMNA DERECHA: Botones apilados ── */}
-  <div className="w-full md:w-[220px] justify-self-end flex flex-col items-stretch gap-2">
-    <div className="hidden md:flex self-end items-center gap-1 text-xs text-emerald-700">
-      <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="currentColor"><path d="M9 11.5l2 2L20 5l2 2-11 11-5-5 2-2z"/></svg>
-      <span>Recommended next step</span>
-    </div>
-
-    <Link href={primary.href} aria-label={primary.label}>
-      <Button className="h-11 w-full rounded-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-[0_10px_20px_rgba(16,185,129,.20)] ring-1 ring-emerald-500/20 justify-center">
-        <PrimaryIcon className="h-5 w-5 mr-2" />
-        {primary.label}
-      </Button>
-    </Link>
-
-    <Link href={secondary.href} aria-label={secondary.label}>
-      <Button variant="outline" className="h-11 w-full rounded-full border-slate-300 text-slate-700 hover:bg-slate-50 justify-center">
-        <SecondaryIcon className="h-5 w-5 mr-2" />
-        {secondary.label}
-      </Button>
-    </Link>
-
-    {nextLessonHref && (
-      <Link href={nextLessonHref} className="self-end">
-        <Button variant="ghost" className="h-10 px-4 rounded-full text-slate-600 hover:text-slate-800">
-          Go to current lesson
-        </Button>
-      </Link>
-    )}
-  </div>
-</CardContent>
+      </CardContent>
     </Card>
   )
 }

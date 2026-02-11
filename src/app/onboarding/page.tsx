@@ -78,29 +78,33 @@ export default function OnboardingPage() {
   }
 
   return (
-    <main className="min-h-screen bg-background flex flex-col items-center justify-center p-4 md:p-8">
-      <div className="w-full max-w-4xl relative">
+    <main className="min-h-screen bg-[#f0fdf7] relative overflow-hidden flex flex-col items-center justify-center p-4 md:p-8">
+      {/* aurora-glow effect */}
+      <div className="absolute inset-0 bg-gradient-to-br from-emerald-100/50 via-white/80 to-white pointer-events-none" />
+      <div className="absolute top-0 left-1/4 w-[60%] h-[60%] bg-emerald-300/10 blur-[130px] rounded-full animate-aurora pointer-events-none" />
+
+      <div className="w-full max-w-4xl relative z-10">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
-          className="bg-card border border-border rounded-xl shadow-2xl overflow-hidden"
+          className="bg-white border border-emerald-100 rounded-[3rem] shadow-2xl overflow-hidden"
         >
           {/* Header */}
-          <div className="p-8 border-b border-border bg-muted/30">
-            <h1 className="text-3xl font-bold tracking-tight text-foreground">
+          <div className="p-10 md:p-14 border-b border-emerald-50 bg-white">
+            <h1 className="text-4xl md:text-5xl font-black tracking-tighter text-emerald-950 uppercase">
               {step === "form" ? "Business Profile" : "Contract Signing"}
             </h1>
-            <p className="text-muted-foreground mt-2 text-lg">
+            <p className="text-emerald-900/40 mt-4 text-xl font-bold">
               {step === "form"
                 ? "Let's start by getting some details about your business."
                 : "Almost there! Please review and sign your service agreement."}
             </p>
 
             {/* Progress indicator */}
-            <div className="flex gap-2 mt-6">
-              <div className={`h-1.5 flex-1 rounded-full transition-colors duration-500 ${step === "form" ? "bg-primary" : "bg-primary/40"}`} />
-              <div className={`h-1.5 flex-1 rounded-full transition-colors duration-500 ${step === "contract_check" ? "bg-primary" : "bg-muted"}`} />
+            <div className="flex gap-3 mt-10">
+              <div className={`h-2 flex-1 rounded-full transition-all duration-700 ${step === "form" ? "bg-emerald-500 shadow-lg shadow-emerald-500/20" : "bg-emerald-500/20"}`} />
+              <div className={`h-2 flex-1 rounded-full transition-all duration-700 ${step === "contract_check" ? "bg-emerald-500 shadow-lg shadow-emerald-500/20" : "bg-emerald-100"}`} />
             </div>
           </div>
 
@@ -123,8 +127,8 @@ export default function OnboardingPage() {
         </motion.div>
 
         {/* Support / Help text */}
-        <p className="mt-8 text-center text-muted-foreground text-sm">
-          Need help? Contact our support team at <span className="text-primary font-medium">support@creditbanc.io</span>
+        <p className="mt-10 text-center text-emerald-900/40 text-sm font-bold tracking-tight">
+          Need help? Contact our support team at <span className="text-emerald-600 underline">support@creditbanc.io</span>
         </p>
       </div>
     </main>

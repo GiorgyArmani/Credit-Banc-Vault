@@ -267,16 +267,15 @@ export default function ProfileDisplay() {
    */
   const render_loading_state = () => {
     return (
-      <Card className="bg-white/90 border-slate-200">
-        <CardHeader>
-          <CardTitle className="text-slate-900">Your Profile</CardTitle>
-          <CardDescription className="text-slate-600">
+      <Card className="bg-white/80 border-emerald-50 rounded-[2.5rem] shadow-sm overflow-hidden">
+        <CardHeader className="p-10 pb-4">
+          <CardTitle className="text-2xl font-black text-emerald-950 uppercase tracking-tighter">Your Profile</CardTitle>
+          <CardDescription className="text-emerald-900/60 text-lg font-bold mt-2">
             Basic information used for your application
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          {/* loading-message: Simple loading text */}
-          <div className="text-slate-500">Loading profile…</div>
+        <CardContent className="p-10 pt-4">
+          <div className="text-emerald-900/40 font-bold animate-pulse">Loading profile…</div>
         </CardContent>
       </Card>
     );
@@ -288,26 +287,22 @@ export default function ProfileDisplay() {
    */
   const render_error_state = () => {
     return (
-      <Card className="bg-white/90 border-slate-200">
-        <CardHeader>
-          <CardTitle className="text-slate-900">Your Profile</CardTitle>
-          <CardDescription className="text-slate-600">
+      <Card className="bg-white/80 border-emerald-50 rounded-[2.5rem] shadow-sm overflow-hidden">
+        <CardHeader className="p-10 pb-4">
+          <CardTitle className="text-2xl font-black text-emerald-950 uppercase tracking-tighter">Your Profile</CardTitle>
+          <CardDescription className="text-emerald-900/60 text-lg font-bold mt-2">
             Basic information used for your application
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          {/* error-container: Styled error message box */}
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-            <div className="flex items-start gap-3">
-              {/* error-icon: Warning triangle icon */}
-              <AlertCircle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+        <CardContent className="p-10 pt-4">
+          <div className="bg-red-50 border border-red-100 rounded-3xl p-6">
+            <div className="flex items-start gap-4">
+              <AlertCircle className="h-6 w-6 text-red-500 flex-shrink-0 mt-0.5" />
               <div className="flex-1">
-                {/* error-title: Bold error heading */}
-                <p className="text-amber-800 text-sm font-medium mb-1">
+                <p className="text-red-900 text-base font-black tracking-tight uppercase mb-1">
                   Unable to Load Profile
                 </p>
-                {/* error-message: Specific error details */}
-                <p className="text-amber-700 text-xs">
+                <p className="text-red-700 text-sm font-bold">
                   {error_message}
                 </p>
               </div>
@@ -323,47 +318,36 @@ export default function ProfileDisplay() {
    * Shows 6 profile fields in a responsive grid
    */
   const render_success_state = () => {
-    // safety-check: Ensure vault data exists
     if (!vault_data) {
       return render_error_state();
     }
 
-    // build-fields: Convert vault data to display fields
     const fields = build_profile_fields(vault_data);
 
     return (
-      <Card id="tour-profile" className="bg-white/90 border-slate-200">
-        <CardHeader>
-          <CardTitle className="text-slate-900">Your Profile</CardTitle>
-          <CardDescription className="text-slate-600">
+      <Card id="tour-profile" className="bg-white/80 border-emerald-50 rounded-[2.5rem] shadow-sm overflow-hidden backdrop-blur-sm transition-all duration-500 hover:shadow-xl">
+        <CardHeader className="p-10 pb-4">
+          <CardTitle className="text-3xl font-black text-emerald-950 uppercase tracking-tighter">Your Profile</CardTitle>
+          <CardDescription className="text-emerald-900/60 text-lg font-bold mt-2">
             Used by underwriting to review your business and funding goals. This information helps move your application forward.
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          {/* profile-grid: Responsive grid of profile fields */}
+        <CardContent className="p-10 pt-4">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {fields.map((field) => (
-              // field-card: Individual field display card
               <div
                 key={field.label}
-                className="rounded-lg border p-3 bg-white"
+                className="rounded-3xl border border-emerald-50 p-6 bg-white transition-all hover:border-emerald-200 group"
               >
-                {/* field-label: Small uppercase label */}
-                <div className="text-xs uppercase tracking-wide text-slate-500">
+                <div className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 group-hover:text-emerald-500 transition-colors">
                   {field.label}
                 </div>
-                {/* field-value: Bold value display */}
-                <div className="text-slate-900 font-medium">
+                <div className="text-emerald-950 font-black text-xl tracking-tight">
                   {field.value}
                 </div>
               </div>
             ))}
           </div>
-
-          {/* optional-edit-button: Commented out for future use */}
-          {/* <div className="mt-4">
-            <Button variant="outline">Edit profile</Button>
-          </div> */}
         </CardContent>
       </Card>
     );
@@ -387,7 +371,6 @@ export default function ProfileDisplay() {
       return null;
 
     default:
-      // exhaustive-check: TypeScript ensures all cases are handled
       console.error("❌ Unknown component state:", component_state);
       return render_error_state();
   }

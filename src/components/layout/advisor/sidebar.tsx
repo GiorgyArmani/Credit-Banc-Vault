@@ -53,22 +53,16 @@ export function Sidebar({
 
   const navItems = [
     { label: 'Dashboard', href: '/advisor/dashboard', icon: BookCheck },
-    // { label: 'AI Chat', href: '/dashboard/chat', icon: MessageSquare },
-
-    //{ label: 'Credit Report Assistant', href: '/dashboard/credit-report-assistant', icon: FileSearch },
-    //{ label: 'Book Consultation', href: '/dashboard/book-consultation', icon: Calendar },
-    // { label: 'Business Vault', href: '/dashboard/business-vault', icon: BookMarked },
-    //{ label: 'Business Profile', href: '/dashboard/business-profile', icon: User },
   ]
 
   // Ancho: en mobile siempre w-72; en desktop depende de "collapsed"
-  const desktopWidth = collapsed ? 'md:w-16' : 'md:w-64'
+  const desktopWidth = collapsed ? 'md:w-20' : 'md:w-72'
 
   return (
     <>
       {/* Overlay (mobile) */}
       <div
-        className={`fixed inset-0 z-40 bg-black/40 transition-opacity md:hidden ${mobileOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
+        className={`fixed inset-0 z-40 bg-emerald-950/40 backdrop-blur-sm transition-opacity md:hidden ${mobileOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
           }`}
         onClick={onMobileClose}
       />
@@ -77,26 +71,31 @@ export function Sidebar({
       <aside
         aria-label="Sidebar navigation"
         className={[
-          // altura + scroll, y sin scroll horizontal
-          'fixed left-0 top-0 z-50 flex h-dvh md:h-screen w-72 flex-col bg-white border-r shadow-sm overflow-y-auto overflow-x-hidden',
-          // animación drawer
-          'transition-transform duration-300 ease-in-out',
+          'fixed left-0 top-0 z-50 flex h-dvh md:h-screen w-72 flex-col bg-emerald-950 border-r border-white/5 shadow-2xl overflow-y-auto overflow-x-hidden',
+          'transition-all duration-300 ease-in-out',
           mobileOpen ? 'translate-x-0' : '-translate-x-full',
           'md:translate-x-0',
           desktopWidth,
         ].join(' ')}
       >
         {/* Header */}
-        <div className="sticky top-0 bg-white">
-          <div className="flex items-center justify-between px-4 py-3 md:justify-center border-b">
-            {/* En desktop colapsado: ocultar branding totalmente */}
-            <div className={collapsed ? 'hidden' : 'block'}>
-              <img src="/vaultlogo.svg" alt="Logo" className="h-60 w-100 mb-1" />
-              <p className="text-sm text-gray-500">Business Document Hub</p>
+        <div className="sticky top-0 bg-emerald-950/80 backdrop-blur-md z-20">
+          <div className="flex flex-col items-center justify-center px-4 py-8 border-b border-white/5 relative">
+            <div className={`transition-all duration-300 ${collapsed ? 'md:opacity-0 md:scale-90 md:h-0 md:overflow-hidden opacity-100 scale-100' : 'opacity-100 scale-100'}`}>
+              <img src="/vaultlogo.svg" alt="Logo" className="h-10 w-auto mb-2 brightness-0 invert" />
+              <p className="text-[10px] text-emerald-500/60 font-black uppercase tracking-[0.2em] mt-2 text-center text-nowrap">Business Document Hub</p>
             </div>
+
+            {/* Minimal logo for collapsed state */}
+            {collapsed && (
+              <div className="bg-emerald-500 w-10 h-10 rounded-2xl hidden md:flex items-center justify-center shadow-lg shadow-emerald-500/20">
+                <span className="text-white font-black text-xl">A</span>
+              </div>
+            )}
+
             <button
               onClick={onMobileClose}
-              className="md:hidden inline-flex h-8 w-8 items-center justify-center rounded hover:bg-gray-100"
+              className="md:hidden absolute right-4 top-1/2 -translate-y-1/2 inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-white/5 text-white hover:bg-white/10 transition-colors"
               aria-label="Close sidebar"
             >
               <X className="h-5 w-5" />
@@ -105,23 +104,41 @@ export function Sidebar({
         </div>
 
         {/* Navigation */}
-        <nav className="px-3 py-3 space-y-1">
+        <nav className="px-4 py-6 space-y-2 flex-grow">
           {navItems.map(({ href, label, icon: Icon }) => {
             const active = pathname === href
             return (
               <Link href={href} key={href} onClick={onMobileClose} title={collapsed ? label : undefined} aria-label={collapsed ? label : undefined}>
                 <Button
-                  variant={active ? 'default' : 'ghost'}
+                  variant="ghost"
                   className={[
-                    'w-full h-11 rounded-md',
-                    // Desktop colapsado: solo ícono centrado, sin padding
-                    collapsed ? 'md:justify-center md:px-0' : 'justify-start px-3',
-                    active ? 'bg-emerald-500 text-white' : 'text-gray-700 hover:bg-gray-100',
+                    'w-full h-14 rounded-2xl transition-all duration-300 group relative overflow-hidden',
+                    collapsed ? 'md:justify-center md:px-0' : 'justify-start px-5',
+                    active
+                      ? 'bg-white text-emerald-950 font-black shadow-[0_0_30px_rgba(16,185,129,0.1)]'
+                      : 'text-emerald-100/60 hover:bg-white/5 hover:text-emerald-50 font-bold',
                   ].join(' ')}
                 >
-                  <Icon className={['h-5 w-5', collapsed ? 'md:mr-0' : 'mr-3', 'shrink-0'].join(' ')} />
-                  {/* En mobile SIEMPRE mostrar etiqueta; en desktop ocultar si colapsado */}
-                  <span className={collapsed ? 'md:hidden inline' : 'inline'}>{label}</span>
+                  {/* Active Indicator Glow */}
+                  {active && (
+                    <div className="absolute inset-0 bg-gradient-to-r from-emerald-500/10 to-transparent pointer-events-none" />
+                  )}
+
+                  <Icon className={[
+                    'h-5 w-5 shrink-0 transition-transform duration-300 group-hover:scale-110',
+                    collapsed ? 'md:mr-0' : 'mr-4',
+                    active ? 'text-emerald-500' : 'text-inherit'
+                  ].join(' ')} />
+
+                  <span className={[
+                    'transition-all duration-300 font-bold',
+                    collapsed ? 'md:hidden md:opacity-0 md:translate-x-2' : 'inline opacity-100 translate-x-0'
+                  ].join(' ')}>{label}</span>
+
+                  {/* Dot indicator for active in collapsed mode */}
+                  {active && collapsed && (
+                    <div className="absolute right-2 w-1 h-5 bg-emerald-500 rounded-full md:block hidden" />
+                  )}
                 </Button>
               </Link>
             )
@@ -129,47 +146,44 @@ export function Sidebar({
         </nav>
 
         {/* Footer */}
-        <div className="mt-auto px-3 pb-3 pt-2 border-t bg-gray-50">
-          {/* Identidad:
-              - mobile y desktop expandido: visible
-              - desktop colapsado: oculto (para no “aplastar” texto) */}
-          <div className={`space-x-3 mb-3 items-center ${collapsed ? 'hidden md:flex md:hidden' : 'flex'}`}>
-            <div className="bg-emerald-100 rounded-full p-2">
-              <User className="h-5 w-5 text-emerald-600" />
+        <div className="mt-auto px-4 pb-6 pt-4 border-t border-white/5 bg-emerald-900/10 backdrop-blur-md">
+          {/* Identidad */}
+          <div className={`space-x-4 mb-6 items-center transition-all duration-300 flex ${collapsed ? 'md:flex-col md:space-x-0 md:gap-3' : ''}`}>
+            <div className="bg-emerald-500/20 rounded-[1.25rem] p-3 border border-emerald-500/20 flex-shrink-0">
+              <User className="h-6 w-6 text-emerald-400" />
             </div>
-            <div className="min-w-0">
-              <p className="font-medium text-gray-800 truncate">{userEmail?.split('@')[0] || 'User'}</p>
-              <Badge className="bg-green-100 text-green-800 text-xs">Free Plan</Badge>
+            <div className={`min-w-0 transition-all duration-300 ${collapsed ? 'md:hidden block' : 'block'}`}>
+              <p className="font-black text-white truncate text-sm mb-1">{userEmail?.split('@')[0] || 'Advisor'}</p>
+              <Badge className="bg-emerald-500/20 text-emerald-400 text-[10px] font-black uppercase tracking-widest border-emerald-500/30">Advisor</Badge>
             </div>
           </div>
 
-          {/* Logout:
-              - mobile y desktop expandido: botón completo
-              - desktop colapsado: solo ícono (sin texto) */}
-          <div className="flex items-center">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleSignOut}
-              className={`w-full text-gray-700 ${collapsed ? 'md:hidden' : ''}`}
-            >
-              <LogOut className="h-4 w-4 mr-2" />
-              <span>Sign Out</span>
-            </Button>
-
-            <button
-              onClick={handleSignOut}
-              aria-label="Sign out"
-              title="Sign Out"
-              className={`hidden ${collapsed ? 'md:inline-flex' : 'md:hidden'} ml-0 items-center justify-center w-10 h-10 rounded-md border text-gray-700 hover:bg-gray-100`}
-            >
-              <LogOut className="h-5 w-5" />
-            </button>
+          {/* Logout */}
+          <div className="flex items-center gap-2">
+            {!collapsed ? (
+              <Button
+                variant="outline"
+                onClick={handleSignOut}
+                className="w-full h-12 rounded-2xl border-white/10 text-emerald-100/60 font-black hover:bg-white/5 hover:text-white transition-all bg-transparent group"
+              >
+                <LogOut className="h-4 w-4 mr-3 transition-transform group-hover:-translate-x-1" />
+                <span className="uppercase tracking-widest text-[10px]">Sign Out</span>
+              </Button>
+            ) : (
+              <button
+                onClick={handleSignOut}
+                aria-label="Sign out"
+                title="Sign Out"
+                className="flex items-center justify-center w-full h-12 rounded-2xl border border-white/10 text-emerald-100/60 hover:bg-white/5 hover:text-white transition-all group"
+              >
+                <LogOut className="h-5 w-5 transition-transform group-hover:-translate-x-1" />
+              </button>
+            )}
           </div>
         </div>
       </aside>
 
-      {/* Botón colapsar/expandir (solo desktop) */}
+      {/* Toggle Button (Desktop Only) */}
       <button
         onClick={() => {
           const next = !collapsed
@@ -177,12 +191,11 @@ export function Sidebar({
           localStorage.setItem('sidebar_collapsed', next ? '1' : '0')
         }}
         aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        className="hidden md:flex fixed left-3 z-[60] h-8 w-8 items-center justify-center rounded-full bg-emerald-500 text-white shadow hover:bg-emerald-600"
-        // colócalo justo encima del footer (ajusta si cambias padding del footer)
-        style={{ bottom: 96 }}
+        className="hidden md:flex fixed left-5 z-[60] h-10 w-10 items-center justify-center rounded-2xl bg-emerald-500 text-white shadow-xl shadow-emerald-500/20 hover:bg-emerald-600 transition-all active:scale-90"
+        style={{ bottom: 100 }}
         title={collapsed ? 'Expand' : 'Collapse'}
       >
-        {collapsed ? <ChevronsRight className="h-4 w-4" /> : <ChevronsLeft className="h-4 w-4" />}
+        {collapsed ? <ChevronsRight className="h-5 w-5" /> : <ChevronsLeft className="h-5 w-5" />}
       </button>
     </>
   )

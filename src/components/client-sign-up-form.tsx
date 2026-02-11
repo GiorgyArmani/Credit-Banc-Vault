@@ -23,7 +23,8 @@ import {
   MapPin,
   Users,
   CreditCard,
-  Clock
+  Clock,
+  AlertCircle
 } from "lucide-react";
 
 
@@ -523,61 +524,67 @@ export default function ClientSignupForm() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-blue-50">
+    <div className="min-h-screen bg-[#f0fdf7] relative overflow-hidden">
+      {/* aurora-glow effect for consistency */}
+      <div className="absolute inset-0 bg-gradient-to-br from-emerald-100/30 via-white/80 to-white pointer-events-none" />
+      <div className="absolute top-0 right-0 w-[50%] h-[50%] bg-emerald-200/10 blur-[120px] rounded-full pointer-events-none animate-aurora" />
+      <div className="absolute bottom-0 left-0 w-[40%] h-[40%] bg-blue-100/5 blur-[120px] rounded-full pointer-events-none animate-aurora" style={{ animationDelay: '-3s' }} />
       {/* Success Modal for Advisor Context */}
       {/* This modal appears when an advisor successfully creates a client */}
       {/* Shows client credentials and auto-refreshes page for next client */}
       {show_success && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-8 animate-fade-in">
-            <div className="text-center mb-6">
-              <div className="mx-auto w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mb-4">
-                <CheckCircle2 className="w-12 h-12 text-emerald-600" />
+        <div className="fixed inset-0 bg-emerald-950/40 backdrop-blur-md flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-[3rem] shadow-2xl max-w-2xl w-full p-10 md:p-14 animate-fade-in relative overflow-hidden border border-emerald-50">
+            {/* abstract bg decoration */}
+            <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50 rounded-full blur-3xl -mr-10 -mt-10" />
+
+            <div className="text-center mb-10 relative z-10">
+              <div className="mx-auto w-24 h-24 bg-emerald-50 rounded-[2rem] flex items-center justify-center mb-6 border border-emerald-100 shadow-inner">
+                <CheckCircle2 className="w-12 h-12 text-emerald-500" />
               </div>
-              <h2 className="text-3xl font-bold text-gray-900 mb-2">
-                Client Created Successfully!
+              <h2 className="text-4xl font-black text-emerald-950 uppercase tracking-tighter mb-3">
+                Client Created!
               </h2>
-              <p className="text-gray-600">
-                {created_client_name} has been added to your client list
+              <p className="text-emerald-950/40 font-bold text-lg">
+                {created_client_name} has been added successfully.
               </p>
             </div>
 
-            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-xl p-6 mb-6">
-              <h3 className="text-lg font-bold text-blue-900 mb-4 flex items-center gap-2">
-                <CheckCircle2 className="w-6 h-6" />
-                Client Login Credentials
+            <div className="bg-emerald-50/50 rounded-[2.5rem] p-8 mb-8 border border-emerald-50 relative z-10">
+              <h3 className="text-xs font-black text-emerald-900/40 uppercase tracking-[0.2em] mb-6 flex items-center gap-2">
+                Login Credentials
               </h3>
 
-              <div className="space-y-3">
-                <div className="bg-white rounded-lg p-4 border border-blue-200">
-                  <p className="text-sm font-semibold text-gray-600 mb-1">Email Address</p>
-                  <p className="text-lg font-mono text-gray-900">{created_client_email}</p>
+              <div className="space-y-4">
+                <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-6 border border-emerald-50">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-emerald-900/30 mb-2">Email Address</p>
+                  <p className="text-xl font-black text-emerald-950">{created_client_email}</p>
                 </div>
 
-                <div className="bg-white rounded-lg p-4 border border-blue-200">
-                  <p className="text-sm font-semibold text-gray-600 mb-1">Temporary Password</p>
-                  <p className="text-lg font-mono text-gray-900">CreditBanc2025!</p>
+                <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-6 border border-emerald-50">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-emerald-900/30 mb-2">Temporary Password</p>
+                  <p className="text-xl font-black text-emerald-950 tracking-tight">CreditBanc2025!</p>
                 </div>
               </div>
             </div>
 
-            <div className="bg-yellow-50 border-2 border-yellow-200 rounded-xl p-4 mb-6">
-              <p className="text-sm text-yellow-800">
-                <strong>Note:</strong> Please share these credentials with your client. The page will refresh in 5 seconds so you can create another client.
+            <div className="bg-emerald-950 rounded-[2rem] p-6 mb-10 relative z-10">
+              <p className="text-sm font-bold text-emerald-50/60 leading-relaxed text-center">
+                Please share these credentials with your client. The page will auto-refresh in 5 seconds.
               </p>
             </div>
 
-            <div className="flex gap-3">
+            <div className="flex flex-col sm:flex-row gap-4 relative z-10">
               <Button
                 onClick={() => window.location.reload()}
-                className="flex-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white"
+                className="flex-1 h-14 bg-emerald-500 hover:bg-emerald-600 text-white font-black rounded-2xl shadow-xl shadow-emerald-500/20 transition-all active:scale-95"
               >
-                Create Another Client
+                Create Another
               </Button>
               <Button
                 onClick={() => router.push('/advisor/clients')}
                 variant="outline"
-                className="flex-1 border-2 border-emerald-600 text-emerald-600 hover:bg-emerald-50"
+                className="flex-1 h-14 border-2 border-emerald-100 text-emerald-950 font-black rounded-2xl hover:bg-emerald-50 transition-all active:scale-95"
               >
                 View Client List
               </Button>
@@ -587,71 +594,77 @@ export default function ClientSignupForm() {
       )}
 
       <div className="w-full px-4 py-8 md:py-12">
-        {/* Header Banner */}
-        <div className="mb-6 md:mb-8">
-          <div className="bg-gradient-to-r from-emerald-600 to-teal-600 rounded-2xl p-6 md:p-8 text-white shadow-2xl">
-            <div className="flex items-center gap-3 mb-4">
-              <Sparkles className="w-6 h-6 md:w-8 md:h-8" />
-              <h1 className="text-2xl md:text-3xl font-bold">Welcome to Credit Banc Vault</h1>
+        <div className="mb-10 relative z-10">
+          <div className="bg-white border border-emerald-50 rounded-[2.5rem] p-10 md:p-14 text-emerald-950 shadow-2xl overflow-hidden relative">
+            {/* abstract bg decoration */}
+            <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50 rounded-full blur-3xl -mr-10 -mt-10" />
+
+            <div className="flex items-center gap-4 mb-6 relative z-10">
+              <Sparkles className="w-10 h-10 text-emerald-500" />
+              <h1 className="text-4xl md:text-5xl font-black uppercase tracking-tighter">Welcome to Credit Banc Vault</h1>
             </div>
-            <p className="text-emerald-50 text-base md:text-lg">
-              Complete your application in 6 simple steps and get instant access to your funding dashboard
+            <p className="text-emerald-900/60 text-xl font-bold max-w-2xl relative z-10">
+              Complete your application in 6 simple steps and get instant access to your funding dashboard.
             </p>
-            <div className="mt-4 md:mt-6 flex flex-wrap gap-3 md:gap-4">
-              <div className="flex items-center gap-2 bg-white/20 rounded-lg px-3 md:px-4 py-2">
-                <TrendingUp className="w-4 h-4 md:w-5 md:h-5" />
-                <span className="text-xs md:text-sm font-medium">Fast Approval</span>
+            <div className="mt-8 flex flex-wrap gap-4 relative z-10">
+              <div className="flex items-center gap-2 bg-emerald-50 rounded-full px-6 py-3 border border-emerald-100">
+                <TrendingUp className="w-5 h-5 text-emerald-600" />
+                <span className="text-xs font-black uppercase tracking-widest text-emerald-700">Fast Approval</span>
               </div>
-              <div className="flex items-center gap-2 bg-white/20 rounded-lg px-3 md:px-4 py-2">
-                <Shield className="w-4 h-4 md:w-5 md:h-5" />
-                <span className="text-xs md:text-sm font-medium">Secure Platform</span>
+              <div className="flex items-center gap-2 bg-emerald-50 rounded-full px-6 py-3 border border-emerald-100">
+                <Shield className="w-5 h-5 text-emerald-600" />
+                <span className="text-xs font-black uppercase tracking-widest text-emerald-700">Secure Platform</span>
               </div>
             </div>
           </div>
         </div>
 
-        <Card className="shadow-2xl border-0">
-          <CardHeader className="border-b bg-gradient-to-r from-gray-50 to-gray-100 p-4 md:p-6">
-            <CardTitle className="text-xl md:text-2xl text-gray-800">New Client Application</CardTitle>
-            <CardDescription className="text-sm md:text-base text-gray-600">
+        <Card className="shadow-2xl border-emerald-50 rounded-[3rem] overflow-hidden relative z-10 bg-white">
+          <CardHeader className="border-b border-emerald-50 bg-white p-10 md:p-14">
+            <CardTitle className="text-3xl font-black text-emerald-950 uppercase tracking-tighter">New Client Application</CardTitle>
+            <CardDescription className="text-lg font-bold text-emerald-900/40 mt-3">
               Fill out your information below. You'll receive login credentials immediately after submission.
             </CardDescription>
           </CardHeader>
 
           <CardContent className="p-4 md:p-8 lg:p-10">
             {/* Progress Steps */}
-            <div className="flex items-center justify-between mb-8 md:mb-10 overflow-x-auto">
+            <div className="flex items-center justify-between mb-12 md:mb-16 overflow-x-auto pb-4 px-2">
               {[
-                { num: 1, label: "Contact Info", icon: Building2 },
+                { num: 1, label: "Contact", icon: Building2 },
                 { num: 2, label: "Location", icon: MapPin },
                 { num: 3, label: "Financials", icon: DollarSign },
                 { num: 4, label: "Owners", icon: Users },
                 { num: 5, label: "Credit", icon: CreditCard },
-                { num: 6, label: "Final Details", icon: Clock },
+                { num: 6, label: "Final", icon: Clock },
               ].map((s, idx) => (
-                <div key={s.num} className="flex items-center">
+                <div key={s.num} className="flex items-center shrink-0">
                   <div className="flex flex-col items-center">
                     <div
-                      className={`w-10 h-10 md:w-12 md:h-12 rounded-full flex items-center justify-center font-bold text-sm transition-all shadow-lg
-                        ${step === s.num ? "bg-gradient-to-br from-emerald-500 to-teal-600 text-white ring-4 ring-emerald-100 scale-110" :
-                          step > s.num ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-400"}`}
+                      className={`w-12 h-12 md:w-14 md:h-14 rounded-2xl flex items-center justify-center font-black transition-all duration-500
+                        ${step === s.num ? "bg-emerald-500 text-white shadow-xl shadow-emerald-500/20 scale-110" :
+                          step > s.num ? "bg-emerald-50 text-emerald-500 border border-emerald-100" : "bg-slate-50 text-slate-300 border border-slate-100"}`}
                     >
-                      {step > s.num ? <CheckCircle2 className="w-5 h-5 md:w-6 md:h-6" /> : <s.icon className="w-5 h-5 md:w-6 md:h-6" />}
+                      {step > s.num ? <CheckCircle2 className="w-6 h-6" /> : <s.icon className="w-6 h-6" />}
                     </div>
-                    <span className={`text-[10px] md:text-xs font-semibold mt-2 text-center whitespace-nowrap ${step === s.num ? "text-emerald-700" : "text-gray-500"}`}>
+                    <span className={`text-[10px] font-black uppercase tracking-widest mt-3 transition-colors duration-500 ${step === s.num ? "text-emerald-950" : "text-slate-400"}`}>
                       {s.label}
                     </span>
                   </div>
-                  {idx < 5 && <div className={`h-1 w-8 md:w-12 mx-1 md:mx-2 rounded-full transition-all ${step > s.num ? "bg-emerald-400" : "bg-gray-200"}`} />}
+                  {idx < 5 && (
+                    <div className="px-2 md:px-4">
+                      <div className={`h-1 w-6 md:w-10 rounded-full transition-all duration-700 ${step > s.num ? "bg-emerald-500" : "bg-slate-100"}`} />
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
 
             {error && (
-              <div className="mb-6 p-4 bg-red-50 border-l-4 border-red-500 rounded-lg">
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-                  <p className="text-red-800 text-sm font-medium">{error}</p>
+              <div className="mb-8 p-6 bg-red-50 border border-red-100 rounded-[2rem] animate-shake">
+                <div className="flex items-center gap-3">
+                  <AlertCircle className="w-6 h-6 text-red-500" />
+                  <p className="text-red-900 text-sm font-black uppercase tracking-tight">{error}</p>
                 </div>
               </div>
             )}
@@ -660,70 +673,70 @@ export default function ClientSignupForm() {
               {/* STEP 1: Contact Info */}
               {step === 1 && (
                 <div className="space-y-6 animate-fade-in">
-                  <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
-                    <h3 className="text-lg font-semibold text-emerald-900 mb-2">Contact Information</h3>
-                    <p className="text-sm text-emerald-700">Let's start with the basic contact details</p>
+                  <div className="bg-emerald-50/50 rounded-3xl p-8 mb-8">
+                    <h3 className="text-xl font-black text-emerald-950 uppercase tracking-tighter mb-2">Contact Information</h3>
+                    <p className="text-emerald-900/40 font-bold">Let's start with the basic contact details.</p>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
                     <div>
-                      <Label htmlFor="client_name" className="text-sm font-semibold text-gray-700">Client Full Name *</Label>
+                      <Label htmlFor="client_name" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Client Full Name *</Label>
                       <Input
                         id="client_name"
                         value={client_name}
                         onChange={(e) => set_client_name(e.target.value)}
-                        className="mt-2"
+                        className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
                         placeholder="John Doe"
                         required
                       />
                     </div>
 
                     <div>
-                      <Label htmlFor="company_name" className="text-sm font-semibold text-gray-700">Company Name *</Label>
+                      <Label htmlFor="company_name" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Company Name *</Label>
                       <Input
                         id="company_name"
                         value={company_name}
                         onChange={(e) => set_company_name(e.target.value)}
-                        className="mt-2"
+                        className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
                         placeholder="Acme Corp LLC"
                         required
                       />
                     </div>
 
                     <div>
-                      <Label htmlFor="client_email" className="text-sm font-semibold text-gray-700">Email Address *</Label>
+                      <Label htmlFor="client_email" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Email Address *</Label>
                       <Input
                         id="client_email"
                         type="email"
                         value={client_email}
                         onChange={(e) => set_client_email(e.target.value)}
-                        className="mt-2"
+                        className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
                         placeholder="john@example.com"
                         required
                       />
                     </div>
 
                     <div>
-                      <Label htmlFor="client_phone" className="text-sm font-semibold text-gray-700">Phone Number *</Label>
+                      <Label htmlFor="client_phone" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Phone Number *</Label>
                       <Input
                         id="client_phone"
                         type="tel"
                         value={client_phone}
                         onChange={(e) => set_client_phone(e.target.value)}
-                        className="mt-2"
+                        className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
                         placeholder="(555) 123-4567"
                         required
                       />
                     </div>
                   </div>
 
-                  <div className="flex justify-end pt-6">
+                  <div className="flex justify-end pt-10">
                     <Button
                       onClick={() => set_step(2)}
-                      className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white px-8 py-6 shadow-lg"
+                      className="h-16 px-10 bg-emerald-500 hover:bg-emerald-600 text-white font-black rounded-2xl shadow-xl shadow-emerald-500/20 transition-all active:scale-95 text-lg"
                     >
                       Next: Location
-                      <ChevronRight className="ml-2 w-5 h-5" />
+                      <ChevronRight className="ml-2 w-6 h-6" />
                     </Button>
                   </div>
                 </div>
@@ -732,16 +745,16 @@ export default function ClientSignupForm() {
               {/* STEP 2: Location & Structure */}
               {step === 2 && (
                 <div className="space-y-6 animate-fade-in">
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                    <h3 className="text-lg font-semibold text-blue-900 mb-2">Business Location & Structure</h3>
-                    <p className="text-sm text-blue-700">Tell us about your business location and structure</p>
+                  <div className="bg-emerald-50/50 rounded-3xl p-8 mb-8">
+                    <h3 className="text-xl font-black text-emerald-950 uppercase tracking-tighter mb-2">Location & Structure</h3>
+                    <p className="text-emerald-900/40 font-bold">Tell us about your business location and structure.</p>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
                     <div>
-                      <Label htmlFor="company_state" className="text-sm font-semibold text-gray-700">State *</Label>
+                      <Label htmlFor="company_state" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">State *</Label>
                       <Select value={company_state} onValueChange={set_company_state}>
-                        <SelectTrigger className="mt-2">
+                        <SelectTrigger className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6">
                           <SelectValue placeholder="Select state" />
                         </SelectTrigger>
                         <SelectContent>
@@ -755,7 +768,7 @@ export default function ClientSignupForm() {
                     </div>
 
                     <div>
-                      <Label htmlFor="company_city" className="text-sm font-semibold text-gray-700">City</Label>
+                      <Label htmlFor="company_city" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">City</Label>
                       <Input
                         id="company_city"
                         value={company_city}
@@ -766,7 +779,7 @@ export default function ClientSignupForm() {
                     </div>
 
                     <div>
-                      <Label htmlFor="company_zip_code" className="text-sm font-semibold text-gray-700">ZIP Code *</Label>
+                      <Label htmlFor="company_zip_code" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">ZIP Code *</Label>
                       <Input
                         id="company_zip_code"
                         value={company_zip_code}
@@ -778,7 +791,7 @@ export default function ClientSignupForm() {
                     </div>
 
                     <div>
-                      <Label htmlFor="legal_entity_type" className="text-sm font-semibold text-gray-700">Legal Entity Type *</Label>
+                      <Label htmlFor="legal_entity_type" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Legal Entity Type *</Label>
                       <Select value={legal_entity_type} onValueChange={set_legal_entity_type}>
                         <SelectTrigger className="mt-2">
                           <SelectValue placeholder="Select entity type" />
@@ -794,55 +807,55 @@ export default function ClientSignupForm() {
                     </div>
 
                     <div>
-                      <Label htmlFor="business_start_date" className="text-sm font-semibold text-gray-700">Business Start Date *</Label>
+                      <Label htmlFor="business_start_date" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Business Start Date *</Label>
                       <Input
                         id="business_start_date"
                         type="date"
                         value={business_start_date}
                         onChange={(e) => set_business_start_date(e.target.value)}
-                        className="mt-2"
+                        className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
                         required
                       />
                     </div>
 
                     <div>
-                      <Label htmlFor="employees_count" className="text-sm font-semibold text-gray-700">Number of Employees *</Label>
+                      <Label htmlFor="employees_count" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Number of Employees *</Label>
                       <Input
                         id="employees_count"
                         type="number"
                         value={employees_count}
                         onChange={(e) => set_employees_count(e.target.value)}
-                        className="mt-2"
+                        className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
                         placeholder="5"
                         required
                       />
                     </div>
                   </div>
 
-                  <div className="flex items-start space-x-3 p-4 hover:bg-gray-50 rounded-lg transition-colors">
+                  <div className="flex items-start space-x-3 p-6 bg-emerald-50/30 border border-emerald-50 rounded-2xl transition-colors">
                     <Checkbox
                       id="is_home_based"
                       checked={is_home_based}
                       onCheckedChange={(checked) => set_is_home_based(checked as boolean)}
                       className="mt-1"
                     />
-                    <Label htmlFor="is_home_based" className="text-sm text-gray-700 cursor-pointer">
+                    <Label htmlFor="is_home_based" className="text-sm font-bold text-emerald-950 cursor-pointer">
                       This is a home-based business
                     </Label>
                   </div>
 
-                  <div className="flex flex-col sm:flex-row justify-between gap-4 pt-6">
+                  <div className="flex flex-col sm:flex-row justify-between gap-4 pt-10">
                     <Button
                       onClick={() => set_step(1)}
                       variant="outline"
-                      className="border-2 border-emerald-600 text-emerald-600 hover:bg-emerald-50 px-8 py-6"
+                      className="h-14 px-8 border-2 border-emerald-100 text-emerald-950 font-black rounded-2xl hover:bg-emerald-50 transition-all active:scale-95"
                     >
                       <ChevronLeft className="mr-2 w-5 h-5" />
                       Previous
                     </Button>
                     <Button
                       onClick={() => set_step(3)}
-                      className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white px-8 py-6 shadow-lg"
+                      className="h-14 px-10 bg-emerald-500 hover:bg-emerald-600 text-white font-black rounded-2xl shadow-xl shadow-emerald-500/20 transition-all active:scale-95"
                     >
                       Next: Financials
                       <ChevronRight className="ml-2 w-5 h-5" />
@@ -854,22 +867,22 @@ export default function ClientSignupForm() {
               {/* STEP 3: Financial Information */}
               {step === 3 && (
                 <div className="space-y-6 animate-fade-in">
-                  <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                    <h3 className="text-lg font-semibold text-green-900 mb-2">Financial Information</h3>
-                    <p className="text-sm text-green-700">Tell us about your funding needs and revenue</p>
+                  <div className="bg-emerald-50/50 rounded-3xl p-8 mb-8">
+                    <h3 className="text-xl font-black text-emerald-950 uppercase tracking-tighter mb-2">Financial Information</h3>
+                    <p className="text-emerald-900/40 font-bold">Tell us about your funding needs and revenue.</p>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
                     <div>
-                      <Label htmlFor="capital_requested" className="text-sm font-semibold text-gray-700">Capital Requested *</Label>
-                      <div className="relative mt-2">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-medium">$</span>
+                      <Label htmlFor="capital_requested" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Capital Requested *</Label>
+                      <div className="relative">
+                        <span className="absolute left-6 top-1/2 -translate-y-1/2 text-emerald-950 font-black">$</span>
                         <Input
                           id="capital_requested"
                           type="number"
                           value={capital_requested}
                           onChange={(e) => set_capital_requested(e.target.value)}
-                          className="pl-7"
+                          className="h-14 pl-10 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold"
                           placeholder="50000"
                           required
                         />
@@ -877,7 +890,7 @@ export default function ClientSignupForm() {
                     </div>
 
                     <div>
-                      <Label htmlFor="proposed_loan_type" className="text-sm font-semibold text-gray-700">Proposed Loan Type *</Label>
+                      <Label htmlFor="proposed_loan_type" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Proposed Loan Type *</Label>
                       <Select value={proposed_loan_type} onValueChange={set_proposed_loan_type}>
                         <SelectTrigger className="mt-2">
                           <SelectValue placeholder="Select loan type" />
@@ -893,12 +906,12 @@ export default function ClientSignupForm() {
                     </div>
 
                     <div className="md:col-span-2">
-                      <Label htmlFor="loan_purpose" className="text-sm font-semibold text-gray-700">What will the funds be used for? *</Label>
+                      <Label htmlFor="loan_purpose" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">What will the funds be used for? *</Label>
                       <Textarea
                         id="loan_purpose"
                         value={loan_purpose}
                         onChange={(e) => set_loan_purpose(e.target.value)}
-                        className="mt-2"
+                        className="rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold p-6"
                         placeholder="Equipment purchase, inventory, expansion, etc."
                         rows={3}
                         required
@@ -906,15 +919,15 @@ export default function ClientSignupForm() {
                     </div>
 
                     <div>
-                      <Label htmlFor="avg_monthly_deposits" className="text-sm font-semibold text-gray-700">Average Monthly Deposits *</Label>
-                      <div className="relative mt-2">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-medium">$</span>
+                      <Label htmlFor="avg_monthly_deposits" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Average Monthly Deposits *</Label>
+                      <div className="relative">
+                        <span className="absolute left-6 top-1/2 -translate-y-1/2 text-emerald-950 font-black">$</span>
                         <Input
                           id="avg_monthly_deposits"
                           type="number"
                           value={avg_monthly_deposits}
                           onChange={(e) => set_avg_monthly_deposits(e.target.value)}
-                          className="pl-7"
+                          className="h-14 pl-10 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold"
                           placeholder="10000"
                           required
                         />
@@ -922,15 +935,15 @@ export default function ClientSignupForm() {
                     </div>
 
                     <div>
-                      <Label htmlFor="avg_annual_revenue" className="text-sm font-semibold text-gray-700">Average Annual Revenue *</Label>
-                      <div className="relative mt-2">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-medium">$</span>
+                      <Label htmlFor="avg_annual_revenue" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Average Annual Revenue *</Label>
+                      <div className="relative">
+                        <span className="absolute left-6 top-1/2 -translate-y-1/2 text-emerald-950 font-black">$</span>
                         <Input
                           id="avg_annual_revenue"
                           type="number"
                           value={avg_annual_revenue}
                           onChange={(e) => set_avg_annual_revenue(e.target.value)}
-                          className="pl-7"
+                          className="h-14 pl-10 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold"
                           placeholder="120000"
                           required
                         />
@@ -1030,15 +1043,15 @@ export default function ClientSignupForm() {
               {/* STEP 4: Business Owners */}
               {step === 4 && (
                 <div className="space-y-6 animate-fade-in">
-                  <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
-                    <h3 className="text-lg font-semibold text-purple-900 mb-2">Business Ownership</h3>
-                    <p className="text-sm text-purple-700">List all owners and their ownership percentages (must total 100%)</p>
+                  <div className="bg-emerald-50/50 rounded-3xl p-8 mb-8">
+                    <h3 className="text-xl font-black text-emerald-950 uppercase tracking-tighter mb-2">Business Ownership</h3>
+                    <p className="text-emerald-900/40 font-bold">List all owners and their ownership percentages (must total 100%).</p>
                   </div>
 
                   <div>
-                    <Label htmlFor="number_of_owners" className="text-sm font-semibold text-gray-700 mb-3 block">How many owners? *</Label>
+                    <Label htmlFor="number_of_owners" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-3 block ml-1">How many owners? *</Label>
                     <Select value={number_of_owners} onValueChange={set_number_of_owners}>
-                      <SelectTrigger className="max-w-xs">
+                      <SelectTrigger className="max-w-xs h-12 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -1049,22 +1062,22 @@ export default function ClientSignupForm() {
                   </div>
 
                   {/* Owner 1 (Required) */}
-                  <div className="bg-gray-50 p-6 rounded-xl border-2 border-gray-200">
-                    <h4 className="text-md font-semibold text-gray-800 mb-4">Owner 1 (Primary) *</h4>
+                  <div className="bg-emerald-50/20 p-8 rounded-[2rem] border border-emerald-50">
+                    <h4 className="text-lg font-black text-emerald-950 uppercase tracking-tight mb-6">Owner 1 (Primary) *</h4>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
-                        <Label htmlFor="owner_1_name" className="text-sm font-semibold text-gray-700">Full Name *</Label>
+                        <Label htmlFor="owner_1_name" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Full Name *</Label>
                         <Input
                           id="owner_1_name"
                           value={owner_1_name}
                           onChange={(e) => set_owner_1_name(e.target.value)}
-                          className="mt-2"
+                          className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
                           placeholder="John Doe"
                           required
                         />
                       </div>
                       <div>
-                        <Label htmlFor="owner_1_ownership_pct" className="text-sm font-semibold text-gray-700">Ownership % *</Label>
+                        <Label htmlFor="owner_1_ownership_pct" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Ownership % *</Label>
                         <Input
                           id="owner_1_ownership_pct"
                           type="number"
@@ -1073,7 +1086,7 @@ export default function ClientSignupForm() {
                           step="0.01"
                           value={owner_1_ownership_pct}
                           onChange={(e) => set_owner_1_ownership_pct(e.target.value)}
-                          className="mt-2"
+                          className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
                           placeholder="100"
                           required
                         />
@@ -1085,21 +1098,21 @@ export default function ClientSignupForm() {
                   {number_of_owners === "More than one" && (
                     <>
                       {/* Owner 2 */}
-                      <div className="bg-gray-50 p-6 rounded-xl border-2 border-gray-200">
-                        <h4 className="text-md font-semibold text-gray-800 mb-4">Owner 2</h4>
+                      <div className="bg-emerald-50/20 p-8 rounded-[2rem] border border-emerald-50">
+                        <h4 className="text-lg font-black text-emerald-950 uppercase tracking-tight mb-6">Owner 2</h4>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
-                            <Label htmlFor="owner_2_name" className="text-sm font-semibold text-gray-700">Full Name</Label>
+                            <Label htmlFor="owner_2_name" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Full Name</Label>
                             <Input
                               id="owner_2_name"
                               value={owner_2_name}
                               onChange={(e) => set_owner_2_name(e.target.value)}
-                              className="mt-2"
+                              className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
                               placeholder="Jane Smith"
                             />
                           </div>
                           <div>
-                            <Label htmlFor="owner_2_ownership_pct" className="text-sm font-semibold text-gray-700">Ownership %</Label>
+                            <Label htmlFor="owner_2_ownership_pct" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Ownership %</Label>
                             <Input
                               id="owner_2_ownership_pct"
                               type="number"
@@ -1108,7 +1121,7 @@ export default function ClientSignupForm() {
                               step="0.01"
                               value={owner_2_ownership_pct}
                               onChange={(e) => set_owner_2_ownership_pct(e.target.value)}
-                              className="mt-2"
+                              className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
                               placeholder="0"
                             />
                           </div>
@@ -1116,21 +1129,21 @@ export default function ClientSignupForm() {
                       </div>
 
                       {/* Owner 3 */}
-                      <div className="bg-gray-50 p-6 rounded-xl border-2 border-gray-200">
-                        <h4 className="text-md font-semibold text-gray-800 mb-4">Owner 3</h4>
+                      <div className="bg-emerald-50/20 p-8 rounded-[2rem] border border-emerald-50">
+                        <h4 className="text-lg font-black text-emerald-950 uppercase tracking-tight mb-6">Owner 3</h4>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
-                            <Label htmlFor="owner_3_name" className="text-sm font-semibold text-gray-700">Full Name</Label>
+                            <Label htmlFor="owner_3_name" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Full Name</Label>
                             <Input
                               id="owner_3_name"
                               value={owner_3_name}
                               onChange={(e) => set_owner_3_name(e.target.value)}
-                              className="mt-2"
+                              className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
                               placeholder="Optional"
                             />
                           </div>
                           <div>
-                            <Label htmlFor="owner_3_ownership_pct" className="text-sm font-semibold text-gray-700">Ownership %</Label>
+                            <Label htmlFor="owner_3_ownership_pct" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Ownership %</Label>
                             <Input
                               id="owner_3_ownership_pct"
                               type="number"
@@ -1139,7 +1152,7 @@ export default function ClientSignupForm() {
                               step="0.01"
                               value={owner_3_ownership_pct}
                               onChange={(e) => set_owner_3_ownership_pct(e.target.value)}
-                              className="mt-2"
+                              className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
                               placeholder="0"
                             />
                           </div>
@@ -1147,21 +1160,21 @@ export default function ClientSignupForm() {
                       </div>
 
                       {/* Owner 4 */}
-                      <div className="bg-gray-50 p-6 rounded-xl border-2 border-gray-200">
-                        <h4 className="text-md font-semibold text-gray-800 mb-4">Owner 4</h4>
+                      <div className="bg-emerald-50/20 p-8 rounded-[2rem] border border-emerald-50">
+                        <h4 className="text-lg font-black text-emerald-950 uppercase tracking-tight mb-6">Owner 4</h4>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
-                            <Label htmlFor="owner_4_name" className="text-sm font-semibold text-gray-700">Full Name</Label>
+                            <Label htmlFor="owner_4_name" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Full Name</Label>
                             <Input
                               id="owner_4_name"
                               value={owner_4_name}
                               onChange={(e) => set_owner_4_name(e.target.value)}
-                              className="mt-2"
+                              className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
                               placeholder="Optional"
                             />
                           </div>
                           <div>
-                            <Label htmlFor="owner_4_ownership_pct" className="text-sm font-semibold text-gray-700">Ownership %</Label>
+                            <Label htmlFor="owner_4_ownership_pct" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Ownership %</Label>
                             <Input
                               id="owner_4_ownership_pct"
                               type="number"
@@ -1170,7 +1183,7 @@ export default function ClientSignupForm() {
                               step="0.01"
                               value={owner_4_ownership_pct}
                               onChange={(e) => set_owner_4_ownership_pct(e.target.value)}
-                              className="mt-2"
+                              className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
                               placeholder="0"
                             />
                           </div>
@@ -1178,21 +1191,21 @@ export default function ClientSignupForm() {
                       </div>
 
                       {/* Owner 5 */}
-                      <div className="bg-gray-50 p-6 rounded-xl border-2 border-gray-200">
-                        <h4 className="text-md font-semibold text-gray-800 mb-4">Owner 5</h4>
+                      <div className="bg-emerald-50/20 p-8 rounded-[2rem] border border-emerald-50">
+                        <h4 className="text-lg font-black text-emerald-950 uppercase tracking-tight mb-6">Owner 5</h4>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
-                            <Label htmlFor="owner_5_name" className="text-sm font-semibold text-gray-700">Full Name</Label>
+                            <Label htmlFor="owner_5_name" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Full Name</Label>
                             <Input
                               id="owner_5_name"
                               value={owner_5_name}
                               onChange={(e) => set_owner_5_name(e.target.value)}
-                              className="mt-2"
+                              className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
                               placeholder="Optional"
                             />
                           </div>
                           <div>
-                            <Label htmlFor="owner_5_ownership_pct" className="text-sm font-semibold text-gray-700">Ownership %</Label>
+                            <Label htmlFor="owner_5_ownership_pct" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Ownership %</Label>
                             <Input
                               id="owner_5_ownership_pct"
                               type="number"
@@ -1201,7 +1214,7 @@ export default function ClientSignupForm() {
                               step="0.01"
                               value={owner_5_ownership_pct}
                               onChange={(e) => set_owner_5_ownership_pct(e.target.value)}
-                              className="mt-2"
+                              className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
                               placeholder="0"
                             />
                           </div>
@@ -1210,18 +1223,18 @@ export default function ClientSignupForm() {
                     </>
                   )}
 
-                  <div className="flex flex-col sm:flex-row justify-between gap-4 pt-6">
+                  <div className="flex flex-col sm:flex-row justify-between gap-4 pt-10">
                     <Button
                       onClick={() => set_step(3)}
                       variant="outline"
-                      className="border-2 border-emerald-600 text-emerald-600 hover:bg-emerald-50 px-8 py-6"
+                      className="h-14 px-8 border-2 border-emerald-100 text-emerald-950 font-black rounded-2xl hover:bg-emerald-50 transition-all active:scale-95"
                     >
                       <ChevronLeft className="mr-2 w-5 h-5" />
                       Previous
                     </Button>
                     <Button
                       onClick={() => set_step(5)}
-                      className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white px-8 py-6 shadow-lg"
+                      className="h-14 px-10 bg-emerald-500 hover:bg-emerald-600 text-white font-black rounded-2xl shadow-xl shadow-emerald-500/20 transition-all active:scale-95"
                     >
                       Next: Credit
                       <ChevronRight className="ml-2 w-5 h-5" />
@@ -1233,19 +1246,19 @@ export default function ClientSignupForm() {
               {/* STEP 5: Credit & Special Situations */}
               {step === 5 && (
                 <div className="space-y-6 animate-fade-in">
-                  <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
-                    <h3 className="text-lg font-semibold text-orange-900 mb-2">Credit & Special Situations</h3>
-                    <p className="text-sm text-orange-700">Help us understand your credit situation and risk factors</p>
+                  <div className="bg-emerald-50/50 rounded-3xl p-8 mb-8">
+                    <h3 className="text-xl font-black text-emerald-950 uppercase tracking-tighter mb-2">Credit & Special Situations</h3>
+                    <p className="text-emerald-900/40 font-bold">Help us understand your credit situation and risk factors.</p>
                   </div>
 
                   {/* Credit Score Section */}
                   <div>
-                    <Label className="text-sm font-semibold text-gray-700 mb-3 block">Credit Score Range *</Label>
+                    <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-4 block ml-1">Credit Score Range *</Label>
                     <div role="radiogroup" aria-label="Credit Score Range" className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       {CREDIT_SCORE_OPTIONS.map((opt) => (
                         <label
                           key={opt.value}
-                          className={`flex items-center p-3 rounded-lg border cursor-pointer transition-colors ${credit_score === opt.value ? "bg-emerald-50 border-emerald-300" : "bg-white border-gray-200"
+                          className={`flex items-center p-5 rounded-2xl border cursor-pointer transition-all duration-300 ${credit_score === opt.value ? "bg-emerald-500 border-emerald-500 text-white shadow-lg shadow-emerald-500/20" : "bg-white border-emerald-50 text-emerald-950 hover:border-emerald-200"
                             }`}
                         >
                           <input
@@ -1256,81 +1269,82 @@ export default function ClientSignupForm() {
                             onChange={() => set_credit_score(opt.value)}
                             className="mr-3 h-4 w-4 text-emerald-600 accent-emerald-600"
                           />
-                          <span className="text-sm text-gray-700">{opt.label}</span>
+                          <span className="text-sm font-black uppercase tracking-tight">{opt.label}</span>
                         </label>
                       ))}
                     </div>
                   </div>
 
                   {/* Risk Assessment Questions */}
-                  <div className="space-y-4">
-                    <h3 className="text-md font-semibold text-gray-800 border-b pb-2">
+                  <div className="bg-emerald-50/50 rounded-3xl p-8 mb-8">
+                    <h3 className="text-xl font-black text-emerald-950 uppercase tracking-tighter mb-2">
                       Risk Assessment Questions
                     </h3>
+                    <p className="text-emerald-900/40 font-bold">Select all applicable risk factors and special situations.</p>
 
                     {/* Main risk assessment checkboxes - displayed in a grid */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-6">
                       {/* Has existing loans checkbox */}
-                      <div className="flex items-start space-x-3 p-3 hover:bg-blue-100 rounded-lg transition-colors">
+                      <div className="flex items-start space-x-3 p-4 bg-white/50 border border-emerald-50 rounded-2xl hover:bg-emerald-50 transition-all group">
                         <Checkbox
                           id="has_existing_loans"
                           checked={has_existing_loans}
                           onCheckedChange={(checked) => set_has_existing_loans(checked as boolean)}
                           className="mt-1"
                         />
-                        <Label htmlFor="has_existing_loans" className="text-sm text-gray-700 cursor-pointer">
+                        <Label htmlFor="has_existing_loans" className="text-sm font-bold text-emerald-950 cursor-pointer">
                           Has existing loans or advances
                         </Label>
                       </div>
 
                       {/* Defaulted on MCA checkbox */}
-                      <div className="flex items-start space-x-3 p-3 hover:bg-blue-100 rounded-lg transition-colors">
+                      <div className="flex items-start space-x-3 p-4 bg-white/50 border border-emerald-50 rounded-2xl hover:bg-emerald-50 transition-all group">
                         <Checkbox
                           id="has_defaulted_mca"
                           checked={has_defaulted_mca}
                           onCheckedChange={(checked) => set_has_defaulted_mca(checked as boolean)}
                           className="mt-1"
                         />
-                        <Label htmlFor="has_defaulted_mca" className="text-sm text-gray-700 cursor-pointer">
+                        <Label htmlFor="has_defaulted_mca" className="text-sm font-bold text-emerald-950 cursor-pointer">
                           Defaulted on MCA
                         </Label>
                       </div>
 
                       {/* Reduced MCA payments checkbox */}
-                      <div className="flex items-start space-x-3 p-3 hover:bg-blue-100 rounded-lg transition-colors">
+                      <div className="flex items-start space-x-3 p-4 bg-white/50 border border-emerald-50 rounded-2xl hover:bg-emerald-50 transition-all group">
                         <Checkbox
                           id="has_reduced_mca_payments"
                           checked={has_reduced_mca_payments}
                           onCheckedChange={(checked) => set_has_reduced_mca_payments(checked as boolean)}
                           className="mt-1"
                         />
-                        <Label htmlFor="has_reduced_mca_payments" className="text-sm text-gray-700 cursor-pointer">
+                        <Label htmlFor="has_reduced_mca_payments" className="text-sm font-bold text-emerald-950 cursor-pointer">
                           Reduced MCA payments
                         </Label>
                       </div>
 
                       {/* Owns real estate checkbox */}
-                      <div className="flex items-start space-x-3 p-3 hover:bg-blue-100 rounded-lg transition-colors">
+                      <div className="flex items-start space-x-3 p-4 bg-white/50 border border-emerald-50 rounded-2xl hover:bg-emerald-50 transition-all group">
                         <Checkbox
                           id="owns_real_estate"
                           checked={owns_real_estate}
                           onCheckedChange={(checked) => set_owns_real_estate(checked as boolean)}
                           className="mt-1"
                         />
-                        <Label htmlFor="owns_real_estate" className="text-sm text-gray-700 cursor-pointer">
+                        <Label htmlFor="owns_real_estate" className="text-sm font-bold text-emerald-950 cursor-pointer">
                           Owns real estate
                         </Label>
                       </div>
 
                       {/* Personal CC debt over $75k checkbox */}
-                      <div className="flex items-start space-x-3 p-3 hover:bg-blue-100 rounded-lg transition-colors">
+                      <div className="flex items-start space-x-3 p-4 bg-white/50 border border-emerald-50 rounded-2xl hover:bg-emerald-50 transition-all group">
                         <Checkbox
                           id="has_personal_debt_over_75k"
                           checked={has_personal_debt_over_75k}
                           onCheckedChange={(checked) => set_has_personal_debt_over_75k(checked as boolean)}
                           className="mt-1"
                         />
-                        <Label htmlFor="has_personal_debt_over_75k" className="text-sm text-gray-700 cursor-pointer">
+                        <Label htmlFor="has_personal_debt_over_75k" className="text-sm font-bold text-emerald-950 cursor-pointer">
                           Personal CC debt over $75k
                         </Label>
                       </div>
@@ -1338,7 +1352,7 @@ export default function ClientSignupForm() {
 
                     {/* Conditional field: Show if client has defaulted on MCA */}
                     {has_defaulted_mca && (
-                      <div className="mt-4 p-4 bg-yellow-50 rounded-lg border border-yellow-200">
+                      <div className="mt-4 p-6 bg-emerald-50/50 rounded-2xl border border-emerald-50">
                         <div className="flex items-start space-x-3">
                           <Checkbox
                             id="mca_was_satisfied"
@@ -1346,7 +1360,7 @@ export default function ClientSignupForm() {
                             onCheckedChange={(checked) => set_mca_was_satisfied(checked as boolean)}
                             className="mt-1"
                           />
-                          <Label htmlFor="mca_was_satisfied" className="text-sm text-gray-700 cursor-pointer">
+                          <Label htmlFor="mca_was_satisfied" className="text-sm font-bold text-emerald-950 cursor-pointer">
                             MCA was satisfied (debt has been paid off)
                           </Label>
                         </div>
@@ -1355,8 +1369,8 @@ export default function ClientSignupForm() {
 
                     {/* Conditional field: Show if client has reduced MCA payments */}
                     {has_reduced_mca_payments && (
-                      <div className="mt-4 p-4 bg-white rounded-lg border border-blue-200">
-                        <Label htmlFor="reduced_payments_months_ago" className="text-sm font-semibold text-gray-700">
+                      <div className="mt-4 p-6 bg-emerald-50/50 rounded-2xl border border-emerald-50">
+                        <Label htmlFor="reduced_payments_months_ago" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">
                           How many months ago did payments reduce?
                         </Label>
                         <Input
@@ -1364,7 +1378,7 @@ export default function ClientSignupForm() {
                           type="number"
                           value={reduced_payments_months_ago}
                           onChange={(e) => set_reduced_payments_months_ago(e.target.value ? Number(e.target.value) : "")}
-                          className="mt-2"
+                          className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
                           placeholder="Number of months"
                         />
                       </div>
@@ -1372,18 +1386,18 @@ export default function ClientSignupForm() {
 
                     {/* Conditional field: Show if client has personal CC debt over $75k */}
                     {has_personal_debt_over_75k && (
-                      <div className="mt-4 p-4 bg-white rounded-lg border border-blue-200">
-                        <Label htmlFor="personal_cc_debt_amount" className="text-sm font-semibold text-gray-700">
+                      <div className="mt-4 p-6 bg-emerald-50/50 rounded-2xl border border-emerald-50">
+                        <Label htmlFor="personal_cc_debt_amount" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">
                           Personal CC Debt Amount
                         </Label>
                         <div className="relative mt-2">
-                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-medium">$</span>
+                          <span className="absolute left-6 top-1/2 -translate-y-1/2 text-emerald-950 font-black">$</span>
                           <Input
                             id="personal_cc_debt_amount"
                             type="number"
                             value={personal_cc_debt_amount}
                             onChange={(e) => set_personal_cc_debt_amount(e.target.value ? Number(e.target.value) : "")}
-                            className="pl-7"
+                            className="h-14 pl-10 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold"
                             placeholder="Amount"
                           />
                         </div>
@@ -1392,14 +1406,14 @@ export default function ClientSignupForm() {
 
                     {/* Bankruptcy/Foreclosure checkbox */}
                     <div className="grid grid-cols-1 gap-3 mt-3">
-                      <div className="flex items-start space-x-3 p-3 hover:bg-blue-100 rounded-lg transition-colors">
+                      <div className="flex items-start space-x-3 p-4 bg-white/50 border border-emerald-50 rounded-2xl hover:bg-emerald-50 transition-all group">
                         <Checkbox
                           id="has_bankruptcy_foreclosure_3y"
                           checked={has_bankruptcy_foreclosure_3y}
                           onCheckedChange={(checked) => set_has_bankruptcy_foreclosure_3y(checked as boolean)}
                           className="mt-1"
                         />
-                        <Label htmlFor="has_bankruptcy_foreclosure_3y" className="text-sm text-gray-700 cursor-pointer">
+                        <Label htmlFor="has_bankruptcy_foreclosure_3y" className="text-sm font-bold text-emerald-950 cursor-pointer">
                           Foreclosures or bankruptcies in past 3 years
                         </Label>
                       </div>
@@ -1407,11 +1421,11 @@ export default function ClientSignupForm() {
 
                     {/* Conditional fields: Show if client has bankruptcy/foreclosure */}
                     {has_bankruptcy_foreclosure_3y && (
-                      <div className="mt-4 p-4 bg-white rounded-lg border border-blue-200 space-y-4">
+                      <div className="mt-4 p-6 bg-emerald-50/50 rounded-2xl border border-emerald-50 space-y-4">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           {/* Months ago field */}
                           <div>
-                            <Label htmlFor="bk_fc_months_ago" className="text-sm font-semibold text-gray-700">
+                            <Label htmlFor="bk_fc_months_ago" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">
                               How many months ago?
                             </Label>
                             <Input
@@ -1419,17 +1433,17 @@ export default function ClientSignupForm() {
                               type="number"
                               value={bk_fc_months_ago}
                               onChange={(e) => set_bk_fc_months_ago(e.target.value ? Number(e.target.value) : "")}
-                              className="mt-2"
+                              className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
                               placeholder="Months"
                             />
                           </div>
                           {/* Type selection field */}
                           <div>
-                            <Label htmlFor="bk_fc_type" className="text-sm font-semibold text-gray-700">
+                            <Label htmlFor="bk_fc_type" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">
                               Type
                             </Label>
                             <Select value={bk_fc_type} onValueChange={set_bk_fc_type}>
-                              <SelectTrigger className="mt-2">
+                              <SelectTrigger className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6">
                                 <SelectValue placeholder="Select type" />
                               </SelectTrigger>
                               <SelectContent>
@@ -1445,14 +1459,14 @@ export default function ClientSignupForm() {
 
                     {/* Tax liens checkbox */}
                     <div className="grid grid-cols-1 gap-3 mt-3">
-                      <div className="flex items-start space-x-3 p-3 hover:bg-blue-100 rounded-lg transition-colors">
+                      <div className="flex items-start space-x-3 p-4 bg-white/50 border border-emerald-50 rounded-2xl hover:bg-emerald-50 transition-all group">
                         <Checkbox
                           id="has_tax_liens"
                           checked={has_tax_liens}
                           onCheckedChange={(checked) => set_has_tax_liens(checked as boolean)}
                           className="mt-1"
                         />
-                        <Label htmlFor="has_tax_liens" className="text-sm text-gray-700 cursor-pointer">
+                        <Label htmlFor="has_tax_liens" className="text-sm font-bold text-emerald-950 cursor-pointer">
                           Tax liens
                         </Label>
                       </div>
@@ -1460,15 +1474,15 @@ export default function ClientSignupForm() {
 
                     {/* Conditional fields: Show if client has tax liens */}
                     {has_tax_liens && (
-                      <div className="mt-4 p-4 bg-white rounded-lg border border-blue-200 space-y-4">
+                      <div className="mt-4 p-6 bg-emerald-50/50 rounded-2xl border border-emerald-50 space-y-4">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           {/* Tax lien type selection */}
                           <div>
-                            <Label htmlFor="tax_liens_type" className="text-sm font-semibold text-gray-700">
+                            <Label htmlFor="tax_liens_type" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">
                               Tax lien type
                             </Label>
                             <Select value={tax_liens_type} onValueChange={set_tax_liens_type}>
-                              <SelectTrigger className="mt-2">
+                              <SelectTrigger className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6">
                                 <SelectValue placeholder="Select type" />
                               </SelectTrigger>
                               <SelectContent>
@@ -1479,31 +1493,31 @@ export default function ClientSignupForm() {
                           </div>
                           {/* Tax lien amount field */}
                           <div>
-                            <Label htmlFor="tax_liens_amount" className="text-sm font-semibold text-gray-700">
+                            <Label htmlFor="tax_liens_amount" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">
                               Tax lien amount
                             </Label>
                             <div className="relative mt-2">
-                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-medium">$</span>
+                              <span className="absolute left-6 top-1/2 -translate-y-1/2 text-emerald-950 font-black">$</span>
                               <Input
                                 id="tax_liens_amount"
                                 type="number"
                                 value={tax_liens_amount}
                                 onChange={(e) => set_tax_liens_amount(e.target.value ? Number(e.target.value) : "")}
-                                className="pl-7"
+                                className="h-14 pl-10 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold"
                                 placeholder="Amount"
                               />
                             </div>
                           </div>
                         </div>
                         {/* Payment plan checkbox */}
-                        <div className="flex items-start space-x-3 p-3 hover:bg-gray-50 rounded-lg transition-colors">
+                        <div className="flex items-start space-x-3 p-4 bg-white/50 border border-emerald-50 rounded-2xl hover:bg-emerald-50 transition-all group">
                           <Checkbox
                             id="tax_liens_on_plan"
                             checked={tax_liens_on_plan}
                             onCheckedChange={(checked) => set_tax_liens_on_plan(checked as boolean)}
                             className="mt-1"
                           />
-                          <Label htmlFor="tax_liens_on_plan" className="text-sm text-gray-700 cursor-pointer">
+                          <Label htmlFor="tax_liens_on_plan" className="text-sm font-bold text-emerald-950 cursor-pointer">
                             On payment plan
                           </Label>
                         </div>
@@ -1512,14 +1526,14 @@ export default function ClientSignupForm() {
 
                     {/* Judgements checkbox */}
                     <div className="grid grid-cols-1 gap-3 mt-3">
-                      <div className="flex items-start space-x-3 p-3 hover:bg-blue-100 rounded-lg transition-colors">
+                      <div className="flex items-start space-x-3 p-4 bg-white/50 border border-emerald-50 rounded-2xl hover:bg-emerald-50 transition-all group">
                         <Checkbox
                           id="has_active_judgements"
                           checked={has_active_judgements}
                           onCheckedChange={(checked) => set_has_active_judgements(checked as boolean)}
                           className="mt-1"
                         />
-                        <Label htmlFor="has_active_judgements" className="text-sm text-gray-700 cursor-pointer">
+                        <Label htmlFor="has_active_judgements" className="text-sm font-bold text-emerald-950 cursor-pointer">
                           Judgements
                         </Label>
                       </div>
@@ -1527,15 +1541,15 @@ export default function ClientSignupForm() {
 
                     {/* Conditional field: Show if client has judgements */}
                     {has_active_judgements && (
-                      <div className="mt-4 p-4 bg-white rounded-lg border border-blue-200">
-                        <Label htmlFor="judgements_explain" className="text-sm font-semibold text-gray-700">
+                      <div className="mt-4 p-6 bg-emerald-50/50 rounded-2xl border border-emerald-50">
+                        <Label htmlFor="judgements_explain" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">
                           Explain
                         </Label>
                         <Textarea
                           id="judgements_explain"
                           value={judgements_explain}
                           onChange={(e) => set_judgements_explain(e.target.value)}
-                          className="mt-2"
+                          className="rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold p-6"
                           placeholder="Explain any judgements..."
                           rows={3}
                         />
@@ -1544,14 +1558,14 @@ export default function ClientSignupForm() {
 
                     {/* ZBL (Zero Balance Letter) checkbox */}
                     <div className="grid grid-cols-1 gap-3 mt-3">
-                      <div className="flex items-start space-x-3 p-3 hover:bg-blue-100 rounded-lg transition-colors">
+                      <div className="flex items-start space-x-3 p-4 bg-white/50 border border-emerald-50 rounded-2xl hover:bg-emerald-50 transition-all group">
                         <Checkbox
                           id="has_zbl"
                           checked={has_zbl}
                           onCheckedChange={(checked) => set_has_zbl(checked as boolean)}
                           className="mt-1"
                         />
-                        <Label htmlFor="has_zbl" className="text-sm text-gray-700 cursor-pointer">
+                        <Label htmlFor="has_zbl" className="text-sm font-bold text-emerald-950 cursor-pointer">
                           Has ZBL (Zero Balance Letter)
                         </Label>
                       </div>
@@ -1581,15 +1595,15 @@ export default function ClientSignupForm() {
               {/* STEP 6: Final Details */}
               {step === 6 && (
                 <div className="space-y-6 animate-fade-in">
-                  <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
-                    <h3 className="text-lg font-semibold text-indigo-900 mb-2">Final Details</h3>
-                    <p className="text-sm text-indigo-700">Just a few more details and you're done!</p>
+                  <div className="bg-emerald-50/50 rounded-3xl p-8 mb-8">
+                    <h3 className="text-xl font-black text-emerald-950 uppercase tracking-tighter mb-2">Final Details</h3>
+                    <p className="text-emerald-900/40 font-bold">Just a few more details and you're done!</p>
                   </div>
 
                   <div>
-                    <Label htmlFor="funding_eta" className="text-sm font-semibold text-gray-700 mb-3 block">How soon do they need funds? *</Label>
+                    <Label htmlFor="funding_eta" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-3 block ml-1">How soon do they need funds? *</Label>
                     <Select value={funding_eta} onValueChange={set_funding_eta}>
-                      <SelectTrigger className="max-w-xs">
+                      <SelectTrigger className="max-w-xs h-12 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6">
                         <SelectValue placeholder="Select timeframe" />
                       </SelectTrigger>
                       <SelectContent>
@@ -1603,12 +1617,12 @@ export default function ClientSignupForm() {
                   </div>
 
                   <div>
-                    <Label htmlFor="additional_notes" className="text-sm font-semibold text-gray-700">Additional Information *</Label>
+                    <Label htmlFor="additional_notes" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-3 block ml-1">Additional Information *</Label>
                     <Textarea
                       id="additional_notes"
                       value={additional_notes}
                       onChange={(e) => set_additional_notes(e.target.value)}
-                      className="mt-2"
+                      className="rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold p-6"
                       placeholder="Any additional information we should know..."
                       rows={5}
                       required
@@ -1619,14 +1633,14 @@ export default function ClientSignupForm() {
                   {/* This section tracks which documents need to be collected from the client */}
                   {/* Each selected document will generate a "requested_{doc_name}" tag in GHL */}
                   <div className="space-y-4">
-                    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-4 border border-blue-200">
-                      <h3 className="text-lg font-semibold text-blue-900 mb-1">Documents Requested</h3>
-                      <p className="text-sm text-blue-700">
-                        Select all documents that need to be collected from this client
+                    <div className="bg-emerald-50/50 rounded-3xl p-8 mb-4">
+                      <h3 className="text-xl font-black text-emerald-950 uppercase tracking-tighter mb-2">Documents Requested</h3>
+                      <p className="text-emerald-900/40 font-bold">
+                        Select all documents that need to be collected from this client.
                       </p>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 bg-gray-50 p-4 md:p-6 rounded-xl border-2 border-gray-200">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 bg-white/50 p-6 md:p-8 rounded-[2.5rem] border border-emerald-50">
                       {DOC_OPTIONS.map((doc) => (
                         <div
                           key={doc}
@@ -1640,7 +1654,7 @@ export default function ClientSignupForm() {
                           />
                           <Label
                             htmlFor={`doc-${doc}`}
-                            className="text-sm text-gray-700 cursor-pointer leading-tight font-medium"
+                            className="text-sm text-emerald-950 cursor-pointer leading-tight font-bold"
                           >
                             {doc}
                           </Label>
@@ -1650,9 +1664,9 @@ export default function ClientSignupForm() {
 
                     {/* Show selected documents count */}
                     {documents_requested.length > 0 && (
-                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                        <p className="text-sm text-blue-900">
-                          <strong>{documents_requested.length}</strong> document{documents_requested.length !== 1 ? 's' : ''} requested
+                      <div className="bg-emerald-500 rounded-2xl p-4 text-center">
+                        <p className="text-sm font-black uppercase tracking-widest text-white">
+                          {documents_requested.length} document{documents_requested.length !== 1 ? 's' : ''} requested
                         </p>
                       </div>
                     )}
@@ -1660,9 +1674,9 @@ export default function ClientSignupForm() {
 
                   {/* Advisor Selection - Only show if NOT an advisor (advisors are auto-assigned) */}
                   {!is_advisor_context && (
-                    <div className="space-y-4">
-                      <h3 className="text-lg font-semibold">Advisor Assignment *</h3>
-                      <p className="text-sm text-gray-600">Select the advisor who will work with this client</p>
+                    <div className="space-y-4 mt-8 pt-8 border-t border-emerald-50">
+                      <h3 className="text-xl font-black text-emerald-950 uppercase tracking-tighter">Advisor Assignment *</h3>
+                      <p className="text-sm font-bold text-emerald-900/40">Select the advisor who will work with this client.</p>
                       {loading_advisors ? (
                         <div className="text-sm text-gray-500">Loading advisors...</div>
                       ) : advisors.length === 0 ? (
@@ -1671,7 +1685,7 @@ export default function ClientSignupForm() {
                         </div>
                       ) : (
                         <Select value={advisor_id} onValueChange={set_advisor_id}>
-                          <SelectTrigger>
+                          <SelectTrigger className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6">
                             <SelectValue placeholder="Select an advisor" />
                           </SelectTrigger>
                           <SelectContent>
@@ -1684,15 +1698,14 @@ export default function ClientSignupForm() {
                         </Select>
                       )}
                       {advisor_id && (
-                        <div className="bg-emerald-50 border border-emerald-200 rounded p-4">
-                          <p className="text-sm font-semibold text-emerald-900">Selected Advisor:</p>
+                        <div className="bg-emerald-500 rounded-3xl p-8 text-white shadow-xl shadow-emerald-500/20">
+                          <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-60 mb-4">Selected Advisor</p>
                           {(() => {
                             const selected = advisors.find(a => a.id === advisor_id);
                             return selected ? (
-                              <div className="mt-2 text-sm text-emerald-800">
-                                <p><strong>Name:</strong> {selected.first_name} {selected.last_name}</p>
-                                <p><strong>Email:</strong> {selected.email}</p>
-                                {selected.phone && <p><strong>Phone:</strong> {selected.phone}</p>}
+                              <div className="space-y-2">
+                                <p className="text-xl font-black uppercase tracking-tight">{selected.first_name} {selected.last_name}</p>
+                                <p className="font-bold opacity-80">{selected.email}</p>
                               </div>
                             ) : null;
                           })()}
@@ -1701,11 +1714,11 @@ export default function ClientSignupForm() {
                     </div>
                   )}
 
-                  <div className="flex flex-col sm:flex-row justify-between gap-4 pt-8 border-t-2 border-gray-200">
+                  <div className="flex flex-col sm:flex-row justify-between gap-4 pt-10 border-t border-emerald-50">
                     <Button
                       onClick={() => set_step(5)}
                       variant="outline"
-                      className="border-2 border-emerald-600 text-emerald-600 hover:bg-emerald-50 px-8 py-6"
+                      className="h-14 px-8 border-2 border-emerald-100 text-emerald-950 font-black rounded-2xl hover:bg-emerald-50 transition-all active:scale-95"
                     >
                       <ChevronLeft className="mr-2 w-5 h-5" />
                       Previous
@@ -1713,12 +1726,12 @@ export default function ClientSignupForm() {
                     <Button
                       onClick={handle_submit}
                       disabled={submitting}
-                      className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white px-12 py-6 shadow-lg disabled:opacity-50"
+                      className="h-14 px-12 bg-emerald-500 hover:bg-emerald-600 text-white font-black rounded-2xl shadow-xl shadow-emerald-500/20 transition-all active:scale-95 disabled:opacity-50"
                     >
                       {submitting ? (
                         <>
-                          <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
-                          Creating Account...
+                          <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-3"></div>
+                          Processing...
                         </>
                       ) : (
                         <>

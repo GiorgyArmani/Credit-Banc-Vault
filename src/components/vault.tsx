@@ -312,8 +312,8 @@ function DocumentCard({
 
   return (
     <div id={docType.code === "funding_application" ? "tour-funding-app" : undefined} className={clsx(
-      "border rounded-xl p-6 transition-all",
-      isComplete ? "bg-emerald-50 border-emerald-200" : "bg-white border-gray-200"
+      "border-2 rounded-[2rem] p-8 transition-all duration-300",
+      isComplete ? "bg-emerald-50 border-emerald-200 shadow-sm" : "bg-white border-emerald-50 shadow-sm hover:shadow-md"
     )}>
       {/* Card Header */}
       <div className="flex items-start justify-between mb-4">
@@ -324,7 +324,7 @@ function DocumentCard({
             <AlertCircle className="h-6 w-6 text-gray-400 flex-shrink-0" />
           )}
           <div>
-            <h3 className="font-semibold text-gray-900">{docType.label}</h3>
+            <h3 className="text-xl font-black text-emerald-950 tracking-tight">{docType.label}</h3>
           </div>
         </div>
       </div>
@@ -397,17 +397,17 @@ function DocumentCard({
           <Button
             onClick={handleUpload}
             disabled={uploading}
-            className="w-full bg-emerald-600 hover:bg-emerald-700"
+            className="w-full bg-emerald-500 hover:bg-emerald-600 font-black rounded-full h-12 shadow-lg shadow-emerald-500/20 transition-all active:scale-95"
           >
             {uploading ? (
               <>
-                <Upload className="h-4 w-4 mr-2 animate-pulse" />
-                Uploading {selectedFiles.length} file(s)...
+                <Upload className="h-4 w-4 mr-2 animate-bounce" />
+                Uploading...
               </>
             ) : (
               <>
                 <Upload className="h-4 w-4 mr-2" />
-                Upload {selectedFiles.length} File(s)
+                Upload File(s)
               </>
             )}
           </Button>
@@ -461,23 +461,20 @@ function DocumentCard({
               <div className="flex gap-2">
                 <button
                   onClick={() => onDownload(doc)}
-                  className="flex-1 py-1.5 text-xs font-medium text-emerald-600 border border-emerald-200 rounded hover:bg-emerald-50 transition"
+                  className="flex-1 py-2 text-xs font-black text-emerald-600 border border-emerald-100 rounded-full hover:bg-emerald-50 transition-colors uppercase tracking-widest"
                 >
-                  <Download className="inline h-3 w-3 mr-1" />
                   Download
                 </button>
                 <button
                   onClick={() => onEdit(doc)}
-                  className="flex-1 py-1.5 text-xs font-medium text-blue-600 border border-blue-200 rounded hover:bg-blue-50 transition"
+                  className="flex-1 py-2 text-xs font-black text-emerald-950 border border-emerald-50 rounded-full hover:bg-emerald-50 transition-colors uppercase tracking-widest"
                 >
-                  <Pencil className="inline h-3 w-3 mr-1" />
                   Edit
                 </button>
                 <button
                   onClick={() => onDelete(doc)}
-                  className="flex-1 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded hover:bg-red-50 transition"
+                  className="flex-1 py-2 text-xs font-black text-red-500 border border-red-50 rounded-full hover:bg-red-50 transition-colors uppercase tracking-widest text-[10px]"
                 >
-                  <Trash2 className="inline h-3 w-3 mr-1" />
                   Delete
                 </button>
               </div>
