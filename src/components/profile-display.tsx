@@ -56,7 +56,7 @@ type VaultData = {
  * 
  * @returns Profile information card based on current state
  */
-export default function ProfileDisplay() {
+export default function ProfileDisplay({ onLoad }: { onLoad?: () => void }) {
   // ============================================
   // STATE MANAGEMENT
   // Using enum for better state control
@@ -75,6 +75,12 @@ export default function ProfileDisplay() {
 
   // error-message-state: Stores specific error message
   const [error_message, set_error_message] = useState<string>("");
+
+  useEffect(() => {
+    if (component_state !== ComponentState.LOADING) {
+      onLoad?.();
+    }
+  }, [component_state, onLoad]);
 
   // ============================================
   // FETCH PROFILE DATA ON MOUNT

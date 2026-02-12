@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { CardTitle, CardDescription } from "@/components/ui/card";
@@ -29,6 +29,7 @@ export function ContractCheckStep({ onComplete, onSignWellOpen, onSignWellClose 
     const [downloaded, setDownloaded] = useState(false);
     const [contractCompleted, setContractCompleted] = useState(false);
     const [isWaiting, setIsWaiting] = useState(false);
+    const embedRef = useRef<any>(null);
     const supabase = createClient();
 
     // Load SignWell Embed Script
@@ -44,6 +45,13 @@ export function ContractCheckStep({ onComplete, onSignWellOpen, onSignWellClose 
         document.body.appendChild(script);
 
         return () => {
+            if (embedRef.current) {
+                try {
+                    embedRef.current.close();
+                } catch (e) {
+                    console.warn("Error closing SignWell embed during unmount:", e);
+                }
+            }
             if (document.body.contains(script)) {
                 document.body.removeChild(script);
             }
@@ -158,19 +166,25 @@ export function ContractCheckStep({ onComplete, onSignWellOpen, onSignWellClose 
                     completed: (e: any) => {
                         console.log("✅ SignWell Document Completed:", e);
                         setIsWaiting(true);
+                        if (embedRef.current) {
+                            embedRef.current.close();
+                        }
                         if (onSignWellClose) onSignWellClose();
                     },
                     closed: (e: any) => {
                         console.log("ℹ️ SignWell Closed:", e);
+                        embedRef.current = null;
                         if (onSignWellClose) onSignWellClose();
                         checkStatus(true);
                     },
                     error: (e: any) => {
                         console.error("❌ SignWell Error:", e);
+                        embedRef.current = null;
                         toast.error("There was an error loading the document.");
                     }
                 }
             });
+            embedRef.current = embed;
             embed.open();
         } catch (error) {
             console.error("Error opening SignWell embed:", error);

@@ -492,10 +492,12 @@ function DocumentCard({
  */
 export default function Vault({
   onChecklist,
-  clientName
+  clientName,
+  onLoad
 }: {
   onChecklist?: (info: ChecklistInfo) => void;
   clientName: string | null;
+  onLoad?: () => void;
 }) {
   const supabase = createClient();
   const { toast } = useToast();
@@ -821,6 +823,12 @@ export default function Vault({
   }, [checklist, allRequiredDocs]);
 
   const allComplete = checklist.every((c) => c.has);
+
+  useEffect(() => {
+    if (!loading && !loadingDynamic) {
+      onLoad?.();
+    }
+  }, [loading, loadingDynamic, onLoad]);
 
   /**
    * Notify parent component (dashboard) of checklist progress

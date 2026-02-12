@@ -1,7 +1,7 @@
 // src/app/dashboard/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import AdvisorDisplay from "@/components/advisor-display";
@@ -42,6 +42,27 @@ function DashboardContent() {
   const { clientName } = useOnboardingStatus();
   const [userEmail, setUserEmail] = useState<string | null>(null);
 
+  // Ready states for synchronization
+  const [isReady, setIsReady] = useState({
+    advisor: false,
+    profile: false,
+    vault: false
+  });
+
+  // Helper to mark a component as ready
+  const markReady = useCallback((component: keyof typeof isReady) => {
+    setIsReady(prev => {
+      if (prev[component]) return prev;
+      return { ...prev, [component]: true };
+    });
+  }, []);
+
+  const onAdvisorLoad = useCallback(() => markReady('advisor'), [markReady]);
+  const onProfileLoad = useCallback(() => markReady('profile'), [markReady]);
+  const onVaultLoad = useCallback(() => markReady('vault'), [markReady]);
+
+  const allComponentsReady = isReady.advisor && isReady.profile && isReady.vault;
+
   // Read tab from URL, default to 'dashboard'
   const searchParams = useSearchParams();
   const tabParam = searchParams?.get('tab');
@@ -66,7 +87,7 @@ function DashboardContent() {
   // Handle tour auto-start
   useEffect(() => {
     const isTourRequested = searchParams?.get('tour') === 'true';
-    if (isTourRequested) {
+    if (isTourRequested && allComponentsReady) {
       // Small delay to ensure components are rendered
       const timer = setTimeout(() => {
         if (typeof (window as any).startWebsiteTour === 'function') {
@@ -77,10 +98,10 @@ function DashboardContent() {
           url.searchParams.delete('tour');
           window.history.replaceState({}, '', url.pathname + url.search);
         }
-      }, 1000);
+      }, 500); // Reduced delay as we already checked for readiness
       return () => clearTimeout(timer);
     }
-  }, [searchParams]);
+  }, [searchParams, allComponentsReady]);
 
   return (
     <div className="min-h-screen bg-white relative overflow-hidden">
@@ -135,8 +156,8 @@ function DashboardContent() {
         {activeTab === 'dashboard' && (
           <div className="space-y-8">
             <div className="grid gap-8">
-              <AdvisorDisplay />
-              <ProfileDisplay />
+              <AdvisorDisplay onLoad={onAdvisorLoad} />
+              <ProfileDisplay onLoad={onProfileLoad} />
             </div>
 
             <Card className="bg-white border-emerald-50 overflow-hidden rounded-[2.5rem] shadow-sm">
@@ -144,7 +165,7 @@ function DashboardContent() {
                 <CardTitle className="text-2xl font-black text-emerald-950 tracking-tighter uppercase">DOCUMENT VAULT</CardTitle>
               </CardHeader>
               <CardContent className="p-10 pt-6">
-                <Vault clientName={clientName} />
+                <Vault clientName={clientName} onLoad={onVaultLoad} />
               </CardContent>
             </Card>
           </div>

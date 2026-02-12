@@ -19,28 +19,23 @@ export default function OnboardingPage() {
   useEffect(() => {
     if (!loading) {
       if (dataVaultCompleted) {
-        if (!contractCompleted) {
-          setStep("contract_check");
-        } else if (needsOnboarding) {
-          // Both steps are done but metadata is not. Trigger completion.
-          handleOnboardingComplete();
-        } else {
-          // Everything is done, including metadata. Clean path to dashboard.
+        // If vault is done, we are either signing or downloading/finishing.
+        setStep("contract_check");
+
+        // Final redirection to dashboard ONLY if metadata confirms completion.
+        if (!needsOnboarding) {
           router.push("/dashboard");
         }
       } else {
         setStep("form");
       }
     }
-  }, [loading, dataVaultCompleted, contractCompleted, needsOnboarding, router]);
+  }, [loading, dataVaultCompleted, needsOnboarding, router]);
 
   const handleFormComplete = async () => {
     await refetch();
-    if (!contractCompleted) {
-      setStep("contract_check");
-    } else {
-      handleOnboardingComplete();
-    }
+    // After form, always go to contract step.
+    setStep("contract_check");
   };
 
   const handleOnboardingComplete = async () => {
@@ -84,53 +79,56 @@ export default function OnboardingPage() {
       <div className="absolute top-0 left-1/4 w-[60%] h-[60%] bg-emerald-300/10 blur-[130px] rounded-full animate-aurora pointer-events-none" />
 
       <div className="w-full max-w-4xl relative z-10">
-        <AnimatePresence mode="wait">
-          {!signWellActive && (
-            <motion.div
-              key="onboarding-card"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ duration: 0.5 }}
-              className="bg-white border border-emerald-100 rounded-[3rem] shadow-2xl overflow-hidden"
-            >
-              {/* Header */}
-              <div className="p-10 md:p-14 border-b border-emerald-50 bg-white">
-                <h1 className="text-4xl md:text-5xl font-black tracking-tighter text-emerald-950 uppercase">
-                  {step === "form" ? "Business Profile" : "Contract Signing"}
-                </h1>
-                <p className="text-emerald-900/40 mt-4 text-xl font-bold">
-                  {step === "form"
-                    ? "Let's start by getting some details about your business."
-                    : "Almost there! Please review and sign your service agreement."}
-                </p>
+        <motion.div
+          key="onboarding-card"
+          initial={{ opacity: 0, y: 20 }}
+          animate={signWellActive ? {
+            opacity: 0,
+            scale: 0.95,
+            transitionEnd: { display: 'none' }
+          } : {
+            opacity: 1,
+            scale: 1,
+            display: 'block'
+          }}
+          transition={{ duration: 0.4 }}
+          className="bg-white border border-emerald-100 rounded-[3rem] shadow-2xl overflow-hidden"
+        >
+          {/* Header */}
+          <div className="p-10 md:p-14 border-b border-emerald-50 bg-white">
+            <h1 className="text-4xl md:text-5xl font-black tracking-tighter text-emerald-950 uppercase">
+              {step === "form" ? "Business Profile" : "Contract Signing"}
+            </h1>
+            <p className="text-emerald-900/40 mt-4 text-xl font-bold">
+              {step === "form"
+                ? "Let's start by getting some details about your business."
+                : "Almost there! Please review and sign your service agreement."}
+            </p>
 
-                {/* Progress indicator */}
-                <div className="flex gap-3 mt-10">
-                  <div className={`h-2 flex-1 rounded-full transition-all duration-700 ${step === "form" ? "bg-emerald-500 shadow-lg shadow-emerald-500/20" : "bg-emerald-500/20"}`} />
-                  <div className={`h-2 flex-1 rounded-full transition-all duration-700 ${step === "contract_check" ? "bg-emerald-500 shadow-lg shadow-emerald-500/20" : "bg-emerald-100"}`} />
-                </div>
+            {/* Progress indicator */}
+            <div className="flex gap-3 mt-10">
+              <div className={`h-2 flex-1 rounded-full transition-all duration-700 ${step === "form" ? "bg-emerald-500 shadow-lg shadow-emerald-500/20" : "bg-emerald-500/20"}`} />
+              <div className={`h-2 flex-1 rounded-full transition-all duration-700 ${step === "contract_check" ? "bg-emerald-500 shadow-lg shadow-emerald-500/20" : "bg-emerald-100"}`} />
+            </div>
+          </div>
+
+          {/* Content Area */}
+          <div className="p-6 md:p-8">
+            {step === "form" && (
+              <DataVaultForm onComplete={handleFormComplete} />
+            )}
+
+            {step === "contract_check" && (
+              <div className="h-full">
+                <ContractCheckStep
+                  onComplete={handleContractComplete}
+                  onSignWellOpen={() => setSignWellActive(true)}
+                  onSignWellClose={() => setSignWellActive(false)}
+                />
               </div>
-
-              {/* Content Area */}
-              <div className="p-6 md:p-8">
-                {step === "form" && (
-                  <DataVaultForm onComplete={handleFormComplete} />
-                )}
-
-                {step === "contract_check" && (
-                  <div className="h-full">
-                    <ContractCheckStep
-                      onComplete={handleContractComplete}
-                      onSignWellOpen={() => setSignWellActive(true)}
-                      onSignWellClose={() => setSignWellActive(false)}
-                    />
-                  </div>
-                )}
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+            )}
+          </div>
+        </motion.div>
 
         {/* Support / Help text - also hide during signing to keep view clear */}
         {!signWellActive && (

@@ -32,13 +32,19 @@ type AdvisorInfo = {
 /**
  * AdvisorDisplay Component
  */
-export default function AdvisorDisplay(): React.ReactElement {
+export default function AdvisorDisplay({ onLoad }: { onLoad?: () => void }): React.ReactElement {
   const supabase = createClient();
   const [component_state, set_component_state] = useState<ComponentState>(
     ComponentState.LOADING
   );
   const [advisor, setAdvisor] = useState<AdvisorInfo | null>(null);
   const [error_message, set_error_message] = useState<string>("");
+
+  useEffect(() => {
+    if (component_state !== ComponentState.LOADING) {
+      onLoad?.();
+    }
+  }, [component_state, onLoad]);
 
   useEffect(() => {
     async function fetch_advisor_info() {
