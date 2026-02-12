@@ -16,6 +16,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   BookCheck,
+  Users,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
@@ -53,6 +54,7 @@ export function Sidebar({
 
   const navItems = [
     { label: 'Dashboard', href: '/advisor/dashboard', icon: BookCheck },
+    { label: 'Clients', href: '/advisor/dashboard/clients', icon: Users },
   ]
 
   // Ancho: en mobile siempre w-72; en desktop depende de "collapsed"

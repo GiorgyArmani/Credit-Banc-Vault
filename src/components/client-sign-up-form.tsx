@@ -508,10 +508,7 @@ export default function ClientSignupForm() {
         set_created_client_name(client_name);
         set_show_success(true);
 
-        // Reset form for next client
-        setTimeout(() => {
-          window.location.reload(); // Reload to reset all form fields
-        }, 5000);
+        // Form is reset via "Create Another" button
       } else {
         // Client self-signup context: Redirect to success page with login credentials
         router.push(`/auth/sign-up-success?email=${encodeURIComponent(client_email)}`);
@@ -543,16 +540,16 @@ export default function ClientSignupForm() {
                 <CheckCircle2 className="w-12 h-12 text-emerald-500" />
               </div>
               <h2 className="text-4xl font-black text-emerald-950 uppercase tracking-tighter mb-3">
-                Client Created!
+                Client Created Successfully!
               </h2>
               <p className="text-emerald-950/40 font-bold text-lg">
-                {created_client_name} has been added successfully.
+                The onboarding process for {created_client_name} has started.
               </p>
             </div>
 
             <div className="bg-emerald-50/50 rounded-[2.5rem] p-8 mb-8 border border-emerald-50 relative z-10">
               <h3 className="text-xs font-black text-emerald-900/40 uppercase tracking-[0.2em] mb-6 flex items-center gap-2">
-                Login Credentials
+                Client Information
               </h3>
 
               <div className="space-y-4">
@@ -560,17 +557,12 @@ export default function ClientSignupForm() {
                   <p className="text-[10px] font-black uppercase tracking-widest text-emerald-900/30 mb-2">Email Address</p>
                   <p className="text-xl font-black text-emerald-950">{created_client_email}</p>
                 </div>
-
-                <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-6 border border-emerald-50">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-emerald-900/30 mb-2">Temporary Password</p>
-                  <p className="text-xl font-black text-emerald-950 tracking-tight">CreditBanc2025!</p>
-                </div>
               </div>
             </div>
 
             <div className="bg-emerald-950 rounded-[2rem] p-6 mb-10 relative z-10">
               <p className="text-sm font-bold text-emerald-50/60 leading-relaxed text-center">
-                Please share these credentials with your client. The page will auto-refresh in 5 seconds.
+                Your client will receive all further instructions via email at <span className="text-white underline decoration-emerald-500/50">{created_client_email}</span>.
               </p>
             </div>
 
@@ -582,7 +574,7 @@ export default function ClientSignupForm() {
                 Create Another
               </Button>
               <Button
-                onClick={() => router.push('/advisor/clients')}
+                onClick={() => router.push('/advisor/dashboard/clients')}
                 variant="outline"
                 className="flex-1 h-14 border-2 border-emerald-100 text-emerald-950 font-black rounded-2xl hover:bg-emerald-50 transition-all active:scale-95"
               >
