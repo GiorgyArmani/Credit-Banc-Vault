@@ -22,71 +22,54 @@ export async function GET() {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
 
-        // 2. Optimized single query: Get all documents (core + user's dynamic) in one call
-        // This reduces database round trips from 2 to 1
-        const [coreDocsResult, dynamicDocsResult] = await Promise.all([
-            // Core documents query
-            supabase
-                .from("required_documents")
-                .select("id, code, label, description, is_multiple, min_files, max_files, ghl_tag, is_core")
-                .eq("is_core", true)
-                .order("code"),
-
-            // Dynamic documents query
-            supabase
-                .from("client_dynamic_documents")
-                .select(`
-                    required_documents!inner (
-                        id,
-                        code,
-                        label,
-                        description,
-                        is_multiple,
-                        min_files,
-                        max_files,
-                        ghl_tag,
-                        is_core
-                    )
-                `)
-                .eq("user_id", user.id)
-                .eq("is_active", true)
-        ]);
-
-        const { data: coreDocsData, error: coreError } = coreDocsResult;
-        const { data: dynamicDocsData, error: dynamicError } = dynamicDocsResult;
-
-        if (coreError) {
-            console.error(`❌ Error querying core documents:`, coreError);
-            throw coreError;
-        }
+        // 2. Optimized single query: Get ONLY dynamic documents for the user
+        // Transitioning to a fully dynamic vault: core documents are now 
+        // also inserted as dynamic documents during signup.
+        const { data: dynamicDocsData, error: dynamicError } = await supabase
+            .from("client_dynamic_documents")
+            .select(`
+                required_documents!inner (
+                    id,
+                    code,
+                    label,
+                    description,
+                    is_multiple,
+                    min_files,
+                    max_files,
+                    ghl_tag,
+                    is_core
+                )
+            `)
+            .eq("user_id", user.id)
+            .eq("is_active", true);
 
         if (dynamicError) {
             console.error(`❌ Error querying dynamic documents:`, dynamicError);
             throw dynamicError;
         }
 
-        // 3. Merge and format response
-        const coreDocs = coreDocsData || [];
+        // 3. Format response
         const dynamicDocs = (dynamicDocsData || [])
             .map((item: any) => item.required_documents)
             .filter(Boolean);
 
-        const allRequirements = [...coreDocs, ...dynamicDocs].map((doc) => ({
-            code: doc.code,
-            label: doc.label,
-            description: doc.description,
-            multiple: doc.is_multiple,
-            minFiles: doc.min_files,
-            maxFiles: doc.max_files,
-            ghlTag: doc.ghl_tag,
-            isCore: doc.is_core,
-        }));
+        const allRequirements = dynamicDocs
+            .filter(doc => doc.code !== 'funding_application') // Filter out auto-uploaded app
+            .map((doc) => ({
+                code: doc.code,
+                label: doc.label,
+                description: doc.description,
+                multiple: doc.is_multiple,
+                minFiles: doc.min_files,
+                maxFiles: doc.max_files,
+                ghlTag: doc.ghl_tag,
+                isCore: doc.is_core,
+            }));
 
         return NextResponse.json(
             {
                 requirements: allRequirements,
-                coreCount: coreDocs.length,
-                dynamicCount: dynamicDocs.length,
+                count: allRequirements.length,
             },
             {
                 headers: {

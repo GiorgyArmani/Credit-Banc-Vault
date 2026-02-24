@@ -96,27 +96,7 @@ export function DataVaultForm({ onComplete }: DataVaultFormProps) {
             {/* internal glow effect */}
             <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none" />
 
-            <CardHeader className="p-10 pb-6 relative z-10">
-                <div className="flex items-center gap-4 mb-4">
-                    <div className="w-12 h-12 bg-emerald-50 rounded-2xl flex items-center justify-center border border-emerald-100 shadow-inner">
-                        <ShieldCheck className="w-6 h-6 text-emerald-500" />
-                    </div>
-                    <div>
-                        <CardTitle className="text-2xl font-black uppercase tracking-tighter text-emerald-950 flex items-center gap-2">
-                            Secure Data Vault
-                            <Sparkles className="w-4 h-4 text-emerald-500/40" />
-                        </CardTitle>
-                        <CardDescription className="text-emerald-900/40 font-bold text-sm">
-                            identity and business verification • encrypted
-                        </CardDescription>
-                    </div>
-                </div>
-                <p className="text-emerald-950/60 font-medium text-sm leading-relaxed bg-emerald-50/50 p-4 rounded-2xl border border-emerald-50">
-                    Please provide the following information to verify your identity and business. This step is mandatory and cannot be skipped.
-                </p>
-            </CardHeader>
-
-            <CardContent className="p-10 pt-0 relative z-10">
+            <CardContent className="p-10 relative z-10">
                 <form onSubmit={handleSubmit} className="space-y-8">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                         <div className="space-y-3">

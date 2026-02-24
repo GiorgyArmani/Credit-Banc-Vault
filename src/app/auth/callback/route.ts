@@ -48,19 +48,24 @@ export async function GET(request: NextRequest) {
         return NextResponse.redirect(`${origin}/auth/login?error=verification_failed`);
       }
 
-      if (!session) {
-        return NextResponse.redirect(`${origin}/auth/login?error=no_session`);
+      // Step 2: Get a verified user object from Supabase Auth
+      // This is crucial for security as it verifies the session on the server
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+
+      if (userError || !user) {
+        console.error("User fetch error after session exchange:", userError);
+        return NextResponse.redirect(`${origin}/auth/login?error=no_user`);
       }
 
-      // Step 2: Get the user's role from the public.users table
-      const { data: userData, error: userError } = await supabase
+      // Step 3: Get the user's role from the public.users table
+      const { data: userData, error: dbError } = await supabase
         .from("users")
         .select("role")
-        .eq("id", session.user.id)
+        .eq("id", user.id)
         .single();
 
-      if (userError) {
-        console.error("User data fetch error:", userError);
+      if (dbError) {
+        console.error("User data fetch error:", dbError);
         // If we can't get role, default to regular dashboard
         return NextResponse.redirect(`${origin}/dashboard`);
       }
@@ -81,7 +86,7 @@ export async function GET(request: NextRequest) {
 
       const redirectPath = roleRedirects[userData.role] || "/dashboard";
 
-      console.log(`✅ User ${session.user.email} authenticated with role: ${userData.role}`);
+      console.log(`✅ User ${user.email} authenticated with role: ${userData.role}`);
       console.log(`➡️  Redirecting to: ${redirectPath}`);
 
       return NextResponse.redirect(`${origin}${redirectPath}`);

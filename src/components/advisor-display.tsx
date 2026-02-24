@@ -142,7 +142,7 @@ export default function AdvisorDisplay({ onLoad }: { onLoad?: () => void }): Rea
         <CardContent>
           <div className="flex flex-col items-center justify-center py-8 space-y-4">
             <div className="animate-pulse flex flex-col items-center space-y-4 w-full">
-              <div className="rounded-full bg-slate-200 h-24 w-24"></div>
+              <div className="rounded-full bg-slate-200 h-24 w-24 md:h-64 md:w-64"></div>
               <div className="flex flex-col items-center space-y-3 w-full">
                 <div className="h-5 bg-slate-200 rounded w-40"></div>
                 <div className="h-4 bg-slate-200 rounded w-32"></div>
@@ -194,7 +194,7 @@ export default function AdvisorDisplay({ onLoad }: { onLoad?: () => void }): Rea
 
         <CardContent className="p-8 pt-0 space-y-8">
           <div className="flex flex-col items-center text-center gap-4">
-            <Avatar className="h-24 w-24 border-4 border-emerald-100 shadow-sm transition-transform hover:scale-105 duration-200">
+            <Avatar className="h-24 w-24 md:h-64 md:w-64 border-4 border-emerald-100 shadow-sm transition-transform hover:scale-105 duration-200">
               <AvatarImage
                 src={advisor.profile_pic_url || undefined}
                 alt={`${advisor.first_name} ${advisor.last_name}`}

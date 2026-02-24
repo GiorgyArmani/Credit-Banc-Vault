@@ -16,62 +16,7 @@ import { PremiumLoader } from "./ui/premium-loader";
 import { Send } from "lucide-react";
 
 /**
- * REQUIRED_DOCS: Core 9 documents that ALL clients must upload
- * These are always required regardless of GHL tags
- */
-const REQUIRED_DOCS = [
-  {
-    code: "business_bank_statements",
-    label: "Bank Statements (last 6 months)",
-    multiple: true,
-    maxFiles: 12,
-    isCore: true
-  },
-  {
-    code: "drivers_license",
-    label: "Driver's License (Front & Back)",
-    multiple: true,
-    minFiles: 2,
-    maxFiles: 2,
-    legacyCodes: ["drivers_license_front", "drivers_license_back"],
-    isCore: true
-  },
-  {
-    code: "voided_check", label: "Voided Business Check",
-    multiple: true,
-    maxFiles: 12,
-    isCore: true
-  },
-  {
-    code: "balance_sheets", label: "Balance Sheets",
-    multiple: true,
-    maxFiles: 12,
-    isCore: true
-  },
-  {
-    code: "profit_loss", label: "Profit & Loss",
-    multiple: true,
-    maxFiles: 12,
-    isCore: true
-  },
-  {
-    code: "tax_returns", label: "Tax Returns",
-    multiple: true,
-    maxFiles: 12,
-    isCore: true
-  },
-  { code: "funding_application", label: "Funding Application", isCore: true },
-  { code: "ar_report", label: "A/R Report", isCore: true },
-  {
-    code: "debt_schedule", label: "Debt Schedule",
-    multiple: true,
-    maxFiles: 12,
-    isCore: true
-  },
-] as const;
-
-/**
- * DocumentType: Interface for both core and dynamic documents
+ * DocumentType: Interface for documents requested for the user
  */
 interface DocumentType {
   code: string;
@@ -84,7 +29,7 @@ interface DocumentType {
   ghlTag?: string;
 }
 
-type RequiredCode = typeof REQUIRED_DOCS[number]["code"];
+// type RequiredCode is no longer needed
 
 /**
  * UserDocument: Interface for documents stored in the database
@@ -311,7 +256,7 @@ function DocumentCard({
   };
 
   return (
-    <div id={docType.code === "funding_application" ? "tour-funding-app" : undefined} className={clsx(
+    <div className={clsx(
       "border-2 rounded-[2rem] p-8 transition-all duration-300",
       isComplete ? "bg-emerald-50 border-emerald-200 shadow-sm" : "bg-white border-emerald-50 shadow-sm hover:shadow-md"
     )}>

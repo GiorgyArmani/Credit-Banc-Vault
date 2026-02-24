@@ -419,114 +419,23 @@ export async function POST(req: Request) {
 
     if (vaultRecord && process.env.GHL_TOKEN) {
       if (vaultRecord.ghl_contact_id) {
-        // Use env var for location ID as it's not consistently in client_data_vault yet (or we can add it later)
-        // The user said "we have it mapped on the env like this" for custom fields, implying env is source of truth for config.
-        const ghlLocationId = process.env.GHL_LOCATION_ID;
+        try {
+          const { ghlSyncDocument } = await import("@/lib/ghl-document-sync");
+          // Note: ghlSyncDocument handles checking mapping, uploading, and tagging
+          const syncResult = await ghlSyncDocument(
+            admin,
+            document_id,
+            user.id,
+            doc_code
+          );
 
-        if (!ghlLocationId) {
-          console.warn("GHL location ID not found in env, skipping GHL upload");
-        } else {
-          // Check if this doc_code has a mapped GHL custom field
-          const ghlFieldMapping = DOC_CODE_TO_GHL_FIELD_MAP[doc_code];
-          console.log(`Processing doc_code: ${doc_code}, Mapping found:`, ghlFieldMapping);
-
-          if (ghlFieldMapping) {
-            // A. Fetch current contact to get existing files
-            console.log("Fetching current contact data...");
-            const contactData = await getContact(vaultRecord.ghl_contact_id, process.env.GHL_TOKEN);
-            const currentCustomFields = contactData.contact?.customFields || [];
-
-            // Find existing value for this field
-            const existingField = currentCustomFields.find((f: any) => f.id === ghlFieldMapping.fieldId);
-            const existingValue = existingField ? existingField.value : {}; // File fields are objects
-
-            console.log("Existing field value:", JSON.stringify(existingValue, null, 2));
-
-            // B. Upload new file
-            const uploadResult = await uploadFileToGHL(
-              admin,
-              vaultRecord.ghl_contact_id,
-              ghlLocationId,
-              ghlFieldMapping.fieldId,
-              doc.storage_path,
-              doc.name,
-              process.env.GHL_TOKEN
-            );
-
-            if (uploadResult.success && uploadResult.fileData) {
-              // C. Merge new file with existing files
-              let newFileEntry = {};
-              if (uploadResult.fileData.meta && uploadResult.fileData.meta.length > 0) {
-                const m = uploadResult.fileData.meta[0];
-
-                // Extract UUID from uploadedFiles URL
-                const uploadedFiles = uploadResult.fileData.uploadedFiles || {};
-                const firstFileUrl = Object.values(uploadedFiles)[0] as string;
-
-                // URL format: https://.../UUID.ext
-                let uuid = "undefined";
-                if (firstFileUrl) {
-                  const urlParts = firstFileUrl.split('/');
-                  const lastPart = urlParts[urlParts.length - 1];
-                  uuid = lastPart.split('.')[0]; // Remove extension
-                }
-
-                newFileEntry = {
-                  [uuid]: {
-                    meta: m,
-                    url: firstFileUrl,
-                    documentId: uuid
-                  }
-                };
-              } else {
-                // Fallback if structure is different
-                console.warn("Unexpected upload response structure, trying to use as is", uploadResult.fileData);
-                newFileEntry = uploadResult.fileData;
-              }
-
-              // Merge: existingValue + newFileEntry
-              // Ensure existingValue is an object
-              const mergedValue = { ...(typeof existingValue === 'object' ? existingValue : {}), ...newFileEntry };
-
-              console.log("Merged field value:", JSON.stringify(mergedValue, null, 2));
-
-              // D. Update contact with merged value
-              await updateContact(
-                vaultRecord.ghl_contact_id,
-                [{ id: ghlFieldMapping.fieldId, value: mergedValue }],
-                process.env.GHL_TOKEN
-              );
-
-              console.log(`✅ Successfully updated contact with new file for ${doc_code}`);
-            } else {
-              console.error(`❌ Failed to upload ${doc_code}:`, uploadResult.error);
-            }
-
-            // Update tags: requested_* → submitted_*
-            await updateGHLTags(
-              vaultRecord.ghl_contact_id,
-              doc_code,
-              process.env.GHL_TOKEN
-            );
-
-            // Sync outstanding documents to GHL and Supabase
-            console.log(`🔄 Syncing outstanding documents for user ${doc.user_id}...`);
-            const syncResult = await syncOutstandingDocuments(
-              doc.user_id,
-              vaultRecord.ghl_contact_id,
-              process.env.GHL_TOKEN
-            );
-
-            if (syncResult.success) {
-              console.log(`✅ Outstanding documents synced successfully`);
-            } else {
-              console.error(`⚠️ Failed to sync outstanding documents:`, syncResult.error);
-            }
+          if (syncResult.success) {
+            console.log(`✅ Successfully synced ${doc_code} to GHL via shared utility`);
           } else {
-            console.warn(
-              `⚠️ No GHL field mapping found for doc_code: ${doc_code}`
-            );
+            console.warn(`⚠️ GHL Sync failed or skipped for ${doc_code}:`, syncResult.error);
           }
+        } catch (syncError) {
+          console.error("❌ Error importing/calling ghlSyncDocument:", syncError);
         }
       } else {
         console.warn("No GHL Contact ID found in client_data_vault for user", doc.user_id);

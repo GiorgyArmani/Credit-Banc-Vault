@@ -1,6 +1,6 @@
-//src/app/api/webhooks/singwell-contract/route.ts
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { signWell } from '@/lib/signwell';
 
 // Cliente de Supabase con service role para operaciones del servidor
 const supabase = createClient(
@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
         // 4. Buscar el registro del cliente en la base de datos
         const { data: client_data, error: fetch_error } = await supabase
             .from('client_data_vault')
-            .select('id, client_email, client_name, contract_completed')
+            .select('id, user_id, client_email, client_name, contract_completed')
             .eq('client_email', client_email)
             .maybeSingle();
 
@@ -151,7 +151,97 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // 8. Respuesta exitosa
+        // 8. Download SignWell PDF and upload to vault
+        console.log('📄 Downloading signed contract from SignWell...');
+
+        try {
+            const documentId = payload.document_id || payload.contract_id;
+
+            if (!documentId) {
+                console.warn('⚠️ No document_id provided in payload, skipping PDF download');
+            } else {
+                const { blob } = await signWell.getCompletedPDF({
+                    documentId,
+                    urlOnly: false,
+                    auditPage: true
+                });
+
+                if (!blob) {
+                    throw new Error('Failed to get completed PDF blob from SignWell');
+                }
+
+                const pdfBuffer = await blob.arrayBuffer();
+                console.log(`✅ Downloaded PDF (${(pdfBuffer.byteLength / 1024).toFixed(2)} KB)`);
+
+                // Create storage path
+                const fileName = `funding_application-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.pdf`;
+                const filePath = `${client_data.user_id}/${fileName}`;
+
+                const { error: uploadError } = await supabase.storage
+                    .from('user-documents')
+                    .upload(filePath, pdfBuffer, {
+                        contentType: 'application/pdf',
+                        upsert: false
+                    });
+
+                if (uploadError) {
+                    throw new Error(`Storage upload error: ${uploadError.message}`);
+                }
+
+                console.log(`✅ Uploaded PDF to storage: ${filePath}`);
+
+                // Create database record in user_documents
+                const { data: docRecord, error: dbError } = await supabase
+                    .from('user_documents')
+                    .insert({
+                        user_id: client_data.user_id,
+                        name: `Funding Application - ${client_data.client_name}.pdf`,
+                        size: pdfBuffer.byteLength,
+                        type: 'application/pdf',
+                        storage_path: filePath,
+                        category: 'funding_application',
+                        doc_code: 'funding_application',
+                        custom_label: `Funding Application - ${client_data.client_name}`,
+                        metadata: {
+                            tags: ['funding_application', 'signwell', 'auto-uploaded'],
+                            source: 'signwell_webhook',
+                            document_id: documentId
+                        }
+                    })
+                    .select('*')
+                    .single();
+
+                if (dbError) {
+                    throw new Error(`Database insert error: ${dbError.message}`);
+                }
+
+                console.log(`✅ Created document record: ${docRecord.id}`);
+
+                // 8.5 Sync to GHL using the shared utility
+                try {
+                    const { ghlSyncDocument } = await import('@/lib/ghl-document-sync');
+                    const syncResult = await ghlSyncDocument(
+                        supabase,
+                        docRecord.id,
+                        client_data.user_id,
+                        'funding_application'
+                    );
+
+                    if (syncResult.success) {
+                        console.log(`✅ Successfully synced funding application to GHL`);
+                    } else {
+                        console.error(`❌ Failed to sync to GHL:`, syncResult.error);
+                    }
+                } catch (syncError) {
+                    console.error('❌ Error calling ghlSyncDocument:', syncError);
+                }
+            }
+        } catch (pdfError: any) {
+            console.error('❌ Error downloading/uploading PDF:', pdfError);
+            // Don't fail the webhook - contract is still marked as completed
+        }
+
+        // 9. Respuesta exitosa
         console.log('✅ Contrato marcado como completado exitosamente');
 
         return NextResponse.json(

@@ -99,3 +99,60 @@ export async function ghlRemoveTags(contactId: string, tags: string[]) {
   });
   return handle(res);
 }
+
+/**
+ * Search for existing contacts in GHL by email, phone, or name
+ * This is used to find contacts that were added in bulk before vault account creation
+ * @param query - Search criteria (email is the most reliable)
+ * @returns Array of matching contacts with their IDs
+ */
+export async function ghlSearchContacts(query: {
+  email?: string;
+  phone?: string;
+  name?: string;
+  locationId: string;
+}): Promise<Array<{ id: string; email?: string; phone?: string; contactName?: string }>> {
+  const { email, phone, name, locationId } = query;
+
+  // Build search query - prioritize email as it's the most unique identifier
+  const searchQuery = email || phone || name;
+
+  if (!searchQuery) {
+    return [];
+  }
+
+  try {
+    const res = await fetch(`${BASE}/contacts/?locationId=${locationId}&query=${encodeURIComponent(searchQuery)}`, {
+      method: "GET",
+      headers: authHeaders(),
+    });
+
+    const data = await handle(res);
+
+    // API returns { contacts: [...] }
+    const contacts = data?.contacts || [];
+
+    // Filter results to find exact matches
+    // GHL search can be fuzzy, so we verify the match
+    return contacts.filter((contact: any) => {
+      if (email && contact.email?.toLowerCase() === email.toLowerCase()) {
+        return true;
+      }
+      if (phone && contact.phone === phone) {
+        return true;
+      }
+      if (name && contact.contactName?.toLowerCase().includes(name.toLowerCase())) {
+        return true;
+      }
+      return false;
+    }).map((contact: any) => ({
+      id: contact.id,
+      email: contact.email,
+      phone: contact.phone,
+      contactName: contact.contactName
+    }));
+  } catch (error) {
+    console.error('Error searching GHL contacts:', error);
+    return []; // Return empty array on error to allow fallback to upsert
+  }
+}

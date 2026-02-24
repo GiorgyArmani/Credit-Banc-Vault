@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import { send_client_welcome_email } from '@/lib/email';
 import { syncOutstandingDocuments } from '@/lib/outstanding-documents';
 import { syncUnifiedClientData, generateSecurePassword } from '@/lib/user-management';
+import { ghlSearchContacts, ghlUpdateContact } from '@/lib/ghl-api';
 
 /**
  * Supabase admin client with elevated privileges
@@ -433,114 +434,242 @@ export async function POST(request: Request) {
       }
     }
 
-    // ========== STEP 4: CREATE/UPDATE GHL CONTACT ==========
-    const ghl_contact_data: any = {
-      locationId: process.env.GHL_LOCATION_ID,
-      firstName: body.client_name.split(' ')[0],
-      lastName: body.client_name.split(' ').slice(1).join(' ') || '',
-      email: body.client_email.toLowerCase(),
-      phone: body.client_phone || '',
-      companyName: body.company_name,
-      city: body.company_city || '',
-      state: body.company_state,
-      postalCode: body.company_zip_code,
-      country: 'US',
-      tags: ['vault-user'], // Initial tag
-      customFields: custom_fields
-    };
+    // ========== STEP 4: SEARCH FOR EXISTING GHL CONTACT ==========
+    // Check if contact already exists in GHL (from bulk import or previous interaction)
+    console.log('🔍 Searching for existing GHL contact...');
 
-    // Add assignedTo field if advisor has a GHL user ID
-    if (advisor_ghl_user_id) {
-      ghl_contact_data.assignedTo = advisor_ghl_user_id;
-      console.log(`✅ Contact will be assigned to advisor in GHL`);
+    const existingContacts = await ghlSearchContacts({
+      email: body.client_email.toLowerCase(),
+      phone: body.client_phone,
+      name: body.client_name,
+      locationId: process.env.GHL_LOCATION_ID!
+    });
+
+    let ghl_contact_id: string;
+
+    if (existingContacts.length > 0) {
+      // Contact exists - UPDATE it with vault data
+      ghl_contact_id = existingContacts[0].id;
+      console.log(`✅ Found existing GHL contact: ${ghl_contact_id} (${existingContacts[0].email})`);
+      console.log(`📝 Updating existing contact with vault data...`);
+
+      // Prepare update payload (same as create, but using UPDATE endpoint)
+      const ghl_update_data: any = {
+        firstName: body.client_name.split(' ')[0],
+        lastName: body.client_name.split(' ').slice(1).join(' ') || '',
+        email: body.client_email.toLowerCase(),
+        phone: body.client_phone || '',
+        companyName: body.company_name,
+        city: body.company_city || '',
+        state: body.company_state,
+        postalCode: body.company_zip_code,
+        country: 'US',
+        customFields: custom_fields
+      };
+
+      // Add assignedTo if advisor has GHL user ID
+      if (advisor_ghl_user_id) {
+        ghl_update_data.assignedTo = advisor_ghl_user_id;
+        console.log(`✅ Contact will be assigned to advisor in GHL`);
+      }
+
+      // Update the existing contact
+      await ghlUpdateContact(ghl_contact_id, ghl_update_data);
+      console.log(`✅ GHL contact updated with vault data: ${ghl_contact_id}`);
+
+    } else {
+      // Contact doesn't exist - CREATE new one
+      console.log(`📝 No existing contact found, creating new GHL contact...`);
+
+      const ghl_contact_data: any = {
+        locationId: process.env.GHL_LOCATION_ID,
+        firstName: body.client_name.split(' ')[0],
+        lastName: body.client_name.split(' ').slice(1).join(' ') || '',
+        email: body.client_email.toLowerCase(),
+        phone: body.client_phone || '',
+        companyName: body.company_name,
+        city: body.company_city || '',
+        state: body.company_state,
+        postalCode: body.company_zip_code,
+        country: 'US',
+        tags: ['vault-user'], // Initial tag
+        customFields: custom_fields
+      };
+
+      // Add assignedTo field if advisor has a GHL user ID
+      if (advisor_ghl_user_id) {
+        ghl_contact_data.assignedTo = advisor_ghl_user_id;
+        console.log(`✅ Contact will be assigned to advisor in GHL`);
+      }
+
+      ghl_contact_id = await ghl_upsert_contact(ghl_contact_data);
+      console.log(`✅ GHL contact created: ${ghl_contact_id}`);
     }
 
-    const ghl_contact_id = await ghl_upsert_contact(ghl_contact_data);
-    console.log(`✅ GHL contact created/updated: ${ghl_contact_id}`);
-
     // ========== STEP 5: SAVE TO CLIENT_DATA_VAULT ==========
-    // IMPORTANT CHANGE: Saving DIRECTLY to client_data_vault
+    // IMPORTANT CHANGE: Using .upsert with onConflict to handle cases where 
+    // the GHL contact is already linked to a different user, or the user already has a record.
+    console.log('💾 Saving data to client_data_vault...');
+
+    const vault_data = {
+      // IDs and references
+      user_id: user_id,
+      advisor_name: body.advisor_name || 'Unknown',
+      advisor_id: body.advisor_id || null,
+      ghl_contact_id: ghl_contact_id,
+      ghl_last_sync_at: new Date().toISOString(),
+
+      // Basic client information
+      client_name: body.client_name,
+      company_name: body.company_name,
+      client_phone: body.client_phone,
+      client_email: body.client_email.toLowerCase(),
+
+      // Location
+      company_state: body.company_state,
+      company_city: body.company_city || null,
+      company_zip_code: body.company_zip_code,
+
+      // Financial information (convert strings to numbers)
+      capital_requested: parseFloat(body.capital_requested),
+      loan_purpose: body.loan_purpose,
+      proposed_loan_type: body.proposed_loan_type,
+      avg_monthly_deposits: parseFloat(body.avg_monthly_deposits),
+      avg_annual_revenue: parseFloat(body.avg_annual_revenue),
+
+      // Business structure
+      legal_entity_type: body.legal_entity_type,
+      business_start_date: body.business_start_date,
+      is_home_based: body.is_home_based || false,
+      employees_count: parseInt(body.employees_count),
+
+      // Owners
+      number_of_owners: body.number_of_owners,
+      owner_1_name: body.owner_1_name,
+      owner_1_ownership_pct: parseFloat(body.owner_1_ownership_pct),
+      owner_2_name: body.owner_2_name || null,
+      owner_2_ownership_pct: body.owner_2_ownership_pct ? parseFloat(body.owner_2_ownership_pct) : null,
+      owner_3_name: body.owner_3_name || null,
+      owner_3_ownership_pct: body.owner_3_ownership_pct ? parseFloat(body.owner_3_ownership_pct) : null,
+      owner_4_name: body.owner_4_name || null,
+      owner_4_ownership_pct: body.owner_4_ownership_pct ? parseFloat(body.owner_4_ownership_pct) : null,
+      owner_5_name: body.owner_5_name || null,
+      owner_5_ownership_pct: body.owner_5_ownership_pct ? parseFloat(body.owner_5_ownership_pct) : null,
+
+      // Credit and special situations
+      credit_score: body.credit_score,
+      has_existing_loans: body.has_existing_loans || false,
+      has_defaulted_mca: body.has_defaulted_mca || false,
+      mca_was_satisfied: body.mca_was_satisfied || null,
+      owns_real_estate: body.owns_real_estate || false,
+      has_reduced_mca_payments: body.has_reduced_mca_payments || false,
+      has_personal_debt_over_75k: body.has_personal_debt_over_75k || null,
+      has_bankruptcy_foreclosure_3y: body.has_bankruptcy_foreclosure_3y || false,
+      has_tax_liens: body.has_tax_liens || false,
+      has_active_judgements: body.has_active_judgements || false,
+      has_zbl: body.has_zbl || null,
+
+      // Timeline and notes
+      funding_eta: body.funding_eta,
+      additional_notes: body.additional_notes,
+
+      // Metadata
+      status: 'active',
+      submitted_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    // First try to upsert based on user_id
+    let vault_id: string;
     const { data: vault_entry, error: vault_error } = await supabase_admin
       .from('client_data_vault')
-      .upsert({
-        // IDs and references
-        user_id: user_id,
-        advisor_name: body.advisor_name || 'Unknown',
-        advisor_id: body.advisor_id || null,
-        ghl_contact_id: ghl_contact_id,
-        ghl_last_sync_at: new Date().toISOString(),
-
-        // Basic client information
-        client_name: body.client_name,
-        company_name: body.company_name,
-        client_phone: body.client_phone,
-        client_email: body.client_email.toLowerCase(),
-
-        // Location
-        company_state: body.company_state,
-        company_city: body.company_city || null,
-        company_zip_code: body.company_zip_code,
-
-        // Financial information (convert strings to numbers)
-        capital_requested: parseFloat(body.capital_requested),
-        loan_purpose: body.loan_purpose,
-        proposed_loan_type: body.proposed_loan_type,
-        avg_monthly_deposits: parseFloat(body.avg_monthly_deposits),
-        avg_annual_revenue: parseFloat(body.avg_annual_revenue),
-
-        // Business structure
-        legal_entity_type: body.legal_entity_type,
-        business_start_date: body.business_start_date,
-        is_home_based: body.is_home_based || false,
-        employees_count: parseInt(body.employees_count),
-
-        // Owners
-        number_of_owners: body.number_of_owners,
-        owner_1_name: body.owner_1_name,
-        owner_1_ownership_pct: parseFloat(body.owner_1_ownership_pct),
-        owner_2_name: body.owner_2_name || null,
-        owner_2_ownership_pct: body.owner_2_ownership_pct ? parseFloat(body.owner_2_ownership_pct) : null,
-        owner_3_name: body.owner_3_name || null,
-        owner_3_ownership_pct: body.owner_3_ownership_pct ? parseFloat(body.owner_3_ownership_pct) : null,
-        owner_4_name: body.owner_4_name || null,
-        owner_4_ownership_pct: body.owner_4_ownership_pct ? parseFloat(body.owner_4_ownership_pct) : null,
-        owner_5_name: body.owner_5_name || null,
-        owner_5_ownership_pct: body.owner_5_ownership_pct ? parseFloat(body.owner_5_ownership_pct) : null,
-
-        // Credit and special situations
-        credit_score: body.credit_score,
-        has_existing_loans: body.has_existing_loans || false,
-        has_defaulted_mca: body.has_defaulted_mca || false,
-        mca_was_satisfied: body.mca_was_satisfied || null,
-        owns_real_estate: body.owns_real_estate || false,
-        has_reduced_mca_payments: body.has_reduced_mca_payments || false,
-        has_personal_debt_over_75k: body.has_personal_debt_over_75k || null,
-        has_bankruptcy_foreclosure_3y: body.has_bankruptcy_foreclosure_3y || false,
-        has_tax_liens: body.has_tax_liens || false,
-        has_active_judgements: body.has_active_judgements || false,
-        has_zbl: body.has_zbl || null,
-
-        // Timeline and notes
-        funding_eta: body.funding_eta,
-        additional_notes: body.additional_notes,
-
-        // Metadata
-        status: 'active',
-        submitted_at: new Date().toISOString(),
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
+      .upsert(vault_data, { onConflict: 'user_id' })
       .select('id')
       .single();
 
     if (vault_error) {
-      console.error('❌ Error saving to client_data_vault:', vault_error);
-      throw new Error(`Error saving to client_data_vault: ${vault_error.message}`);
+      if (vault_error.code === '23505' && vault_error.message.includes('ghl_contact_id')) {
+        console.log('⚠️ Conflict detected on ghl_contact_id, re-routing upsert...');
+        const { data: retry_entry, error: retry_error } = await supabase_admin
+          .from('client_data_vault')
+          .upsert(vault_data, { onConflict: 'ghl_contact_id' })
+          .select('id')
+          .single();
+
+        if (retry_error) {
+          console.error('❌ Error saving to client_data_vault on retry:', retry_error);
+          throw new Error(`Error saving to client_data_vault (retry): ${retry_error.message}`);
+        }
+        vault_id = retry_entry!.id;
+        console.log(`✅ Data saved to client_data_vault (conflict resolved): ${vault_id}`);
+      } else {
+        console.error('❌ Error saving to client_data_vault:', vault_error);
+        throw new Error(`Error saving to client_data_vault: ${vault_error.message}`);
+      }
+    } else {
+      vault_id = vault_entry!.id;
+      console.log(`✅ Data saved to client_data_vault: ${vault_id}`);
     }
 
-    console.log(`✅ Data saved to client_data_vault: ${vault_entry!.id}`);
+    // ========== STEP 5.5: POPULATE DYNAMIC DOCUMENTS TABLE ==========
+    // Transitioning to a FULLY DYNAMIC vault.
+    // We insert "Standard" documents + any "Requested" documents via GHL tags.
 
-    // ========== STEP 5.5: SYNC OUTSTANDING DOCUMENTS ==========
+    // Convert requested document labels to internal codes
+    const LABEL_TO_CODE_MAP: Record<string, string> = {
+      'Business Bank Statements': 'business_bank_statements',
+      'Driver\'s License': 'drivers_license',
+      'Voided Check': 'voided_check',
+      'Business/Personal Tax Returns': 'tax_returns',
+      'Profit & Loss Statement': 'profit_loss',
+      'Balance Sheet': 'balance_sheets',
+      'A/R Report': 'ar_report',
+      'Debt Schedule': 'debt_schedule',
+      'Funding Application': 'funding_application'
+    };
+
+    const requestedFromForm = (body.documents_requested || [])
+      .map((label: string) => LABEL_TO_CODE_MAP[label])
+      .filter(Boolean);
+
+    const requestedDocTags = (body.ghl_tags || [])
+      .filter((tag: string) => tag.startsWith('requested_'))
+      .map((tag: string) => tag.replace('requested_', ''));
+
+    // Combine requested from form and tags, ensuring uniqueness
+    const allRequestedCodes = Array.from(new Set([...requestedFromForm, ...requestedDocTags]));
+
+    console.log(`📋 Total documents to request: ${allRequestedCodes.length} (${requestedFromForm.length} from form, ${requestedDocTags.length} dynamic)`);
+
+    // Get the document IDs from required_documents table
+    const { data: docDefinitions, error: docLookupError } = await supabase_admin
+      .from('required_documents')
+      .select('id, code')
+      .in('code', allRequestedCodes);
+
+    if (docLookupError) {
+      console.error('⚠️ Error looking up document definitions:', docLookupError);
+    } else if (docDefinitions && docDefinitions.length > 0) {
+      // Upsert records into client_dynamic_documents to avoid unique constraint errors
+      const dynamicDocRecords = docDefinitions.map(doc => ({
+        user_id: user_id,
+        document_id: doc.id,
+        is_active: true,
+        requested_at: new Date().toISOString()
+      }));
+
+      const { error: insertError } = await supabase_admin
+        .from('client_dynamic_documents')
+        .upsert(dynamicDocRecords, { onConflict: 'user_id, document_id' });
+
+      if (insertError) {
+        console.error('⚠️ Error upserting dynamic documents:', insertError);
+      } else {
+        console.log(`✅ Upserted ${dynamicDocRecords.length} dynamic document requirements`);
+      }
+    }
+
+    // ========== STEP 5.7: SYNC OUTSTANDING DOCUMENTS ==========
     // We do this immediately so GHL has the initial list of requirements
     if (process.env.GHL_TOKEN) {
       await syncOutstandingDocuments(user_id, ghl_contact_id, process.env.GHL_TOKEN);
@@ -609,7 +738,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       success: true,
       data: {
-        vault_id: vault_entry!.id,
+        vault_id: vault_id,
         user_id: user_id,
         ghl_contact_id: ghl_contact_id,
         tags_applied: tags_to_apply

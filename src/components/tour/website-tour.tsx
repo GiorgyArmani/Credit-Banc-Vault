@@ -61,15 +61,6 @@ export default function WebsiteTour({ onStart }: WebsiteTourProps) {
                         side: "bottom",
                         align: 'start'
                     }
-                },
-                {
-                    element: '#tour-funding-app',
-                    popover: {
-                        title: '6. Final Step: Application Upload',
-                        description: 'This is where things officially begin. Upload your completed and signed funding application from onboarding to the Vault to proceed.',
-                        side: "top",
-                        align: 'start'
-                    }
                 }
             ]
         });

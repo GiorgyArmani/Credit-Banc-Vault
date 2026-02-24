@@ -159,16 +159,6 @@ export default function LoginForm({
                 )}
               </Button>
             </div>
-
-            <div className="mt-10 text-center">
-              <span className="text-emerald-900/40 font-bold text-sm">New to the vault? </span>
-              <Link
-                href="/client-signup"
-                className="text-emerald-600 font-black uppercase tracking-widest text-xs hover:underline"
-              >
-                Sign Up
-              </Link>
-            </div>
           </form>
         </CardContent>
       </Card>

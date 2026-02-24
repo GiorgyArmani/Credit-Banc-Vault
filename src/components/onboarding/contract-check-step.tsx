@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { CardTitle, CardDescription } from "@/components/ui/card";
-import { Loader2, CheckCircle2, RefreshCw, Download } from "lucide-react";
+import { Loader2, CheckCircle2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 import { PremiumLoader } from "@/components/ui/premium-loader";
@@ -25,8 +25,6 @@ export function ContractCheckStep({ onComplete, onSignWellOpen, onSignWellClose 
     const [checking, setChecking] = useState(false);
     const [contractUrl, setContractUrl] = useState<string | null>(null);
     const [embedLoaded, setEmbedLoaded] = useState(false);
-    const [downloading, setDownloading] = useState(false);
-    const [downloaded, setDownloaded] = useState(false);
     const [contractCompleted, setContractCompleted] = useState(false);
     const [isWaiting, setIsWaiting] = useState(false);
     const embedRef = useRef<any>(null);
@@ -124,7 +122,39 @@ export function ContractCheckStep({ onComplete, onSignWellOpen, onSignWellClose 
             if (data?.contract_completed) {
                 setContractCompleted(true);
                 setIsWaiting(false);
-                if (!silent) toast.success("Contract signed successfully!");
+                if (!silent) {
+                    toast.success("Contract signed successfully!");
+                }
+                // Always redirect to dashboard once contract is complete, regardless of silent mode
+                setTimeout(() => {
+                    onComplete();
+                }, 1500);
+            } else if (!silent && data?.contract_url) {
+                // If manual check and we have a URL but not completed, try a force sync
+                const urlParams = new URLSearchParams(data.contract_url.split('?')[1]);
+                const documentId = urlParams.get('doc_id');
+
+                if (documentId) {
+                    toast.info("Verifying signature with SignWell...");
+                    try {
+                        const res = await fetch('/api/onboarding/sync-contract', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ documentId })
+                        });
+                        const syncData = await res.json();
+                        if (syncData.success) {
+                            setContractCompleted(true);
+                            setIsWaiting(false);
+                            toast.success("Contract verified and synced!");
+                            setTimeout(() => onComplete(), 1500);
+                        } else {
+                            toast.info("Contract not yet completed by all parties.");
+                        }
+                    } catch (err) {
+                        console.error("Error during manual sync verify:", err);
+                    }
+                }
             } else if (!silent) {
                 // If we were waiting but it's not done yet, maybe show a hint or just stay in waiting
                 toast.info("Still waiting for final status...");
@@ -163,13 +193,39 @@ export function ContractCheckStep({ onComplete, onSignWellOpen, onSignWellClose 
                 url: contractUrl,
                 allowClose: false,
                 events: {
-                    completed: (e: any) => {
+                    completed: async (e: any) => {
                         console.log("✅ SignWell Document Completed:", e);
                         setIsWaiting(true);
+
+                        // Extract document ID from URL if possible
+                        const urlParams = new URLSearchParams(contractUrl?.split('?')[1]);
+                        const documentId = urlParams.get('doc_id');
+
+                        if (documentId) {
+                            try {
+                                console.log(`🔄 Triggering direct sync for doc: ${documentId}`);
+                                const res = await fetch('/api/onboarding/sync-contract', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ documentId })
+                                });
+                                const data = await res.json();
+                                if (data.success) {
+                                    console.log("✅ Direct sync successful");
+                                } else {
+                                    console.warn("⚠️ Direct sync failed, relying on webhook:", data.error);
+                                }
+                            } catch (err) {
+                                console.error("❌ Error calling sync api:", err);
+                            }
+                        }
+
                         if (embedRef.current) {
                             embedRef.current.close();
                         }
                         if (onSignWellClose) onSignWellClose();
+                        // Final check to move forward
+                        await checkStatus(true);
                     },
                     closed: (e: any) => {
                         console.log("ℹ️ SignWell Closed:", e);
@@ -192,27 +248,6 @@ export function ContractCheckStep({ onComplete, onSignWellOpen, onSignWellClose 
         }
     };
 
-    const handleDownload = async () => {
-        setDownloading(true);
-        try {
-            const res = await fetch('/api/onboarding/download-contract');
-            const data = await res.json();
-
-            if (data.downloadUrl) {
-                window.open(data.downloadUrl, '_blank');
-                setDownloaded(true);
-                toast.success("Contract download started!");
-            } else {
-                toast.error("Failed to get download link");
-            }
-        } catch (error) {
-            console.error("Error downloading contract:", error);
-            toast.error("Failed to download contract");
-        } finally {
-            setDownloading(false);
-        }
-    };
-
     // Unified Premium Loader for different states
     if (isWaiting || !contractUrl) {
         return (
@@ -226,27 +261,7 @@ export function ContractCheckStep({ onComplete, onSignWellOpen, onSignWellClose 
     }
 
     return (
-        <div className="w-full max-w-2xl mx-auto py-8">
-            <div className="text-center mb-10">
-                <div className="h-16 w-16 bg-blue-100/50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-6 shadow-sm">
-                    {contractCompleted ? (
-                        <CheckCircle2 className="h-8 w-8 text-emerald-600" />
-                    ) : (
-                        <CheckCircle2 className="h-8 w-8" />
-                    )}
-                </div>
-
-                <CardTitle className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-emerald-600 mb-3">
-                    {contractCompleted ? "Congratulations!" : "Sign Your Agreement"}
-                </CardTitle>
-
-                <CardDescription className="text-lg max-w-md mx-auto text-gray-600">
-                    {contractCompleted
-                        ? "Your agreement is now finalized. Please download your copy below to complete your onboarding."
-                        : "Your personalized agreement is ready. Review and sign securely through SignWell to keep things moving."
-                    }
-                </CardDescription>
-            </div>
+        <div className="w-full max-w-2xl mx-auto">
 
             <div className={`bg-white border rounded-2xl p-8 shadow-md mb-8 flex flex-col items-center justify-center min-h-[250px] transition-all duration-500 ${contractCompleted ? "border-emerald-200 bg-emerald-50/10" : "border-blue-100"}`}>
                 <div className="w-full max-w-md space-y-6">
@@ -262,32 +277,14 @@ export function ContractCheckStep({ onComplete, onSignWellOpen, onSignWellClose 
                     )}
 
                     {contractCompleted && (
-                        <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-700">
-                            <Button
-                                size="lg"
-                                variant="outline"
-                                className="w-full text-lg h-14 border-2 border-emerald-600 text-emerald-600 hover:bg-emerald-50 font-bold transition-all hover:scale-[1.02]"
-                                onClick={handleDownload}
-                                disabled={downloading}
-                            >
-                                {downloading ? (
-                                    <>
-                                        <Loader2 className="mr-3 h-6 w-6 animate-spin" />
-                                        Downloading...
-                                    </>
-                                ) : (
-                                    <>
-                                        <Download className="mr-3 h-6 w-6" />
-                                        Download Signed Contract
-                                    </>
-                                )}
-                            </Button>
-
-                            {downloaded && (
-                                <p className="text-center text-emerald-600 font-medium flex items-center justify-center animate-in zoom-in duration-300">
-                                    <CheckCircle2 className="mr-2 h-4 w-4" /> Download Complete
-                                </p>
-                            )}
+                        <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-700 text-center">
+                            <CheckCircle2 className="h-16 w-16 text-emerald-600 mx-auto" />
+                            <p className="text-emerald-600 font-bold text-lg">
+                                Contract Signed Successfully!
+                            </p>
+                            <p className="text-gray-500 text-sm">
+                                Your signed contract has been automatically saved to your document vault.
+                            </p>
                         </div>
                     )}
 
@@ -300,23 +297,7 @@ export function ContractCheckStep({ onComplete, onSignWellOpen, onSignWellClose 
             </div>
 
             <div className="text-center">
-                {contractCompleted ? (
-                    <div className="space-y-5">
-                        <Button
-                            onClick={onComplete}
-                            size="lg"
-                            disabled={!downloaded}
-                            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold h-14 px-10 shadow-lg shadow-emerald-200 disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:scale-[1.05]"
-                        >
-                            Complete Onboarding & Go to Dashboard →
-                        </Button>
-                        {!downloaded && (
-                            <p className="text-sm text-gray-500 italic">
-                                Please download your contract to continue
-                            </p>
-                        )}
-                    </div>
-                ) : (
+                {!contractCompleted && (
                     <div className="flex flex-col items-center space-y-4">
                         <p className="text-sm text-gray-500 font-medium">Already signed? Click here.</p>
                         <Button
