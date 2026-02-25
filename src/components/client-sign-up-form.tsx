@@ -78,7 +78,6 @@ const FUNDING_URGENCY = [
 // Each document will generate a GHL tag: "requested_{doc_name}"
 // When uploaded, tag changes to: "submitted_{doc_name}"
 const DOC_OPTIONS = [
-  "Funding Application",
   "Business Bank Statements",
   "Business/Personal Tax Returns",
   "Profit & Loss Statement",
@@ -316,7 +315,6 @@ export default function ClientSignupForm() {
 
   // Mapping of document labels to their internal codes (must match vault.tsx)
   const DOC_TAG_MAP: Record<string, string> = {
-    "Funding Application": "funding_application",
     "Business Bank Statements": "business_bank_statements",
     "Business/Personal Tax Returns": "tax_returns",
     "Profit & Loss Statement": "profit_loss",

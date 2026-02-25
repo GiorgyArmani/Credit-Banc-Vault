@@ -1,5 +1,6 @@
 // src/lib/email.ts
 import nodemailer from 'nodemailer';
+import path from 'path';
 
 /**
  * Interface for client welcome email data
@@ -57,6 +58,8 @@ export function generate_client_welcome_email_html(data: ClientWelcomeEmailData)
     login_url,
   } = data;
 
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://credit-banc-vault.vercel.app';
+
   return `
 <!DOCTYPE html>
 <html lang="en">
@@ -71,10 +74,15 @@ export function generate_client_welcome_email_html(data: ClientWelcomeEmailData)
       <td align="center" style="padding: 40px 0;">
         <table role="presentation" style="width: 600px; max-width: 100%; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
           
-          <!-- Logo Section -->
+          <!-- Header Section -->
           <tr>
-            <td style="padding: 40px 40px 20px; text-align: center; background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
-              <h1 style="margin: 0; color: #ffffff; font-size: 28px; font-weight: 700;">Credit Banc Vault</h1>
+            <td style="background-color: #10b981; padding: 20px; text-align: center;">
+              <img src="cid:cb_logo_white" alt="Credit Banc" style="height: 48px; width: auto; display: block; margin: 0 auto;">
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 0; text-align: center; line-height: 0;">
+              <img src="cid:vault_email_header" alt="Welcome to the Credit Banc Vault" style="width: 100%; max-width: 600px; height: auto; display: block;">
             </td>
           </tr>
 
@@ -286,6 +294,18 @@ export async function send_client_welcome_email(data: ClientWelcomeEmailData) {
     subject: 'Welcome to Credit Banc Vault - Your Account is Ready!',
     text: text_content,
     html: html_content,
+    attachments: [
+      {
+        filename: 'CBLOGOWHITE.png',
+        path: path.join(process.cwd(), 'public', 'CBLOGOWHITE.png'),
+        cid: 'cb_logo_white'
+      },
+      {
+        filename: 'vaultemailheader.png',
+        path: path.join(process.cwd(), 'public', 'vaultemailheader.png'),
+        cid: 'vault_email_header'
+      }
+    ]
   };
 
   const result = await transporter.sendMail(mail_options);

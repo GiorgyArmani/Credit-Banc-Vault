@@ -161,7 +161,6 @@ export const ClientSignupSchema = z.object({
   // Checkboxes for which documents need to be collected from client
   // ============================================
   documents_requested: z.array(z.enum([
-    "Funding Application",
     "Business Bank Statements",
     "Business/Personal Tax Returns",
     "Profit & Loss Statement",

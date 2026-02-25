@@ -624,8 +624,7 @@ export async function POST(request: Request) {
       'Profit & Loss Statement': 'profit_loss',
       'Balance Sheet': 'balance_sheets',
       'A/R Report': 'ar_report',
-      'Debt Schedule': 'debt_schedule',
-      'Funding Application': 'funding_application'
+      'Debt Schedule': 'debt_schedule'
     };
 
     const requestedFromForm = (body.documents_requested || [])
