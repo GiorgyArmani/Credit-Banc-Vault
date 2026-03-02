@@ -27,6 +27,26 @@ export interface AdvisorWelcomeEmailData {
 }
 
 /**
+ * Interface for underwriting welcome email data
+ */
+export interface UnderwritingWelcomeEmailData {
+  underwriter_name: string;
+  underwriter_email: string;
+  login_url: string;
+}
+
+/**
+ * Interface for advisor document notification data
+ */
+export interface AdvisorDocumentNotificationData {
+  advisor_name: string;
+  advisor_email: string;
+  client_name: string;
+  requested_documents: string[];
+  login_url: string;
+}
+
+/**
  * Creates Nodemailer transporter with SMTP credentials
  * Uses Mailgun SMTP through LeadConnector
  */
@@ -622,4 +642,210 @@ export async function send_password_reset_email(data: PasswordResetEmailData) {
   const result = await transporter.sendMail(mail_options);
 
   return result;
+}
+
+/**
+ * ============================================================================
+ * UNDERWRITING WELCOME EMAIL FUNCTIONS
+ * ============================================================================
+ */
+
+/**
+ * Generates HTML for underwriting welcome email
+ */
+export function generate_underwriting_welcome_email_html(data: UnderwritingWelcomeEmailData): string {
+  const { underwriter_name, underwriter_email, login_url } = data;
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Welcome to Credit Banc Underwriting Team</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f6f9fc;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse;">
+    <tr>
+      <td align="center" style="padding: 40px 0;">
+        <table role="presentation" style="width: 600px; max-width: 100%; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+          
+          <!-- Logo Section -->
+          <tr>
+            <td style="padding: 40px 40px 20px; text-align: center; background: linear-gradient(135deg, #0f172a 0%, #334155 100%);">
+              <h1 style="margin: 0; color: #ffffff; font-size: 28px; font-weight: 700;">Credit Banc Vault</h1>
+              <p style="margin: 5px 0 0; color: #94a3b8; font-size: 14px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.1em;">Underwriting Portal</p>
+            </td>
+          </tr>
+
+          <!-- Welcome Message -->
+          <tr>
+            <td style="padding: 40px 40px 20px;">
+              <h2 style="margin: 0 0 16px; color: #1e293b; font-size: 24px; font-weight: 600;">Welcome to the Team, ${underwriter_name}! 📋</h2>
+              <p style="margin: 0 0 16px; color: #475569; font-size: 16px; line-height: 1.6;">
+                Your underwriting account has been successfully created. You now have access to the Credit Banc Vault 
+                underwriting dashboard where you can review client submissions and manage funding requests.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Welcome Info Box -->
+          <tr>
+            <td style="padding: 0 40px 20px;">
+              <table role="presentation" style="width: 100%; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px;">
+                <tr>
+                  <td>
+                    <h3 style="margin: 0 0 12px; color: #1e293b; font-size: 18px; font-weight: 600;">🔑 Access Information</h3>
+                    <div style="margin-bottom: 16px;">
+                      <p style="margin: 0 0 4px; color: #64748b; font-size: 14px;">Login Email:</p>
+                      <p style="margin: 0; color: #1e293b; font-size: 16px; font-weight: 700;">${underwriter_email}</p>
+                    </div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Login Button -->
+          <tr>
+            <td style="padding: 20px 40px;" align="center">
+              <a href="${login_url}" style="display: inline-block; background-color: #1e293b; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-size: 16px; font-weight: 600;">
+                Access Underwriting Portal
+              </a>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding: 40px; text-align: center; color: #94a3b8; font-size: 13px; line-height: 1.6; border-top: 1px solid #f1f5f9;">
+              <p style="margin: 0 0 8px;">© ${new Date().getFullYear()} Credit Banc. Confidential Internal Use Only.</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `;
+}
+
+/**
+ * Sends welcome email to new underwriter
+ */
+export async function send_underwriting_welcome_email(data: UnderwritingWelcomeEmailData) {
+  const transporter = create_smtp_transporter();
+
+  const from_email = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  const from_name = process.env.SMTP_FROM_NAME || 'Credit Banc Vault';
+
+  const html_content = generate_underwriting_welcome_email_html(data);
+
+  const mail_options = {
+    from: `${from_name} <${from_email}>`,
+    to: data.underwriter_email,
+    subject: 'Welcome to Credit Banc Vault - Underwriting Team Access',
+    html: html_content,
+  };
+
+  return await transporter.sendMail(mail_options);
+}
+
+/**
+ * ============================================================================
+ * ADVISOR NOTIFICATION FUNCTIONS
+ * ============================================================================
+ */
+
+/**
+ * Generates HTML for advisor document notification email
+ */
+export function generate_advisor_document_notification_html(data: AdvisorDocumentNotificationData): string {
+  const { advisor_name, client_name, requested_documents, login_url } = data;
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Action Required: New Documents Needed</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f6f9fc;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse;">
+    <tr>
+      <td align="center" style="padding: 40px 0;">
+        <table role="presentation" style="width: 600px; max-width: 100%; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+          
+          <!-- Header -->
+          <tr>
+            <td style="padding: 40px 40px 20px; text-align: center; background-color: #ef4444;">
+              <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 700;">Action Required</h1>
+            </td>
+          </tr>
+
+          <!-- Message -->
+          <tr>
+            <td style="padding: 40px 40px 20px;">
+              <h2 style="margin: 0 0 16px; color: #1e293b; font-size: 20px; font-weight: 600;">Hi ${advisor_name},</h2>
+              <p style="margin: 0 0 16px; color: #475569; font-size: 16px; line-height: 1.6;">
+                Our underwriting team has reviewed the file for <strong>${client_name}</strong> and requires additional documentation to proceed.
+              </p>
+              <div style="background-color: #fef2f2; border: 1px solid #fee2e2; border-radius: 8px; padding: 20px; margin-bottom: 24px;">
+                <h3 style="margin: 0 0 12px; color: #991b1b; font-size: 16px; font-weight: 700;">Requested Documents:</h3>
+                <ul style="margin: 0; padding-left: 20px; color: #b91c1c; font-size: 15px; line-height: 1.6;">
+                  ${requested_documents.map(doc => `<li style="margin-bottom: 8px;">${doc}</li>`).join('')}
+                </ul>
+              </div>
+              <p style="margin: 0 0 24px; color: #475569; font-size: 16px; line-height: 1.6;">
+                Please contact the client and request these documents through your advisor portal.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Action Button -->
+          <tr>
+            <td style="padding: 0 40px 40px;" align="center">
+              <a href="${login_url}" style="display: inline-block; background-color: #ef4444; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-size: 16px; font-weight: 600;">
+                Go to Advisor Portal
+              </a>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding: 40px; text-align: center; color: #94a3b8; font-size: 13px; line-height: 1.6; border-top: 1px solid #f1f5f9;">
+              <p style="margin: 0;">© ${new Date().getFullYear()} Credit Banc Vault. This is an automated notification.</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `;
+}
+
+/**
+ * Sends notification email to advisor about missing documents
+ */
+export async function send_advisor_document_notification(data: AdvisorDocumentNotificationData) {
+  const transporter = create_smtp_transporter();
+
+  const from_email = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  const from_name = process.env.SMTP_FROM_NAME || 'Credit Banc Vault';
+
+  const html_content = generate_advisor_document_notification_html(data);
+
+  const mail_options = {
+    from: `${from_name} <${from_email}>`,
+    to: data.advisor_email,
+    subject: `Action Required: New Documents Needed for ${data.client_name}`,
+    html: html_content,
+  };
+
+  return await transporter.sendMail(mail_options);
 }

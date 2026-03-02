@@ -98,24 +98,6 @@ type Advisor = {
   profile_pic_url: string | null;
 };
 
-// Interface for outstanding loans structure - used to track existing debt information
-interface OutstandingLoans {
-  loan1: {
-    balance: number | "";
-    lender_name: string;
-    term: string;
-  };
-  loan2: {
-    balance: number | "";
-    lender_name: string;
-    term: string;
-  };
-  loan3: {
-    balance: number | "";
-    lender_name: string;
-    term: string;
-  };
-}
 
 export default function ClientSignupForm() {
   const router = useRouter();
@@ -150,26 +132,7 @@ export default function ClientSignupForm() {
   const [avg_monthly_deposits, set_avg_monthly_deposits] = useState("");
   const [avg_annual_revenue, set_avg_annual_revenue] = useState("");
 
-  // ===== Existing Debt (Outstanding Loans) =====
-  // This tracks whether the client has any previous debt obligations
-  const [has_previous_debt, set_has_previous_debt] = useState(false);
-  // State to store up to 3 outstanding loans with balance, lender name, and term
-  const [outstanding_loans, set_outstanding_loans] = useState<OutstandingLoans>({
-    loan1: { balance: "", lender_name: "", term: "" },
-    loan2: { balance: "", lender_name: "", term: "" },
-    loan3: { balance: "", lender_name: "", term: "" },
-  });
 
-  // Helper function to update individual loan fields
-  const update_loan = (loan_key: keyof OutstandingLoans, field: string, value: any) => {
-    set_outstanding_loans((prev) => ({
-      ...prev,
-      [loan_key]: {
-        ...prev[loan_key],
-        [field]: value,
-      },
-    }));
-  };
 
   // Helper function to toggle document selection
   // Adds or removes documents from the requested list
@@ -341,7 +304,6 @@ export default function ClientSignupForm() {
     if (tax_liens_on_plan) tags.push("tax-lien-payment-plan");
     if (has_active_judgements) tags.push("active-judgements");
     if (has_zbl) tags.push("has-zbl");
-    if (has_previous_debt) tags.push("existing-debt");
 
     // Add credit score category tag - values now match GHL exactly
     if (credit_score) {
@@ -464,10 +426,6 @@ export default function ClientSignupForm() {
           additional_info: additional_notes,
         },
 
-        // ===== Outstanding Loans (existing debt) =====
-        // This captures up to 3 existing loans the client may have
-        outstanding_loans: has_previous_debt ? outstanding_loans : null,
-        has_previous_debt,
 
         // Timeline y notas
         funding_eta,
@@ -920,74 +878,6 @@ export default function ClientSignupForm() {
                     </div>
                   </div>
 
-                  {/* Existing Debt Section */}
-                  {/* This section captures information about any outstanding loans the client currently has */}
-                  <div className="space-y-4 mt-6 p-6 bg-amber-50 rounded-lg border border-amber-200">
-                    <h3 className="text-lg font-semibold text-gray-900">Existing Debt</h3>
-                    <div className="flex items-center space-x-2">
-                      <Checkbox
-                        id="has_previous_debt"
-                        checked={has_previous_debt}
-                        onCheckedChange={(checked) => set_has_previous_debt(checked as boolean)}
-                      />
-                      <Label htmlFor="has_previous_debt" className="cursor-pointer text-gray-700">
-                        Has Previous Debt
-                      </Label>
-                    </div>
-
-                    {/* Conditional rendering: Show loan input fields only if client has previous debt */}
-                    {has_previous_debt && (
-                      <div className="space-y-4 border rounded-lg p-4 bg-white">
-                        {/* Iterate through 3 possible loans - Loan 1 is required, 2 and 3 are optional */}
-                        {[1, 2, 3].map((num) => {
-                          const loan_key = `loan${num}` as keyof OutstandingLoans;
-                          return (
-                            <div key={num} className="space-y-3 pb-4 border-b last:border-b-0">
-                              <h4 className="font-medium text-gray-800">
-                                Loan {num} {num > 1 && <span className="text-gray-500 text-sm">(Optional)</span>}
-                              </h4>
-                              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                {/* Balance field: captures the outstanding balance amount */}
-                                <div>
-                                  <Label className="text-xs text-gray-600">Balance</Label>
-                                  <div className="relative mt-1">
-                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">$</span>
-                                    <Input
-                                      type="number"
-                                      value={outstanding_loans[loan_key]?.balance || ""}
-                                      onChange={(e) => update_loan(loan_key, "balance", Number(e.target.value))}
-                                      placeholder="Amount"
-                                      className="pl-7"
-                                    />
-                                  </div>
-                                </div>
-                                {/* Lender name field: captures who the loan is with */}
-                                <div>
-                                  <Label className="text-xs text-gray-600">Lender Name</Label>
-                                  <Input
-                                    value={outstanding_loans[loan_key]?.lender_name || ""}
-                                    onChange={(e) => update_loan(loan_key, "lender_name", e.target.value)}
-                                    placeholder="Lender"
-                                    className="mt-1"
-                                  />
-                                </div>
-                                {/* Term field: captures the loan term (e.g., "12 months") */}
-                                <div>
-                                  <Label className="text-xs text-gray-600">Term</Label>
-                                  <Input
-                                    value={outstanding_loans[loan_key]?.term || ""}
-                                    onChange={(e) => update_loan(loan_key, "term", e.target.value)}
-                                    placeholder="12 months"
-                                    className="mt-1"
-                                  />
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
 
                   <div className="flex flex-col sm:flex-row justify-between gap-4 pt-6">
                     <Button

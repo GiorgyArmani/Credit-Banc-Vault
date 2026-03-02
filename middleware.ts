@@ -56,6 +56,8 @@ export async function middleware(request: NextRequest) {
     "/auth/callback",
     "/auth/sign-up-success",
     "/auth/advisor-signup-success",
+    "/auth/underwriting-signup",
+    "/auth/underwriting-signup-success",
     "/auth/update-password",
     "/auth/forgot-password",
     "/",

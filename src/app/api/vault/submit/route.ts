@@ -15,10 +15,10 @@ export async function POST() {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
 
-        // 1. Get client's GHL contact ID
+        // 1. Get client's GHL contact ID and Advisor ID
         const { data: clientData, error: fetchError } = await supabase
             .from("client_data_vault")
-            .select("id, ghl_contact_id")
+            .select("id, ghl_contact_id, advisor_id")
             .eq("user_id", user.id)
             .single();
 
@@ -31,17 +31,13 @@ export async function POST() {
         }
 
         if (!clientData.ghl_contact_id) {
-            // If no GHL ID, we can't tag, but we should still mark as submitted locally? 
-            // Or should we error? For now let's log and proceed with local update only if possible, 
-            // but the requirement is specifically about tagging. 
-            // Let's assume GHL ID is required for this specific "vault_submitted" flow as it's the primary goal.
             console.warn("No GHL Contact ID found for user", user.id);
         } else {
             // 2. Add tag in GHL
             await ghlAddTags(clientData.ghl_contact_id, ["vault_submitted"]);
         }
 
-        // 3. Mark as submitted in DB
+        // 3. Mark as submitted in local client_data_vault
         const { error: updateError } = await supabase
             .from("client_data_vault")
             .update({
@@ -51,6 +47,22 @@ export async function POST() {
 
         if (updateError) {
             throw updateError;
+        }
+
+        // 4. Create record in public.submissions for Underwriting
+        const { error: submissionError } = await supabase
+            .from("submissions")
+            .insert({
+                user_id: user.id,
+                advisor_id: clientData.advisor_id,
+                status: 'submitted',
+                submitted_at: new Date().toISOString()
+            });
+
+        if (submissionError) {
+            console.error("Error creating submission record:", submissionError);
+            // We don't necessarily want to fail the whole request if this secondary record fails, 
+            // but it's important for the new workflow.
         }
 
         return NextResponse.json({ success: true });
