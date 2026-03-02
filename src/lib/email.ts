@@ -58,7 +58,7 @@ export function generate_client_welcome_email_html(data: ClientWelcomeEmailData)
     login_url,
   } = data;
 
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://credit-banc-vault.vercel.app';
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://vault.creditbanc.io';
 
   return `
 <!DOCTYPE html>
