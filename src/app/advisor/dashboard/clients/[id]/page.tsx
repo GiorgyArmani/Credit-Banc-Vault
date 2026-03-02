@@ -20,8 +20,26 @@ import {
     Loader2,
     CheckCircle2,
     Eye,
-    Star
+    Star,
+    Plus
 } from "lucide-react";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
+import { requestNewDocument } from "./actions";
+import { toast } from "sonner";
 import clsx from "clsx";
 
 /**
@@ -99,19 +117,8 @@ interface UserDocument {
     storage_path: string;
 }
 
-/**
- * required-doc-types: Standard document types required from clients
- */
-const REQUIRED_DOC_TYPES = [
-    { code: "business_bank_statements", label: "Bank Statements (6 months)" },
-    { code: "drivers_license_front", label: "Driver's License - Front" },
-    { code: "drivers_license_back", label: "Driver's License - Back" },
-    { code: "voided_check", label: "Voided Business Check" },
-    { code: "debt_schedule", label: "Business Debt Schedule" },
-    { code: "profit_loss", label: "Profit and Loss" },
-    { code: "funding_application", label: "Funding Application" },
-    { code: "ar_report", label: "A/R Report" },
-];
+// Note: REQUIRED_DOC_TYPES is now fetched dynamically from the database
+// for each client to match the specific requests made during signup.
 
 export default function AdvisorClientDetailsPage() {
     // ============================================
@@ -133,6 +140,17 @@ export default function AdvisorClientDetailsPage() {
 
     // documents-state: Stores all client documents
     const [documents, set_documents] = useState<UserDocument[]>([]);
+
+    // required-docs-state: Stores dynamic document requirements for this client
+    const [required_docs, set_required_docs] = useState<{ code: string; label: string }[]>([]);
+
+    // all-available-docs-state: Stores all possible document types for request
+    const [all_doc_types, set_all_doc_types] = useState<{ id: string; code: string; label: string }[]>([]);
+
+    // request-modal-state: UI controls for the request dialog
+    const [is_request_modal_open, set_is_request_modal_open] = useState(false);
+    const [selected_doc_type_id, set_selected_doc_type_id] = useState<string>("");
+    const [is_requesting, set_is_requesting] = useState(false);
 
     // error-message-state: Stores specific error message
     const [error_message, set_error_message] = useState<string>("");
@@ -313,6 +331,53 @@ export default function AdvisorClientDetailsPage() {
                 set_documents(docs_data || []);
             }
 
+            // ============================================
+            // STEP 6: FETCH DYNAMIC REQUIREMENTS
+            // Query client_dynamic_documents to see what was actually requested
+            // ============================================
+            const { data: dynamic_requirements, error: req_error } = await supabase
+                .from("client_dynamic_documents")
+                .select(`
+                    required_documents!inner (
+                        code,
+                        label
+                    )
+                `)
+                .eq("user_id", client_data.user_id)
+                .eq("is_active", true);
+
+            if (req_error) {
+                console.error("❌ Error fetching requirements:", req_error);
+                // Fallback to basic documents if query fails
+                set_required_docs([
+                    { code: "business_bank_statements", label: "Bank Statements" },
+                    { code: "drivers_license", label: "Driver's License" },
+                    { code: "voided_check", label: "Voided Check" }
+                ]);
+            } else {
+                const formatted_reqs = (dynamic_requirements || [])
+                    .map((item: any) => item.required_documents)
+                    .filter((doc: any) => doc.code !== 'funding_application'); // Skip auto-generated app
+
+                console.log(`✅ Loaded ${formatted_reqs.length} dynamic requirements`);
+                set_required_docs(formatted_reqs);
+
+                // ============================================
+                // STEP 7: FETCH ALL AVAILABLE DOC TYPES
+                // Used for the "Request New Document" selection modal
+                // ============================================
+                const { data: all_docs, error: all_docs_error } = await supabase
+                    .from("required_documents")
+                    .select("id, code, label")
+                    .order("label", { ascending: true });
+
+                if (all_docs_error) {
+                    console.error("❌ Error fetching doc types:", all_docs_error);
+                } else {
+                    set_all_doc_types(all_docs || []);
+                }
+            }
+
             set_component_state(ComponentState.SUCCESS);
 
         } catch (err: any) {
@@ -387,6 +452,33 @@ export default function AdvisorClientDetailsPage() {
         if (bytes < 1024) return bytes + " B";
         if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
         return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+    }
+
+    /**
+     * handle-request-document: Triggers the server action to request a new document
+     */
+    async function handle_request_document() {
+        if (!selected_doc_type_id) return;
+
+        set_is_requesting(true);
+        try {
+            const result = await requestNewDocument(client_id, selected_doc_type_id);
+
+            if (result.success) {
+                toast.success("Document requested successfully!");
+                set_is_request_modal_open(false);
+                set_selected_doc_type_id("");
+                // Refresh data to show new requirement
+                fetch_client_details();
+            } else {
+                toast.error(result.error || "Failed to request document");
+            }
+        } catch (err: any) {
+            console.error("❌ Request error:", err);
+            toast.error("An unexpected error occurred");
+        } finally {
+            set_is_requesting(false);
+        }
     }
 
     // ============================================
@@ -502,9 +594,9 @@ export default function AdvisorClientDetailsPage() {
     }
 
     /**
-     * render-document-category: Renders a category section with its documents
+     * render_document_category: Renders a category section with its documents
      */
-    function render_document_category(doc_type: typeof REQUIRED_DOC_TYPES[number]) {
+    function render_document_category(doc_type: { code: string; label: string }) {
         const category_docs = get_documents_by_category(doc_type.code);
         const has_docs = category_docs.length > 0;
 
@@ -565,15 +657,17 @@ export default function AdvisorClientDetailsPage() {
         if (!client_profile) return null;
 
         // Calculate document completion statistics
-        const total_required = REQUIRED_DOC_TYPES.length;
-        const completed_categories = REQUIRED_DOC_TYPES.filter(
+        const total_required = required_docs.length;
+        const completed_categories = required_docs.filter(
             doc_type => get_documents_by_category(doc_type.code).length > 0
         ).length;
-        const completion_percentage = Math.round((completed_categories / total_required) * 100);
+        const completion_percentage = total_required > 0
+            ? Math.round((completed_categories / total_required) * 100)
+            : 100;
 
         // Get additional documents (not in required categories)
         const additional_docs = documents.filter(
-            doc => !REQUIRED_DOC_TYPES.some(type => type.code === doc.category)
+            doc => !required_docs.some(type => type.code === doc.category)
         );
 
         return (
@@ -677,10 +771,24 @@ export default function AdvisorClientDetailsPage() {
                 {/* Document Status Overview */}
                 <Card>
                     <CardHeader>
-                        <CardTitle>Document Upload Status</CardTitle>
-                        <CardDescription>
-                            {completed_categories} of {total_required} required document categories completed
-                        </CardDescription>
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <CardTitle>Document Upload Status</CardTitle>
+                                <CardDescription>
+                                    {completed_categories} of {total_required} required document categories completed
+                                </CardDescription>
+                            </div>
+
+                            {/* Request New Document Button */}
+                            <Button
+                                onClick={() => set_is_request_modal_open(true)}
+                                variant="outline"
+                                className="border-emerald-600 text-emerald-600 hover:bg-emerald-50"
+                            >
+                                <Plus className="h-4 w-4 mr-2" />
+                                Request New Document
+                            </Button>
+                        </div>
                     </CardHeader>
                     <CardContent>
                         {/* Progress Bar */}
@@ -699,7 +807,7 @@ export default function AdvisorClientDetailsPage() {
                         {/* Required Documents */}
                         <div className="space-y-4">
                             <h4 className="font-semibold text-gray-900">Required Documents</h4>
-                            {REQUIRED_DOC_TYPES.map(doc_type => render_document_category(doc_type))}
+                            {required_docs.map(doc_type => render_document_category(doc_type))}
                         </div>
 
                         {/* Additional Documents */}
@@ -724,6 +832,70 @@ export default function AdvisorClientDetailsPage() {
                         )}
                     </CardContent>
                 </Card>
+
+                {/* Request Document Modal */}
+                <Dialog open={is_request_modal_open} onOpenChange={set_is_request_modal_open}>
+                    <DialogContent className="sm:max-w-md">
+                        <DialogHeader>
+                            <DialogTitle>Request New Document</DialogTitle>
+                            <DialogDescription>
+                                Select a document type to request from {client_profile.client_name}.
+                                They will see this requirement in their vault.
+                            </DialogDescription>
+                        </DialogHeader>
+
+                        <div className="py-4">
+                            <Select
+                                value={selected_doc_type_id}
+                                onValueChange={set_selected_doc_type_id}
+                            >
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Select document type..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {all_doc_types
+                                        .filter(type => !required_docs.some(r => r.code === type.code))
+                                        .map((type) => (
+                                            <SelectItem key={type.id} value={type.id}>
+                                                {type.label}
+                                            </SelectItem>
+                                        ))
+                                    }
+                                </SelectContent>
+                            </Select>
+
+                            {all_doc_types.filter(type => !required_docs.some(r => r.code === type.code)).length === 0 && (
+                                <p className="text-sm text-gray-500 mt-2">
+                                    All available document types have already been requested.
+                                </p>
+                            )}
+                        </div>
+
+                        <DialogFooter>
+                            <Button
+                                variant="ghost"
+                                onClick={() => set_is_request_modal_open(false)}
+                                disabled={is_requesting}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                onClick={handle_request_document}
+                                disabled={!selected_doc_type_id || is_requesting}
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                            >
+                                {is_requesting ? (
+                                    <>
+                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                        Requesting...
+                                    </>
+                                ) : (
+                                    "Request Document"
+                                )}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
             </div>
         );
     }

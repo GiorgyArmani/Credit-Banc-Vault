@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import clsx from 'clsx'
 import { Sidebar } from '@/components/layout/advisor/sidebar'
+import { Toaster } from 'sonner'
 import { useProtectedRoute } from '@/hooks/use-protected-route'
 import { usePathname } from 'next/navigation'
 import OnboardingGate from '@/components/onboarding/onboarding-gate'
@@ -72,6 +73,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <OnboardingGate>{children}</OnboardingGate>
           </div>
         </main>
+        <Toaster position="top-right" richColors />
       </div>
     </div>
   )
