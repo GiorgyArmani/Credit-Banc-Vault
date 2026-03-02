@@ -30,14 +30,7 @@ export default function AdvisorNewClientPage() {
           - Makes it clear this is for client creation
           - Matches the professional tone of your app
         */}
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold tracking-tight text-gray-900">
-            Create New Client
-          </h1>
-          <p className="text-muted-foreground mt-2">
-            Fill in client information collected during your onboarding call
-          </p>
-        </div>
+
 
         {/* 
           client-sign-up-form: Your existing form component

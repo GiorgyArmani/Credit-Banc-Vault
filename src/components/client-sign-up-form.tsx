@@ -584,36 +584,15 @@ export default function ClientSignupForm() {
       )}
 
       <div className="w-full px-4 py-8 md:py-12">
-        <div className="mb-10 relative z-10">
-          <div className="bg-white border border-emerald-50 rounded-[2.5rem] p-10 md:p-14 text-emerald-950 shadow-2xl overflow-hidden relative">
-            {/* abstract bg decoration */}
-            <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50 rounded-full blur-3xl -mr-10 -mt-10" />
-
-            <div className="flex items-center gap-4 mb-6 relative z-10">
-              <Sparkles className="w-10 h-10 text-emerald-500" />
-              <h1 className="text-4xl md:text-5xl font-black uppercase tracking-tighter">Welcome to Credit Banc Vault</h1>
-            </div>
-            <p className="text-emerald-900/60 text-xl font-bold max-w-2xl relative z-10">
-              Complete your application in 6 simple steps and get instant access to your funding dashboard.
-            </p>
-            <div className="mt-8 flex flex-wrap gap-4 relative z-10">
-              <div className="flex items-center gap-2 bg-emerald-50 rounded-full px-6 py-3 border border-emerald-100">
-                <TrendingUp className="w-5 h-5 text-emerald-600" />
-                <span className="text-xs font-black uppercase tracking-widest text-emerald-700">Fast Approval</span>
-              </div>
-              <div className="flex items-center gap-2 bg-emerald-50 rounded-full px-6 py-3 border border-emerald-100">
-                <Shield className="w-5 h-5 text-emerald-600" />
-                <span className="text-xs font-black uppercase tracking-widest text-emerald-700">Secure Platform</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
         <Card className="shadow-2xl border-emerald-50 rounded-[3rem] overflow-hidden relative z-10 bg-white">
           <CardHeader className="border-b border-emerald-50 bg-white p-10 md:p-14">
             <CardTitle className="text-3xl font-black text-emerald-950 uppercase tracking-tighter">New Client Application</CardTitle>
-            <CardDescription className="text-lg font-bold text-emerald-900/40 mt-3">
-              Fill out your information below. You'll receive login credentials immediately after submission.
+            <CardDescription className="text-lg font-bold text-emerald-900/40 mt-3 flex flex-col gap-2">
+              <span>Please complete your client information below. Login credentials will be sent immediately after submission</span>
+              <span className="text-sm text-emerald-600/80 bg-emerald-50 w-fit px-4 py-1.5 rounded-full border border-emerald-100 flex items-center gap-2 mt-2">
+                <AlertCircle className="w-4 h-4" />
+                Please ensure all fields marked with <span className="text-emerald-500 font-black text-base leading-none">*</span> are completed to avoid errors.
+              </span>
             </CardDescription>
           </CardHeader>
 
