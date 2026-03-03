@@ -705,6 +705,7 @@ export async function POST(request: Request) {
     // ========== STEP 6.5: SEND WELCOME EMAIL ==========
     try {
       // Reuse advisor data already fetched above
+      // CC the advisor so they know credentials were sent to their client
       await send_client_welcome_email({
         client_name: body.client_name,
         client_email: body.client_email.toLowerCase(),
@@ -712,6 +713,7 @@ export async function POST(request: Request) {
         advisor_name: body.advisor_name || 'Your Advisor',
         advisor_email: advisor_email || 'support@creditbanc.io',
         advisor_phone: advisor_phone || undefined,
+        advisor_cc_email: advisor_email || undefined,
         requested_documents: body.documents_requested || [],
         login_url: `${process.env.NEXT_PUBLIC_APP_URL}/auth/login`,
       });

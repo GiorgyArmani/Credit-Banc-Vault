@@ -21,7 +21,9 @@ import {
     CheckCircle2,
     Eye,
     Star,
-    Plus
+    Plus,
+    RefreshCw,
+    Send
 } from "lucide-react";
 import {
     Dialog,
@@ -151,6 +153,9 @@ export default function AdvisorClientDetailsPage() {
     const [is_request_modal_open, set_is_request_modal_open] = useState(false);
     const [selected_doc_type_id, set_selected_doc_type_id] = useState<string>("");
     const [is_requesting, set_is_requesting] = useState(false);
+
+    // resend-credentials-state: Tracks loading state for credential resend
+    const [is_resending, set_is_resending] = useState(false);
 
     // error-message-state: Stores specific error message
     const [error_message, set_error_message] = useState<string>("");
@@ -455,6 +460,34 @@ export default function AdvisorClientDetailsPage() {
     }
 
     /**
+     * handle-resend-credentials: Calls the API to reset the client's password
+     * and resend their login credentials via email
+     */
+    async function handle_resend_credentials() {
+        set_is_resending(true);
+        try {
+            const response = await fetch('/api/clients/resend-credentials', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ client_id }),
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                toast.success('Login credentials sent! Check the client\'s inbox.');
+            } else {
+                toast.error(result.error || 'Failed to resend credentials');
+            }
+        } catch (err: any) {
+            console.error('❌ Resend error:', err);
+            toast.error('An unexpected error occurred');
+        } finally {
+            set_is_resending(false);
+        }
+    }
+
+    /**
      * handle-request-document: Triggers the server action to request a new document
      */
     async function handle_request_document() {
@@ -693,20 +726,44 @@ export default function AdvisorClientDetailsPage() {
                                 </CardDescription>
                             </div>
 
-                            {/* Document Completion Badge */}
-                            <Badge
-                                variant="outline"
-                                className={clsx(
-                                    "text-lg px-4 py-2 font-semibold border-2",
-                                    completion_percentage >= 100
-                                        ? "bg-emerald-100 text-emerald-800 border-emerald-300"
-                                        : completion_percentage >= 50
-                                            ? "bg-yellow-100 text-yellow-800 border-yellow-300"
-                                            : "bg-red-100 text-red-800 border-red-300"
-                                )}
-                            >
-                                {completion_percentage}% Complete
-                            </Badge>
+                            {/* Right-side actions: completion badge + resend button */}
+                            <div className="flex items-center gap-3 flex-shrink-0">
+                                {/* Resend Login Credentials Button */}
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={handle_resend_credentials}
+                                    disabled={is_resending}
+                                    className="border-blue-500 text-blue-600 hover:bg-blue-50 disabled:opacity-60"
+                                >
+                                    {is_resending ? (
+                                        <>
+                                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                            Sending...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Send className="h-4 w-4 mr-2" />
+                                            Resend Login Credentials
+                                        </>
+                                    )}
+                                </Button>
+
+                                {/* Document Completion Badge */}
+                                <Badge
+                                    variant="outline"
+                                    className={clsx(
+                                        "text-lg px-4 py-2 font-semibold border-2",
+                                        completion_percentage >= 100
+                                            ? "bg-emerald-100 text-emerald-800 border-emerald-300"
+                                            : completion_percentage >= 50
+                                                ? "bg-yellow-100 text-yellow-800 border-yellow-300"
+                                                : "bg-red-100 text-red-800 border-red-300"
+                                    )}
+                                >
+                                    {completion_percentage}% Complete
+                                </Badge>
+                            </div>
                         </div>
                     </CardHeader>
 

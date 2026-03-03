@@ -12,6 +12,7 @@ interface ClientWelcomeEmailData {
   advisor_name: string;
   advisor_email: string;
   advisor_phone?: string;
+  advisor_cc_email?: string; // Optional: CC the advisor on the client welcome email
   requested_documents: string[];
   login_url: string;
 }
@@ -308,7 +309,7 @@ export async function send_client_welcome_email(data: ClientWelcomeEmailData) {
   const html_content = generate_client_welcome_email_html(data);
   const text_content = generate_client_welcome_email_text(data);
 
-  const mail_options = {
+  const mail_options: any = {
     from: `${from_name} <${from_email}>`,
     to: data.client_email,
     subject: 'Welcome to Credit Banc Vault - Your Account is Ready!',
@@ -327,6 +328,11 @@ export async function send_client_welcome_email(data: ClientWelcomeEmailData) {
       }
     ]
   };
+
+  // CC the advisor on the welcome email if requested
+  if (data.advisor_cc_email) {
+    mail_options.cc = data.advisor_cc_email;
+  }
 
   const result = await transporter.sendMail(mail_options);
 
