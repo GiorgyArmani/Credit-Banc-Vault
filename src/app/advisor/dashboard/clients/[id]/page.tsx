@@ -23,7 +23,10 @@ import {
     Star,
     Plus,
     RefreshCw,
-    Send
+    Send,
+    UploadCloud,
+    CheckCircle,
+    ShieldCheck
 } from "lucide-react";
 import {
     Dialog,
@@ -101,6 +104,7 @@ interface ClientProfile {
     avg_monthly_deposits: number;
     credit_score: string;
     created_at: string;
+    data_vault_submitted_at: string | null;
 }
 
 /**
@@ -156,6 +160,18 @@ export default function AdvisorClientDetailsPage() {
 
     // resend-credentials-state: Tracks loading state for credential resend
     const [is_resending, set_is_resending] = useState(false);
+
+    // upload-for-client-state: Controls for advisor document upload modal
+    const [is_upload_modal_open, set_is_upload_modal_open] = useState(false);
+    const [upload_doc_code, set_upload_doc_code] = useState<string>("");
+    const [upload_doc_label, set_upload_doc_label] = useState<string>("");
+    const [upload_files, set_upload_files] = useState<File[]>([]);
+    const [is_uploading, set_is_uploading] = useState(false);
+
+    // vault-submit-state: Controls for advisor vault submission
+    const [is_submit_confirm_open, set_is_submit_confirm_open] = useState(false);
+    const [is_submitting_vault, set_is_submitting_vault] = useState(false);
+    const [vault_submitted, set_vault_submitted] = useState(false);
 
     // error-message-state: Stores specific error message
     const [error_message, set_error_message] = useState<string>("");
@@ -281,7 +297,8 @@ export default function AdvisorClientDetailsPage() {
           business_start_date,
           avg_monthly_deposits,
           credit_score,
-          created_at
+          created_at,
+          data_vault_submitted_at
         `)
                 .eq("id", client_id)
                 .maybeSingle();
@@ -316,6 +333,8 @@ export default function AdvisorClientDetailsPage() {
 
             console.log("✅ Client profile loaded:", client_data.client_name);
             set_client_profile(client_data as ClientProfile);
+            // Reflect any existing submission state
+            set_vault_submitted(!!client_data.data_vault_submitted_at);
 
             // ============================================
             // STEP 5: FETCH CLIENT'S DOCUMENTS
@@ -457,6 +476,71 @@ export default function AdvisorClientDetailsPage() {
         if (bytes < 1024) return bytes + " B";
         if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
         return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+    }
+
+    /**
+     * handle-advisor-upload: Uploads selected files on behalf of the client
+     * Sends multipart/form-data to the new advisor-specific upload endpoint
+     */
+    async function handle_advisor_upload() {
+        if (upload_files.length === 0 || !upload_doc_code) return;
+
+        set_is_uploading(true);
+        try {
+            const form = new FormData();
+            form.append('client_id', client_id);
+            form.append('doc_code', upload_doc_code);
+            upload_files.forEach(f => form.append('file', f));
+
+            const res = await fetch('/api/advisor/clients/upload', {
+                method: 'POST',
+                body: form,
+            });
+            const result = await res.json();
+
+            if (result.success) {
+                toast.success(`${result.uploaded} file(s) uploaded successfully!`);
+                set_is_upload_modal_open(false);
+                set_upload_files([]);
+                set_upload_doc_code("");
+                fetch_client_details(); // Refresh to show new docs
+            } else {
+                toast.error(result.error || 'Upload failed');
+            }
+        } catch (err: any) {
+            console.error('❌ Upload error:', err);
+            toast.error('An unexpected error occurred during upload');
+        } finally {
+            set_is_uploading(false);
+        }
+    }
+
+    /**
+     * handle-submit-vault: Submits the client's vault to underwriting via advisor endpoint
+     */
+    async function handle_submit_vault() {
+        set_is_submitting_vault(true);
+        try {
+            const res = await fetch('/api/advisor/clients/submit-vault', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ client_id }),
+            });
+            const result = await res.json();
+
+            if (result.success) {
+                toast.success('Vault submitted to underwriting successfully!');
+                set_vault_submitted(true);
+                set_is_submit_confirm_open(false);
+            } else {
+                toast.error(result.error || 'Submission failed');
+            }
+        } catch (err: any) {
+            console.error('❌ Submit vault error:', err);
+            toast.error('An unexpected error occurred');
+        } finally {
+            set_is_submitting_vault(false);
+        }
     }
 
     /**
@@ -660,17 +744,35 @@ export default function AdvisorClientDetailsPage() {
                         </div>
                     </div>
 
-                    <Badge
-                        variant="outline"
-                        className={clsx(
-                            "font-semibold border",
-                            has_docs
-                                ? "bg-emerald-100 text-emerald-800 border-emerald-300"
-                                : "bg-gray-100 text-gray-600 border-gray-300"
-                        )}
-                    >
-                        {has_docs ? "Complete" : "Pending"}
-                    </Badge>
+                    <div className="flex items-center gap-2">
+                        {/* Upload button for advisor */}
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                                set_upload_doc_code(doc_type.code);
+                                set_upload_doc_label(doc_type.label);
+                                set_upload_files([]);
+                                set_is_upload_modal_open(true);
+                            }}
+                            className="border-emerald-500 text-emerald-700 hover:bg-emerald-50 text-xs"
+                        >
+                            <UploadCloud className="h-3.5 w-3.5 mr-1" />
+                            Upload
+                        </Button>
+
+                        <Badge
+                            variant="outline"
+                            className={clsx(
+                                "font-semibold border",
+                                has_docs
+                                    ? "bg-emerald-100 text-emerald-800 border-emerald-300"
+                                    : "bg-gray-100 text-gray-600 border-gray-300"
+                            )}
+                        >
+                            {has_docs ? "Complete" : "Pending"}
+                        </Badge>
+                    </div>
                 </div>
 
                 {/* Document List */}
@@ -890,6 +992,168 @@ export default function AdvisorClientDetailsPage() {
                     </CardContent>
                 </Card>
 
+                {/* Submit to Underwriting Section */}
+                <Card className={clsx(
+                    "border-2",
+                    vault_submitted
+                        ? "bg-emerald-50 border-emerald-300"
+                        : "bg-white border-slate-200"
+                )}>
+                    <CardContent className="pt-6">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <h3 className="font-semibold text-gray-900 text-lg flex items-center gap-2">
+                                    <ShieldCheck className={clsx("h-5 w-5", vault_submitted ? "text-emerald-600" : "text-slate-400")} />
+                                    Submit to Underwriting
+                                </h3>
+                                <p className="text-sm text-gray-600 mt-1">
+                                    {vault_submitted
+                                        ? `Vault was submitted to underwriting${client_profile.data_vault_submitted_at ? ` on ${format_date(client_profile.data_vault_submitted_at)}` : ""}.`
+                                        : "Once all documents are ready, submit this vault to the underwriting team for review."
+                                    }
+                                </p>
+                            </div>
+
+                            {vault_submitted ? (
+                                <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300 border text-sm px-4 py-2">
+                                    <CheckCircle className="h-4 w-4 mr-2" />
+                                    Submitted
+                                </Badge>
+                            ) : (
+                                <Button
+                                    onClick={() => set_is_submit_confirm_open(true)}
+                                    className="bg-slate-800 hover:bg-slate-900 text-white"
+                                >
+                                    <ShieldCheck className="h-4 w-4 mr-2" />
+                                    Submit to Underwriting
+                                </Button>
+                            )}
+                        </div>
+                    </CardContent>
+                </Card>
+
+                {/* Upload Document Modal */}
+                <Dialog open={is_upload_modal_open} onOpenChange={(open) => {
+                    if (!is_uploading) {
+                        set_is_upload_modal_open(open);
+                        if (!open) set_upload_files([]);
+                    }
+                }}>
+                    <DialogContent className="sm:max-w-md">
+                        <DialogHeader>
+                            <DialogTitle>Upload Document for Client</DialogTitle>
+                            <DialogDescription>
+                                Upload <strong>{upload_doc_label || upload_doc_code}</strong> on behalf of {client_profile.client_name}.
+                                The file will appear in their vault.
+                            </DialogDescription>
+                        </DialogHeader>
+
+                        <div className="py-4 space-y-4">
+                            {/* File picker */}
+                            <div
+                                className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center cursor-pointer hover:border-emerald-400 hover:bg-emerald-50 transition-colors"
+                                onClick={() => document.getElementById('advisor-file-input')?.click()}
+                            >
+                                <UploadCloud className="h-8 w-8 text-gray-400 mx-auto mb-2" />
+                                <p className="text-sm text-gray-600">
+                                    {upload_files.length > 0
+                                        ? `${upload_files.length} file(s) selected`
+                                        : "Click to select files"
+                                    }
+                                </p>
+                                {upload_files.length > 0 && (
+                                    <ul className="mt-2 text-xs text-gray-500 space-y-1">
+                                        {upload_files.map((f, i) => (
+                                            <li key={i}>{f.name} ({(f.size / 1024).toFixed(1)} KB)</li>
+                                        ))}
+                                    </ul>
+                                )}
+                            </div>
+                            <input
+                                id="advisor-file-input"
+                                type="file"
+                                multiple
+                                className="hidden"
+                                onChange={(e) => {
+                                    if (e.target.files) {
+                                        set_upload_files(Array.from(e.target.files));
+                                    }
+                                }}
+                            />
+                        </div>
+
+                        <DialogFooter>
+                            <Button
+                                variant="ghost"
+                                onClick={() => {
+                                    set_is_upload_modal_open(false);
+                                    set_upload_files([]);
+                                }}
+                                disabled={is_uploading}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                onClick={handle_advisor_upload}
+                                disabled={upload_files.length === 0 || is_uploading}
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                            >
+                                {is_uploading ? (
+                                    <>
+                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                        Uploading...
+                                    </>
+                                ) : (
+                                    <>
+                                        <UploadCloud className="h-4 w-4 mr-2" />
+                                        Upload {upload_files.length > 0 ? `(${upload_files.length})` : ""}
+                                    </>
+                                )}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+
+                {/* Submit to Underwriting Confirmation Modal */}
+                <Dialog open={is_submit_confirm_open} onOpenChange={(open) => {
+                    if (!is_submitting_vault) set_is_submit_confirm_open(open);
+                }}>
+                    <DialogContent className="sm:max-w-md">
+                        <DialogHeader>
+                            <DialogTitle>Submit Vault to Underwriting?</DialogTitle>
+                            <DialogDescription>
+                                You are about to submit <strong>{client_profile.client_name}</strong>'s vault to the underwriting team for review.
+                                This will notify underwriting and mark the vault as submitted.
+                            </DialogDescription>
+                        </DialogHeader>
+                        <DialogFooter>
+                            <Button
+                                variant="ghost"
+                                onClick={() => set_is_submit_confirm_open(false)}
+                                disabled={is_submitting_vault}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                onClick={handle_submit_vault}
+                                disabled={is_submitting_vault}
+                                className="bg-slate-800 hover:bg-slate-900 text-white"
+                            >
+                                {is_submitting_vault ? (
+                                    <>
+                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                        Submitting...
+                                    </>
+                                ) : (
+                                    <>
+                                        <ShieldCheck className="h-4 w-4 mr-2" />
+                                        Yes, Submit
+                                    </>
+                                )}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
                 {/* Request Document Modal */}
                 <Dialog open={is_request_modal_open} onOpenChange={set_is_request_modal_open}>
                     <DialogContent className="sm:max-w-md">
