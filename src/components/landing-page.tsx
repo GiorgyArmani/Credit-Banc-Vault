@@ -83,7 +83,7 @@ export function LandingPage() {
               <Link href="#how-it-works" className="text-sm font-semibold text-gray-600 hover:text-emerald-600 transition-colors">
                 How It Works
               </Link>
-              <Link href="#" className="text-sm font-semibold text-gray-600 hover:text-emerald-600 transition-colors">
+              <Link href="/support" className="text-sm font-semibold text-gray-600 hover:text-emerald-600 transition-colors">
                 Support
               </Link>
             </nav>
@@ -131,7 +131,7 @@ export function LandingPage() {
                   How It Works
                 </Link>
                 <Link
-                  href="#"
+                  href="/support"
                   className="text-base font-bold text-gray-700 hover:text-emerald-600 transition-colors px-2 py-2"
                   onClick={() => setMobileMenuOpen(false)}
                 >

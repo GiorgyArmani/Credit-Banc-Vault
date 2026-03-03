@@ -855,3 +855,104 @@ export async function send_advisor_document_notification(data: AdvisorDocumentNo
 
   return await transporter.sendMail(mail_options);
 }
+
+/**
+ * ============================================================================
+ * SUPPORT TICKET EMAIL FUNCTIONS
+ * ============================================================================
+ */
+
+/**
+ * Interface for support ticket email data
+ */
+export interface SupportTicketEmailData {
+  name: string;
+  email: string;
+  subject: string;
+  message: string;
+}
+
+/**
+ * Generates HTML for support ticket email
+ */
+export function generate_support_ticket_email_html(data: SupportTicketEmailData): string {
+  const { name, email, subject, message } = data;
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>New Support Ticket</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f6f9fc;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse;">
+    <tr>
+      <td align="center" style="padding: 40px 0;">
+        <table role="presentation" style="width: 600px; max-width: 100%; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+          
+          <!-- Header -->
+          <tr>
+            <td style="padding: 40px 40px 20px; text-align: center; background-color: #10b981;">
+              <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 700;">New Support Ticket</h1>
+            </td>
+          </tr>
+
+          <!-- Message -->
+          <tr>
+            <td style="padding: 40px 40px 20px;">
+              <h2 style="margin: 0 0 16px; color: #1e293b; font-size: 20px; font-weight: 600;">Support Request Details</h2>
+              
+              <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px; margin-bottom: 24px;">
+                <p style="margin: 0 0 12px; color: #475569; font-size: 16px;"><strong>From:</strong> ${name} (<a href="mailto:${email}" style="color: #10b981; text-decoration: none;">${email}</a>)</p>
+                <p style="margin: 0 0 12px; color: #475569; font-size: 16px;"><strong>Subject:</strong> ${subject}</p>
+                <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 16px 0;">
+                <p style="margin: 0; color: #1e293b; font-size: 16px; line-height: 1.6; white-space: pre-wrap;">${message}</p>
+              </div>
+
+              <p style="margin: 0; color: #64748b; font-size: 14px; text-align: center;">
+                This message was sent from the Credit Banc Vault support form.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding: 40px; text-align: center; color: #94a3b8; font-size: 13px; line-height: 1.6; border-top: 1px solid #f1f5f9;">
+              <p style="margin: 0;">© ${new Date().getFullYear()} Credit Banc Vault. All rights reserved.</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `;
+}
+
+/**
+ * Sends support ticket email to the support team
+ */
+export async function send_support_ticket_email(data: SupportTicketEmailData) {
+  const transporter = create_smtp_transporter();
+
+  const from_email = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  const from_name = process.env.SMTP_FROM_NAME || 'Credit Banc Vault Support';
+  const support_email = process.env.SUPPORT_EMAIL || 'support@creditbanc.io';
+
+  const html_content = generate_support_ticket_email_html(data);
+
+  const mail_options = {
+    from: `${from_name} <${from_email}>`,
+    to: support_email,
+    replyTo: data.email,
+    subject: `Support Ticket: ${data.subject}`,
+    text: `New support ticket from ${data.name} (${data.email})\n\nSubject: ${data.subject}\n\nMessage:\n${data.message}`,
+    html: html_content,
+  };
+
+  return await transporter.sendMail(mail_options);
+}

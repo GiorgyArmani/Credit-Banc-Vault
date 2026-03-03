@@ -1,7 +1,8 @@
 "use client"
 
 import React from "react"
-import { Phone, Mail, HelpCircle, X } from "lucide-react"
+import Link from "next/link"
+import { Phone, Mail, HelpCircle, X, MessageSquare } from "lucide-react"
 import {
     Popover,
     PopoverContent,
@@ -42,6 +43,20 @@ export function FloatingSupport() {
 
                     {/* Contact Methods */}
                     <div className="p-4 space-y-2 bg-card">
+                        {/* Support Ticket Link */}
+                        <Link
+                            href="/support"
+                            className="flex items-center gap-4 p-3 rounded-xl hover:bg-accent transition-all duration-200 group border border-transparent hover:border-accent-foreground/10"
+                        >
+                            <div className="h-11 w-11 rounded-full bg-primary/10 flex items-center justify-center group-hover:bg-primary transition-all duration-200">
+                                <MessageSquare className="h-5 w-5 text-primary group-hover:text-primary-foreground transition-all duration-200" />
+                            </div>
+                            <div className="flex flex-col">
+                                <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Create Ticket</span>
+                                <span className="font-bold text-foreground group-hover:text-primary transition-colors">Send us a message</span>
+                            </div>
+                        </Link>
+
                         {/* Phone Link */}
                         <a
                             href="tel:+13214615024"
