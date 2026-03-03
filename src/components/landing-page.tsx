@@ -94,7 +94,7 @@ export function LandingPage() {
                 <Link href="/auth/login">Log In</Link>
               </Button>
               <Button size="sm" className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold px-6 shadow-md shadow-emerald-500/10" asChild>
-                <a href="https://creditbanc.io/schedule-a-call" target="_blank" rel="noopener noreferrer">Schedule Call</a>
+                <a href="https://creditbanc.io/apply-now" target="_blank" rel="noopener noreferrer">Schedule Call</a>
               </Button>
             </div>
 
@@ -142,7 +142,7 @@ export function LandingPage() {
                     <Link href="/auth/login" onClick={() => setMobileMenuOpen(false)}>Log In</Link>
                   </Button>
                   <Button size="lg" className="w-full bg-emerald-500 hover:bg-emerald-600 font-bold" asChild>
-                    <a href="https://creditbanc.io/schedule-a-call" target="_blank" rel="noopener noreferrer">Get Started</a>
+                    <a href="https://creditbanc.io/apply-now" target="_blank" rel="noopener noreferrer">Get Started</a>
                   </Button>
                 </div>
               </nav>
@@ -180,7 +180,7 @@ export function LandingPage() {
             {/* cta-buttons: Primary and secondary call-to-action buttons */}
             <div className="flex flex-col sm:flex-row gap-5 justify-center items-center">
               <Button size="lg" className="text-xl px-12 py-9 h-auto bg-emerald-500 text-white hover:bg-emerald-400 font-bold transition-all hover:scale-105 shadow-2xl shadow-emerald-500/30 active:scale-95" asChild>
-                <a href="https://creditbanc.io/schedule-a-call" target="_blank" rel="noopener noreferrer">
+                <a href="creditbanc.io/apply-now" target="_blank" rel="noopener noreferrer">
                   Start Now
                   <ArrowRight className="ml-3 h-6 w-6" />
                 </a>
@@ -301,7 +301,7 @@ export function LandingPage() {
             Schedule a call with our advisors to get your account created and start uploading documents to the <span className="text-emerald-400 font-extrabold uppercase tracking-widest">Credit Banc Vault</span>.
           </p>
           <Button size="lg" className="text-2xl px-14 py-10 h-auto bg-emerald-500 text-white hover:bg-emerald-400 font-black transition-all hover:scale-105 shadow-2xl shadow-emerald-500/40 active:scale-95" asChild>
-            <a href="https://creditbanc.io/schedule-a-call" target="_blank" rel="noopener noreferrer" className="flex items-center">
+            <a href="https://creditbanc.io/apply-now" target="_blank" rel="noopener noreferrer" className="flex items-center">
               Start Now
               <ArrowRight className="ml-4 h-8 w-8" />
             </a>
