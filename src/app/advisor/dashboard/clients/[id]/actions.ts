@@ -3,7 +3,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
-import { ghlAddTags } from "@/lib/ghl-api";
+import { ghlAddTags, ghlUpdateContact } from "@/lib/ghl-api";
+import { syncUnifiedClientData } from "@/lib/user-management";
 
 /**
  * requestNewDocument
@@ -93,6 +94,117 @@ export async function requestDocuments(clientId: string, documentIds: string[]) 
         return { success: true };
     } catch (error: any) {
         console.error("Exception in requestDocuments:", error);
+        return { success: false, error: error.message || "An unexpected error occurred" };
+    }
+}
+
+/**
+ * updateClientProfile
+ * 
+ * Allows an advisor to update a client's profile information.
+ * Syncs changes to public.users, business_profiles, and GoHighLevel.
+ */
+export async function updateClientProfile(clientId: string, data: any) {
+    try {
+        const supabase = await createClient();
+
+        // 1. Get authenticated advisor
+        const { data: { user: advisorUser } } = await supabase.auth.getUser();
+        if (!advisorUser) {
+            throw new Error("Unauthorized");
+        }
+
+        // 2. Verify advisor ownership and get critical fields
+        const { data: client, error: clientError } = await supabase
+            .from("client_data_vault")
+            .select("user_id, ghl_contact_id, advisor_id")
+            .eq("id", clientId)
+            .single();
+
+        if (clientError || !client) {
+            throw new Error("Client not found");
+        }
+
+        // Verify advisor ownership via advisor record
+        const { data: advisorData } = await supabase
+            .from("advisors")
+            .select("id")
+            .eq("user_id", advisorUser.id)
+            .single();
+
+        if (!advisorData || client.advisor_id !== advisorData.id) {
+            throw new Error("Access denied: You do not own this client");
+        }
+
+        const supabaseAdmin = createAdminClient();
+
+        // 3. Update client_data_vault
+        const { error: updateError } = await supabaseAdmin
+            .from("client_data_vault")
+            .update({
+                client_name: data.client_name,
+                client_email: data.client_email.toLowerCase(),
+                client_phone: data.client_phone,
+                company_name: data.company_name,
+                company_city: data.company_city,
+                company_state: data.company_state,
+                company_zip_code: data.company_zip_code,
+                capital_requested: data.capital_requested,
+                avg_monthly_deposits: data.avg_monthly_deposits,
+                avg_annual_revenue: data.avg_annual_revenue,
+                credit_score: data.credit_score,
+                legal_entity_type: data.legal_entity_type,
+                business_start_date: data.business_start_date,
+                loan_purpose: data.loan_purpose,
+                proposed_loan_type: data.proposed_loan_type,
+                funding_eta: data.funding_eta,
+                employees_count: data.employees_count,
+                is_home_based: data.is_home_based,
+                updated_at: new Date().toISOString()
+            })
+            .eq("id", clientId);
+
+        if (updateError) {
+            throw new Error(`Failed to update vault: ${updateError.message}`);
+        }
+
+        // 4. Sync to Unified Tables (users, business_profiles)
+        await syncUnifiedClientData(supabaseAdmin, {
+            userId: client.user_id,
+            email: data.client_email,
+            clientName: data.client_name,
+            companyName: data.company_name,
+            phone: data.client_phone,
+            city: data.company_city,
+            state: data.company_state,
+            zipCode: data.company_zip_code
+        });
+
+        // 5. GHL Sync: Update contact info
+        if (client.ghl_contact_id) {
+            try {
+                await ghlUpdateContact(client.ghl_contact_id, {
+                    firstName: data.client_name.split(' ')[0],
+                    lastName: data.client_name.split(' ').slice(1).join(' ') || '',
+                    email: data.client_email.toLowerCase(),
+                    phone: data.client_phone,
+                    companyName: data.company_name,
+                    city: data.company_city,
+                    state: data.company_state,
+                    postalCode: data.company_zip_code,
+                    // Optionally update more custom fields if needed
+                });
+            } catch (ghlError) {
+                console.error("GHL Sync Error (non-fatal):", ghlError);
+            }
+        }
+
+        // 6. Revalidate
+        revalidatePath(`/advisor/dashboard/clients/${clientId}`);
+
+        return { success: true };
+    } catch (error: any) {
+        console.error("Exception in updateClientProfile:", error);
         return { success: false, error: error.message || "An unexpected error occurred" };
     }
 }

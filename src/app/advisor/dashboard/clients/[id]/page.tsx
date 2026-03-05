@@ -28,7 +28,8 @@ import {
     Send,
     UploadCloud,
     CheckCircle,
-    ShieldCheck
+    ShieldCheck,
+    UserCog
 } from "lucide-react";
 import {
     Dialog,
@@ -53,6 +54,7 @@ import { toast } from "sonner";
 import clsx from "clsx";
 import { format } from "date-fns";
 import { Textarea } from "@/components/ui/textarea";
+import { EditProfileModal } from "./edit-profile-modal";
 
 /**
  * ============================================================================
@@ -196,6 +198,9 @@ export default function AdvisorClientDetailsPage() {
     const [notes, set_notes] = useState<InternalNote[]>([]);
     const [new_standalone_note, set_new_standalone_note] = useState("");
     const [is_adding_note, set_is_adding_note] = useState(false);
+
+    // Edit Profile state
+    const [is_edit_modal_open, set_is_edit_modal_open] = useState(false);
 
     // ============================================
     // FETCH CLIENT DATA ON MOUNT
@@ -884,6 +889,19 @@ export default function AdvisorClientDetailsPage() {
                                 </CardDescription>
                             </div>
 
+                            {/* Center-side actions: Edit Profile */}
+                            <div className="flex-1 px-8">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => set_is_edit_modal_open(true)}
+                                    className="border-blue-500 text-blue-600 hover:bg-blue-50"
+                                >
+                                    <UserCog className="h-4 w-4 mr-2" />
+                                    Edit Profile
+                                </Button>
+                            </div>
+
                             {/* Right-side actions: completion badge + resend button */}
                             <div className="flex items-center gap-3 flex-shrink-0">
                                 {/* Resend Login Credentials Button */}
@@ -1378,6 +1396,16 @@ export default function AdvisorClientDetailsPage() {
                         </DialogFooter>
                     </DialogContent>
                 </Dialog>
+
+                {/* Edit Profile Modal */}
+                {client_profile && (
+                    <EditProfileModal
+                        isOpen={is_edit_modal_open}
+                        onClose={() => set_is_edit_modal_open(false)}
+                        onSuccess={fetch_client_details}
+                        clientData={client_profile}
+                    />
+                )}
             </div>
         );
     }

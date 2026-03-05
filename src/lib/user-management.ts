@@ -95,19 +95,54 @@ export async function syncUnifiedClientData(
     }
 
     // 3. Ensure client_data_vault has basic info (Critical for Dashboard)
-    // We use .update() or .upsert() depends on context, but here we usually want 
-    // to initialize it if it doesn't exist or update core fields.
+    // We use .upsert() but first we fetch existing data to ensure NOT NULL constraints 
+    // are satisfied during the 'INSERT' phase of the upsert, while preserving data during 'UPDATE'.
+    const { data: existingVault } = await supabase
+        .from('client_data_vault')
+        .select('*')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+    const vaultPayload = {
+        // Identity / Basic Info (Always update these)
+        user_id: userId,
+        client_name: clientName,
+        client_email: email.toLowerCase(),
+        company_name: companyName,
+        company_state: state || existingVault?.company_state || 'Unknown',
+        company_zip_code: zipCode || existingVault?.company_zip_code || '00000',
+        client_phone: phone || existingVault?.client_phone || '000-000-0000',
+        updated_at: new Date().toISOString(),
+
+        // Required Financial/Business Fields (Merge with existing or use safe defaults)
+        capital_requested: existingVault?.capital_requested ?? 0,
+        loan_purpose: existingVault?.loan_purpose ?? 'Business Funding',
+        proposed_loan_type: existingVault?.proposed_loan_type ?? 'Other',
+        avg_monthly_deposits: existingVault?.avg_monthly_deposits ?? 0,
+        avg_annual_revenue: existingVault?.avg_annual_revenue ?? 0,
+        legal_entity_type: existingVault?.legal_entity_type ?? 'Other',
+        business_start_date: existingVault?.business_start_date ?? new Date().toISOString().split('T')[0],
+        employees_count: existingVault?.employees_count ?? 0,
+        number_of_owners: existingVault?.number_of_owners ?? '1',
+        owner_1_name: existingVault?.owner_1_name ?? clientName,
+        owner_1_ownership_pct: existingVault?.owner_1_ownership_pct ?? 100,
+        credit_score: existingVault?.credit_score ?? '700+',
+        has_existing_loans: existingVault?.has_existing_loans ?? false,
+        has_defaulted_mca: existingVault?.has_defaulted_mca ?? false,
+        owns_real_estate: existingVault?.owns_real_estate ?? false,
+        has_reduced_mca_payments: existingVault?.has_reduced_mca_payments ?? false,
+        has_bankruptcy_foreclosure_3y: existingVault?.has_bankruptcy_foreclosure_3y ?? false,
+        has_tax_liens: existingVault?.has_tax_liens ?? false,
+        has_active_judgements: existingVault?.has_active_judgements ?? false,
+        funding_eta: existingVault?.funding_eta ?? 'Immediately',
+        additional_notes: existingVault?.additional_notes ?? 'Synced from identity',
+        advisor_name: existingVault?.advisor_name ?? 'Unknown',
+        status: existingVault?.status ?? 'active',
+    };
+
     const { error: vaultError } = await supabase
         .from('client_data_vault')
-        .upsert({
-            user_id: userId,
-            client_name: clientName,
-            client_email: email.toLowerCase(),
-            company_name: companyName,
-            company_state: state || 'Unknown', // Required field
-            company_zip_code: zipCode || '00000', // Required field
-            client_phone: phone || '000-000-0000', // Required field
-        }, { onConflict: 'user_id' });
+        .upsert(vaultPayload, { onConflict: 'user_id' });
 
     if (vaultError) {
         console.error('[User Sync] Error upserting client_data_vault:', vaultError);
