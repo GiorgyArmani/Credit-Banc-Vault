@@ -8,6 +8,7 @@ import { useProtectedRoute } from '@/hooks/use-protected-route'
 import { usePathname } from 'next/navigation'
 import OnboardingGate from '@/components/onboarding/onboarding-gate'
 import { Menu } from 'lucide-react'
+import { NotificationBell } from '@/components/notifications/NotificationBell'
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   useProtectedRoute()
@@ -53,7 +54,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
       {/* Margen dinámico solo md+ */}
       <div className={clsx('flex min-h-screen flex-col', collapsed ? 'md:ml-16' : 'md:ml-64')}>
-        {/* Topbar (solo mobile) */}
+        {/* Topbar (Mobile) */}
         <header className="sticky top-0 z-30 bg-white border-b md:hidden">
           <div className="h-14 px-3 flex items-center justify-between">
             <button
@@ -64,7 +65,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <Menu className="h-6 w-6" />
             </button>
             <div className="text-sm font-medium text-gray-700">{currentTitle}</div>
-            <div className="w-10" />
+            <NotificationBell />
+          </div>
+        </header>
+
+        {/* Topbar (Desktop) */}
+        <header className="hidden md:flex sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b h-16 items-center px-8 justify-between">
+          <div className="text-lg font-bold text-gray-800 tracking-tight">{currentTitle}</div>
+          <div className="flex items-center gap-4">
+            <NotificationBell />
           </div>
         </header>
 

@@ -38,67 +38,81 @@ export async function POST(request: Request) {
         }
 
         // 3. Prepare SignWell Params
-        const templateId = process.env.SIGNWELL_TEMPLATE_ID;
+        const isPersonalTermLoan = vaultData.proposed_loan_type === 'Personal Term Loan';
+
+        const templateId = isPersonalTermLoan
+            ? process.env.SIGNWELL_PTL_TEMPLATE_ID
+            : process.env.SIGNWELL_TEMPLATE_ID;
+
         if (!templateId) {
-            console.error('❌ SIGNWELL_TEMPLATE_ID is missing');
+            const missingVar = isPersonalTermLoan ? 'SIGNWELL_PTL_TEMPLATE_ID' : 'SIGNWELL_TEMPLATE_ID';
+            console.error(`❌ ${missingVar} is missing`);
             return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
         }
 
-        const addressComposite = [
-            vaultData.company_address || vaultData.business_address,
-            vaultData.company_city,
-            vaultData.company_state,
-            vaultData.company_zip_code
-        ].filter(Boolean).join(', ');
-
-        const today = new Date();
-        const agreementDay = today.getDate().toString();
-        const agreementMonth = today.toLocaleString('default', { month: 'long' });
+        console.log(`📄 Loan type: "${vaultData.proposed_loan_type}" → using template: ${templateId}`);
 
         // Fields to map - keys must match SignWell template API IDs exactly
-        const fields = {
-            // Business Details
-            application_business_name: vaultData.company_name,
-            application_dba: '', // Not collected
-            application_taxid: vaultData.ein,
-            application_state_of_incorporation: vaultData.company_state,
-            application_business_start_date: vaultData.business_start_date,
-            application_industry: vaultData.industry,
-            application_address: vaultData.business_address || vaultData.company_address,
-            application_city: vaultData.company_city,
-            application_state: vaultData.company_state,
-            application_zip_code: vaultData.company_zip_code,
-            physical_location_phone: vaultData.client_phone,
-            preferred_contact_phone: vaultData.client_phone,
-            application_cell: vaultData.client_phone,
-            application_fax: '', // Not collected
-            application_email: vaultData.client_email,
-            application_website: '', // Not collected
-            gross_annual_revenue: vaultData.avg_annual_revenue?.toString(),
-            avg_monthly_cc_sales: vaultData.avg_monthly_deposits?.toString(), // Mapping deposits as proxy for CC sales
-            funding_amount_requested: vaultData.capital_requested?.toString(), // Correct mapping: Amount Requested
-            monthly_bank_deposit: vaultData.avg_monthly_deposits?.toString(), // Correct mapping: Monthly Deposits
-            use_of_funds: vaultData.loan_purpose,
+        let fields: Record<string, string>;
 
-            // Client Details
-            application_client_firstname: vaultData.client_name.split(' ')[0],
-            application_client_lastname: vaultData.client_name.split(' ').slice(1).join(' '),
-            application_client_ownership: vaultData.owner_1_ownership_pct?.toString(),
-            application_client_dob: '', // Not collected
-            application_client_ssn: vaultData.ssn,
-            application_client_email2: vaultData.client_email,
-            application_client_street_address: vaultData.home_address,
-            application_client_city: '', // Not stored separately
-            application_client_state: '', // Not stored separately
-            application_client_zipcode: '', // Not stored separately
-            application_client_homephone: vaultData.client_phone,
-            application_client_cellphone: vaultData.client_phone,
-            application_client_name: vaultData.client_name,
+        if (isPersonalTermLoan) {
+            // Personal Term Loan – simplified field set
+            fields = {
+                application_client_firstname: vaultData.client_name?.split(' ')[0] || '',
+                application_client_lastname: vaultData.client_name?.split(' ').slice(1).join(' ') || '',
+                application_client_ssn: vaultData.ssn || '',
+                application_email: vaultData.client_email || '',
+                funding_amount_requested: vaultData.capital_requested?.toString() || ''
+            };
+        } else {
+            const today = new Date();
+            const agreementDay = today.getDate().toString();
+            const agreementMonth = today.toLocaleString('default', { month: 'long' });
 
-            // Agreement
-            agreement_day: agreementDay,
-            agreement_month: agreementMonth
-        };
+            fields = {
+                // Business Details
+                application_business_name: vaultData.company_name,
+                application_dba: '', // Not collected
+                application_taxid: vaultData.ein,
+                application_state_of_incorporation: vaultData.company_state,
+                application_business_start_date: vaultData.business_start_date,
+                application_industry: vaultData.industry,
+                application_address: vaultData.business_address || vaultData.company_address,
+                application_city: vaultData.company_city,
+                application_state: vaultData.company_state,
+                application_zip_code: vaultData.company_zip_code,
+                physical_location_phone: vaultData.client_phone,
+                preferred_contact_phone: vaultData.client_phone,
+                application_cell: vaultData.client_phone,
+                application_fax: '', // Not collected
+                application_email: vaultData.client_email,
+                application_website: '', // Not collected
+                gross_annual_revenue: vaultData.avg_annual_revenue?.toString(),
+                avg_monthly_cc_sales: vaultData.avg_monthly_deposits?.toString(),
+                funding_amount_requested: vaultData.capital_requested?.toString(),
+                monthly_bank_deposit: vaultData.avg_monthly_deposits?.toString(),
+                use_of_funds: vaultData.loan_purpose,
+
+                // Client Details
+                application_client_firstname: vaultData.client_name?.split(' ')[0],
+                application_client_lastname: vaultData.client_name?.split(' ').slice(1).join(' '),
+                application_client_ownership: vaultData.owner_1_ownership_pct?.toString(),
+                application_client_dob: '', // Not collected
+                application_client_ssn: vaultData.ssn,
+                application_client_email2: vaultData.client_email,
+                application_client_street_address: vaultData.home_address,
+                application_client_city: '', // Not stored separately
+                application_client_state: '', // Not stored separately
+                application_client_zipcode: '', // Not stored separately
+                application_client_homephone: vaultData.client_phone,
+                application_client_cellphone: vaultData.client_phone,
+                application_client_name: vaultData.client_name,
+
+                // Agreement
+                agreement_day: agreementDay,
+                agreement_month: agreementMonth
+            };
+        }
 
         // 4. Call SignWell API
         try {

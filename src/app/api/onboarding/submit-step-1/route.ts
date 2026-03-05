@@ -64,7 +64,6 @@ export async function POST(request: Request) {
                 industry,
                 home_address: homeAddress,
                 business_address: businessAddress,
-                data_vault_submitted_at: new Date().toISOString(),
             })
             .eq('user_id', user.id);
 

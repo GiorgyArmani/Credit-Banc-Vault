@@ -31,6 +31,22 @@ export class SignWell {
     }
 
     /**
+     * Fetches document details to check status
+     */
+    async getDocument(documentId: string): Promise<any> {
+        const response = await fetch(`${this.baseUrl}/documents/${documentId}`, {
+            method: 'GET',
+            headers: this.getHeaders()
+        });
+
+        if (!response.ok) {
+            throw new Error(`Failed to fetch document ${documentId}: ${response.statusText}`);
+        }
+
+        return await response.json();
+    }
+
+    /**
      * Creates a document from a template and returns the signing URL for the first recipient
      */
     async createDocument(params: {
@@ -44,15 +60,13 @@ export class SignWell {
         }
 
         console.log(`🔍 Fetching template details for: ${params.templateId}`);
-        let placeholderId = "1"; // Default fallback
-        let placeholderName = "Client"; // Default fallback
+        let placeholders: { id: string; name: string }[] = [{ id: "1", name: "Client" }]; // Default fallback
         try {
             const template = await this.getTemplate(params.templateId);
 
             if (template.placeholders && template.placeholders.length > 0) {
-                placeholderId = template.placeholders[0].id;
-                placeholderName = template.placeholders[0].name;
-                console.log(`✅ Found placeholder: ${placeholderId} (${placeholderName})`);
+                placeholders = template.placeholders.map((p: any) => ({ id: p.id, name: p.name }));
+                console.log(`✅ Found ${placeholders.length} placeholder(s):`, placeholders.map(p => `${p.id} (${p.name})`).join(', '));
             }
         } catch (error) {
             console.warn("⚠️ Could not fetch template details, falling back to default placeholder.", error);
@@ -65,12 +79,13 @@ export class SignWell {
             template_id: params.templateId,
             test_mode: process.env.NODE_ENV === 'development',
             embedded_signing: true,
-            recipients: [{
-                id: placeholderId,
-                placeholder_name: placeholderName,
+            // Assign the client recipient to every placeholder in the template
+            recipients: placeholders.map(p => ({
+                id: p.id,
+                placeholder_name: p.name,
                 email: params.recipientEmail,
                 name: params.recipientName
-            }],
+            })),
             template_fields: Object.entries(params.fields).map(([api_id, value]) => ({
                 api_id,
                 value: value || '' // Ensure empty strings for null/undefined
@@ -138,6 +153,17 @@ export class SignWell {
         if (!response.ok) {
             const errorText = await response.text();
             console.error('❌ SignWell PDF Error:', errorText);
+
+            if (response.status === 404) {
+                // Try to get document status to see if it's just not completed yet
+                try {
+                    const doc = await this.getDocument(params.documentId);
+                    throw new Error(`Failed to get completed PDF: Document status is "${doc.status}". It must be "completed" to download the PDF.`);
+                } catch (statusError: any) {
+                    throw new Error(`Failed to get completed PDF: 404 Not Found (and could not verify status: ${statusError.message})`);
+                }
+            }
+
             throw new Error(`Failed to get completed PDF: ${response.status} ${response.statusText}`);
         }
 

@@ -92,8 +92,9 @@ function DocumentCard({
    */
   const relevantDocs = documents.filter(doc =>
     doc.category === docType.code ||
-    //@ts-ignore - legacyCodes might not exist on all types
-    docType.legacyCodes?.includes(doc.category)
+    (doc as any).doc_code === docType.code ||
+    docType.legacyCodes?.includes(doc.category || "") ||
+    docType.legacyCodes?.includes((doc as any).doc_code || "")
   );
 
   const hasDocuments = relevantDocs.length > 0;
@@ -361,70 +362,75 @@ function DocumentCard({
 
       {/* Uploaded Documents List */}
       {relevantDocs.length > 0 && (
-        <div className="space-y-2">
-          <h4 className="text-sm font-medium text-gray-700 mb-2">
-            Uploaded Files:
-          </h4>
-          {relevantDocs.map((doc) => (
-            <div
-              key={doc.id}
-              className="bg-white border border-gray-200 rounded-lg p-3"
-            >
-              <div className="flex items-start justify-between mb-2">
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-gray-900 truncate">
-                    {doc.custom_label || doc.name}
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    {(doc.size / 1024).toFixed(1)} KB •
-                    Uploaded {new Date(doc.upload_date).toLocaleDateString()}
-                  </p>
+        <div className="space-y-3 mt-4 pt-4 border-t border-emerald-100">
+          <div className="flex items-center justify-between mb-1">
+            <h4 className="text-xs font-bold text-emerald-900 uppercase tracking-widest">
+              Uploaded Files ({relevantDocs.length})
+            </h4>
+          </div>
+          <div className={clsx(
+            "space-y-2 pr-1",
+            relevantDocs.length > 2 ? "max-h-[220px] overflow-y-auto custom-scrollbar" : ""
+          )}>
+            {relevantDocs.map((doc) => (
+              <div
+                key={doc.id}
+                className="bg-white border border-emerald-100 shadow-sm rounded-xl p-3 flex flex-col gap-2 transition-all hover:border-emerald-200"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0 flex items-center gap-2">
+                    <FileText className="h-4 w-4 text-emerald-500 shrink-0" />
+                    <div className="min-w-0">
+                      <p className="font-bold text-gray-900 text-[13px] truncate">
+                        {doc.custom_label || doc.name}
+                      </p>
+                      <p className="text-[10px] text-gray-400 font-medium">
+                        {(doc.size / 1024).toFixed(0)} KB • {new Date(doc.upload_date).toLocaleDateString()}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => onToggleFavorite(doc)}
+                    className="p-1 shrink-0 transition-transform active:scale-90"
+                  >
+                    <Star className={clsx(
+                      "h-4 w-4",
+                      doc.is_favorite
+                        ? "text-yellow-500 fill-yellow-500"
+                        : "text-gray-300 hover:text-gray-400"
+                    )} />
+                  </button>
                 </div>
-                <button onClick={() => onToggleFavorite(doc)}>
-                  <Star className={clsx(
-                    "h-5 w-5",
-                    doc.is_favorite
-                      ? "text-yellow-500 fill-yellow-500"
-                      : "text-gray-400"
-                  )} />
-                </button>
-              </div>
 
-              {doc.tags && doc.tags.length > 0 && (
-                <div className="flex flex-wrap gap-1 mb-2">
-                  {doc.tags.map((tag, idx) => (
-                    <span
-                      key={idx}
-                      className="px-2 py-0.5 bg-gray-200 text-gray-700 rounded-full text-xs"
-                    >
-                      {tag}
-                    </span>
-                  ))}
+                <div className="flex items-center gap-1.5 mt-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => onDownload(doc)}
+                    className="h-7 px-2 text-[10px] font-bold text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 uppercase tracking-tight"
+                  >
+                    Download
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => onEdit(doc)}
+                    className="h-7 px-2 text-[10px] font-bold text-slate-600 hover:text-slate-700 hover:bg-slate-50 uppercase tracking-tight"
+                  >
+                    Edit
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => onDelete(doc)}
+                    className="h-7 px-2 text-[10px] font-bold text-red-500 hover:text-red-600 hover:bg-red-50 uppercase tracking-tight"
+                  >
+                    Delete
+                  </Button>
                 </div>
-              )}
-
-              <div className="flex gap-2">
-                <button
-                  onClick={() => onDownload(doc)}
-                  className="flex-1 py-2 text-xs font-black text-emerald-600 border border-emerald-100 rounded-full hover:bg-emerald-50 transition-colors uppercase tracking-widest"
-                >
-                  Download
-                </button>
-                <button
-                  onClick={() => onEdit(doc)}
-                  className="flex-1 py-2 text-xs font-black text-emerald-950 border border-emerald-50 rounded-full hover:bg-emerald-50 transition-colors uppercase tracking-widest"
-                >
-                  Edit
-                </button>
-                <button
-                  onClick={() => onDelete(doc)}
-                  className="flex-1 py-2 text-xs font-black text-red-500 border border-red-50 rounded-full hover:bg-red-50 transition-colors uppercase tracking-widest text-[10px]"
-                >
-                  Delete
-                </button>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -440,7 +446,7 @@ export default function Vault({
   clientName,
   onLoad
 }: {
-  onChecklist?: (info: ChecklistInfo) => void;
+  onChecklist?: (info: ChecklistInfo & { isSubmitted: boolean }) => void;
   clientName: string | null;
   onLoad?: () => void;
 }) {
@@ -503,10 +509,6 @@ export default function Vault({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /**
-   * fetchDynamicRequirements: Fetches ALL document requirements from API
-   * This includes both core documents and dynamic documents requested via GHL tags
-   */
   const fetchDynamicRequirements = async () => {
     try {
       console.log('🔄 Fetching dynamic document requirements...');
@@ -547,7 +549,6 @@ export default function Vault({
         description: "Could not load document requirements. Please refresh the page.",
         variant: "default"
       });
-      // Set empty array on error instead of using hardcoded fallback
       setDynamicDocs([]);
     } finally {
       setLoadingDynamic(false);
@@ -561,6 +562,7 @@ export default function Vault({
   const fetchDocuments = async (uid: string, silent = false) => {
     if (!silent) setLoading(true);
     try {
+      // 1. Fetch user documents
       const { data, error } = await supabase
         .from("user_documents")
         .select("*")
@@ -575,6 +577,17 @@ export default function Vault({
       })) as UserDocument[];
 
       setDocuments(mapped);
+
+      // 2. Check if vault was already submitted
+      const { data: vaultData } = await supabase
+        .from("client_data_vault")
+        .select("data_vault_submitted_at")
+        .eq("user_id", uid)
+        .maybeSingle();
+
+      if (vaultData?.data_vault_submitted_at) {
+        setIsSubmitted(true);
+      }
     } catch (err: any) {
       toast({
         title: "Error",
@@ -713,9 +726,10 @@ export default function Vault({
   const uploadedByCode = useMemo(() => {
     const map = new Map<string, number>();
     documents.forEach((doc) => {
-      if (doc.category) {
-        map.set(doc.category, (map.get(doc.category) || 0) + 1);
-      }
+      const cat = doc.category;
+      const dCode = (doc as any).doc_code;
+      if (cat) map.set(cat, (map.get(cat) || 0) + 1);
+      if (dCode && dCode !== cat) map.set(dCode, (map.get(dCode) || 0) + 1);
     });
     return map;
   }, [documents]);
@@ -780,8 +794,8 @@ export default function Vault({
    * Allows dashboard to show overall completion status
    */
   useEffect(() => {
-    onChecklist?.({ progress: progressPct, complete: allComplete });
-  }, [progressPct, allComplete, onChecklist]);
+    onChecklist?.({ progress: progressPct, complete: allComplete, isSubmitted });
+  }, [progressPct, allComplete, isSubmitted, onChecklist]);
 
   if (loading || loadingDynamic) {
     return <PremiumLoader message="Syncing your document vault..." fullScreen={false} />;
@@ -850,7 +864,7 @@ export default function Vault({
           </div>
         )}
 
-        {isSubmitted && (
+        {isSubmitted && allComplete && (
           <div className="mt-4 p-4 bg-emerald-100 border border-emerald-200 rounded-lg flex items-center gap-2 text-emerald-800">
             <CheckCircle2 className="h-5 w-5" />
             <span className="font-medium">Vault Submitted Successfully!</span>

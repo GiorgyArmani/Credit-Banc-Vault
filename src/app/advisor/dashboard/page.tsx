@@ -75,7 +75,22 @@ export default function AdvisorDashboard() {
     id: string;
     first_name: string;
     role: string;
-    // Add other fields as needed
+    email: string;
+  }
+
+  interface RecentApp {
+    id: string;
+    client_name: string;
+    company_name: string;
+    status: string;
+    submitted_at: string;
+  }
+
+  interface ActivityItem {
+    id: string;
+    client_name: string;
+    file_name: string;
+    created_at: string;
   }
 
   const [userData, setUserData] = useState<AdvisorUserProfile | null>(null);
@@ -84,8 +99,10 @@ export default function AdvisorDashboard() {
     totalClients: 0,
     pendingApplications: 0,
     approvedApplications: 0,
-    thisMonthApplications: 0
+    successRate: 0
   });
+  const [recentApps, setRecentApps] = useState<RecentApp[]>([]);
+  const [recentActivity, setRecentActivity] = useState<ActivityItem[]>([]);
 
   const router = useRouter();
   const supabase = createClient();
@@ -119,10 +136,37 @@ export default function AdvisorDashboard() {
           return;
         }
 
+        // Fetch advisor id from advisors table
+        let advisorId = null;
+        let { data: advisor_data, error: advisor_error } = await supabase
+          .from("advisors")
+          .select("id")
+          .eq("user_id", user.id)
+          .maybeSingle();
+
+        if (!advisor_data && !advisor_error) {
+          const email_query = await supabase
+            .from("advisors")
+            .select("id")
+            .eq("email", profile.email)
+            .maybeSingle();
+
+          advisor_data = email_query.data;
+          if (advisor_data) {
+            await supabase.from("advisors").update({ user_id: user.id }).eq("id", advisor_data.id);
+          }
+        }
+
+        if (advisor_data) {
+          advisorId = advisor_data.id;
+        }
+
         setUserData(profile);
 
         // Load advisor statistics
-        await loadStats();
+        if (advisorId) {
+          await loadStats(advisorId);
+        }
 
       } catch (error) {
         console.error("Error loading user data:", error);
@@ -137,18 +181,100 @@ export default function AdvisorDashboard() {
   /**
    * Load advisor statistics from database
    */
-  async function loadStats() {
+  async function loadStats(advisorId: string) {
     try {
-      // For now, using placeholder data
+      // 1. Total Clients
+      const { count: totalClients } = await supabase
+        .from("client_data_vault")
+        .select("*", { count: "exact", head: true })
+        .eq("advisor_id", advisorId);
+
+      // 2. Pending Applications ('submitted' and 'documents_requested')
+      const { count: pendingApplications } = await supabase
+        .from("submissions")
+        .select("*", { count: "exact", head: true })
+        .eq("advisor_id", advisorId)
+        .in("status", ["submitted", "documents_requested"]);
+
+      // 3. Approved ('locked')
+      const { count: approvedApplications } = await supabase
+        .from("submissions")
+        .select("*", { count: "exact", head: true })
+        .eq("advisor_id", advisorId)
+        .eq("status", "locked");
+
+      const allCompleted = approvedApplications || 0;
+      const totalSubs = (pendingApplications || 0) + allCompleted;
+      const successRate = totalSubs > 0 ? Math.round((allCompleted / totalSubs) * 100) : 0;
+
       setStats({
-        totalClients: 12,
-        pendingApplications: 5,
-        approvedApplications: 7,
-        thisMonthApplications: 3
+        totalClients: totalClients || 0,
+        pendingApplications: pendingApplications || 0,
+        approvedApplications: allCompleted,
+        successRate
       });
+
+      // Fetch recent applications
+      const { data: recentSubsData } = await supabase
+        .from("submissions")
+        .select(`
+          id,
+          status,
+          submitted_at,
+          client_data_vault (
+            client_name,
+            company_name
+          )
+        `)
+        .eq("advisor_id", advisorId)
+        .order("submitted_at", { ascending: false })
+        .limit(5);
+
+      if (recentSubsData) {
+        setRecentApps(recentSubsData.map((s: any) => ({
+          id: s.id,
+          status: s.status,
+          submitted_at: s.submitted_at || new Date().toISOString(),
+          client_name: s.client_data_vault?.client_name || s.client_data_vault?.[0]?.client_name || 'Unknown Client',
+          company_name: s.client_data_vault?.company_name || s.client_data_vault?.[0]?.company_name || 'Unknown Company'
+        })));
+      }
+
+      // Fetch recent activity
+      const { data: clientsData } = await supabase
+        .from("client_data_vault")
+        .select("user_id, client_name")
+        .eq("advisor_id", advisorId);
+
+      if (clientsData && clientsData.length > 0) {
+        const clientMap = new Map();
+        clientsData.forEach(c => clientMap.set(c.user_id, c.client_name));
+
+        const clientIds = clientsData.map(c => c.user_id);
+        const { data: recentDocs } = await supabase
+          .from("user_documents")
+          .select("id, file_name, created_at, user_id")
+          .in("user_id", clientIds)
+          .order("created_at", { ascending: false })
+          .limit(5);
+
+        if (recentDocs) {
+          setRecentActivity(recentDocs.map(d => ({
+            id: d.id,
+            client_name: clientMap.get(d.user_id) || 'Unknown Client',
+            file_name: d.file_name || 'Document',
+            created_at: d.created_at
+          })));
+        }
+      }
     } catch (error) {
       console.error("Error loading stats:", error);
     }
+  }
+
+  function formatDate(dateStr: string) {
+    if (!dateStr) return "";
+    return new Date(dateStr).toLocaleDateString("en-US", { month: "short", day: "numeric" });
   }
 
   /**
@@ -228,25 +354,25 @@ export default function AdvisorDashboard() {
             icon={Users}
             label="Total Clients"
             value={stats.totalClients}
-            trend="+2 from last month"
+            trend="Active on platform"
           />
           <StatCard
             icon={Clock}
             label="Pending Applications"
             value={stats.pendingApplications}
-            trend="Requires attention"
+            trend="Awaiting underwriting"
           />
           <StatCard
             icon={CheckCircle}
-            label="Approved This Month"
+            label="Approved Applications"
             value={stats.approvedApplications}
-            trend={`${stats.thisMonthApplications} new this month`}
+            trend="Fully processed"
           />
           <StatCard
             icon={TrendingUp}
             label="Success Rate"
-            value="85%"
-            trend="+5% from last month"
+            value={`${stats.successRate}%`}
+            trend="Of total submissions"
           />
         </div>
 
@@ -314,10 +440,36 @@ export default function AdvisorDashboard() {
             </CardHeader>
             <CardContent className="px-10 pb-10">
               <div className="space-y-4">
-                <div className="text-sm font-bold text-emerald-900/30 text-center py-12 bg-emerald-50/20 rounded-[2rem] border-2 border-dashed border-emerald-100/50">
-                  <FileText className="h-8 w-8 mx-auto mb-3 opacity-20" />
-                  No recent applications
-                </div>
+                {recentApps.length > 0 ? (
+                  recentApps.map(app => (
+                    <div key={app.id} className="flex items-center justify-between p-4 bg-emerald-50/30 rounded-2xl border border-emerald-50 hover:bg-emerald-50/60 transition-colors">
+                      <div className="flex items-center gap-4">
+                        <div className="p-3 bg-white rounded-xl shadow-sm border border-emerald-100/50">
+                          <FileText className="h-5 w-5 text-emerald-500" />
+                        </div>
+                        <div>
+                          <p className="font-black text-emerald-950 text-sm uppercase tracking-tight">{app.client_name}</p>
+                          <p className="text-xs font-bold text-emerald-900/40">{app.company_name}</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <Badge className={`uppercase tracking-widest text-[9px] px-2 py-0.5 border ${app.status === 'locked' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' :
+                          app.status === 'documents_requested' ? 'bg-red-100 text-red-700 border-red-200' :
+                            app.status === 'submitted' ? 'bg-blue-100 text-blue-700 border-blue-200' :
+                              'bg-slate-100 text-slate-700 border-slate-200'
+                          }`}>
+                          {app.status === 'documents_requested' ? 'Action Needed' : app.status}
+                        </Badge>
+                        <p className="text-[10px] font-bold text-emerald-900/40 mt-1">{formatDate(app.submitted_at)}</p>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-sm font-bold text-emerald-900/30 text-center py-12 bg-emerald-50/20 rounded-[2rem] border-2 border-dashed border-emerald-100/50">
+                    <FileText className="h-8 w-8 mx-auto mb-3 opacity-20" />
+                    No recent applications
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -335,10 +487,26 @@ export default function AdvisorDashboard() {
             </CardHeader>
             <CardContent className="px-10 pb-10">
               <div className="space-y-4">
-                <div className="text-sm font-bold text-emerald-900/30 text-center py-12 bg-emerald-50/20 rounded-[2rem] border-2 border-dashed border-emerald-100/50">
-                  <Sparkles className="h-8 w-8 mx-auto mb-3 opacity-20" />
-                  No recent activity
-                </div>
+                {recentActivity.length > 0 ? (
+                  recentActivity.map(activity => (
+                    <div key={activity.id} className="flex items-center gap-4 p-4 bg-emerald-50/30 rounded-2xl border border-emerald-50 hover:bg-emerald-50/60 transition-colors">
+                      <div className="p-3 bg-white rounded-xl shadow-sm border border-emerald-100/50">
+                        <CheckCircle className="h-5 w-5 text-emerald-500" />
+                      </div>
+                      <div className="flex-1">
+                        <p className="font-bold text-emerald-950 text-sm">
+                          <span className="font-black">{activity.client_name}</span> uploaded <span className="text-emerald-700">{activity.file_name}</span>
+                        </p>
+                        <p className="text-[10px] font-bold text-emerald-900/40 mt-0.5">{formatDate(activity.created_at)}</p>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-sm font-bold text-emerald-900/30 text-center py-12 bg-emerald-50/20 rounded-[2rem] border-2 border-dashed border-emerald-100/50">
+                    <Sparkles className="h-8 w-8 mx-auto mb-3 opacity-20" />
+                    No recent activity
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>

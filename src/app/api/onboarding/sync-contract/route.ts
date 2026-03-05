@@ -49,14 +49,33 @@ export async function POST(request: Request) {
 
         // 2. Download the completed PDF from SignWell
         // We use urlOnly: false to get the binary data
-        const { blob } = await signWell.getCompletedPDF({
-            documentId,
-            urlOnly: false,
-            auditPage: true
-        });
+        // We implement a retry loop because SignWell might take a few seconds to generate the PDF
+        let blob: Blob | undefined;
+        let lastError: any;
+        const maxRetries = 5;
+        const delayMs = 2000;
+
+        for (let i = 0; i < maxRetries; i++) {
+            try {
+                console.log(`⏳ Attempt ${i + 1}/${maxRetries} to fetch PDF for ${documentId}...`);
+                const result = await signWell.getCompletedPDF({
+                    documentId,
+                    urlOnly: false,
+                    auditPage: true
+                });
+                blob = result.blob;
+                if (blob) break;
+            } catch (error: any) {
+                lastError = error;
+                console.warn(`⚠️ Attempt ${i + 1} failed:`, error.message);
+                if (i < maxRetries - 1) {
+                    await new Promise(resolve => setTimeout(resolve, delayMs));
+                }
+            }
+        }
 
         if (!blob) {
-            throw new Error('Failed to download PDF from SignWell');
+            throw new Error(lastError?.message || 'Failed to download PDF from SignWell after retries');
         }
 
         const pdfBuffer = await blob.arrayBuffer();

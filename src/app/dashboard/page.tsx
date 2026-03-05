@@ -5,6 +5,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import AdvisorDisplay from "@/components/advisor-display";
+import { MyScoreIQCarousel } from "@/components/myscoreiq-carousel";
 import ProfileDisplay from "@/components/profile-display";
 import Vault from '@/components/vault';
 import TemplatesView from '@/components/templates-view';
@@ -39,8 +40,13 @@ export default function DashboardPage() {
 
 function DashboardContent() {
   const supabase = createClient();
-  const { clientName } = useOnboardingStatus();
+  const { clientName, dataVaultCompleted } = useOnboardingStatus();
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [isVaultSubmitted, setIsVaultSubmitted] = useState(false);
+
+  const handleChecklist = useCallback((info: { progress: number; complete: boolean; isSubmitted?: boolean }) => {
+    setIsVaultSubmitted(!!info.isSubmitted && info.complete);
+  }, []);
 
   // Ready states for synchronization
   const [isReady, setIsReady] = useState({
@@ -157,6 +163,7 @@ function DashboardContent() {
           <div className="space-y-8">
             <div className="grid gap-8">
               <AdvisorDisplay onLoad={onAdvisorLoad} />
+
               <ProfileDisplay onLoad={onProfileLoad} />
             </div>
 
@@ -165,9 +172,10 @@ function DashboardContent() {
                 <CardTitle className="text-2xl font-black text-emerald-950 tracking-tighter uppercase">DOCUMENT VAULT</CardTitle>
               </CardHeader>
               <CardContent className="p-10 pt-6">
-                <Vault clientName={clientName} onLoad={onVaultLoad} />
+                <Vault clientName={clientName} onLoad={onVaultLoad} onChecklist={handleChecklist} />
               </CardContent>
             </Card>
+            {isVaultSubmitted && <MyScoreIQCarousel />}
           </div>
         )}
 

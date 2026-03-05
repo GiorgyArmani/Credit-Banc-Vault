@@ -49,15 +49,15 @@ export async function POST() {
             throw updateError;
         }
 
-        // 4. Create record in public.submissions for Underwriting
+        // 4. Create or Update record in public.submissions for Underwriting using upsert
         const { error: submissionError } = await supabase
             .from("submissions")
-            .insert({
+            .upsert({
                 user_id: user.id,
                 advisor_id: clientData.advisor_id,
                 status: 'submitted',
                 submitted_at: new Date().toISOString()
-            });
+            }, { onConflict: 'user_id' });
 
         if (submissionError) {
             console.error("Error creating submission record:", submissionError);

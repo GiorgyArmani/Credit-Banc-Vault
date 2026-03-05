@@ -18,6 +18,8 @@ import {
     DollarSign,
     AlertCircle,
     Loader2,
+    MessageSquare,
+    MoreVertical,
     CheckCircle2,
     Eye,
     Star,
@@ -43,9 +45,14 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-import { requestNewDocument } from "./actions";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { requestDocuments } from "./actions";
+import { fetchInternalNotes, addInternalNote } from "@/app/actions/internal-notes";
 import { toast } from "sonner";
 import clsx from "clsx";
+import { format } from "date-fns";
+import { Textarea } from "@/components/ui/textarea";
 
 /**
  * ============================================================================
@@ -123,6 +130,14 @@ interface UserDocument {
     storage_path: string;
 }
 
+interface InternalNote {
+    id: string;
+    author_name: string;
+    author_role: string;
+    content: string;
+    created_at: string;
+}
+
 // Note: REQUIRED_DOC_TYPES is now fetched dynamically from the database
 // for each client to match the specific requests made during signup.
 
@@ -155,7 +170,8 @@ export default function AdvisorClientDetailsPage() {
 
     // request-modal-state: UI controls for the request dialog
     const [is_request_modal_open, set_is_request_modal_open] = useState(false);
-    const [selected_doc_type_id, set_selected_doc_type_id] = useState<string>("");
+    const [selected_doc_ids, set_selected_doc_ids] = useState<string[]>([]);
+    const [request_search_query, set_request_search_query] = useState("");
     const [is_requesting, set_is_requesting] = useState(false);
 
     // resend-credentials-state: Tracks loading state for credential resend
@@ -175,6 +191,11 @@ export default function AdvisorClientDetailsPage() {
 
     // error-message-state: Stores specific error message
     const [error_message, set_error_message] = useState<string>("");
+
+    // Internal Notes state
+    const [notes, set_notes] = useState<InternalNote[]>([]);
+    const [new_standalone_note, set_new_standalone_note] = useState("");
+    const [is_adding_note, set_is_adding_note] = useState(false);
 
     // ============================================
     // FETCH CLIENT DATA ON MOUNT
@@ -402,11 +423,19 @@ export default function AdvisorClientDetailsPage() {
                 }
             }
 
+            // ============================================
+            // STEP 8: FETCH INTERNAL NOTES
+            // ============================================
+            const notes_res = await fetchInternalNotes(client_id);
+            if (notes_res.success) {
+                set_notes(notes_res.notes || []);
+            }
+
             set_component_state(ComponentState.SUCCESS);
 
         } catch (err: any) {
             console.error("❌ Unexpected error:", err);
-            set_error_message("An unexpected error occurred.");
+            set_error_message(err.message || "An unexpected error occurred.");
             set_component_state(ComponentState.ERROR);
         }
     }
@@ -572,29 +601,56 @@ export default function AdvisorClientDetailsPage() {
     }
 
     /**
-     * handle-request-document: Triggers the server action to request a new document
+     * handle-request-document: Triggers the server action to request multiple new documents
      */
     async function handle_request_document() {
-        if (!selected_doc_type_id) return;
+        if (selected_doc_ids.length === 0) {
+            toast.error("Please select at least one document");
+            return;
+        }
 
         set_is_requesting(true);
         try {
-            const result = await requestNewDocument(client_id, selected_doc_type_id);
+            const result = await requestDocuments(client_id, selected_doc_ids);
 
             if (result.success) {
-                toast.success("Document requested successfully!");
+                toast.success(`${selected_doc_ids.length} document(s) requested successfully!`);
                 set_is_request_modal_open(false);
-                set_selected_doc_type_id("");
-                // Refresh data to show new requirement
+                set_selected_doc_ids([]);
+                set_request_search_query("");
+                // Refresh data to show new requirements
                 fetch_client_details();
             } else {
-                toast.error(result.error || "Failed to request document");
+                toast.error(result.error || "Failed to request documents");
             }
         } catch (err: any) {
             console.error("❌ Request error:", err);
             toast.error("An unexpected error occurred");
         } finally {
             set_is_requesting(false);
+        }
+    }
+
+    async function handle_add_note() {
+        if (!new_standalone_note.trim()) return;
+
+        set_is_adding_note(true);
+        try {
+            const result = await addInternalNote(client_id, new_standalone_note, "advisor");
+            if (result.success) {
+                toast.success("Note added!");
+                set_new_standalone_note("");
+                // Refresh notes
+                const notes_res = await fetchInternalNotes(client_id);
+                if (notes_res.success && notes_res.notes) set_notes(notes_res.notes);
+            } else {
+                toast.error(result.error || "Failed to add note");
+            }
+        } catch (err: any) {
+            console.error("❌ Add note error:", err);
+            toast.error("An unexpected error occurred");
+        } finally {
+            set_is_adding_note(false);
         }
     }
 
@@ -927,6 +983,63 @@ export default function AdvisorClientDetailsPage() {
                     </CardContent>
                 </Card>
 
+                {/* Internal Communication Section */}
+                <Card className="border-amber-200 bg-amber-50/30">
+                    <CardHeader className="pb-3">
+                        <div className="flex items-center gap-2">
+                            <MessageSquare className="h-5 w-5 text-amber-600" />
+                            <CardTitle className="text-lg text-amber-900">Internal Communication</CardTitle>
+                        </div>
+                        <CardDescription className="text-amber-700/80">
+                            Shared notes between Advisor and Underwriting for this client.
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                        {/* Notes Feed */}
+                        <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                            {notes.length === 0 ? (
+                                <div className="text-center py-8 bg-white/50 rounded-lg border border-dashed border-amber-200">
+                                    <p className="text-sm text-amber-600">No internal notes yet.</p>
+                                </div>
+                            ) : (
+                                notes.map((note) => (
+                                    <div key={note.id} className="bg-white p-3 rounded-lg border border-amber-100 shadow-sm">
+                                        <div className="flex justify-between items-start mb-1">
+                                            <span className="font-semibold text-sm text-gray-900 uppercase tracking-tight">
+                                                {note.author_name} ({note.author_role})
+                                            </span>
+                                            <span className="text-[10px] text-gray-400">
+                                                {format(new Date(note.created_at), "MMM d, h:mm a")}
+                                            </span>
+                                        </div>
+                                        <p className="text-sm text-gray-700 whitespace-pre-wrap">{note.content}</p>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+
+                        {/* Add Note Input */}
+                        <div className="space-y-2 pt-2 border-t border-amber-100">
+                            <Textarea
+                                placeholder="Add an internal note for underwriting..."
+                                value={new_standalone_note}
+                                onChange={(e) => set_new_standalone_note(e.target.value)}
+                                className="bg-white border-amber-200 focus:ring-amber-500 min-h-[80px]"
+                            />
+                            <div className="flex justify-end">
+                                <Button
+                                    onClick={handle_add_note}
+                                    disabled={is_adding_note || !new_standalone_note.trim()}
+                                    className="bg-amber-600 hover:bg-amber-700 text-white"
+                                    size="sm"
+                                >
+                                    {is_adding_note ? "Adding..." : "Post Note"}
+                                </Button>
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
+
                 {/* Document Status Overview */}
                 <Card>
                     <CardHeader>
@@ -1156,64 +1269,112 @@ export default function AdvisorClientDetailsPage() {
                 </Dialog>
                 {/* Request Document Modal */}
                 <Dialog open={is_request_modal_open} onOpenChange={set_is_request_modal_open}>
-                    <DialogContent className="sm:max-w-md">
+                    <DialogContent className="sm:max-w-md flex flex-col max-h-[90vh]">
                         <DialogHeader>
                             <DialogTitle>Request New Document</DialogTitle>
                             <DialogDescription>
-                                Select a document type to request from {client_profile.client_name}.
-                                They will see this requirement in their vault.
+                                Select document types to request from {client_profile.client_name}.
+                                They will see these requirements in their vault.
                             </DialogDescription>
                         </DialogHeader>
 
-                        <div className="py-4">
-                            <Select
-                                value={selected_doc_type_id}
-                                onValueChange={set_selected_doc_type_id}
-                            >
-                                <SelectTrigger>
-                                    <SelectValue placeholder="Select document type..." />
-                                </SelectTrigger>
-                                <SelectContent>
+                        <div className="py-2 space-y-4 flex-1 overflow-hidden flex flex-col">
+                            {/* Search Input */}
+                            <div className="relative">
+                                <Input
+                                    placeholder="Search document types..."
+                                    value={request_search_query}
+                                    onChange={(e) => set_request_search_query(e.target.value)}
+                                    className="pl-9"
+                                />
+                                <Plus className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 rotate-45" />
+                            </div>
+
+                            {/* Checklist */}
+                            <div className="border rounded-lg overflow-hidden flex flex-col flex-1">
+                                <div className="overflow-y-auto p-4 space-y-3 max-h-[300px]">
                                     {all_doc_types
                                         .filter(type => !required_docs.some(r => r.code === type.code))
+                                        .filter(type =>
+                                            type.label.toLowerCase().includes(request_search_query.toLowerCase()) ||
+                                            type.code.toLowerCase().includes(request_search_query.toLowerCase())
+                                        )
                                         .map((type) => (
-                                            <SelectItem key={type.id} value={type.id}>
-                                                {type.label}
-                                            </SelectItem>
+                                            <div key={type.id} className="flex items-center space-x-3 group">
+                                                <Checkbox
+                                                    id={`doc-${type.id}`}
+                                                    checked={selected_doc_ids.includes(type.id)}
+                                                    onCheckedChange={(checked) => {
+                                                        if (checked) {
+                                                            set_selected_doc_ids([...selected_doc_ids, type.id]);
+                                                        } else {
+                                                            set_selected_doc_ids(selected_doc_ids.filter(id => id !== type.id));
+                                                        }
+                                                    }}
+                                                />
+                                                <label
+                                                    htmlFor={`doc-${type.id}`}
+                                                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex-1 group-hover:text-emerald-600 transition-colors"
+                                                >
+                                                    {type.label}
+                                                </label>
+                                            </div>
                                         ))
                                     }
-                                </SelectContent>
-                            </Select>
 
-                            {all_doc_types.filter(type => !required_docs.some(r => r.code === type.code)).length === 0 && (
-                                <p className="text-sm text-gray-500 mt-2">
-                                    All available document types have already been requested.
-                                </p>
-                            )}
+                                    {all_doc_types.filter(type => !required_docs.some(r => r.code === type.code)).length === 0 && (
+                                        <div className="text-center py-8">
+                                            <p className="text-sm text-gray-500">
+                                                All available document types have already been requested.
+                                            </p>
+                                        </div>
+                                    )}
+
+                                    {all_doc_types.filter(type => !required_docs.some(r => r.code === type.code)).length > 0 &&
+                                        all_doc_types.filter(type =>
+                                            !required_docs.some(r => r.code === type.code) &&
+                                            (type.label.toLowerCase().includes(request_search_query.toLowerCase()) ||
+                                                type.code.toLowerCase().includes(request_search_query.toLowerCase()))
+                                        ).length === 0 && (
+                                            <div className="text-center py-8">
+                                                <p className="text-sm text-gray-500">
+                                                    No document types match "{request_search_query}"
+                                                </p>
+                                            </div>
+                                        )}
+                                </div>
+                            </div>
                         </div>
 
-                        <DialogFooter>
-                            <Button
-                                variant="ghost"
-                                onClick={() => set_is_request_modal_open(false)}
-                                disabled={is_requesting}
-                            >
-                                Cancel
-                            </Button>
-                            <Button
-                                onClick={handle_request_document}
-                                disabled={!selected_doc_type_id || is_requesting}
-                                className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                            >
-                                {is_requesting ? (
-                                    <>
-                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                        Requesting...
-                                    </>
-                                ) : (
-                                    "Request Document"
-                                )}
-                            </Button>
+                        <DialogFooter className="pt-2">
+                            <div className="flex items-center justify-between w-full">
+                                <p className="text-xs font-bold text-gray-400">
+                                    {selected_doc_ids.length} selected
+                                </p>
+                                <div className="flex gap-2">
+                                    <Button
+                                        variant="ghost"
+                                        onClick={() => set_is_request_modal_open(false)}
+                                        disabled={is_requesting}
+                                    >
+                                        Cancel
+                                    </Button>
+                                    <Button
+                                        onClick={handle_request_document}
+                                        disabled={selected_doc_ids.length === 0 || is_requesting}
+                                        className="bg-emerald-600 hover:bg-emerald-700 text-white min-w-[140px]"
+                                    >
+                                        {is_requesting ? (
+                                            <>
+                                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                                Requesting...
+                                            </>
+                                        ) : (
+                                            `Request ${selected_doc_ids.length > 1 ? 'Documents' : 'Document'}`
+                                        )}
+                                    </Button>
+                                </div>
+                            </div>
                         </DialogFooter>
                     </DialogContent>
                 </Dialog>

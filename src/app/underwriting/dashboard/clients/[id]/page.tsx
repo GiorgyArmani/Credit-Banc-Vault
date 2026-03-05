@@ -35,9 +35,12 @@ import {
     DialogTrigger,
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Textarea } from "@/components/ui/textarea";
 import { notifyAdvisor } from "../../actions";
+import { fetchInternalNotes, addInternalNote } from "@/app/actions/internal-notes";
 import { toast } from "sonner";
 import clsx from "clsx";
+import { format } from "date-fns";
 
 enum ComponentState {
     LOADING = "LOADING",
@@ -79,6 +82,14 @@ interface UserDocument {
     storage_path: string;
 }
 
+interface InternalNote {
+    id: string;
+    author_name: string;
+    author_role: string;
+    content: string;
+    created_at: string;
+}
+
 export default function UnderwritingClientDetailsPage() {
     const supabase = createClient();
     const router = useRouter();
@@ -93,7 +104,15 @@ export default function UnderwritingClientDetailsPage() {
 
     const [is_notify_modal_open, set_is_notify_modal_open] = useState(false);
     const [selected_missing_docs, setSelected_missing_docs] = useState<string[]>([]);
+    const [all_available_docs, set_all_available_docs] = useState<{ code: string; label: string }[]>([]);
+    const [selected_extra_docs, set_selected_extra_docs] = useState<string[]>([]);
+    const [custom_note, set_custom_note] = useState("");
     const [is_notifying, setIs_notifying] = useState(false);
+
+    // Internal Notes state
+    const [notes, set_notes] = useState<InternalNote[]>([]);
+    const [new_standalone_note, set_new_standalone_note] = useState("");
+    const [is_adding_note, set_is_adding_note] = useState(false);
 
     useEffect(() => {
         if (client_id) fetch_client_details();
@@ -145,6 +164,13 @@ export default function UnderwritingClientDetailsPage() {
                 .eq("is_core", true);
             const coreReqs = coreDocs || [];
 
+            // 4. Fetch all available document types FOR THE CATALOG
+            const { data: allDocs } = await supabase
+                .from("required_documents")
+                .select("code, label")
+                .order("label", { ascending: true });
+            set_all_available_docs(allDocs || []);
+
             const { data: dynamicDocs } = await supabase
                 .from("client_dynamic_documents")
                 .select("required_documents(code, label)")
@@ -157,6 +183,12 @@ export default function UnderwritingClientDetailsPage() {
             // Unique by code
             const uniqueReqs = Array.from(new Map(allReqs.map(r => [r.code, r])).values());
             set_required_docs(uniqueReqs);
+
+            // 5. Fetch internal notes
+            const notesRes = await fetchInternalNotes(client_id);
+            if (notesRes.success) {
+                set_notes(notesRes.notes || []);
+            }
 
             set_component_state(ComponentState.SUCCESS);
 
@@ -185,23 +217,71 @@ export default function UnderwritingClientDetailsPage() {
     }
 
     async function handleNotifyAdvisor() {
-        if (selected_missing_docs.length === 0) {
-            toast.error("Please select at least one document");
+        if (selected_missing_docs.length === 0 && selected_extra_docs.length === 0) {
+            toast.error("Please select at least one document or requirement");
             return;
         }
 
         setIs_notifying(true);
         try {
-            const res = await notifyAdvisor(client_id, selected_missing_docs);
+            // Construct the final note content with ALL requested items
+            let items_summary = "";
+            if (selected_missing_docs.length > 0) {
+                items_summary += `MISSING REQUIRED ITEMS:\n- ${selected_missing_docs.join("\n- ")}\n\n`;
+            }
+            if (selected_extra_docs.length > 0) {
+                items_summary += `ADDITIONAL DOCUMENTS REQUESTED:\n- ${selected_extra_docs.join("\n- ")}\n\n`;
+            }
+
+            let final_note = custom_note;
+            if (items_summary) {
+                final_note = final_note
+                    ? `${items_summary}--- NOTES ---\n${final_note}`
+                    : items_summary.trim();
+            }
+
+            // Consolidate labels for the email notification
+            const all_labels = [...selected_missing_docs, ...selected_extra_docs];
+
+            const res = await notifyAdvisor(client_id, all_labels, final_note);
             if (res.success) {
                 toast.success("Advisor notified successfully!");
                 set_is_notify_modal_open(false);
                 setSelected_missing_docs([]);
+                set_selected_extra_docs([]);
+                set_custom_note("");
+                // Refresh notes since notifyAdvisor might have added a system note/audit trail
+                const notesRes = await fetchInternalNotes(client_id);
+                if (notesRes.success) {
+                    set_notes(notesRes.notes || []);
+                }
             } else {
                 toast.error(res.error || "Failed to notify advisor");
             }
         } finally {
             setIs_notifying(false);
+        }
+    }
+
+    async function handleAddNote() {
+        if (!new_standalone_note.trim()) return;
+
+        set_is_adding_note(true);
+        try {
+            const res = await addInternalNote(client_id, new_standalone_note, "underwriting");
+            if (res.success) {
+                toast.success("Note added!");
+                set_new_standalone_note("");
+                // Refresh notes
+                const notesRes = await fetchInternalNotes(client_id);
+                if (notesRes.success) {
+                    set_notes(notesRes.notes || []);
+                }
+            } else {
+                toast.error(res.error || "Failed to add note");
+            }
+        } finally {
+            set_is_adding_note(false);
         }
     }
 
@@ -256,32 +336,70 @@ export default function UnderwritingClientDetailsPage() {
                                 Select which documents are missing or rejected to notify <strong>{client_profile.advisor.first_name} {client_profile.advisor.last_name}</strong>.
                             </DialogDescription>
                         </DialogHeader>
-                        <div className="py-6 space-y-4">
-                            {required_docs.map((doc) => {
-                                const is_done = documents.some(d => d.category === doc.code);
-                                return (
-                                    <div key={doc.code} className="flex items-center space-x-3">
-                                        <Checkbox
-                                            id={doc.code}
-                                            checked={selected_missing_docs.includes(doc.label)}
-                                            onCheckedChange={(checked) => {
-                                                if (checked) setSelected_missing_docs([...selected_missing_docs, doc.label]);
-                                                else setSelected_missing_docs(selected_missing_docs.filter(l => l !== doc.label));
-                                            }}
-                                        />
-                                        <label htmlFor={doc.code} className={clsx("text-sm font-bold leading-none cursor-pointer", is_done ? "text-slate-400 line-through" : "text-slate-700")}>
-                                            {doc.label}
-                                        </label>
-                                    </div>
-                                );
-                            })}
+                        <div className="py-6 space-y-6 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
+                            <div className="space-y-3">
+                                <p className="text-xs font-black uppercase tracking-widest text-slate-400">Select Missing Required Items</p>
+                                <div className="grid grid-cols-1 gap-2 border rounded-2xl p-4 bg-slate-50/50">
+                                    {required_docs.map((doc) => {
+                                        const is_done = documents.some(d => d.category === doc.code);
+                                        return (
+                                            <div key={doc.code} className="flex items-center space-x-3 p-2 rounded-lg hover:bg-white transition-colors">
+                                                <Checkbox
+                                                    id={`missing-${doc.code}`}
+                                                    checked={selected_missing_docs.includes(doc.label)}
+                                                    onCheckedChange={(checked) => {
+                                                        if (checked) setSelected_missing_docs([...selected_missing_docs, doc.label]);
+                                                        else setSelected_missing_docs(selected_missing_docs.filter(l => l !== doc.label));
+                                                    }}
+                                                />
+                                                <label htmlFor={`missing-${doc.code}`} className={clsx("text-sm font-bold leading-none cursor-pointer", is_done ? "text-slate-400 line-through font-medium" : "text-slate-700")}>
+                                                    {doc.label} {is_done && "(Already Uploaded)"}
+                                                </label>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+
+                            <div className="space-y-3">
+                                <p className="text-xs font-black uppercase tracking-widest text-slate-400">Select Additional Documents to Request</p>
+                                <div className="grid grid-cols-1 gap-2 border rounded-2xl p-4 bg-slate-50/50 max-h-[250px] overflow-y-auto custom-scrollbar">
+                                    {all_available_docs
+                                        .filter(doc => !required_docs.some(r => r.code === doc.code))
+                                        .map((doc) => (
+                                            <div key={`extra-${doc.code}`} className="flex items-center space-x-3 p-2 rounded-lg hover:bg-white transition-colors">
+                                                <Checkbox
+                                                    id={`extra-${doc.code}`}
+                                                    checked={selected_extra_docs.includes(doc.label)}
+                                                    onCheckedChange={(checked) => {
+                                                        if (checked) set_selected_extra_docs([...selected_extra_docs, doc.label]);
+                                                        else set_selected_extra_docs(selected_extra_docs.filter(l => l !== doc.label));
+                                                    }}
+                                                />
+                                                <label htmlFor={`extra-${doc.code}`} className="text-sm font-bold text-slate-700 leading-none cursor-pointer">
+                                                    {doc.label}
+                                                </label>
+                                            </div>
+                                        ))}
+                                </div>
+                            </div>
+
+                            <div className="space-y-2 pt-2">
+                                <label className="text-xs font-black uppercase tracking-widest text-slate-400">Custom message (Internal Note)</label>
+                                <Textarea
+                                    placeholder="Add specific instructions for the advisor..."
+                                    className="min-h-[100px] rounded-2xl border-slate-200 focus:ring-emerald-500"
+                                    value={custom_note}
+                                    onChange={(e) => set_custom_note(e.target.value)}
+                                />
+                            </div>
                         </div>
                         <DialogFooter>
                             <Button variant="outline" onClick={() => set_is_notify_modal_open(false)} className="rounded-xl font-bold">Cancel</Button>
                             <Button
                                 onClick={handleNotifyAdvisor}
                                 className="bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-black shadow-lg shadow-emerald-500/20"
-                                disabled={is_notifying || selected_missing_docs.length === 0}
+                                disabled={is_notifying || (selected_missing_docs.length === 0 && selected_extra_docs.length === 0)}
                             >
                                 {is_notifying ? "Sending..." : "Send Notification"}
                             </Button>
@@ -349,6 +467,63 @@ export default function UnderwritingClientDetailsPage() {
                             <div className="flex items-center gap-3 p-3 text-slate-600 font-bold hover:bg-slate-50 rounded-xl transition-colors">
                                 <Phone className="w-5 h-5 text-emerald-500" />
                                 <span className="text-sm">{client_profile.client_phone}</span>
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    {/* Internal Notes Feed */}
+                    <Card className="rounded-[2.5rem] border-slate-200 flex flex-col h-[500px]">
+                        <CardHeader className="pb-4 shrink-0">
+                            <CardTitle className="text-xs font-black uppercase tracking-[0.2em] text-slate-400 flex items-center justify-between">
+                                Internal Communication
+                                <Badge variant="outline" className="text-[9px]">{notes.length}</Badge>
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent className="flex-1 flex flex-col min-h-0 overflow-hidden">
+                            {/* Notes List */}
+                            <div className="flex-1 overflow-y-auto space-y-4 pr-2 mb-4 custom-scrollbar">
+                                {notes.length === 0 ? (
+                                    <div className="h-full flex flex-col items-center justify-center text-center p-8">
+                                        <Clock className="w-8 h-8 text-slate-200 mb-2" />
+                                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">No activity yet</p>
+                                    </div>
+                                ) : (
+                                    notes.map((note) => (
+                                        <div key={note.id} className="space-y-1">
+                                            <div className="flex items-center justify-between">
+                                                <span className={clsx(
+                                                    "text-[10px] font-black uppercase tracking-tighter px-2 py-0.5 rounded",
+                                                    note.author_role === 'underwriting' ? "bg-slate-100 text-slate-600" : "bg-emerald-100 text-emerald-700"
+                                                )}>
+                                                    {note.author_name}
+                                                </span>
+                                                <span className="text-[9px] font-bold text-slate-400">
+                                                    {format(new Date(note.created_at), 'MMM d, h:mm a')}
+                                                </span>
+                                            </div>
+                                            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                                                <p className="text-xs text-slate-700 font-medium whitespace-pre-wrap">{note.content}</p>
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+
+                            {/* Add Note Input */}
+                            <div className="shrink-0 space-y-2 pt-4 border-t border-slate-100">
+                                <Textarea
+                                    placeholder="Type a note..."
+                                    className="min-h-[80px] rounded-2xl border-slate-200 text-xs focus:ring-emerald-500"
+                                    value={new_standalone_note}
+                                    onChange={(e) => set_new_standalone_note(e.target.value)}
+                                />
+                                <Button
+                                    className="w-full h-10 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-black uppercase tracking-widest text-[10px]"
+                                    onClick={handleAddNote}
+                                    disabled={is_adding_note || !new_standalone_note.trim()}
+                                >
+                                    {is_adding_note ? <Loader2 className="w-4 h-4 animate-spin" /> : "Post Note"}
+                                </Button>
                             </div>
                         </CardContent>
                     </Card>
