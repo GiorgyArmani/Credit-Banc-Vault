@@ -29,7 +29,8 @@ import {
     UploadCloud,
     CheckCircle,
     ShieldCheck,
-    UserCog
+    UserCog,
+    Trash2
 } from "lucide-react";
 import {
     Dialog,
@@ -48,7 +49,7 @@ import {
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { requestDocuments } from "./actions";
+import { requestDocuments, deleteClientFile, deleteClientVault } from "./actions";
 import { fetchInternalNotes, addInternalNote } from "@/app/actions/internal-notes";
 import { toast } from "sonner";
 import clsx from "clsx";
@@ -201,6 +202,15 @@ export default function AdvisorClientDetailsPage() {
 
     // Edit Profile state
     const [is_edit_modal_open, set_is_edit_modal_open] = useState(false);
+
+    // Delete File state
+    const [is_delete_file_modal_open, set_is_delete_file_modal_open] = useState(false);
+    const [file_to_delete, set_file_to_delete] = useState<UserDocument | null>(null);
+    const [is_deleting_file, set_is_deleting_file] = useState(false);
+
+    // Delete Vault state
+    const [is_delete_vault_modal_open, set_is_delete_vault_modal_open] = useState(false);
+    const [is_deleting_vault, set_is_deleting_vault] = useState(false);
 
     // ============================================
     // FETCH CLIENT DATA ON MOUNT
@@ -659,6 +669,46 @@ export default function AdvisorClientDetailsPage() {
         }
     }
 
+    async function handle_delete_file() {
+        if (!file_to_delete) return;
+
+        set_is_deleting_file(true);
+        try {
+            const result = await deleteClientFile(client_id, file_to_delete.id);
+            if (result.success) {
+                toast.success("File deleted successfully");
+                set_is_delete_file_modal_open(false);
+                set_file_to_delete(null);
+                fetch_client_details(); // Refresh documents
+            } else {
+                toast.error(result.error || "Failed to delete file");
+            }
+        } catch (err: any) {
+            console.error("❌ Delete file error:", err);
+            toast.error("An unexpected error occurred");
+        } finally {
+            set_is_deleting_file(false);
+        }
+    }
+
+    async function handle_delete_vault() {
+        set_is_deleting_vault(true);
+        try {
+            const result = await deleteClientVault(client_id);
+            if (result.success) {
+                toast.success("Client vault deleted successfully");
+                router.push("/advisor/dashboard/clients");
+            } else {
+                toast.error(result.error || "Failed to delete vault");
+            }
+        } catch (err: any) {
+            console.error("❌ Delete vault error:", err);
+            toast.error("An unexpected error occurred");
+        } finally {
+            set_is_deleting_vault(false);
+        }
+    }
+
     // ============================================
     // RENDER FUNCTIONS FOR DIFFERENT STATES
     // ============================================
@@ -757,14 +807,26 @@ export default function AdvisorClientDetailsPage() {
                             </div>
                         </div>
 
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => download_document(doc)}
-                            className="ml-4 flex-shrink-0"
-                        >
-                            <Download className="h-4 w-4" />
-                        </Button>
+                        <div className="flex items-center gap-2 ml-4 flex-shrink-0">
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => download_document(doc)}
+                            >
+                                <Download className="h-4 w-4" />
+                            </Button>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                    set_file_to_delete(doc);
+                                    set_is_delete_file_modal_open(true);
+                                }}
+                                className="text-red-500 hover:text-red-600 hover:bg-red-50"
+                            >
+                                <Trash2 className="h-4 w-4" />
+                            </Button>
+                        </div>
                     </div>
                 </CardContent>
             </Card>
@@ -889,8 +951,8 @@ export default function AdvisorClientDetailsPage() {
                                 </CardDescription>
                             </div>
 
-                            {/* Center-side actions: Edit Profile */}
-                            <div className="flex-1 px-8">
+                            {/* Center-side actions: Edit Profile & Delete Vault */}
+                            <div className="flex-1 px-8 flex items-center gap-3">
                                 <Button
                                     variant="outline"
                                     size="sm"
@@ -899,6 +961,15 @@ export default function AdvisorClientDetailsPage() {
                                 >
                                     <UserCog className="h-4 w-4 mr-2" />
                                     Edit Profile
+                                </Button>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => set_is_delete_vault_modal_open(true)}
+                                    className="border-red-500 text-red-600 hover:bg-red-50"
+                                >
+                                    <Trash2 className="h-4 w-4 mr-2" />
+                                    Delete Vault
                                 </Button>
                             </div>
 
@@ -1406,6 +1477,87 @@ export default function AdvisorClientDetailsPage() {
                         clientData={client_profile}
                     />
                 )}
+
+                {/* Delete File Confirmation Modal */}
+                <Dialog open={is_delete_file_modal_open} onOpenChange={set_is_delete_file_modal_open}>
+                    <DialogContent className="sm:max-w-md">
+                        <DialogHeader>
+                            <DialogTitle>Delete Document?</DialogTitle>
+                            <DialogDescription>
+                                Are you sure you want to delete <strong>{file_to_delete?.custom_label || file_to_delete?.name}</strong>?
+                                This action cannot be undone.
+                            </DialogDescription>
+                        </DialogHeader>
+                        <DialogFooter>
+                            <Button
+                                variant="ghost"
+                                onClick={() => {
+                                    set_is_delete_file_modal_open(false);
+                                    set_file_to_delete(null);
+                                }}
+                                disabled={is_deleting_file}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                onClick={handle_delete_file}
+                                disabled={is_deleting_file}
+                                className="bg-red-600 hover:bg-red-700 text-white"
+                            >
+                                {is_deleting_file ? (
+                                    <>
+                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                        Deleting...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Trash2 className="h-4 w-4 mr-2" />
+                                        Yes, Delete
+                                    </>
+                                )}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+
+                {/* Delete Vault Confirmation Modal */}
+                <Dialog open={is_delete_vault_modal_open} onOpenChange={set_is_delete_vault_modal_open}>
+                    <DialogContent className="sm:max-w-md">
+                        <DialogHeader>
+                            <DialogTitle className="text-red-600">Permanently Delete Vault?</DialogTitle>
+                            <DialogDescription>
+                                This will permanently delete <strong>{client_profile.client_name}</strong>'s data vault, including all uploaded documents and profile information.
+                                This action is <strong>irreversible</strong>.
+                            </DialogDescription>
+                        </DialogHeader>
+                        <DialogFooter>
+                            <Button
+                                variant="ghost"
+                                onClick={() => set_is_delete_vault_modal_open(false)}
+                                disabled={is_deleting_vault}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                onClick={handle_delete_vault}
+                                disabled={is_deleting_vault}
+                                className="bg-red-600 hover:bg-red-700 text-white"
+                            >
+                                {is_deleting_vault ? (
+                                    <>
+                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                        Deleting Vault...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Trash2 className="h-4 w-4 mr-2" />
+                                        Permanently Delete
+                                    </>
+                                )}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
             </div>
         );
     }
