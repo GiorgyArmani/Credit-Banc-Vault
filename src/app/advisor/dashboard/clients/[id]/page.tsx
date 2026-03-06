@@ -30,7 +30,8 @@ import {
     CheckCircle,
     ShieldCheck,
     UserCog,
-    Trash2
+    Trash2,
+    X
 } from "lucide-react";
 import {
     Dialog,
@@ -49,7 +50,7 @@ import {
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { requestDocuments, deleteClientFile, deleteClientVault } from "./actions";
+import { requestDocuments, deleteClientFile, deleteClientVault, removeRequestedDocument } from "./actions";
 import { fetchInternalNotes, addInternalNote } from "@/app/actions/internal-notes";
 import { toast } from "sonner";
 import clsx from "clsx";
@@ -211,6 +212,11 @@ export default function AdvisorClientDetailsPage() {
     // Delete Vault state
     const [is_delete_vault_modal_open, set_is_delete_vault_modal_open] = useState(false);
     const [is_deleting_vault, set_is_deleting_vault] = useState(false);
+
+    // Remove Request state
+    const [is_remove_request_modal_open, set_is_remove_request_modal_open] = useState(false);
+    const [doc_to_remove_request, set_doc_to_remove_request] = useState<{ code: string; label: string } | null>(null);
+    const [is_removing_request, set_is_removing_request] = useState(false);
 
     // ============================================
     // FETCH CLIENT DATA ON MOUNT
@@ -709,6 +715,28 @@ export default function AdvisorClientDetailsPage() {
         }
     }
 
+    async function handle_remove_request() {
+        if (!doc_to_remove_request) return;
+
+        set_is_removing_request(true);
+        try {
+            const result = await removeRequestedDocument(client_id, doc_to_remove_request.code);
+            if (result.success) {
+                toast.success(`Request for ${doc_to_remove_request.label} removed`);
+                set_is_remove_request_modal_open(false);
+                set_doc_to_remove_request(null);
+                fetch_client_details(); // Refresh requirements
+            } else {
+                toast.error(result.error || "Failed to remove request");
+            }
+        } catch (err: any) {
+            console.error("❌ Remove request error:", err);
+            toast.error("An unexpected error occurred");
+        } finally {
+            set_is_removing_request(false);
+        }
+    }
+
     // ============================================
     // RENDER FUNCTIONS FOR DIFFERENT STATES
     // ============================================
@@ -895,6 +923,23 @@ export default function AdvisorClientDetailsPage() {
                         >
                             {has_docs ? "Complete" : "Pending"}
                         </Badge>
+
+                        {/* Remove Requested Document button (only if no files uploaded and it's a dynamic req) */}
+                        {!has_docs && (
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    set_doc_to_remove_request(doc_type);
+                                    set_is_remove_request_modal_open(true);
+                                }}
+                                className="h-8 w-8 p-0 text-gray-400 hover:text-red-500 hover:bg-red-50"
+                                title="Remove Request"
+                            >
+                                <X className="h-4 w-4" />
+                            </Button>
+                        )}
                     </div>
                 </div>
 
@@ -1553,6 +1598,45 @@ export default function AdvisorClientDetailsPage() {
                                         <Trash2 className="h-4 w-4 mr-2" />
                                         Permanently Delete
                                     </>
+                                )}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+
+                {/* Remove Request Confirmation Modal */}
+                <Dialog open={is_remove_request_modal_open} onOpenChange={set_is_remove_request_modal_open}>
+                    <DialogContent className="sm:max-w-md">
+                        <DialogHeader>
+                            <DialogTitle>Remove Document Request?</DialogTitle>
+                            <DialogDescription>
+                                Are you sure you want to remove the request for <strong>{doc_to_remove_request?.label}</strong>?
+                                The client will no longer see this as a required document.
+                            </DialogDescription>
+                        </DialogHeader>
+                        <DialogFooter>
+                            <Button
+                                variant="ghost"
+                                onClick={() => {
+                                    set_is_remove_request_modal_open(false);
+                                    set_doc_to_remove_request(null);
+                                }}
+                                disabled={is_removing_request}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                onClick={handle_remove_request}
+                                disabled={is_removing_request}
+                                className="bg-red-600 hover:bg-red-700 text-white"
+                            >
+                                {is_removing_request ? (
+                                    <>
+                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                        Removing...
+                                    </>
+                                ) : (
+                                    "Remove Request"
                                 )}
                             </Button>
                         </DialogFooter>

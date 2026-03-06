@@ -344,3 +344,65 @@ export async function deleteClientVault(clientId: string) {
         return { success: false, error: error.message || "An unexpected error occurred" };
     }
 }
+
+/**
+ * removeRequestedDocument
+ * 
+ * Allows an advisor to remove a document request (dynamic document).
+ */
+export async function removeRequestedDocument(clientId: string, documentCode: string) {
+    try {
+        const supabase = await createClient();
+
+        // 1. Get authenticated advisor
+        const { data: { user: advisorUser } } = await supabase.auth.getUser();
+        if (!advisorUser) throw new Error("Unauthorized");
+
+        // 2. Verify advisor ownership
+        const { data: client, error: clientError } = await supabase
+            .from("client_data_vault")
+            .select("id, advisor_id, user_id")
+            .eq("id", clientId)
+            .single();
+
+        if (clientError || !client) throw new Error("Client not found");
+
+        const { data: advisorData } = await supabase
+            .from("advisors")
+            .select("id")
+            .eq("user_id", advisorUser.id)
+            .single();
+
+        if (!advisorData || client.advisor_id !== advisorData.id) {
+            throw new Error("Access denied: You do not own this client");
+        }
+
+        // 3. Get document ID from code
+        const { data: docDef, error: docDefError } = await supabase
+            .from("required_documents")
+            .select("id")
+            .eq("code", documentCode)
+            .single();
+
+        if (docDefError || !docDef) throw new Error("Document type not found");
+
+        const supabaseAdmin = createAdminClient();
+
+        // 4. Delete from client_dynamic_documents
+        const { error: deleteError } = await supabaseAdmin
+            .from("client_dynamic_documents")
+            .delete()
+            .eq("user_id", client.user_id)
+            .eq("document_id", docDef.id);
+
+        if (deleteError) throw new Error(`Failed to remove document request: ${deleteError.message}`);
+
+        // 5. Revalidate
+        revalidatePath(`/advisor/dashboard/clients/${clientId}`);
+
+        return { success: true };
+    } catch (error: any) {
+        console.error("Exception in removeRequestedDocument:", error);
+        return { success: false, error: error.message || "An unexpected error occurred" };
+    }
+}
