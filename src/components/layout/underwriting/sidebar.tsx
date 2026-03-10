@@ -13,6 +13,8 @@ import {
     ChevronsLeft,
     ChevronsRight,
     ShieldCheck,
+    BarChart3 as ChartBarIcon,
+    Search,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
@@ -50,7 +52,8 @@ export function Sidebar({
 
     const navItems = [
         { label: 'Review Queue', href: '/underwriting/dashboard', icon: LayoutDashboard },
-        // Future additions could go here
+        { label: 'Bank Analysis', href: '/underwriting/bank-analysis', icon: ChartBarIcon },
+        { label: 'Lender Match', href: '/underwriting/lender-match', icon: Search },
     ]
 
     const desktopWidth = collapsed ? 'md:w-20' : 'md:w-72'

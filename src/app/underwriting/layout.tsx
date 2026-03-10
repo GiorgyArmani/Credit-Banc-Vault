@@ -28,6 +28,8 @@ export default function UnderwritingLayout({ children }: { children: React.React
     const currentTitle = useMemo(() => {
         const map: Record<string, string> = {
             '/underwriting/dashboard': 'Review Queue',
+            '/underwriting/bank-analysis': 'Bank Analysis',
+            '/underwriting/lender-match': 'Lender Match',
         }
         const key = Object.keys(map).find(k => pathname?.startsWith(k))
         return key ? map[key] : 'Underwriting'
