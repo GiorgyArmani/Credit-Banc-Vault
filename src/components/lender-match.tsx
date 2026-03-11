@@ -16,8 +16,9 @@
  * State and Industry can also be pre-populated from the deal or edited inline.
  */
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import type { DealSummary } from "./bank-analysis";
+import { createClient } from "@/lib/supabase/client";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -55,68 +56,6 @@ interface MatchResult {
   warnings: string[];
 }
 
-// ─── Lender Data ─────────────────────────────────────────────────────────────
-
-const LENDER_DATA: Lender[] = [
-  { "lender_name": "360 Equipment Financing", "specialty": "Equipment", "min_fico": null, "min_sbss": null, "time_in_business_months": null, "negative_days": null, "monthly_deposits": null, "avg_monthly_revenue": null, "avg_daily_balance": null, "preferred_industries": "CONSTRUCTION/YELLOW IRON\nLOCAL TRANSPORTATION\nMANUFACTURING\nMEDICAL\nAUTO REPAIR\nPROFESSIONAL SERVICES\nLANDSCAPING/AGRICULTURE\nCAR HAULING\nWASTE MANAGEMENT", "restricted_industries": "Trucking, Logging", "restricted_industry_exceptions": null, "restricted_states": "AK, HI", "ownership_percentage": null, "number_of_positions": null, "bankruptcies": "No", "tax_liens_limit": 25000, "min_funding": null, "max_funding": null, "auto_decline_reasons": "Child support", "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "4 Hour Funding", "specialty": "Equipment", "min_fico": 600, "min_sbss": null, "time_in_business_months": 18, "negative_days": null, "monthly_deposits": null, "avg_monthly_revenue": null, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": "Adult Entertainment, Aircraft, Amusement Rides/Games, ATM Machines, Cannabis Related, Logging Equipment, Trucking/Logistics, Vending Machines", "restricted_industry_exceptions": null, "restricted_states": null, "ownership_percentage": null, "number_of_positions": null, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": "No mail stops, home based business", "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "Alliance Funding Group", "specialty": "Equipment", "min_fico": 600, "min_sbss": 0, "time_in_business_months": 48, "negative_days": null, "monthly_deposits": null, "avg_monthly_revenue": null, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": "Law Offices, Accounting, Adult Entertainment, Cannabis-Related, Financial Services, Gaming, Online Retailers, Trucking Owner Operators OTR", "restricted_industry_exceptions": null, "restricted_states": null, "ownership_percentage": null, "number_of_positions": null, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "ALT Funding", "specialty": "MCA", "min_fico": null, "min_sbss": null, "time_in_business_months": null, "negative_days": null, "monthly_deposits": null, "avg_monthly_revenue": null, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": null, "restricted_industry_exceptions": null, "restricted_states": "CA, NY", "ownership_percentage": null, "number_of_positions": 2, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "Always Bank", "specialty": "SBA", "min_fico": 650, "min_sbss": 155, "time_in_business_months": null, "negative_days": null, "monthly_deposits": null, "avg_monthly_revenue": null, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": null, "restricted_industry_exceptions": null, "restricted_states": null, "ownership_percentage": null, "number_of_positions": null, "bankruptcies": null, "tax_liens_limit": null, "min_funding": 150000, "max_funding": 500000, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "BC Providers", "specialty": "MCA", "min_fico": 550, "min_sbss": null, "time_in_business_months": null, "negative_days": null, "monthly_deposits": null, "avg_monthly_revenue": 20000, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": "Transportation", "restricted_industry_exceptions": null, "restricted_states": "CA", "ownership_percentage": null, "number_of_positions": null, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "BHB Funding", "specialty": "MCA", "min_fico": 560, "min_sbss": null, "time_in_business_months": 12, "negative_days": 3, "monthly_deposits": 4, "avg_monthly_revenue": null, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": "Attorneys / Law Firms Adult Entertainment Gambling Establishments Schools Non-Profits Pawn Shops Mortgage Brokers Auto Sales Car Rental", "restricted_industry_exceptions": null, "restricted_states": "CA, UT", "ownership_percentage": null, "number_of_positions": null, "bankruptcies": null, "tax_liens_limit": null, "min_funding": 5000, "max_funding": 250000, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "Bitty", "specialty": "MCA", "min_fico": 500, "min_sbss": null, "time_in_business_months": 6, "negative_days": 7, "monthly_deposits": null, "avg_monthly_revenue": 5000, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": "Accommodation Arts Entertainment Auto Dealer Bail Bonds Non-Profits Money Service Businesses", "restricted_industry_exceptions": null, "restricted_states": null, "ownership_percentage": null, "number_of_positions": null, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "Biz2Credit", "specialty": "MCA", "min_fico": 600, "min_sbss": null, "time_in_business_months": 24, "negative_days": null, "monthly_deposits": null, "avg_monthly_revenue": 50000, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": "general contractors, trucking, cannabis, real estate", "restricted_industry_exceptions": null, "restricted_states": null, "ownership_percentage": null, "number_of_positions": 1, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "Biz2Credit", "specialty": "Term Loan", "min_fico": 700, "min_sbss": null, "time_in_business_months": 24, "negative_days": 0, "monthly_deposits": 9, "avg_monthly_revenue": 45000, "avg_daily_balance": 3000, "preferred_industries": null, "restricted_industries": "Cannabis, Check Cashing, Credit Repair, Collections Agencies, ATM Machines", "restricted_industry_exceptions": null, "restricted_states": null, "ownership_percentage": null, "number_of_positions": 1, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": "2 last years of tax return must show profit" },
-  { "lender_name": "BizPoint Capital", "specialty": "MCA", "min_fico": 500, "min_sbss": null, "time_in_business_months": 9, "negative_days": null, "monthly_deposits": 5, "avg_monthly_revenue": null, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": null, "restricted_industry_exceptions": null, "restricted_states": null, "ownership_percentage": null, "number_of_positions": 1, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "Boom Funded", "specialty": "MCA", "min_fico": 500, "min_sbss": null, "time_in_business_months": 24, "negative_days": null, "monthly_deposits": null, "avg_monthly_revenue": 70000, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": null, "restricted_industry_exceptions": null, "restricted_states": null, "ownership_percentage": null, "number_of_positions": 2, "bankruptcies": null, "tax_liens_limit": null, "min_funding": 35000, "max_funding": 2000000, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "CAN Capital", "specialty": "MCA", "min_fico": 600, "min_sbss": null, "time_in_business_months": 36, "negative_days": null, "monthly_deposits": 3, "avg_monthly_revenue": null, "avg_daily_balance": null, "preferred_industries": "Medical, Manufacturing, Retail, Veterinary, Auto Repair, Eating & Drinking", "restricted_industries": "Cannabis, Auto Dealerships, Real Estate, Adult Entertainment, Transportation, Trucking, Non-Profit, Financial, Legal Services", "restricted_industry_exceptions": null, "restricted_states": null, "ownership_percentage": null, "number_of_positions": 0, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": 200000, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": "Daily and weekly", "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "CFG", "specialty": "MCA", "min_fico": 450, "min_sbss": null, "time_in_business_months": 6, "negative_days": 0, "monthly_deposits": null, "avg_monthly_revenue": 8000, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": "Pawn Shops, Bail Bonds, Bankruptcy Lawyers, Stockbrokers, Crypto, Used Auto, New Auto, Payday loan, Any company that loans money", "restricted_industry_exceptions": null, "restricted_states": "CA", "ownership_percentage": null, "number_of_positions": 3, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "Credibly", "specialty": "MCA", "min_fico": 550, "min_sbss": null, "time_in_business_months": 6, "negative_days": 7, "monthly_deposits": null, "avg_monthly_revenue": 25000, "avg_daily_balance": 1000, "preferred_industries": null, "restricted_industries": null, "restricted_industry_exceptions": null, "restricted_states": null, "ownership_percentage": null, "number_of_positions": null, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "East Shore", "specialty": "MCA", "min_fico": 500, "min_sbss": null, "time_in_business_months": 0, "negative_days": 7, "monthly_deposits": null, "avg_monthly_revenue": 10000, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": null, "restricted_industry_exceptions": null, "restricted_states": "CA, UT, VA, NY", "ownership_percentage": null, "number_of_positions": null, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "EFT", "specialty": "MCA", "min_fico": 480, "min_sbss": null, "time_in_business_months": 6, "negative_days": 3, "monthly_deposits": null, "avg_monthly_revenue": null, "avg_daily_balance": 1000, "preferred_industries": null, "restricted_industries": "Auto Sales, Gyms, Nightclubs, Bars, Movie Theaters, Restaurants, Travel, Trucking, Bail bonds, Gun shops, Farms", "restricted_industry_exceptions": null, "restricted_states": "CA, UT, VA", "ownership_percentage": null, "number_of_positions": 3, "bankruptcies": null, "tax_liens_limit": null, "min_funding": 15000, "max_funding": 25000, "auto_decline_reasons": "MCA default", "holdback_percentage": null, "payment_type": "Daily and Weekly", "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "Essential Funding", "specialty": "MCA", "min_fico": 0, "min_sbss": null, "time_in_business_months": 12, "negative_days": 6, "monthly_deposits": 3, "avg_monthly_revenue": null, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": "Casinos, Collection agencies, Ammunition, Law Firms, Sales Organizations, Travel Agencies, Adult Entertainment, Cannabis, Bail Bonds, Real Estate", "restricted_industry_exceptions": "Trucking, transportation, construction, car sales", "restricted_states": "NY, UT, CA, PR", "ownership_percentage": null, "number_of_positions": 3, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "Everest", "specialty": "MCA", "min_fico": 550, "min_sbss": null, "time_in_business_months": 3, "negative_days": 5, "monthly_deposits": null, "avg_monthly_revenue": 5000, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": "Financial, Auto Sales, Attorneys", "restricted_industry_exceptions": null, "restricted_states": null, "ownership_percentage": null, "number_of_positions": 2, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "FastCapital", "specialty": "MCA", "min_fico": null, "min_sbss": null, "time_in_business_months": 12, "negative_days": null, "monthly_deposits": null, "avg_monthly_revenue": null, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": null, "restricted_industry_exceptions": null, "restricted_states": null, "ownership_percentage": null, "number_of_positions": 2, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": 1, "additional_info": null },
-  { "lender_name": "FMS Advance", "specialty": "MCA", "min_fico": 500, "min_sbss": null, "time_in_business_months": 12, "negative_days": 5, "monthly_deposits": null, "avg_monthly_revenue": null, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": "Law Firms, Collection Agencies, Mortgage Companies, Real Estate, Financial institutions, Nonprofit, Auto Sales", "restricted_industry_exceptions": null, "restricted_states": "ND, CA, VA, HI, PR", "ownership_percentage": null, "number_of_positions": 2, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": 750000, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "Forward Financing", "specialty": "MCA", "min_fico": 500, "min_sbss": null, "time_in_business_months": 12, "negative_days": 5, "monthly_deposits": null, "avg_monthly_revenue": 10000, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": "Adult entertainment, Auto sales, Cannabis, Non-profit, Drug paraphernalia, Firearms, Lending or financing firms, Debt collection, Real estate investment, Check cashing", "restricted_industry_exceptions": null, "restricted_states": null, "ownership_percentage": null, "number_of_positions": 0, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "Fox", "specialty": "MCA", "min_fico": 600, "min_sbss": null, "time_in_business_months": 6, "negative_days": 7, "monthly_deposits": null, "avg_monthly_revenue": 100000, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": "Debt collectors, credit counselors, trucking, non-profits, law firms", "restricted_industry_exceptions": null, "restricted_states": null, "ownership_percentage": null, "number_of_positions": 3, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "Funding Metrics", "specialty": "MCA", "min_fico": 0, "min_sbss": null, "time_in_business_months": null, "negative_days": null, "monthly_deposits": null, "avg_monthly_revenue": null, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": null, "restricted_industry_exceptions": null, "restricted_states": null, "ownership_percentage": null, "number_of_positions": 3, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "Fundkite", "specialty": "MCA", "min_fico": 600, "min_sbss": null, "time_in_business_months": 12, "negative_days": 5, "monthly_deposits": null, "avg_monthly_revenue": null, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": "Banks, Credit Unions, Money Services, Bail Bonding, Factoring, Financial Transaction Processing, Credit Protection, Collection Agencies, Churches", "restricted_industry_exceptions": null, "restricted_states": "CA", "ownership_percentage": null, "number_of_positions": 2, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "Fundr", "specialty": "MCA", "min_fico": 500, "min_sbss": null, "time_in_business_months": null, "negative_days": null, "monthly_deposits": null, "avg_monthly_revenue": 15000, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": "Casinos, holding companies, RE, Non-profits, check cashing, attorneys, automobile dealers", "restricted_industry_exceptions": null, "restricted_states": null, "ownership_percentage": null, "number_of_positions": 3, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "GM Funding", "specialty": "MCA", "min_fico": 660, "min_sbss": null, "time_in_business_months": 3, "negative_days": 2, "monthly_deposits": 5, "avg_monthly_revenue": 15000, "avg_daily_balance": 1000, "preferred_industries": null, "restricted_industries": "Farming, New home construction, Used cars, Real estate, Travel agencies, Gun stores, Banking, Cannabis", "restricted_industry_exceptions": null, "restricted_states": null, "ownership_percentage": 0.5, "number_of_positions": 4, "bankruptcies": "No", "tax_liens_limit": "Over 100k must be on a payment plan", "min_funding": 50000, "max_funding": 150000, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "IBF", "specialty": "SBA", "min_fico": 640, "min_sbss": 165, "time_in_business_months": null, "negative_days": null, "monthly_deposits": null, "avg_monthly_revenue": null, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": null, "restricted_industry_exceptions": null, "restricted_states": null, "ownership_percentage": null, "number_of_positions": 2, "bankruptcies": null, "tax_liens_limit": null, "min_funding": 15000, "max_funding": 50000, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": "Monthly", "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "IDEA", "specialty": "LOC", "min_fico": 660, "min_sbss": 0, "time_in_business_months": 36, "negative_days": 3, "monthly_deposits": 8, "avg_monthly_revenue": 15000, "avg_daily_balance": 5000, "preferred_industries": null, "restricted_industries": "No sole proprietorships or non-profits", "restricted_industry_exceptions": null, "restricted_states": "VT, SD, ND", "ownership_percentage": 0.5, "number_of_positions": 2, "bankruptcies": "No", "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": "No sole proprietorships or non-profits", "holdback_percentage": null, "payment_type": "Weekly", "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "JW Capital", "specialty": "MCA", "min_fico": 0, "min_sbss": null, "time_in_business_months": 12, "negative_days": 0, "monthly_deposits": null, "avg_monthly_revenue": 50000, "avg_daily_balance": null, "preferred_industries": "trucking, commercial construction, healthcare", "restricted_industries": "Auto", "restricted_industry_exceptions": null, "restricted_states": null, "ownership_percentage": null, "number_of_positions": 2, "bankruptcies": "yes", "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": "Doesn't fund 1st position" },
-  { "lender_name": "Kalamata", "specialty": "MCA", "min_fico": 600, "min_sbss": null, "time_in_business_months": 12, "negative_days": 5, "monthly_deposits": null, "avg_monthly_revenue": null, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": "Insurance, Property Management, Staffing, Home Based Businesses, Construction, Adult Entertainment, Gas Stations, Marijuana, Guns, Legal Services, Non-Profit, Pawn Shops, Auto Sales, Transportation, Real Estate", "restricted_industry_exceptions": null, "restricted_states": null, "ownership_percentage": null, "number_of_positions": 0, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "LCF", "specialty": "MCA", "min_fico": 0, "min_sbss": null, "time_in_business_months": 3, "negative_days": 4, "monthly_deposits": null, "avg_monthly_revenue": null, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": null, "restricted_industry_exceptions": null, "restricted_states": null, "ownership_percentage": null, "number_of_positions": 0, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "Lendini", "specialty": "MCA", "min_fico": 500, "min_sbss": null, "time_in_business_months": 8, "negative_days": 6, "monthly_deposits": null, "avg_monthly_revenue": 5000, "avg_daily_balance": 500, "preferred_industries": null, "restricted_industries": "Attorneys, Auto Sales, Check Cashing, Collection Agency, Credit Repair, Crypto, Real Estate, Transportation, Gun Dealers, Insurance, Marijuana, Non-Profit", "restricted_industry_exceptions": null, "restricted_states": null, "ownership_percentage": null, "number_of_positions": 2, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "LG Funding", "specialty": "MCA", "min_fico": 0, "min_sbss": null, "time_in_business_months": null, "negative_days": null, "monthly_deposits": null, "avg_monthly_revenue": null, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": "Trucking", "restricted_industry_exceptions": null, "restricted_states": null, "ownership_percentage": null, "number_of_positions": 1, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "Libertas", "specialty": "MCA", "min_fico": 650, "min_sbss": null, "time_in_business_months": 48, "negative_days": 5, "monthly_deposits": 8, "avg_monthly_revenue": 150000, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": "Trucking, Auto, Finance, Mortgage brokers, cash businesses", "restricted_industry_exceptions": null, "restricted_states": null, "ownership_percentage": null, "number_of_positions": 0, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "Liquidibee", "specialty": "MCA", "min_fico": 525, "min_sbss": null, "time_in_business_months": null, "negative_days": 5, "monthly_deposits": null, "avg_monthly_revenue": 25000, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": null, "restricted_industry_exceptions": null, "restricted_states": null, "ownership_percentage": 0.51, "number_of_positions": 0, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": 500000, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "Maverick Funding", "specialty": "MCA", "min_fico": 540, "min_sbss": null, "time_in_business_months": 9, "negative_days": null, "monthly_deposits": 5, "avg_monthly_revenue": 60000, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": "Trucking, Transportation", "restricted_industry_exceptions": null, "restricted_states": "PR, HI", "ownership_percentage": null, "number_of_positions": 4, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "Mint", "specialty": "MCA", "min_fico": 0, "min_sbss": null, "time_in_business_months": 9, "negative_days": 5, "monthly_deposits": 3, "avg_monthly_revenue": 25000, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": "Financial Services, Law Firms, Auto Sales, Real Estate, Non-Profit, Cannabis, Solar, Staffing", "restricted_industry_exceptions": null, "restricted_states": null, "ownership_percentage": null, "number_of_positions": null, "bankruptcies": null, "tax_liens_limit": null, "min_funding": 5000, "max_funding": 2500000, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": "Weekly", "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "MNR", "specialty": "MCA", "min_fico": 550, "min_sbss": null, "time_in_business_months": 14, "negative_days": 6, "monthly_deposits": 7, "avg_monthly_revenue": null, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": "Auto Sales, Brokerages, Check Cashing, Adult Entertainment, Lawyers and Legal offices", "restricted_industry_exceptions": null, "restricted_states": null, "ownership_percentage": null, "number_of_positions": null, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": 500000, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "Nebula", "specialty": "MCA", "min_fico": 620, "min_sbss": null, "time_in_business_months": 12, "negative_days": 3, "monthly_deposits": null, "avg_monthly_revenue": 45000, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": "Gaming, Non-Profits, Day Trading, Mortgage Brokers, Check Cashing, Adult Entertainment, Collection Agencies", "restricted_industry_exceptions": null, "restricted_states": null, "ownership_percentage": null, "number_of_positions": null, "bankruptcies": null, "tax_liens_limit": null, "min_funding": 10000, "max_funding": 5000000, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "NewCo", "specialty": "MCA", "min_fico": 550, "min_sbss": null, "time_in_business_months": 12, "negative_days": 5, "monthly_deposits": 4, "avg_monthly_revenue": null, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": null, "restricted_industry_exceptions": null, "restricted_states": null, "ownership_percentage": null, "number_of_positions": 3, "bankruptcies": null, "tax_liens_limit": null, "min_funding": 10000, "max_funding": 750000, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": "Daily, Weekly", "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "Newity", "specialty": "SBA", "min_fico": 660, "min_sbss": 165, "time_in_business_months": null, "negative_days": null, "monthly_deposits": null, "avg_monthly_revenue": null, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": "RE", "restricted_industry_exceptions": null, "restricted_states": "PR", "ownership_percentage": null, "number_of_positions": null, "bankruptcies": null, "tax_liens_limit": "No", "min_funding": null, "max_funding": 500000, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "PDM Capital", "specialty": "MCA", "min_fico": 500, "min_sbss": null, "time_in_business_months": 8, "negative_days": null, "monthly_deposits": 3, "avg_monthly_revenue": 30000, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": null, "restricted_industry_exceptions": null, "restricted_states": null, "ownership_percentage": null, "number_of_positions": 3, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "QFS", "specialty": "Reverse consolidation", "min_fico": 500, "min_sbss": 0, "time_in_business_months": 12, "negative_days": 5, "monthly_deposits": null, "avg_monthly_revenue": null, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": null, "restricted_industry_exceptions": null, "restricted_states": "CA", "ownership_percentage": null, "number_of_positions": 1, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "Rapid Finance", "specialty": "MCA", "min_fico": 600, "min_sbss": null, "time_in_business_months": 36, "negative_days": 0, "monthly_deposits": null, "avg_monthly_revenue": 10000, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": "Adult Entertainment, Auto Dealers, Bail Bonds, Law Firms, Marijuana, Casinos, Non-Profit, Real Estate Investors, Vape Shops", "restricted_industry_exceptions": "Gas Stations, Insurance Agencies, Property Management, Staffing Companies", "restricted_states": "NJ, MT, NV, RI, VT", "ownership_percentage": null, "number_of_positions": 2, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "Revenued", "specialty": "MCA", "min_fico": 400, "min_sbss": null, "time_in_business_months": 6, "negative_days": 3, "monthly_deposits": null, "avg_monthly_revenue": null, "avg_daily_balance": 1000, "preferred_industries": null, "restricted_industries": "Transportation, Used Car Sales, Sole Proprietorships", "restricted_industry_exceptions": null, "restricted_states": null, "ownership_percentage": null, "number_of_positions": 2, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "Skyinance", "specialty": "MCA", "min_fico": 0, "min_sbss": null, "time_in_business_months": null, "negative_days": 0, "monthly_deposits": null, "avg_monthly_revenue": null, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": "Auto Sales, check cashing, bail bonds, Financial Services", "restricted_industry_exceptions": null, "restricted_states": "CA, VA, UT", "ownership_percentage": null, "number_of_positions": 3, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "The Fundworks", "specialty": "MCA", "min_fico": 550, "min_sbss": null, "time_in_business_months": 12, "negative_days": 8, "monthly_deposits": 4, "avg_monthly_revenue": 10000, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": "Adult Entertainment, Attorneys, Bail Bonds, Collection, Marijuana, Real Estate Investment, Trucking, Used Auto Dealerships", "restricted_industry_exceptions": "New Automobile Dealerships, Construction, Gas Stations, Import/Export", "restricted_states": null, "ownership_percentage": null, "number_of_positions": 0, "bankruptcies": null, "tax_liens_limit": null, "min_funding": 10000, "max_funding": null, "auto_decline_reasons": "Criminal record of fraud, Manipulated documents, Judgments from other funding companies", "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "TVT Capital", "specialty": "MCA", "min_fico": null, "min_sbss": null, "time_in_business_months": null, "negative_days": 0, "monthly_deposits": null, "avg_monthly_revenue": 75000, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": "No start ups", "restricted_industry_exceptions": null, "restricted_states": null, "ownership_percentage": null, "number_of_positions": 3, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "Vader", "specialty": "MCA", "min_fico": 500, "min_sbss": null, "time_in_business_months": 1, "negative_days": 7, "monthly_deposits": null, "avg_monthly_revenue": 4000, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": "Financial, Auto Sales, Attorneys", "restricted_industry_exceptions": null, "restricted_states": null, "ownership_percentage": null, "number_of_positions": 3, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "Vault", "specialty": "MCA", "min_fico": 500, "min_sbss": null, "time_in_business_months": 12, "negative_days": 6, "monthly_deposits": null, "avg_monthly_revenue": 30000, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": "auto sales, debt collection, Finance, entertainment companies", "restricted_industry_exceptions": null, "restricted_states": null, "ownership_percentage": null, "number_of_positions": 7, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "Velocity Capital Group", "specialty": "MCA", "min_fico": 550, "min_sbss": null, "time_in_business_months": 12, "negative_days": 2, "monthly_deposits": 3, "avg_monthly_revenue": 20000, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": "Construction 1st position, Bail Bonds, Gas Stations, Law Firms, Logistics, Trucking, Vehicle/Auto Dealer, Real Estate, Staffing, Vape Shops, Pawn Shops, Solar", "restricted_industry_exceptions": null, "restricted_states": null, "ownership_percentage": null, "number_of_positions": 4, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": "Less than 3 Monthly Deposits, Deposit Volume under $20K, Open Bankruptcies, Excessive NSFs, Fraudulent Documentation", "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "Vital Cap", "specialty": "MCA", "min_fico": 520, "min_sbss": null, "time_in_business_months": 12, "negative_days": 3, "monthly_deposits": 5, "avg_monthly_revenue": 20000, "avg_daily_balance": null, "preferred_industries": "Restaurants, Wholesalers, Liquor Stores, Retail, Medical, Manufacturers", "restricted_industries": "Financial Institutions, Collection agencies, Gas station, Used/new auto, Trucking", "restricted_industry_exceptions": null, "restricted_states": "VA, CA", "ownership_percentage": 0.6, "number_of_positions": 2, "bankruptcies": "Chapter 7 must be discharged, Chapter 13 must be discharged", "tax_liens_limit": "Personal up to 200k", "min_funding": null, "max_funding": null, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "Vox Funding", "specialty": "MCA", "min_fico": null, "min_sbss": null, "time_in_business_months": null, "negative_days": null, "monthly_deposits": null, "avg_monthly_revenue": 15000, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": "Adult Entertainment, Pawn Shop, Check Cashiers, Sole proprietors, Used Car Dealerships, Wire Transfer Companies", "restricted_industry_exceptions": "Trucking: $150,000 minimum", "restricted_states": null, "ownership_percentage": null, "number_of_positions": 3, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": 1500000, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": null, "consolidation_positions": null, "additional_info": null },
-  { "lender_name": "Wing Lake", "specialty": "Consolidation", "min_fico": null, "min_sbss": 0, "time_in_business_months": null, "negative_days": null, "monthly_deposits": null, "avg_monthly_revenue": 300000, "avg_daily_balance": null, "preferred_industries": null, "restricted_industries": "oil and gas", "restricted_industry_exceptions": null, "restricted_states": null, "ownership_percentage": null, "number_of_positions": 2, "bankruptcies": null, "tax_liens_limit": null, "min_funding": null, "max_funding": null, "auto_decline_reasons": null, "holdback_percentage": null, "payment_type": "Monthly", "consolidation_positions": null, "additional_info": null },
-];
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
 const fmt$ = (v: number) =>
   v === 0 ? "—" : "$" + v.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
@@ -131,6 +70,22 @@ const SPECIALTY_COLORS: Record<string, string> = {
   "Invoice Factoring": "bg-pink-900/40 text-pink-300 border-pink-700/40",
   Consolidation: "bg-indigo-900/40 text-indigo-300 border-indigo-700/40",
   "Reverse consolidation": "bg-teal-900/40 text-teal-300 border-teal-700/40",
+};
+
+const DEFAULT_DEAL: DealSummary = {
+  fico: 0,
+  tibMonths: 0,
+  avgRevenue: 0,
+  avgDailyBalance: 0,
+  totalNegDays: 0,
+  numOpenPositions: 0,
+  avgMonthlyDeposits: 0,
+  hasBankruptcy: false,
+  businessName: "",
+  ownerName: "",
+  capitalRequested: 0,
+  state: "",
+  industry: "",
 };
 
 // ─── Matching Engine ──────────────────────────────────────────────────────────
@@ -150,6 +105,9 @@ function matchLender(lender: Lender, deal: DealSummary): MatchResult {
 
   if (lender.negative_days !== null && deal.totalNegDays > 0 && deal.totalNegDays > lender.negative_days)
     flags.push(`Neg days ${deal.totalNegDays} > max ${lender.negative_days}`);
+
+  if (lender.monthly_deposits && deal.avgMonthlyDeposits > 0 && deal.avgMonthlyDeposits < lender.monthly_deposits)
+    flags.push(`Deposits ${deal.avgMonthlyDeposits} < min ${lender.monthly_deposits}`);
 
   if (lender.number_of_positions !== null && deal.numOpenPositions > 0 && deal.numOpenPositions > lender.number_of_positions)
     flags.push(`${deal.numOpenPositions} positions > max ${lender.number_of_positions}`);
@@ -193,50 +151,134 @@ function matchLender(lender: Lender, deal: DealSummary): MatchResult {
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
-interface LenderMatchProps {
-  /** Pass a DealSummary built from a completed BankAnalysis. */
-  deal: Partial<DealSummary>;
+export interface LenderMatchProps {
+  dealSummary?: Partial<DealSummary>;
+  state?: string;
+  industry?: string;
+}
+
+interface ClientOption {
+  id: string;
+  client_name: string;
+  company_name: string;
+  company_state: string;
+  industry: string;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function LenderMatch({ deal }: LenderMatchProps) {
-  // Allow inline override of state & industry in case they're not on the deal object yet
-  const [state, setState] = useState(deal.state ?? "");
-  const [industry, setIndustry] = useState(deal.industry ?? "");
+export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, state: propState = "", industry: propIndustry = "" }: LenderMatchProps) {
+  // Internal state for the "active" deal being matched
+  const [deal, setDeal] = useState<DealSummary>({ ...DEFAULT_DEAL, ...propDeal });
+  const [filterState, setFilterState] = useState(propState || propDeal.state || "");
+  const [filterIndustry, setFilterIndustry] = useState(propIndustry || propDeal.industry || "");
+  
+  const [clientList, setClientList] = useState<ClientOption[]>([]);
+  const [selectedClientId, setSelectedClientId] = useState<string>("");
+  const [isLoadingClient, setIsLoadingClient] = useState(false);
   const [specialtyFilter, setSpecialtyFilter] = useState("All");
   const [showPassedOnly, setShowPassedOnly] = useState(false);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
 
-  const resolvedDeal: DealSummary = {
-    businessName: deal.businessName ?? "",
-    ownerName: deal.ownerName ?? "",
-    fico: deal.fico ?? 0,
-    tibMonths: deal.tibMonths ?? 0,
-    avgRevenue: deal.avgRevenue ?? 0,
-    avgDailyBalance: deal.avgDailyBalance ?? 0,
-    totalNegDays: deal.totalNegDays ?? 0,
-    numOpenPositions: deal.numOpenPositions ?? 0,
-    hasBankruptcy: deal.hasBankruptcy ?? false,
-    capitalRequested: deal.capitalRequested ?? 0,
-    state,
-    industry,
-  };
+  // Sync state with props when dealSummary changes
+  useEffect(() => {
+    if (Object.keys(propDeal).length > 0) {
+      setDeal(prev => ({ ...prev, ...propDeal }));
+      if (propDeal.state) setFilterState(propDeal.state);
+      if (propDeal.industry) setFilterIndustry(propDeal.industry);
+    }
+  }, [propDeal]);
+
+  // Fetch clients for the selector
+  useEffect(() => {
+    const supabase = createClient();
+    supabase
+      .from("client_data_vault")
+      .select("id, client_name, company_name, company_state, industry")
+      .order("client_name", { ascending: true })
+      .then(({ data }) => {
+        if (data) setClientList(data as ClientOption[]);
+      });
+  }, []);
+
+  async function loadClientResults(clientId: string) {
+    if (!clientId) return;
+    setIsLoadingClient(true);
+    const supabase = createClient();
+    
+    // Get analysis results
+    const { data: analysis, error: aError } = await supabase
+      .from("bank_analysis_results")
+      .select("*")
+      .eq("client_id", clientId)
+      .single();
+
+    if (analysis && !aError) {
+      const client = clientList.find(c => c.id === clientId);
+      const newDeal: DealSummary = {
+        fico: analysis.fico || 0,
+        tibMonths: analysis.tib_months || 0,
+        avgRevenue: Number(analysis.avg_revenue) || 0,
+        avgDailyBalance: Number(analysis.avg_daily_balance) || 0,
+        totalNegDays: analysis.total_neg_days || 0,
+        numOpenPositions: analysis.num_open_positions || 0,
+        avgMonthlyDeposits: Number(analysis.avg_monthly_deposits) || 0,
+        hasBankruptcy: analysis.has_bankruptcy || false,
+        state: client?.company_state || "",
+        industry: client?.industry || "",
+        businessName: analysis.business_name || client?.company_name || "",
+        ownerName: analysis.owner_name || client?.client_name || "",
+        capitalRequested: Number(analysis.capital_requested) || 0,
+      };
+      
+      setDeal(newDeal);
+      setFilterState(newDeal.state || "");
+      setFilterIndustry(newDeal.industry || "");
+    } else {
+      // Fallback or alert if no analysis found
+      console.log("No saved analysis found for this client");
+    }
+    setIsLoadingClient(false);
+  }
+
+  const [lenderData, setLenderData] = useState<Lender[]>([]);
+  const [loadingLenders, setLoadingLenders] = useState(true);
+
+  // Load lenders from Supabase
+  useEffect(() => {
+    async function fetchLenders() {
+      setLoadingLenders(true);
+      const supabase = createClient();
+      const { data, error } = await supabase.from("lender_guidelines").select("*");
+      if (!error && data) {
+        // Deduplicate by name + specialty
+        const uniqueMap = new Map<string, Lender>();
+        (data as Lender[]).forEach((l) => {
+          const key = `${l.lender_name}-${l.specialty || ""}`;
+          // If we see it again, only keep it if the current one has more data or just keep first
+          if (!uniqueMap.has(key)) {
+            uniqueMap.set(key, l);
+          }
+        });
+        setLenderData(Array.from(uniqueMap.values()));
+      }
+      setLoadingLenders(false);
+    }
+    fetchLenders();
+  }, []);
 
   const results = useMemo(() =>
-    LENDER_DATA
-      .map((l) => matchLender(l, resolvedDeal))
+    lenderData
+      .map((l) => matchLender(l, deal))
       .sort((a, b) => {
         if (a.passed !== b.passed) return a.passed ? -1 : 1;
         return a.flags.length - b.flags.length;
       }),
-    [resolvedDeal.fico, resolvedDeal.tibMonths, resolvedDeal.avgRevenue, resolvedDeal.totalNegDays,
-    resolvedDeal.numOpenPositions, resolvedDeal.avgDailyBalance, resolvedDeal.capitalRequested,
-    resolvedDeal.hasBankruptcy, state, industry]
+    [deal, filterState, filterIndustry, lenderData]
   );
 
   const passed = results.filter((r) => r.passed);
-  const specialties = ["All", ...Array.from(new Set(LENDER_DATA.map((l) => l.specialty ?? "Unknown"))).sort()];
+  const specialties = ["All", ...Array.from(new Set(lenderData.map((l) => l.specialty ?? "Unknown"))).sort()];
 
   const filtered = results.filter((r) => {
     if (showPassedOnly && !r.passed) return false;
@@ -244,7 +286,7 @@ export default function LenderMatch({ deal }: LenderMatchProps) {
     return true;
   });
 
-  const dataEntered = resolvedDeal.fico > 0 || resolvedDeal.tibMonths > 0 || resolvedDeal.avgRevenue > 0 || state || industry;
+  const dataEntered = deal.fico || deal.tibMonths || deal.avgRevenue || filterState || filterIndustry;
 
   return (
     <div
@@ -256,11 +298,24 @@ export default function LenderMatch({ deal }: LenderMatchProps) {
         <div className="flex items-center justify-between flex-wrap gap-3 mb-3">
           <div>
             <div className="text-xs font-bold text-gray-500 uppercase tracking-widest">Lender Match</div>
-            {(resolvedDeal.businessName || resolvedDeal.ownerName) && (
-              <div className="text-sm font-semibold text-gray-100 mt-0.5">
-                {resolvedDeal.businessName || resolvedDeal.ownerName}
-              </div>
-            )}
+            <div className="flex items-center gap-3 mt-2">
+              <select
+                value={selectedClientId}
+                onChange={(e) => {
+                  setSelectedClientId(e.target.value);
+                  loadClientResults(e.target.value);
+                }}
+                className="bg-gray-950 border border-gray-700 rounded px-2 py-1.5 text-sm font-mono text-gray-100 focus:outline-none focus:border-blue-500 min-w-[240px]"
+              >
+                <option value="">Select Client Analysis...</option>
+                {clientList.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.company_name} ({c.client_name})
+                  </option>
+                ))}
+              </select>
+              {isLoadingClient && <span className="text-xs text-blue-400 animate-pulse">Loading...</span>}
+            </div>
           </div>
           {dataEntered && (
             <div className="flex items-center gap-4">
@@ -279,13 +334,14 @@ export default function LenderMatch({ deal }: LenderMatchProps) {
         {/* Deal summary pills */}
         <div className="flex flex-wrap gap-2">
           {[
-            { label: "FICO", value: resolvedDeal.fico > 0 ? String(resolvedDeal.fico) : null },
-            { label: "TIB", value: resolvedDeal.tibMonths > 0 ? `${resolvedDeal.tibMonths}mo` : null },
-            { label: "Avg Revenue", value: resolvedDeal.avgRevenue > 0 ? fmt$(resolvedDeal.avgRevenue) : null },
-            { label: "Neg Days", value: resolvedDeal.totalNegDays > 0 ? String(resolvedDeal.totalNegDays) : null },
-            { label: "Positions", value: resolvedDeal.numOpenPositions > 0 ? String(resolvedDeal.numOpenPositions) : null },
-            { label: "Requested", value: resolvedDeal.capitalRequested > 0 ? fmt$(resolvedDeal.capitalRequested) : null },
-            { label: "Bankruptcy", value: resolvedDeal.hasBankruptcy ? "Yes" : null },
+            { label: "FICO", value: deal.fico && deal.fico > 0 ? String(deal.fico) : null },
+            { label: "TIB", value: deal.tibMonths && deal.tibMonths > 0 ? `${deal.tibMonths}mo` : null },
+            { label: "Avg Revenue", value: deal.avgRevenue && deal.avgRevenue > 0 ? fmt$(deal.avgRevenue) : null },
+            { label: "Neg Days", value: deal.totalNegDays && deal.totalNegDays > 0 ? String(deal.totalNegDays) : null },
+            { label: "Positions", value: deal.numOpenPositions && deal.numOpenPositions > 0 ? String(deal.numOpenPositions) : null },
+            { label: "Deposits", value: deal.avgMonthlyDeposits && deal.avgMonthlyDeposits > 0 ? String(deal.avgMonthlyDeposits) : null },
+            { label: "Requested", value: deal.capitalRequested && deal.capitalRequested > 0 ? fmt$(deal.capitalRequested) : null },
+            { label: "Bankruptcy", value: deal.hasBankruptcy ? "Yes" : null },
           ].filter((p) => p.value !== null).map(({ label, value }) => (
             <div key={label} className="flex items-center gap-1.5 bg-gray-900 border border-gray-700 rounded-lg px-2.5 py-1">
               <span className="text-xs text-gray-500">{label}</span>
@@ -294,6 +350,10 @@ export default function LenderMatch({ deal }: LenderMatchProps) {
           ))}
         </div>
       </div>
+      
+      {loadingLenders && (
+        <div className="text-sm text-blue-400 font-mono animate-pulse">Loading lender guidelines...</div>
+      )}
 
       {/* Override inputs — state & industry */}
       <div className="rounded-xl border border-gray-700 p-4" style={{ background: "#161b22" }}>
@@ -303,8 +363,8 @@ export default function LenderMatch({ deal }: LenderMatchProps) {
             <label className="text-xs text-gray-500 uppercase tracking-wider block mb-1">Business State</label>
             <input
               type="text"
-              value={state}
-              onChange={(e) => setState(e.target.value.toUpperCase().slice(0, 2))}
+              value={filterState}
+              onChange={(e) => setFilterState(e.target.value.toUpperCase().slice(0, 2))}
               placeholder="FL"
               className="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5 text-sm font-mono text-gray-100 uppercase focus:outline-none focus:border-blue-500 transition-colors"
             />
@@ -313,8 +373,8 @@ export default function LenderMatch({ deal }: LenderMatchProps) {
             <label className="text-xs text-gray-500 uppercase tracking-wider block mb-1">Industry / Business Type</label>
             <input
               type="text"
-              value={industry}
-              onChange={(e) => setIndustry(e.target.value)}
+              value={filterIndustry}
+              onChange={(e) => setFilterIndustry(e.target.value)}
               placeholder="e.g. Restaurant, Trucking..."
               className="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5 text-sm font-mono text-gray-100 focus:outline-none focus:border-blue-500 transition-colors"
             />

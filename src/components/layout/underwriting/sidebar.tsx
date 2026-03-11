@@ -15,6 +15,7 @@ import {
     ShieldCheck,
     BarChart3 as ChartBarIcon,
     Search,
+    Database,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
@@ -54,6 +55,7 @@ export function Sidebar({
         { label: 'Review Queue', href: '/underwriting/dashboard', icon: LayoutDashboard },
         { label: 'Bank Analysis', href: '/underwriting/bank-analysis', icon: ChartBarIcon },
         { label: 'Lender Match', href: '/underwriting/lender-match', icon: Search },
+        { label: 'Lender Database', href: '/underwriting/lender-guidelines', icon: Database },
     ]
 
     const desktopWidth = collapsed ? 'md:w-20' : 'md:w-72'

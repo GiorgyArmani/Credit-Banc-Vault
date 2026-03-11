@@ -30,6 +30,7 @@ export default function UnderwritingLayout({ children }: { children: React.React
             '/underwriting/dashboard': 'Review Queue',
             '/underwriting/bank-analysis': 'Bank Analysis',
             '/underwriting/lender-match': 'Lender Match',
+            '/underwriting/lender-guidelines': 'Lender Guidelines',
         }
         const key = Object.keys(map).find(k => pathname?.startsWith(k))
         return key ? map[key] : 'Underwriting'

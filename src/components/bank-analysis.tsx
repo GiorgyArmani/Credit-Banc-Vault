@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import LenderMatch from "./lender-match";
+import { createClient } from "@/lib/supabase/client";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -11,7 +13,6 @@ interface MonthlyData {
   avgDailyBalance: string;
   numDeposits: string;
   negativeDays: string;
-  nsfs: string;
 }
 
 interface AccountData {
@@ -53,11 +54,12 @@ export interface DealSummary {
   tibMonths: number;          // from Q5, normalized to months
   avgRevenue: number;         // computed from bank statements
   avgDailyBalance: number;    // computed from bank statements
+  avgMonthlyDeposits: number; // computed from bank statements
   totalNegDays: number;       // summed across all accounts
   numOpenPositions: number;   // active positions count
   hasBankruptcy: boolean;     // from Q8
   capitalRequested: number;   // from Q3
-  state: string;              // must be passed in separately (2-letter)
+  state: string;              // 2-letter
   industry: string;           // from Q1
 }
 
@@ -71,13 +73,12 @@ const emptyMonthly = (): MonthlyData => ({
   avgDailyBalance: "",
   numDeposits: "",
   negativeDays: "0",
-  nsfs: "0",
 });
 
 const emptyAccount = (): AccountData => ({
   accountNumber: "",
   months: MONTHS.map(() => emptyMonthly()),
-  notes: ["", "", "", "", ""],
+  notes: ["", ""],
 });
 
 const emptyPosition = (): OpenPosition => ({
@@ -180,23 +181,33 @@ function AccountBlock({
   onChange,
   onRemove,
   canRemove,
+  activeMonthIndices = [1, 0, 11],
 }: {
   account: AccountData;
   index: number;
   onChange: (a: AccountData) => void;
   onRemove: () => void;
   canRemove: boolean;
+  activeMonthIndices?: number[];
 }) {
   const updateMonth = (mi: number, field: keyof MonthlyData, val: string) => {
-    const months = account.months.map((m, i) => (i === mi ? { ...m, [field]: val } : m));
+    let months = [...account.months];
+    months[mi] = { ...months[mi], [field]: val };
+
+    // Automatic balance carry-over: Ending Balance(M) -> Beginning Balance(M+1)
+    if (field === "endingBalance") {
+      const nextMi = (mi + 1) % 12;
+      months[nextMi] = { ...months[nextMi], beginningBalance: val };
+    }
+
     onChange({ ...account, months });
   };
 
-  const filledMonths = account.months.filter((m) => parseMoney(m.totalDeposits) > 0);
-  const avgDeposits = avgOfFilled(account.months.map((m) => m.totalDeposits));
-  const avgBalance = avgOfFilled(account.months.map((m) => m.avgDailyBalance));
-  const totalNSFs = account.months.reduce((a, m) => a + (parseInt(m.nsfs) || 0), 0);
-  const totalNegDays = account.months.reduce((a, m) => a + (parseInt(m.negativeDays) || 0), 0);
+  const activeMonths = activeMonthIndices.map(mi => account.months[mi]);
+  const filledMonths = activeMonths.filter((m) => parseMoney(m.totalDeposits) > 0);
+  const avgDeposits = avgOfFilled(activeMonths.map((m) => m.totalDeposits));
+  const avgBalance = avgOfFilled(activeMonths.map((m) => m.avgDailyBalance));
+  const totalNegDays = activeMonths.reduce((a, m) => a + (parseInt(m.negativeDays) || 0), 0);
 
   const ROWS: { key: keyof MonthlyData; label: string; isMoney: boolean }[] = [
     { key: "totalDeposits", label: "Total Deposits", isMoney: true },
@@ -205,7 +216,6 @@ function AccountBlock({
     { key: "avgDailyBalance", label: "Avg Daily Balance", isMoney: true },
     { key: "numDeposits", label: "# of Deposits", isMoney: false },
     { key: "negativeDays", label: "Negative Days", isMoney: false },
-    { key: "nsfs", label: "NSFs", isMoney: false },
   ];
 
   return (
@@ -227,7 +237,6 @@ function AccountBlock({
         <div className="hidden lg:flex items-center gap-6">
           <StatCell label="Avg Deposits" value={avgDeposits > 0 ? formatMoney(avgDeposits) : "—"} />
           <StatCell label="Avg Daily Bal" value={avgBalance > 0 ? formatMoney(avgBalance) : "—"} />
-          <StatCell label="Total NSFs" value={totalNSFs.toString()} />
           <StatCell label="Neg Days" value={totalNegDays.toString()} />
           <StatCell label="Months Filled" value={`${filledMonths.length}/12`} />
         </div>
@@ -249,9 +258,9 @@ function AccountBlock({
               <th className="text-left px-4 py-2 text-[#8b949e] font-medium w-36 sticky left-0 bg-[#161b22] z-10">
                 Field
               </th>
-              {MONTHS.map((m) => (
-                <th key={m} className="text-center px-2 py-2 text-[#8b949e] font-medium min-w-[100px]">
-                  {m.slice(0, 3)}
+              {activeMonthIndices.map((mi) => (
+                <th key={mi} className="text-center px-2 py-2 text-[#8b949e] font-medium min-w-[100px]">
+                  {MONTHS[mi].slice(0, 3)}
                 </th>
               ))}
               <th className="text-center px-3 py-2 text-[#388bfd] font-semibold min-w-[110px] bg-[#1c2128]">
@@ -261,7 +270,7 @@ function AccountBlock({
           </thead>
           <tbody>
             {ROWS.map((row, ri) => {
-              const vals = account.months.map((m) => m[row.key]);
+              const vals = activeMonthIndices.map((mi) => account.months[mi][row.key]);
               const avg = row.isMoney ? avgOfFilled(vals) : null;
               const total = !row.isMoney ? vals.reduce((a, v) => a + (parseInt(v) || 0), 0) : null;
 
@@ -274,15 +283,18 @@ function AccountBlock({
                     style={{ background: ri % 2 === 0 ? "#161b22" : "#13191f" }}>
                     {row.label}
                   </td>
-                  {account.months.map((m, mi) => (
-                    <td key={mi} className="px-1 py-1">
-                      <CurrencyInput
-                        value={m[row.key]}
-                        onChange={(v) => updateMonth(mi, row.key, v)}
-                        placeholder={row.isMoney ? "0" : "0"}
-                      />
-                    </td>
-                  ))}
+                  {activeMonthIndices.map((mi) => {
+                    const m = account.months[mi];
+                    return (
+                      <td key={mi} className="px-1 py-1">
+                        <CurrencyInput
+                          value={m[row.key]}
+                          onChange={(v) => updateMonth(mi, row.key, v)}
+                          placeholder={row.isMoney ? "0" : "0"}
+                        />
+                      </td>
+                    );
+                  })}
                   <td className="px-3 py-1 text-center bg-[#1c2128] font-mono font-semibold text-[#58a6ff]">
                     {row.isMoney
                       ? avg !== null && avg > 0 ? formatMoney(avg) : "—"
@@ -296,7 +308,7 @@ function AccountBlock({
       </div>
 
       {/* Notes */}
-      <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 p-4 border-t border-[#21262d] bg-[#13191f]">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 border-t border-[#21262d] bg-[#13191f]">
         {account.notes.map((note, ni) => (
           <div key={ni}>
             <label className="text-[10px] text-[#8b949e] uppercase tracking-wider block mb-1">Note {ni + 1}</label>
@@ -624,10 +636,38 @@ function ReverseConsolidation() {
   );
 }
 
+// (Duplicate interface removed)
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 // NOTE: Lender matching logic lives in LenderMatch.tsx — import separately.
 
+interface ClientOption {
+  id: string;
+  client_name: string;
+  company_name: string;
+  client_phone: string;
+  owner_1_name?: string;
+  owner_2_name?: string;
+  capital_requested: number;
+  credit_score: string;
+  business_start_date: string;
+  legal_entity_type: string;
+  num_owners?: string;
+  company_state?: string;
+  industry?: string;
+}
+
 export default function BankAnalysis() {
+  const supabase = createClient();
+
+  // ── Client loader state ───────────────────────────────────────────────────
+  const [clientList, setClientList] = useState<ClientOption[]>([]);
+  const [clientSearch, setClientSearch] = useState("");
+  const [selectedClientId, setSelectedClientId] = useState("");
+  const [loadedClientName, setLoadedClientName] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+
   const [businessName, setBusinessName] = useState("");
   const [ownerName, setOwnerName] = useState("");
   const [ownerName2, setOwnerName2] = useState("");
@@ -645,27 +685,191 @@ export default function BankAnalysis() {
     anyPositions: "", modifiedOrDefaulted: "", repName: "",
   });
 
+  const [hasBankruptcy, setHasBankruptcy] = useState(false);
+  const [hasZBL, setHasZBL] = useState(false);
+  const [capitalRequested, setCapitalRequested] = useState<number>(0);
+  const [state, setState] = useState("");
+  const [industry, setIndustry] = useState("");
+
   const [activeTab, setActiveTab] = useState<"analysis" | "positions" | "offers" | "recon">("analysis");
 
-  // Derived averages across all accounts
-  const allDepositMonths = accounts.flatMap((a) => a.months.map((m) => m.totalDeposits));
+  // ── Month range selector ────────────────────────────────────────────────
+  const [monthRange, setMonthRange] = useState<3 | 6 | 8 | 12>(3);
+
+  // Always count backwards from previous month
+  // e.g. current=March(2), previous=February(1), 3 months: [Dec(11), Jan(0), Feb(1)]
+  const prevMonthIdx = (new Date().getMonth() - 1 + 12) % 12;
+  const activeMonthIndices = Array.from({ length: monthRange }, (_, i) =>
+    (prevMonthIdx - monthRange + 1 + i + 12) % 12
+  );
+
+  // ── Fetch clients on mount ────────────────────────────────────────────────
+  useEffect(() => {
+    supabase
+      .from("client_data_vault")
+      .select("id, client_name, company_name, client_phone, owner_1_name, owner_2_name, capital_requested, credit_score, business_start_date, legal_entity_type, num_owners:number_of_owners, company_state, industry")
+      .order("client_name", { ascending: true })
+      .then(({ data }) => {
+        if (data) setClientList(data as ClientOption[]);
+      });
+  }, []);
+
+  // ── Compute TIB string or months from start date ───────────────────────────
+  function computeTIB(startDate: string): string {
+    if (!startDate) return "";
+    const start = new Date(startDate);
+    const now = new Date();
+    const totalMonths = (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
+    const years = Math.floor(totalMonths / 12);
+    const months = totalMonths % 12;
+    if (years === 0) return `${months} month${months !== 1 ? "s" : ""}`;
+    if (months === 0) return `${years} year${years !== 1 ? "s" : ""}`;
+    return `${years} year${years !== 1 ? "s" : ""} ${months} month${months !== 1 ? "s" : ""}`;
+  }
+
+  function computeTIBMonths(startDate: string): number {
+    if (!startDate) return 0;
+    const start = new Date(startDate);
+    const now = new Date();
+    return (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
+  }
+
+  // ── Load selected client into form ───────────────────────────────────────
+  async function loadClient() {
+    if (!selectedClientId) return;
+    setIsLoading(true);
+    const client = clientList.find(c => c.id === selectedClientId);
+    if (!client) { setIsLoading(false); return; }
+
+    setBusinessName(client.company_name || "");
+    setOwnerName(client.owner_1_name || client.client_name || "");
+    setOwnerName2(client.owner_2_name || "");
+    setPhone(client.client_phone || "");
+    setState(client.company_state || "");
+    setIndustry(client.industry || "");
+
+    setQuestions(q => ({
+      ...q,
+      businessType: client.legal_entity_type || "",
+      capitalRequested: client.capital_requested ? `$${client.capital_requested.toLocaleString()}` : "",
+      numOwners: client.num_owners || "",
+      timeInBusiness: computeTIB(client.business_start_date),
+      ficoScore: client.credit_score || "",
+    }));
+    setLoadedClientName(`${client.client_name} — ${client.company_name}`);
+
+    // Fetch state and industry from client_data_vault
+    const { data: profile } = await supabase
+      .from("client_data_vault")
+      .select("company_state, industry")
+      .eq("id", selectedClientId)
+      .single();
+
+    if (profile) {
+      setState(profile.company_state || "");
+      setIndustry(profile.industry || "");
+    }
+
+    // Attempt to fetch saved bank analysis state
+    const { data: analysis } = await supabase
+      .from("bank_analysis_results")
+      .select("*")
+      .eq("client_id", selectedClientId)
+      .single();
+
+    if (analysis) {
+      if (analysis.accounts_data) setAccounts(analysis.accounts_data);
+      if (analysis.positions_data) setPositions(analysis.positions_data);
+      if (analysis.questions_data) setQuestions(analysis.questions_data);
+      if (typeof analysis.has_bankruptcy === 'boolean') setHasBankruptcy(analysis.has_bankruptcy);
+    } else {
+      // Reset if no saved analysis
+      setAccounts([emptyAccount()]);
+      setPositions(Array(6).fill(null).map(() => emptyPosition()));
+      setHasBankruptcy(false);
+    }
+
+    setIsLoading(false);
+  }
+
+  const filteredClients = clientSearch.trim()
+    ? clientList.filter(c =>
+      c.client_name.toLowerCase().includes(clientSearch.toLowerCase()) ||
+      c.company_name.toLowerCase().includes(clientSearch.toLowerCase())
+    )
+    : clientList;
+
+  // Derived averages across all accounts (filtered by activeMonthIndices)
+  const activeMonthsForAllAccounts = accounts.flatMap(a => activeMonthIndices.map(mi => a.months[mi]));
+
+  const allDepositMonths = activeMonthsForAllAccounts.map((m) => m.totalDeposits);
   const avgRevenue = avgOfFilled(allDepositMonths);
+
+  const allDailyBalanceMonths = activeMonthsForAllAccounts.map((m) => m.avgDailyBalance);
+  const avgDailyBalanceAcrossAccounts = avgOfFilled(allDailyBalanceMonths);
+
+  const allDepositCountMonths = activeMonthsForAllAccounts.map((m) => m.numDeposits);
+  const avgMonthlyDepositsAcrossAccounts = avgOfFilled(allDepositCountMonths);
+
+  const totalNegDaysAcrossAccounts = accounts.reduce((sum, acc) => {
+    return sum + activeMonthIndices.reduce((mSum, mi) => mSum + (parseInt(acc.months[mi].negativeDays) || 0), 0);
+  }, 0);
 
   const updateQ = (k: keyof QualifyingQuestions, v: string) =>
     setQuestions((q) => ({ ...q, [k]: v }));
 
-  const QUALIFYING_QS: { key: keyof QualifyingQuestions; label: string; q: string }[] = [
+  // ─── Save to Database ───────────────────────────────────────────────────────
+  const saveAnalysis = async () => {
+    if (!selectedClientId) {
+      alert("Please select a client first.");
+      return;
+    }
+    setIsSaving(true);
+
+    try {
+      // Find client date to compute TIB months
+      const client = clientList.find(c => c.id === selectedClientId);
+      const tibMonths = client ? computeTIBMonths(client.business_start_date) : 0;
+
+      const { error } = await supabase.from('bank_analysis_results').upsert({
+        client_id: selectedClientId,
+        business_name: businessName,
+        owner_name: ownerName,
+        fico: parseInt(questions.ficoScore) || 0,
+        tib_months: tibMonths || parseInt(questions.timeInBusiness) || 0,
+        avg_revenue: avgRevenue,
+        avg_daily_balance: avgDailyBalanceAcrossAccounts,
+        total_neg_days: totalNegDaysAcrossAccounts,
+        num_open_positions: positions.filter(p => p.funderLender || p.balance).length,
+        has_bankruptcy: hasBankruptcy,
+        capital_requested: capitalRequested,
+        accounts_data: accounts,
+        positions_data: positions,
+        questions_data: questions
+      }, { onConflict: 'client_id' });
+
+      if (error) {
+        throw error;
+      }
+      alert('Analysis saved successfully!');
+    } catch (err: any) {
+      console.error("Save error:", err);
+      alert('Error saving analysis: ' + err.message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const QUALIFYING_QS: { key: keyof QualifyingQuestions; label: string; q: string; isPhone?: boolean }[] = [
     { key: "businessType", label: "1", q: "What type of business is this?" },
     { key: "numOwners", label: "2", q: "How many owners does the company have?" },
     { key: "capitalRequested", label: "3", q: "What is the capital requested?" },
-    { key: "fundingTimeframe", label: "4", q: "What is the timeframe in receiving the funds?" },
     { key: "timeInBusiness", label: "5", q: "What is their time in business?" },
     { key: "ficoScore", label: "6", q: "Does the merchant know their FICO score?" },
     { key: "workingWithOthers", label: "7", q: "Currently working with anyone else?" },
     { key: "bankruptcy", label: "8", q: "Currently in a Bankruptcy (Personal or Business)?" },
     { key: "anyPositions", label: "9", q: "Are there any positions?" },
     { key: "modifiedOrDefaulted", label: "10", q: "Modified or defaulted on a loan or advance?" },
-    { key: "repName", label: "11", q: "Who is the rep?" },
   ];
 
   const TABS = [
@@ -701,9 +905,52 @@ export default function BankAnalysis() {
       </div>
 
       <div className="max-w-[1600px] mx-auto px-4 py-6">
+
+        {/* ── Client Selection ── */}
+        <div className="rounded-xl border border-[#30363d] bg-[#161b22] p-4 mb-6">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-1.5 h-1.5 rounded-full bg-[#388bfd]" />
+            <span className="text-[10px] font-bold tracking-[0.2em] uppercase text-[#388bfd]">Load Client Data</span>
+            {loadedClientName && (
+              <span className="ml-auto text-[10px] text-[#3fb950] font-mono">✓ Loaded: {loadedClientName}</span>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <svg xmlns="http://www.w3.org/2000/svg" className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#484f58]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+              <input
+                type="text"
+                value={clientSearch}
+                onChange={e => setClientSearch(e.target.value)}
+                placeholder="Search client name or company..."
+                className="w-full bg-[#0d1117] border border-[#30363d] rounded px-2 py-1.5 pl-8 text-sm text-[#e6edf3] placeholder-[#484f58] focus:outline-none focus:border-[#388bfd] transition-colors"
+              />
+            </div>
+            <select
+              value={selectedClientId}
+              onChange={e => setSelectedClientId(e.target.value)}
+              className="flex-1 bg-[#0d1117] border border-[#30363d] rounded px-2 py-1.5 text-sm text-[#e6edf3] focus:outline-none focus:border-[#388bfd] transition-colors font-mono"
+            >
+              <option value="">— Select client —</option>
+              {filteredClients.map(c => (
+                <option key={c.id} value={c.id}>
+                  {c.client_name} · {c.company_name}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={loadClient}
+              disabled={!selectedClientId || isLoading}
+              className="px-4 py-1.5 rounded text-xs font-bold tracking-wider uppercase bg-[#388bfd] hover:bg-[#58a6ff] disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors whitespace-nowrap"
+            >
+              {isLoading ? "Loading..." : "Load →"}
+            </button>
+          </div>
+        </div>
+
         {/* Business Info */}
         <div className="rounded-xl border border-[#30363d] bg-[#161b22] p-4 mb-6">
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {[
               { label: "Business DBA Name", value: businessName, onChange: setBusinessName },
               { label: "Owner Name", value: ownerName, onChange: setOwnerName },
@@ -718,6 +965,24 @@ export default function BankAnalysis() {
               </div>
             ))}
           </div>
+
+          {/* Computed Globals */}
+          {(state || industry) && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4 pt-4 border-t border-[#30363d]">
+              {state && (
+                <div>
+                  <label className="text-[10px] text-[#8b949e] uppercase tracking-wider block mb-1">State (Override)</label>
+                  <p className="font-mono text-sm text-[#c9d1d9]">{state}</p>
+                </div>
+              )}
+              {industry && (
+                <div className="col-span-2 md:col-span-3">
+                  <label className="text-[10px] text-[#8b949e] uppercase tracking-wider block mb-1">Industry (Override)</label>
+                  <p className="font-mono text-sm text-[#c9d1d9]">{industry}</p>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Tabs */}
@@ -727,8 +992,8 @@ export default function BankAnalysis() {
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={`px-4 py-2 text-xs font-medium tracking-wider uppercase transition-all border-b-2 -mb-px ${activeTab === tab.id
-                  ? "text-[#58a6ff] border-[#388bfd]"
-                  : "text-[#8b949e] border-transparent hover:text-[#c9d1d9]"
+                ? "text-[#58a6ff] border-[#388bfd]"
+                : "text-[#8b949e] border-transparent hover:text-[#c9d1d9]"
                 }`}
             >
               {tab.label}
@@ -739,6 +1004,26 @@ export default function BankAnalysis() {
         {/* Tab: Bank Analysis */}
         {activeTab === "analysis" && (
           <div>
+            {/* Month range selector */}
+            <div className="flex items-center gap-2 mb-4">
+              <span className="text-[10px] text-[#8b949e] uppercase tracking-wider font-mono">Range:</span>
+              {([3, 6, 8, 12] as const).map(n => (
+                <button
+                  key={n}
+                  onClick={() => setMonthRange(n)}
+                  className={`px-3 py-1 rounded text-xs font-mono font-bold tracking-wider transition-all ${monthRange === n
+                    ? "bg-[#388bfd] text-white shadow-[0_0_8px_#388bfd50]"
+                    : "bg-[#1c2128] text-[#8b949e] border border-[#30363d] hover:border-[#388bfd]/40 hover:text-[#c9d1d9]"
+                    }`}
+                >
+                  {n} Mo
+                </button>
+              ))}
+              <span className="text-[10px] text-[#484f58] font-mono ml-1">
+                {MONTHS[activeMonthIndices[0]].slice(0, 3)} → {MONTHS[activeMonthIndices[activeMonthIndices.length - 1]].slice(0, 3)}
+              </span>
+            </div>
+
             {accounts.map((account, i) => (
               <AccountBlock
                 key={i}
@@ -747,6 +1032,7 @@ export default function BankAnalysis() {
                 onChange={(a) => setAccounts(accounts.map((ac, ai) => (ai === i ? a : ac)))}
                 onRemove={() => setAccounts(accounts.filter((_, ai) => ai !== i))}
                 canRemove={accounts.length > 1}
+                activeMonthIndices={activeMonthIndices}
               />
             ))}
             <button
@@ -792,13 +1078,25 @@ export default function BankAnalysis() {
                   <TextInput
                     value={questions[q.key]}
                     onChange={(v) => updateQ(q.key, v)}
-                    placeholder="Response..."
+                    placeholder={q.isPhone ? "e.g. (555) 000-0000" : "Response..."}
                   />
                 </div>
               </div>
             ))}
           </div>
         </div>
+
+        {/* Global Action / Output */}
+        <div className="mt-8 flex justify-end pb-8 border-b border-[#30363d]">
+          <button
+            onClick={saveAnalysis}
+            disabled={isSaving}
+            className="flex items-center justify-center gap-2 px-6 py-3 font-semibold text-white bg-green-600 hover:bg-green-500 border border-green-500/50 rounded-lg shadow-lg disabled:opacity-50 transition-all uppercase tracking-wider text-sm"
+          >
+            {isSaving ? "Saving..." : "Save Analysis Result"}
+          </button>
+        </div>
+
       </div>
     </div>
   );
