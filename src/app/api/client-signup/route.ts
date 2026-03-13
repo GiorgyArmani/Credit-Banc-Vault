@@ -611,7 +611,44 @@ export async function POST(request: Request) {
       console.log(`✅ Data saved to client_data_vault: ${vault_id}`);
     }
 
-    // ========== STEP 5.5: POPULATE DYNAMIC DOCUMENTS TABLE ==========
+    // ========== STEP 5.2: SAVE OPEN POSITIONS ==========
+    // If the client has existing loans, persist each position to client_open_positions
+    const open_positions: any[] = body.open_positions || [];
+    if (body.has_existing_loans && open_positions.length > 0) {
+      // Delete any previously stored positions for this vault entry (handles re-signups)
+      await supabase_admin
+        .from('client_open_positions')
+        .delete()
+        .eq('client_vault_id', vault_id);
+
+      // Build insert records, filtering out rows without a lender name
+      const position_records = open_positions
+        .filter((p: any) => p.lender_name?.trim())
+        .map((p: any, index: number) => ({
+          client_vault_id: vault_id,
+          position_number: index + 1,
+          lender_name: p.lender_name.trim(),
+          loan_type: p.loan_type || '',
+          current_balance: p.current_balance ? parseFloat(p.current_balance) : null,
+          payment_amount: p.payment_amount ? parseFloat(p.payment_amount) : null,
+          payment_term: p.payment_term?.trim() || null,
+        }));
+
+      if (position_records.length > 0) {
+        const { error: positions_error } = await supabase_admin
+          .from('client_open_positions')
+          .insert(position_records);
+
+        if (positions_error) {
+          console.error('⚠️ Error saving open positions:', positions_error);
+          // Non-fatal: do not throw, rest of signup continues
+        } else {
+          console.log(`✅ Saved ${position_records.length} open position(s) for vault ${vault_id}`);
+        }
+      }
+    }
+
+
     // Transitioning to a FULLY DYNAMIC vault.
     // We insert "Standard" documents + any "Requested" documents via GHL tags.
 

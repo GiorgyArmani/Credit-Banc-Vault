@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, SubmitHandler, Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { useRouter } from "next/navigation";
@@ -56,7 +56,11 @@ const CREDIT_SCORE_OPTIONS = [
 
 const LEGAL_ENTITY_TYPES = ['LLC', 'C-Corp', 'S-Corp', 'Sole Prop', 'Other'];
 const FUNDING_URGENCY = ['Immediately', '1–3 Weeks', '3 Weeks +'];
-const LOAN_TYPES = ['Line of Credit', 'MCA', 'SBA Loan', 'Personal Term Loan', 'Real Estate Loan', 'AR Loan', 'Other'];
+const PROPOSED_LOAN_TYPES = [
+    "Term Loan", "MCA", "SBA Loan", "Line of Credit", 
+    "Personal Term Loan", "Real Estate Loan", "Equipment Financing", 
+    "Asset Based Loan", "Bridge Loan", "Invoice Factoring", "Other"
+];
 
 const formSchema = z.object({
     client_name: z.string().min(2, "Name must be at least 2 characters"),
@@ -72,11 +76,11 @@ const formSchema = z.object({
     credit_score: z.string().min(1, "Credit score is required"),
     legal_entity_type: z.string().min(1, "Entity type is required"),
     business_start_date: z.string().min(1, "Start date is required"),
-    loan_purpose: z.string().optional(),
-    proposed_loan_type: z.string().optional(),
-    funding_eta: z.string().optional(),
-    employees_count: z.coerce.number().nonnegative().optional(),
-    is_home_based: z.boolean(),
+    loan_purpose: z.string().default(""),
+    proposed_loan_types: z.array(z.string()),
+    funding_eta: z.string().default(""),
+    employees_count: z.coerce.number().nonnegative().default(0),
+    is_home_based: z.boolean().default(false),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -113,7 +117,7 @@ export function EditProfileModal({ isOpen, onClose, onSuccess, clientData }: Edi
     const router = useRouter();
 
     const form = useForm<FormValues>({
-        resolver: zodResolver(formSchema),
+        resolver: zodResolver(formSchema) as Resolver<FormValues>,
         defaultValues: {
             client_name: clientData.client_name || "",
             client_email: clientData.client_email || "",
@@ -129,17 +133,25 @@ export function EditProfileModal({ isOpen, onClose, onSuccess, clientData }: Edi
             legal_entity_type: clientData.legal_entity_type || "",
             business_start_date: clientData.business_start_date || "",
             loan_purpose: clientData.loan_purpose || "",
-            proposed_loan_type: clientData.proposed_loan_type || "",
+            proposed_loan_types: clientData.proposed_loan_type 
+                ? clientData.proposed_loan_type.split(",").map(t => t.trim()).filter(Boolean)
+                : [],
             funding_eta: clientData.funding_eta || "",
             employees_count: clientData.employees_count || 0,
             is_home_based: !!clientData.is_home_based,
         },
     });
 
-    async function onSubmit(values: FormValues) {
+    const onSubmit: SubmitHandler<FormValues> = async (values) => {
         setIsSubmitting(true);
         try {
-            const result = await updateClientProfile(clientData.id, values);
+            // Serialize proposed_loan_types array back to comma-separated string
+            const submissionValues = {
+                ...values,
+                proposed_loan_type: values.proposed_loan_types.join(", ")
+            };
+            
+            const result = await updateClientProfile(clientData.id, submissionValues);
             if (result.success) {
                 toast.success("Client profile updated successfully");
                 if (onSuccess) onSuccess();
@@ -168,7 +180,7 @@ export function EditProfileModal({ isOpen, onClose, onSuccess, clientData }: Edi
                     </DialogDescription>
                 </DialogHeader>
 
-                <Form {...form}>
+                <Form {...(form as any)}>
                     <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8 py-4">
                         {/* 1. Contact Info */}
                         <div className="space-y-4">
@@ -344,24 +356,37 @@ export function EditProfileModal({ isOpen, onClose, onSuccess, clientData }: Edi
                                 />
                                 <FormField
                                     control={form.control}
-                                    name="proposed_loan_type"
+                                    name="proposed_loan_types"
                                     render={({ field }) => (
-                                        <FormItem>
-                                            <FormLabel className="text-[10px] font-black uppercase tracking-widest text-emerald-900/60 ml-1">Loan Type</FormLabel>
-                                            <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                                <FormControl>
-                                                    <SelectTrigger className="h-12 rounded-xl border-emerald-100 bg-emerald-50/30 focus:bg-white font-bold">
-                                                        <SelectValue placeholder="Select type" />
-                                                    </SelectTrigger>
-                                                </FormControl>
-                                                <SelectContent>
-                                                    {LOAN_TYPES.map((type) => (
-                                                        <SelectItem key={type} value={type} className="font-bold">
-                                                            {type}
-                                                        </SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
+                                        <FormItem className="col-span-2">
+                                            <FormLabel className="text-[10px] font-black uppercase tracking-widest text-emerald-900/60 ml-1">Proposed Loan Types</FormLabel>
+                                            <FormControl>
+                                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 p-4 bg-emerald-50/20 border border-emerald-100 rounded-2xl">
+                                                    {PROPOSED_LOAN_TYPES.map((type) => {
+                                                        const isSelected = field.value.includes(type);
+                                                        return (
+                                                            <div 
+                                                                key={type}
+                                                                onClick={() => {
+                                                                    const current = new Set(field.value);
+                                                                    if (current.has(type)) current.delete(type);
+                                                                    else current.add(type);
+                                                                    field.onChange(Array.from(current));
+                                                                }}
+                                                                className={`
+                                                                    flex items-center justify-center p-2 rounded-xl border-2 cursor-pointer transition-all font-bold text-[10px] uppercase text-center h-full min-h-[40px] select-none
+                                                                    ${isSelected 
+                                                                        ? "bg-emerald-500 border-emerald-500 text-white shadow-md shadow-emerald-500/10" 
+                                                                        : "bg-white border-emerald-100 text-emerald-900/60 hover:border-emerald-200"
+                                                                    }
+                                                                `}
+                                                            >
+                                                                {type}
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </FormControl>
                                             <FormMessage />
                                         </FormItem>
                                     )}

@@ -28,6 +28,7 @@ interface OpenPosition {
   amount: string;
   balance: string;
   remitPct: string;
+  term: string;
 }
 
 interface QualifyingQuestions {
@@ -88,6 +89,7 @@ const emptyPosition = (): OpenPosition => ({
   amount: "",
   balance: "",
   remitPct: "",
+  term: "",
 });
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -104,6 +106,11 @@ function avgOfFilled(vals: string[]) {
 
 function sumOfFilled(vals: string[]) {
   return vals.map(parseMoney).filter((n) => n > 0).reduce((a, b) => a + b, 0);
+}
+
+function avgOfIntegers(vals: string[]) {
+  const nums = vals.map(v => parseInt(v)).filter(n => !isNaN(n));
+  return nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -207,7 +214,7 @@ function AccountBlock({
   const filledMonths = activeMonths.filter((m) => parseMoney(m.totalDeposits) > 0);
   const avgDeposits = avgOfFilled(activeMonths.map((m) => m.totalDeposits));
   const avgBalance = avgOfFilled(activeMonths.map((m) => m.avgDailyBalance));
-  const totalNegDays = activeMonths.reduce((a, m) => a + (parseInt(m.negativeDays) || 0), 0);
+  const avgNegDays = avgOfIntegers(activeMonths.map((m) => m.negativeDays));
 
   const ROWS: { key: keyof MonthlyData; label: string; isMoney: boolean }[] = [
     { key: "totalDeposits", label: "Total Deposits", isMoney: true },
@@ -237,7 +244,7 @@ function AccountBlock({
         <div className="hidden lg:flex items-center gap-6">
           <StatCell label="Avg Deposits" value={avgDeposits > 0 ? formatMoney(avgDeposits) : "—"} />
           <StatCell label="Avg Daily Bal" value={avgBalance > 0 ? formatMoney(avgBalance) : "—"} />
-          <StatCell label="Neg Days" value={totalNegDays.toString()} />
+          <StatCell label="Avg Neg Days" value={avgNegDays.toFixed(1)} />
           <StatCell label="Months Filled" value={`${filledMonths.length}/12`} />
         </div>
         {canRemove && (
@@ -271,8 +278,7 @@ function AccountBlock({
           <tbody>
             {ROWS.map((row, ri) => {
               const vals = activeMonthIndices.map((mi) => account.months[mi][row.key]);
-              const avg = row.isMoney ? avgOfFilled(vals) : null;
-              const total = !row.isMoney ? vals.reduce((a, v) => a + (parseInt(v) || 0), 0) : null;
+              const avg = row.isMoney ? avgOfFilled(vals) : avgOfIntegers(vals);
 
               return (
                 <tr
@@ -297,8 +303,8 @@ function AccountBlock({
                   })}
                   <td className="px-3 py-1 text-center bg-[#1c2128] font-mono font-semibold text-[#58a6ff]">
                     {row.isMoney
-                      ? avg !== null && avg > 0 ? formatMoney(avg) : "—"
-                      : total !== null ? total.toString() : "—"}
+                      ? avg > 0 ? formatMoney(avg) : "—"
+                      : avg.toFixed(1)}
                   </td>
                 </tr>
               );
@@ -371,7 +377,7 @@ function OpenPositions({
         <table className="w-full text-xs">
           <thead>
             <tr className="border-b border-[#30363d]">
-              {["Funder / Lender", "Frequency", "# Debits", "Amount", "Balance", "Remit %", "Actions"].map((h) => (
+              {["Funder / Lender", "Frequency", "# Debits", "Amount", "Balance", "Term", "Remit %", "Actions"].map((h) => (
                 <th key={h} className="text-left px-3 py-2 text-[#8b949e] font-medium whitespace-nowrap">
                   {h}
                 </th>
@@ -395,6 +401,9 @@ function OpenPositions({
                 </td>
                 <td className="px-2 py-1.5">
                   <CurrencyInput value={pos.balance} onChange={(v) => updatePosition(i, "balance", v)} placeholder="$0" />
+                </td>
+                <td className="px-2 py-1.5">
+                  <TextInput value={pos.term} onChange={(v) => updatePosition(i, "term", v)} placeholder="Term..." />
                 </td>
                 <td className="px-2 py-1.5 w-24">
                   <div className="relative">
@@ -655,6 +664,9 @@ interface ClientOption {
   num_owners?: string;
   company_state?: string;
   industry?: string;
+  avg_monthly_deposits: number;
+  avg_annual_revenue: number;
+  proposed_loan_type: string;
 }
 
 export default function BankAnalysis() {
@@ -707,7 +719,7 @@ export default function BankAnalysis() {
   useEffect(() => {
     supabase
       .from("client_data_vault")
-      .select("id, client_name, company_name, client_phone, owner_1_name, owner_2_name, capital_requested, credit_score, business_start_date, legal_entity_type, num_owners:number_of_owners, company_state, industry")
+      .select("id, client_name, company_name, client_phone, owner_1_name, owner_2_name, capital_requested, credit_score, business_start_date, legal_entity_type, num_owners:number_of_owners, company_state, industry, avg_monthly_deposits, avg_annual_revenue, proposed_loan_type")
       .order("client_name", { ascending: true })
       .then(({ data }) => {
         if (data) setClientList(data as ClientOption[]);
@@ -715,6 +727,16 @@ export default function BankAnalysis() {
   }, []);
 
   // ── Compute TIB string or months from start date ───────────────────────────
+  function formatFullDate(dateStr: string): string {
+    if (!dateStr) return "";
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    });
+  }
+
   function computeTIB(startDate: string): string {
     if (!startDate) return "";
     const start = new Date(startDate);
@@ -753,7 +775,7 @@ export default function BankAnalysis() {
       businessType: client.legal_entity_type || "",
       capitalRequested: client.capital_requested ? `$${client.capital_requested.toLocaleString()}` : "",
       numOwners: client.num_owners || "",
-      timeInBusiness: computeTIB(client.business_start_date),
+      timeInBusiness: formatFullDate(client.business_start_date),
       ficoScore: client.credit_score || "",
     }));
     setLoadedClientName(`${client.client_name} — ${client.company_name}`);
@@ -761,7 +783,7 @@ export default function BankAnalysis() {
     // Fetch state and industry from client_data_vault
     const { data: profile } = await supabase
       .from("client_data_vault")
-      .select("company_state, industry")
+      .select("company_state, industry, avg_monthly_deposits")
       .eq("id", selectedClientId)
       .single();
 
@@ -770,23 +792,56 @@ export default function BankAnalysis() {
       setIndustry(profile.industry || "");
     }
 
-    // Attempt to fetch saved bank analysis state
+    // 1. Attempt to fetch saved bank analysis state (the underwriter's workspace)
     const { data: analysis } = await supabase
       .from("bank_analysis_results")
       .select("*")
       .eq("client_id", selectedClientId)
       .single();
 
+    let savedPositions: OpenPosition[] = [];
     if (analysis) {
       if (analysis.accounts_data) setAccounts(analysis.accounts_data);
-      if (analysis.positions_data) setPositions(analysis.positions_data);
+      if (analysis.positions_data) savedPositions = analysis.positions_data;
       if (analysis.questions_data) setQuestions(analysis.questions_data);
       if (typeof analysis.has_bankruptcy === 'boolean') setHasBankruptcy(analysis.has_bankruptcy);
     } else {
-      // Reset if no saved analysis
       setAccounts([emptyAccount()]);
-      setPositions(Array(6).fill(null).map(() => emptyPosition()));
       setHasBankruptcy(false);
+    }
+
+    // 2. Fetch the "ground truth" from Client Vault (submitted positions)
+    const { data: dbPositions } = await supabase
+      .from("client_open_positions")
+      .select("*")
+      .eq("client_vault_id", selectedClientId)
+      .order("position_number", { ascending: true });
+
+    if (dbPositions && dbPositions.length > 0) {
+      const mappedPositions = dbPositions.map(p => {
+        // Look for matching position in saved analysis to preserve underwriter-only fields
+        const saved = savedPositions.find(sp => sp.funderLender === p.lender_name);
+        return {
+          funderLender: p.lender_name,
+          frequency: saved?.frequency || p.loan_type || "",
+          numDebits: saved?.numDebits || "0",
+          amount: p.payment_amount?.toString() || "",
+          balance: p.current_balance?.toString() || "",
+          term: p.payment_term || "",
+          remitPct: saved?.remitPct || "0",
+        };
+      });
+
+      // Pad to 6 slots
+      const padded = [...mappedPositions];
+      while (padded.length < 6) padded.push(emptyPosition());
+      setPositions(padded);
+    } else if (savedPositions.length > 0) {
+      // If no ground truth in DB, use whatever was saved in analysis
+      setPositions(savedPositions);
+    } else {
+      // Default empty state
+      setPositions(Array(6).fill(null).map(emptyPosition));
     }
 
     setIsLoading(false);
@@ -809,11 +864,12 @@ export default function BankAnalysis() {
   const avgDailyBalanceAcrossAccounts = avgOfFilled(allDailyBalanceMonths);
 
   const allDepositCountMonths = activeMonthsForAllAccounts.map((m) => m.numDeposits);
-  const avgMonthlyDepositsAcrossAccounts = avgOfFilled(allDepositCountMonths);
+  const avgMonthlyDepositsAcrossAccounts = avgOfIntegers(allDepositCountMonths);
 
-  const totalNegDaysAcrossAccounts = accounts.reduce((sum, acc) => {
+  const totalNegDaysSum = accounts.reduce((sum, acc) => {
     return sum + activeMonthIndices.reduce((mSum, mi) => mSum + (parseInt(acc.months[mi].negativeDays) || 0), 0);
   }, 0);
+  const avgNegDaysAcrossAccounts = totalNegDaysSum / (monthRange || 1);
 
   const updateQ = (k: keyof QualifyingQuestions, v: string) =>
     setQuestions((q) => ({ ...q, [k]: v }));
@@ -839,10 +895,10 @@ export default function BankAnalysis() {
         tib_months: tibMonths || parseInt(questions.timeInBusiness) || 0,
         avg_revenue: avgRevenue,
         avg_daily_balance: avgDailyBalanceAcrossAccounts,
-        total_neg_days: totalNegDaysAcrossAccounts,
+        total_neg_days: totalNegDaysSum,
         num_open_positions: positions.filter(p => p.funderLender || p.balance).length,
-        has_bankruptcy: hasBankruptcy,
-        capital_requested: capitalRequested,
+        has_bankruptcy: questions.bankruptcy.toLowerCase().includes("yes") || hasBankruptcy,
+        capital_requested: capitalRequested || parseMoney(questions.capitalRequested),
         accounts_data: accounts,
         positions_data: positions,
         questions_data: questions
@@ -860,17 +916,6 @@ export default function BankAnalysis() {
     }
   };
 
-  const QUALIFYING_QS: { key: keyof QualifyingQuestions; label: string; q: string; isPhone?: boolean }[] = [
-    { key: "businessType", label: "1", q: "What type of business is this?" },
-    { key: "numOwners", label: "2", q: "How many owners does the company have?" },
-    { key: "capitalRequested", label: "3", q: "What is the capital requested?" },
-    { key: "timeInBusiness", label: "5", q: "What is their time in business?" },
-    { key: "ficoScore", label: "6", q: "Does the merchant know their FICO score?" },
-    { key: "workingWithOthers", label: "7", q: "Currently working with anyone else?" },
-    { key: "bankruptcy", label: "8", q: "Currently in a Bankruptcy (Personal or Business)?" },
-    { key: "anyPositions", label: "9", q: "Are there any positions?" },
-    { key: "modifiedOrDefaulted", label: "10", q: "Modified or defaulted on a loan or advance?" },
-  ];
 
   const TABS = [
     { id: "analysis" as const, label: "Bank Analysis" },
@@ -892,14 +937,26 @@ export default function BankAnalysis() {
             <span className="text-[#484f58] text-sm">/</span>
             <span className="text-sm text-[#8b949e]">Bank Analysis</span>
           </div>
-          <div className="flex items-center gap-2">
-            {avgRevenue > 0 && (
-              <div className="hidden sm:flex items-center gap-1.5 bg-[#1c2128] border border-[#30363d] rounded-lg px-3 py-1.5">
+          <div className="flex items-center gap-4">
+            <div className="hidden sm:flex items-center gap-4">
+              <div className="flex items-center gap-2 bg-[#1c2128] border border-[#30363d] rounded-lg px-3 py-1.5">
                 <div className="w-1.5 h-1.5 rounded-full bg-[#3fb950]" />
-                <span className="text-[10px] text-[#8b949e] uppercase tracking-wider">Avg Monthly Revenue</span>
+                <span className="text-[10px] text-[#8b949e] uppercase tracking-wider">Avg Revenue</span>
                 <span className="text-sm font-mono font-bold text-[#3fb950] ml-1">{formatMoney(avgRevenue)}</span>
               </div>
-            )}
+              <div className="flex items-center gap-2 bg-[#1c2128] border border-[#30363d] rounded-lg px-3 py-1.5">
+                <div className="w-1.5 h-1.5 rounded-full bg-[#388bfd]" />
+                <span className="text-[10px] text-[#8b949e] uppercase tracking-wider">Avg Daily Bal</span>
+                <span className="text-sm font-mono font-bold text-[#388bfd] ml-1">{formatMoney(avgDailyBalanceAcrossAccounts)}</span>
+              </div>
+            </div>
+            <button
+              onClick={saveAnalysis}
+              disabled={isSaving || !selectedClientId}
+              className="flex items-center justify-center gap-2 px-4 py-1.5 font-bold text-white bg-[#238636] hover:bg-[#2ea043] border border-[#2ea043]/50 rounded text-[10px] uppercase tracking-wider transition-all disabled:opacity-40"
+            >
+              {isSaving ? "Saving..." : "Save Analysis"}
+            </button>
           </div>
         </div>
       </div>
@@ -948,41 +1005,128 @@ export default function BankAnalysis() {
           </div>
         </div>
 
-        {/* Business Info */}
-        <div className="rounded-xl border border-[#30363d] bg-[#161b22] p-4 mb-6">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {[
-              { label: "Business DBA Name", value: businessName, onChange: setBusinessName },
-              { label: "Owner Name", value: ownerName, onChange: setOwnerName },
-              { label: "Owner Name 2", value: ownerName2, onChange: setOwnerName2 },
-              { label: "Referred By", value: referredBy, onChange: setReferredBy },
-              { label: "Phone Number", value: phone, onChange: setPhone },
-              { label: "Phone Number 2", value: phone2, onChange: setPhone2 },
-            ].map((f) => (
-              <div key={f.label}>
-                <label className="text-[10px] text-[#8b949e] uppercase tracking-wider block mb-1">{f.label}</label>
-                <TextInput value={f.value} onChange={f.onChange} placeholder={f.label} />
+        {/* Business & Financial Information */}
+        <div className="rounded-xl border border-[#30363d] bg-[#161b22] p-5 mb-6 shadow-xl">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            
+            {/* Left Column: Business Details */}
+            <div className="lg:col-span-8 space-y-6">
+              <div>
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-1.5 h-6 bg-[#388bfd] rounded-full" />
+                  <h3 className="text-xs font-bold tracking-[0.2em] uppercase text-[#e6edf3]">Business & Contact Details</h3>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  {[
+                    { label: "Business DBA Name", value: businessName, onChange: setBusinessName },
+                    { label: "Owner Name", value: ownerName, onChange: setOwnerName },
+                    { label: "Phone Number", value: phone, onChange: setPhone },
+                    { label: "Owner Name 2", value: ownerName2, onChange: setOwnerName2 },
+                    { label: "Phone Number 2", value: phone2, onChange: setPhone2 },
+                    { label: "Referred By", value: referredBy, onChange: setReferredBy },
+                  ].map((f) => (
+                    <div key={f.label}>
+                      <label className="text-[9px] text-[#8b949e] uppercase tracking-widest block mb-1.5">{f.label}</label>
+                      <TextInput value={f.value} onChange={f.onChange} placeholder={f.label} className="!bg-[#0d1117]/50" />
+                    </div>
+                  ))}
+                </div>
               </div>
-            ))}
-          </div>
 
-          {/* Computed Globals */}
-          {(state || industry) && (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4 pt-4 border-t border-[#30363d]">
-              {state && (
-                <div>
-                  <label className="text-[10px] text-[#8b949e] uppercase tracking-wider block mb-1">State (Override)</label>
-                  <p className="font-mono text-sm text-[#c9d1d9]">{state}</p>
+              <div>
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-1.5 h-6 bg-[#d29922] rounded-full" />
+                  <h3 className="text-xs font-bold tracking-[0.2em] uppercase text-[#e6edf3]">Underwriting Profile</h3>
                 </div>
-              )}
-              {industry && (
-                <div className="col-span-2 md:col-span-3">
-                  <label className="text-[10px] text-[#8b949e] uppercase tracking-wider block mb-1">Industry (Override)</label>
-                  <p className="font-mono text-sm text-[#c9d1d9]">{industry}</p>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div>
+                    <label className="text-[9px] text-[#8b949e] uppercase tracking-widest block mb-1.5">Capital Requested</label>
+                    <TextInput value={questions.capitalRequested} onChange={v => updateQ("capitalRequested", v)} placeholder="$0" />
+                  </div>
+                  <div>
+                    <label className="text-[9px] text-[#8b949e] uppercase tracking-widest block mb-1.5">FICO Score</label>
+                    <TextInput value={questions.ficoScore} onChange={v => updateQ("ficoScore", v)} placeholder="e.g. 700+" />
+                  </div>
+                  <div>
+                    <label className="text-[9px] text-[#8b949e] uppercase tracking-widest block mb-1.5">Business Start Date (TIB)</label>
+                    <TextInput value={questions.timeInBusiness} onChange={v => updateQ("timeInBusiness", v)} placeholder="Full date..." />
+                  </div>
+                  <div>
+                    <label className="text-[9px] text-[#8b949e] uppercase tracking-widest block mb-1.5"># of Owners</label>
+                    <TextInput value={questions.numOwners} onChange={v => updateQ("numOwners", v)} placeholder="e.g. 1" />
+                  </div>
+                  <div>
+                    <label className="text-[9px] text-[#8b949e] uppercase tracking-widest block mb-1.5">Entity Type</label>
+                    <TextInput value={questions.businessType} onChange={v => updateQ("businessType", v)} placeholder="LLC, Corp..." />
+                  </div>
+                  <div>
+                    <label className="text-[9px] text-[#8b949e] uppercase tracking-widest block mb-1.5">Industry</label>
+                    <TextInput value={industry} onChange={setIndustry} placeholder="Industry type..." />
+                  </div>
+                  <div>
+                    <label className="text-[9px] text-[#8b949e] uppercase tracking-widest block mb-1.5">Proposed Loan Type</label>
+                    <div className="w-full bg-[#0d1117] border border-[#30363d] rounded px-2 py-1 text-sm text-[#e6edf3] min-h-[30px] flex items-center">
+                      {clientList.find(c => c.id === selectedClientId)?.proposed_loan_type || "—"}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[9px] text-[#8b949e] uppercase tracking-widest block mb-1.5">Bankruptcy History</label>
+                    <TextInput value={questions.bankruptcy} onChange={v => updateQ("bankruptcy", v)} placeholder="No..." />
+                  </div>
+                  <div>
+                    <label className="text-[9px] text-[#8b949e] uppercase tracking-widest block mb-1.5">Default History</label>
+                    <TextInput value={questions.modifiedOrDefaulted} onChange={v => updateQ("modifiedOrDefaulted", v)} placeholder="None..." />
+                  </div>
                 </div>
-              )}
+              </div>
             </div>
-          )}
+
+            {/* Right Column: Economic Summary */}
+            <div className="lg:col-span-4 lg:border-l lg:border-[#30363d] lg:pl-6">
+              <div className="sticky top-4 space-y-4">
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-1.5 h-6 bg-[#3fb950] rounded-full" />
+                  <h3 className="text-xs font-bold tracking-[0.2em] uppercase text-[#e6edf3]">Economic Data</h3>
+                </div>
+                
+                <div className="space-y-3">
+                  <div className="p-3 rounded-lg bg-[#0d1117] border border-[#30363d] hover:border-[#3fb950]/30 transition-colors">
+                    <span className="text-[9px] text-[#8b949e] uppercase tracking-widest block mb-1">Avg Annual Revenue (Vault)</span>
+                    <span className="text-xl font-mono font-bold text-[#c9d1d9]">
+                      {clientList.find(c => c.id === selectedClientId)?.avg_annual_revenue ? formatMoney(clientList.find(c => c.id === selectedClientId)!.avg_annual_revenue) : "—"}
+                    </span>
+                  </div>
+                  <div className="p-3 rounded-lg bg-[#0d1117] border border-[#30363d] hover:border-[#3fb950]/30 transition-colors">
+                    <span className="text-[9px] text-[#8b949e] uppercase tracking-widest block mb-1">Avg Monthly Revenue (Analysis/Vault)</span>
+                    <span className="text-xl font-mono font-bold text-[#3fb950]">
+                      {avgRevenue > 0 ? formatMoney(avgRevenue) : (clientList.find(c => c.id === selectedClientId)?.avg_monthly_deposits ? formatMoney(clientList.find(c => c.id === selectedClientId)!.avg_monthly_deposits) : "—")}
+                    </span>
+                  </div>
+                  <div className="p-3 rounded-lg bg-[#0d1117] border border-[#30363d] hover:border-[#388bfd]/30 transition-colors">
+                    <span className="text-[9px] text-[#8b949e] uppercase tracking-widest block mb-1">Avg Daily Balance</span>
+                    <span className="text-xl font-mono font-bold text-[#388bfd]">{formatMoney(avgDailyBalanceAcrossAccounts)}</span>
+                  </div>
+                  <div className="p-3 rounded-lg bg-[#0d1117] border border-[#30363d] hover:border-[#d29922]/30 transition-colors">
+                    <span className="text-[9px] text-[#8b949e] uppercase tracking-widest block mb-1">Avg Monthly Deposits</span>
+                    <span className="text-xl font-mono font-bold text-[#d29922]">{avgMonthlyDepositsAcrossAccounts.toFixed(1)}</span>
+                  </div>
+                  <div className="p-3 rounded-lg bg-[#0d1117] border border-[#30363d] hover:border-[#f85149]/30 transition-colors">
+                    <span className="text-[9px] text-[#8b949e] uppercase tracking-widest block mb-1">Avg Negative Days</span>
+                    <span className={`text-xl font-mono font-bold ${avgNegDaysAcrossAccounts > 0 ? "text-[#f85149]" : "text-[#8b949e]"}`}>
+                      {avgNegDaysAcrossAccounts.toFixed(1)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="pt-2">
+                  <div className="flex items-center justify-between text-[10px] text-[#8b949e] uppercase tracking-widest mb-1 px-1">
+                    <span>State (Override)</span>
+                    <span className="font-mono text-[#c9d1d9]">{state || "N/A"}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Tabs */}
@@ -1063,39 +1207,6 @@ export default function BankAnalysis() {
 
         {/* Tab: Reverse Consolidation */}
         {activeTab === "recon" && <ReverseConsolidation />}
-
-        {/* Qualifying Questions - always visible */}
-        <div className="mt-6">
-          <SectionHeader>Qualifying Questions — Must Ask</SectionHeader>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {QUALIFYING_QS.map((q) => (
-              <div key={q.key} className="flex items-start gap-3 rounded-lg border border-[#21262d] bg-[#161b22] px-3 py-3 hover:border-[#30363d] transition-colors">
-                <div className="flex-shrink-0 w-6 h-6 rounded-full bg-[#1c2128] border border-[#388bfd]/40 flex items-center justify-center text-[10px] font-mono font-bold text-[#58a6ff]">
-                  {q.label}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-[11px] text-[#8b949e] mb-1.5">{q.q}</p>
-                  <TextInput
-                    value={questions[q.key]}
-                    onChange={(v) => updateQ(q.key, v)}
-                    placeholder={q.isPhone ? "e.g. (555) 000-0000" : "Response..."}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Global Action / Output */}
-        <div className="mt-8 flex justify-end pb-8 border-b border-[#30363d]">
-          <button
-            onClick={saveAnalysis}
-            disabled={isSaving}
-            className="flex items-center justify-center gap-2 px-6 py-3 font-semibold text-white bg-green-600 hover:bg-green-500 border border-green-500/50 rounded-lg shadow-lg disabled:opacity-50 transition-all uppercase tracking-wider text-sm"
-          >
-            {isSaving ? "Saving..." : "Save Analysis Result"}
-          </button>
-        </div>
 
       </div>
     </div>

@@ -64,11 +64,34 @@ interface ClientProfile {
     avg_monthly_deposits: number;
     credit_score: string;
     created_at: string;
+    proposed_loan_type: string;
+    loan_purpose: string;
+    industry: string;
+    number_of_owners: string;
+    owner_1_name: string;
+    owner_1_ownership_pct: number;
+    owner_2_name: string | null;
+    owner_2_ownership_pct: number | null;
+    owner_3_name: string | null;
+    owner_3_ownership_pct: number | null;
+    owner_4_name: string | null;
+    owner_4_ownership_pct: number | null;
+    owner_5_name: string | null;
+    owner_5_ownership_pct: number | null;
     advisor: {
         first_name: string;
         last_name: string;
         email: string;
     };
+}
+
+interface OpenPosition {
+    id: string;
+    lender_name: string;
+    loan_type: string;
+    current_balance: number | null;
+    payment_amount: number | null;
+    payment_term: string | null;
 }
 
 interface UserDocument {
@@ -99,6 +122,7 @@ export default function UnderwritingClientDetailsPage() {
     const [component_state, set_component_state] = useState<ComponentState>(ComponentState.LOADING);
     const [client_profile, set_client_profile] = useState<ClientProfile | null>(null);
     const [documents, set_documents] = useState<UserDocument[]>([]);
+    const [open_positions, set_open_positions] = useState<OpenPosition[]>([]);
     const [required_docs, set_required_docs] = useState<{ code: string; label: string }[]>([]);
     const [error_message, set_error_message] = useState<string>("");
 
@@ -129,7 +153,11 @@ export default function UnderwritingClientDetailsPage() {
                     id, user_id, client_name, client_email, client_phone, 
                     company_name, company_city, company_state, capital_requested,
                     legal_entity_type, business_start_date, avg_monthly_deposits,
-                    credit_score, created_at,
+                    credit_score, created_at, 
+                    proposed_loan_type, loan_purpose, industry, 
+                    number_of_owners, owner_1_name, owner_1_ownership_pct,
+                    owner_2_name, owner_2_ownership_pct, owner_3_name, owner_3_ownership_pct,
+                    owner_4_name, owner_4_ownership_pct, owner_5_name, owner_5_ownership_pct,
                     advisors (
                         first_name, last_name, email
                     )
@@ -156,6 +184,14 @@ export default function UnderwritingClientDetailsPage() {
                 .eq("user_id", client.user_id)
                 .order("upload_date", { ascending: false });
             set_documents(docs || []);
+
+            // 2.5 Fetch Open Positions
+            const { data: positions } = await supabase
+                .from("client_open_positions")
+                .select("*")
+                .eq("client_vault_id", client_id)
+                .order("position_number", { ascending: true });
+            set_open_positions(positions || []);
 
             // 3. Fetch current requirements (core + dynamic)
             const { data: coreDocs } = await supabase
@@ -438,10 +474,24 @@ export default function UnderwritingClientDetailsPage() {
                                 <p className="text-slate-900 font-black">{client_profile.advisor.first_name} {client_profile.advisor.last_name}</p>
                                 <p className="text-slate-500 font-medium text-xs break-all">{client_profile.advisor.email}</p>
                             </div>
+                            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Industry</p>
+                                <p className="text-slate-900 font-black uppercase tracking-tight">{client_profile.industry || "Not Specified"}</p>
+                            </div>
+                            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Proposed Loan Type</p>
+                                <div className="flex flex-wrap gap-1 mt-1">
+                                    {(client_profile.proposed_loan_type || "").split(',').map((type, i) => (
+                                        <Badge key={i} variant="secondary" className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100 border-none text-[9px] font-black uppercase">
+                                            {type.trim()}
+                                        </Badge>
+                                    ))}
+                                </div>
+                            </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Time in Biz</p>
-                                    <p className="text-slate-900 font-black">{new Date(client_profile.business_start_date).getFullYear()}</p>
+                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Time in Biz (Full)</p>
+                                    <p className="text-slate-900 font-black text-xs">{format(new Date(client_profile.business_start_date), "MMM d, yyyy")}</p>
                                 </div>
                                 <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
                                     <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Credit Score</p>
@@ -451,6 +501,52 @@ export default function UnderwritingClientDetailsPage() {
                             <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
                                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Entity Profile</p>
                                 <p className="text-slate-900 font-black uppercase tracking-tighter">{client_profile.legal_entity_type}</p>
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    <Card className="rounded-[2.5rem] border-slate-200">
+                        <CardHeader className="pb-4">
+                            <CardTitle className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">Ownership & Structure</CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Amount of Owners</p>
+                                <p className="text-slate-900 font-black">{client_profile.number_of_owners}</p>
+                            </div>
+                            
+                            <div className="space-y-2">
+                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Owner Detail</p>
+                                <div className="space-y-2">
+                                    <div className="p-3 bg-white rounded-xl border border-slate-100 flex justify-between items-center shadow-sm">
+                                        <span className="text-xs font-bold text-slate-700 truncate pr-2">{client_profile.owner_1_name}</span>
+                                        <Badge className="bg-slate-900 text-white text-[10px]">{client_profile.owner_1_ownership_pct}%</Badge>
+                                    </div>
+                                    {client_profile.owner_2_name && (
+                                        <div className="p-3 bg-white rounded-xl border border-slate-100 flex justify-between items-center shadow-sm">
+                                            <span className="text-xs font-bold text-slate-700 truncate pr-2">{client_profile.owner_2_name}</span>
+                                            <Badge className="bg-slate-400 text-white text-[10px]">{client_profile.owner_2_ownership_pct}%</Badge>
+                                        </div>
+                                    )}
+                                    {client_profile.owner_3_name && (
+                                        <div className="p-3 bg-white rounded-xl border border-slate-100 flex justify-between items-center shadow-sm">
+                                            <span className="text-xs font-bold text-slate-700 truncate pr-2">{client_profile.owner_3_name}</span>
+                                            <Badge className="bg-slate-400 text-white text-[10px]">{client_profile.owner_3_ownership_pct}%</Badge>
+                                        </div>
+                                    )}
+                                    {client_profile.owner_4_name && (
+                                        <div className="p-3 bg-white rounded-xl border border-slate-100 flex justify-between items-center shadow-sm">
+                                            <span className="text-xs font-bold text-slate-700 truncate pr-2">{client_profile.owner_4_name}</span>
+                                            <Badge className="bg-slate-400 text-white text-[10px]">{client_profile.owner_4_ownership_pct}%</Badge>
+                                        </div>
+                                    )}
+                                    {client_profile.owner_5_name && (
+                                        <div className="p-3 bg-white rounded-xl border border-slate-100 flex justify-between items-center shadow-sm">
+                                            <span className="text-xs font-bold text-slate-700 truncate pr-2">{client_profile.owner_5_name}</span>
+                                            <Badge className="bg-slate-400 text-white text-[10px]">{client_profile.owner_5_ownership_pct}%</Badge>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         </CardContent>
                     </Card>
@@ -531,6 +627,78 @@ export default function UnderwritingClientDetailsPage() {
 
                 {/* Documents Column */}
                 <div className="lg:col-span-2 space-y-8">
+                    {/* Use of Proceeds & Open Positions Section */}
+                    <div className="space-y-6">
+                        <div className="grid grid-cols-1 gap-6">
+                            {/* Use of Proceeds */}
+                            <Card className="rounded-[2rem] border-emerald-100 bg-emerald-50/10 overflow-hidden">
+                                <CardHeader className="bg-emerald-50/30 pb-3">
+                                    <CardTitle className="text-[10px] font-black uppercase tracking-widest text-emerald-800/40">Use of Proceeds</CardTitle>
+                                </CardHeader>
+                                <CardContent className="p-6">
+                                    <p className="text-sm font-bold text-slate-700 leading-relaxed italic">
+                                        "{client_profile.loan_purpose || "No use of proceeds specified."}"
+                                    </p>
+                                </CardContent>
+                            </Card>
+
+                            {/* Open Positions Table */}
+                            <Card className="rounded-[2.5rem] border-slate-200 overflow-hidden">
+                                <CardHeader className="pb-4 border-b border-slate-100">
+                                    <div className="flex items-center justify-between">
+                                        <CardTitle className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">Open Positions (Previous Debt)</CardTitle>
+                                        <Badge variant="outline" className="text-emerald-500 font-black">{open_positions.length}</Badge>
+                                    </div>
+                                </CardHeader>
+                                <CardContent className="p-0">
+                                    {open_positions.length === 0 ? (
+                                        <div className="p-10 text-center">
+                                            <CheckCircle2 className="w-8 h-8 text-emerald-200 mx-auto mb-2" />
+                                            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">No open positions reported</p>
+                                        </div>
+                                    ) : (
+                                        <div className="overflow-x-auto">
+                                            <table className="w-full text-left border-collapse">
+                                                <thead>
+                                                    <tr className="bg-slate-50/50">
+                                                        <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100 italic">Lender</th>
+                                                        <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100">Type</th>
+                                                        <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100">Balance</th>
+                                                        <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100">Payment</th>
+                                                        <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100">Term</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {open_positions.map((pos, i) => (
+                                                        <tr key={pos.id} className="hover:bg-slate-50/30 transition-colors group">
+                                                            <td className="px-6 py-4 border-b border-slate-50">
+                                                                <p className="text-sm font-black text-slate-900">{pos.lender_name}</p>
+                                                            </td>
+                                                            <td className="px-6 py-4 border-b border-slate-50">
+                                                                <Badge variant="secondary" className="bg-slate-100 text-slate-600 border-none text-[9px] font-black uppercase whitespace-nowrap">
+                                                                    {pos.loan_type}
+                                                                </Badge>
+                                                            </td>
+                                                            <td className="px-6 py-4 border-b border-slate-50 font-black text-xs text-slate-700">
+                                                                {pos.current_balance ? pos.current_balance.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) : "-"}
+                                                            </td>
+                                                            <td className="px-6 py-4 border-b border-slate-50 font-black text-xs text-emerald-600">
+                                                                {pos.payment_amount ? pos.payment_amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) : "-"}
+                                                            </td>
+                                                            <td className="px-6 py-4 border-b border-slate-50">
+                                                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{pos.payment_term || "-"}</p>
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    )}
+                                </CardContent>
+                            </Card>
+                        </div>
+                    </div>
+
                     {/* Required Documents Section */}
                     <div className="space-y-4">
                         <h3 className="text-xs font-black uppercase tracking-[0.3em] text-slate-400 flex items-center gap-3">

@@ -24,7 +24,9 @@ import {
   Users,
   CreditCard,
   Clock,
-  AlertCircle
+  AlertCircle,
+  Plus,
+  Trash2
 } from "lucide-react";
 
 
@@ -98,6 +100,14 @@ type Advisor = {
   profile_pic_url: string | null;
 };
 
+type OpenPosition = {
+  lender_name: string;
+  loan_type: string;
+  current_balance: string;
+  payment_amount: string;
+  payment_term: string;
+};
+
 
 export default function ClientSignupForm() {
   const router = useRouter();
@@ -128,7 +138,7 @@ export default function ClientSignupForm() {
   // ===== PASO 3: Información Financiera =====
   const [capital_requested, set_capital_requested] = useState("");
   const [loan_purpose, set_loan_purpose] = useState("");
-  const [proposed_loan_type, set_proposed_loan_type] = useState("");
+  const [proposed_loan_types, set_proposed_loan_types] = useState<string[]>([]);
   const [avg_monthly_deposits, set_avg_monthly_deposits] = useState("");
   const [avg_annual_revenue, set_avg_annual_revenue] = useState("");
 
@@ -139,6 +149,13 @@ export default function ClientSignupForm() {
   const toggle_document = (doc: string) => {
     set_documents_requested((prev) =>
       prev.includes(doc) ? prev.filter((d) => d !== doc) : [...prev, doc]
+    );
+  };
+
+  // Helper to toggle a loan type in the multi-select
+  const toggle_loan_type = (type: string) => {
+    set_proposed_loan_types((prev) =>
+      prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]
     );
   };
 
@@ -192,6 +209,32 @@ export default function ClientSignupForm() {
 
   // Zero balance letter
   const [has_zbl, set_has_zbl] = useState(false);
+
+  // ===== PASO 5.5: Open Positions (Previous Debt) =====
+  const empty_position = (): OpenPosition => ({
+    lender_name: "",
+    loan_type: "",
+    current_balance: "",
+    payment_amount: "",
+    payment_term: "",
+  });
+  const [open_positions, set_open_positions] = useState<OpenPosition[]>([empty_position()]);
+
+  const add_position = () => {
+    if (open_positions.length < 5) {
+      set_open_positions((prev) => [...prev, empty_position()]);
+    }
+  };
+
+  const remove_position = (idx: number) => {
+    set_open_positions((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const update_position = (idx: number, field: keyof OpenPosition, value: string) => {
+    set_open_positions((prev) =>
+      prev.map((pos, i) => (i === idx ? { ...pos, [field]: value } : pos))
+    );
+  };
 
   // ===== PASO 6: Timeline, Notas y Advisor =====
   const [funding_eta, set_funding_eta] = useState("");
@@ -374,7 +417,6 @@ export default function ClientSignupForm() {
         // Financiero
         capital_requested,
         loan_purpose,
-        proposed_loan_type,
         avg_monthly_deposits,
         avg_annual_revenue,
 
@@ -401,6 +443,9 @@ export default function ClientSignupForm() {
         credit_score,
         has_existing_loans,
 
+        // Serialize the multi-select to a comma-separated string for the DB text column and GHL
+        proposed_loan_type: proposed_loan_types.join(", "),
+
         // ===== Application Flags (for application_flags table) =====
         // These flags will be saved to the application_flags table
         application_flags: {
@@ -426,6 +471,11 @@ export default function ClientSignupForm() {
           additional_info: additional_notes,
         },
 
+        // ===== Open Positions (Previous Debt) =====
+        // Only sent if client has existing loans
+        open_positions: has_existing_loans
+          ? open_positions.filter((p) => p.lender_name.trim() !== "")
+          : [],
 
         // Timeline y notas
         funding_eta,
@@ -816,20 +866,43 @@ export default function ClientSignupForm() {
                       </div>
                     </div>
 
-                    <div>
-                      <Label htmlFor="proposed_loan_type" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Proposed Loan Type *</Label>
-                      <Select value={proposed_loan_type} onValueChange={set_proposed_loan_type}>
-                        <SelectTrigger className="mt-2">
-                          <SelectValue placeholder="Select loan type" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {LOAN_TYPES.map((type) => (
-                            <SelectItem key={type} value={type}>
+                    <div className="md:col-span-2">
+                      <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-3 block ml-1">
+                        Proposed Loan Type * <span className="normal-case font-bold text-emerald-500">(select all that apply)</span>
+                      </Label>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {LOAN_TYPES.map((type) => {
+                          const selected = proposed_loan_types.includes(type);
+                          return (
+                            <button
+                              key={type}
+                              type="button"
+                              onClick={() => toggle_loan_type(type)}
+                              className={`flex items-center gap-2 px-4 py-3 rounded-2xl border text-sm font-black transition-all duration-200 ${
+                                selected
+                                  ? "bg-emerald-500 border-emerald-500 text-white shadow-lg shadow-emerald-500/20"
+                                  : "bg-white border-emerald-100 text-emerald-950 hover:border-emerald-300"
+                              }`}
+                            >
+                              <span className={`w-4 h-4 rounded-md border-2 flex items-center justify-center shrink-0 transition-colors ${
+                                selected ? "bg-white border-white" : "border-emerald-200"
+                              }`}>
+                                {selected && (
+                                  <svg className="w-2.5 h-2.5 text-emerald-500" viewBox="0 0 10 8" fill="none">
+                                    <path d="M1 4l3 3 5-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                  </svg>
+                                )}
+                              </span>
                               {type}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {proposed_loan_types.length > 0 && (
+                        <p className="mt-2 text-xs font-bold text-emerald-600">
+                          Selected: {proposed_loan_types.join(" · ")}
+                        </p>
+                      )}
                     </div>
 
                     <div className="md:col-span-2">
@@ -1208,6 +1281,127 @@ export default function ClientSignupForm() {
                         </Label>
                       </div>
                     </div>
+
+                    {/* ===== OPEN POSITIONS SECTION ===== */}
+                    {/* Shown when client has existing loans — records each previous debt position */}
+                    {has_existing_loans && (
+                      <div className="mt-6 space-y-4">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h4 className="text-base font-black text-emerald-950 uppercase tracking-tight">Open Positions</h4>
+                            <p className="text-xs font-bold text-emerald-900/40 mt-0.5">Record each existing loan or advance (up to 5)</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={add_position}
+                            disabled={open_positions.length >= 5}
+                            className="flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-black uppercase tracking-widest rounded-xl transition-all active:scale-95"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            Add Position
+                          </button>
+                        </div>
+
+                        {open_positions.map((pos, idx) => (
+                          <div key={idx} className="bg-white rounded-[1.5rem] border border-emerald-100 p-6 space-y-4 relative">
+                            {/* Position header */}
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-500">
+                                Position {idx + 1}
+                              </span>
+                              {open_positions.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => remove_position(idx)}
+                                  className="text-red-400 hover:text-red-600 transition-colors p-1 rounded-lg hover:bg-red-50"
+                                  aria-label="Remove position"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              {/* Lender Name */}
+                              <div>
+                                <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Lender *</Label>
+                                <Input
+                                  value={pos.lender_name}
+                                  onChange={(e) => update_position(idx, "lender_name", e.target.value)}
+                                  className="h-12 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-5"
+                                  placeholder="e.g. Chase, PayPal, OnDeck"
+                                />
+                              </div>
+
+                              {/* Loan Type */}
+                              <div>
+                                <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Type of Loan *</Label>
+                                <Select
+                                  value={pos.loan_type}
+                                  onValueChange={(val) => update_position(idx, "loan_type", val)}
+                                >
+                                  <SelectTrigger className="h-12 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-5">
+                                    <SelectValue placeholder="Select type" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {LOAN_TYPES.map((type) => (
+                                      <SelectItem key={type} value={type}>{type}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+
+                              {/* Current Balance */}
+                              <div>
+                                <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Current Balance</Label>
+                                <div className="relative">
+                                  <span className="absolute left-5 top-1/2 -translate-y-1/2 text-emerald-700 font-black text-sm">$</span>
+                                  <Input
+                                    type="number"
+                                    min="0"
+                                    value={pos.current_balance}
+                                    onChange={(e) => update_position(idx, "current_balance", e.target.value)}
+                                    className="h-12 pl-9 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold"
+                                    placeholder="0"
+                                  />
+                                </div>
+                              </div>
+
+                              {/* Payment Amount */}
+                              <div>
+                                <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Payment Amount</Label>
+                                <div className="relative">
+                                  <span className="absolute left-5 top-1/2 -translate-y-1/2 text-emerald-700 font-black text-sm">$</span>
+                                  <Input
+                                    type="number"
+                                    min="0"
+                                    value={pos.payment_amount}
+                                    onChange={(e) => update_position(idx, "payment_amount", e.target.value)}
+                                    className="h-12 pl-9 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold"
+                                    placeholder="0"
+                                  />
+                                </div>
+                              </div>
+
+                              {/* Payment Term */}
+                              <div className="md:col-span-2">
+                                <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Payment Term</Label>
+                                <Input
+                                  value={pos.payment_term}
+                                  onChange={(e) => update_position(idx, "payment_term", e.target.value)}
+                                  className="h-12 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-5"
+                                  placeholder="e.g. Daily, Weekly, Monthly, 12 months"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+
+                        {open_positions.length >= 5 && (
+                          <p className="text-xs font-bold text-emerald-900/40 text-center">Maximum of 5 positions reached</p>
+                        )}
+                      </div>
+                    )}
 
                     {/* Conditional field: Show if client has defaulted on MCA */}
                     {has_defaulted_mca && (
