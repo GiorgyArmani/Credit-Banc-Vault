@@ -192,6 +192,7 @@ export default function AdvisorClientDetailsPage() {
     const [is_submit_confirm_open, set_is_submit_confirm_open] = useState(false);
     const [is_submitting_vault, set_is_submitting_vault] = useState(false);
     const [vault_submitted, set_vault_submitted] = useState(false);
+    const [submission_status, set_submission_status] = useState<string | null>(null);
 
     // error-message-state: Stores specific error message
     const [error_message, set_error_message] = useState<string>("");
@@ -443,6 +444,19 @@ export default function AdvisorClientDetailsPage() {
                     set_all_doc_types(all_docs || []);
                 }
             }
+
+            // ============================================
+            // STEP 8: FETCH SUBMISSION STATUS
+            // ============================================
+            const { data: sub_data } = await supabase
+                .from("submissions")
+                .select("status")
+                .eq("user_id", client_data.user_id)
+                .maybeSingle();
+
+            set_submission_status(sub_data?.status || null);
+            // Updated vault_submitted to be more reflective of the active status
+            set_vault_submitted(sub_data?.status === 'locked');
 
             // ============================================
             // STEP 8: FETCH INTERNAL NOTES
@@ -1242,39 +1256,65 @@ export default function AdvisorClientDetailsPage() {
                 {/* Submit to Underwriting Section */}
                 <Card className={clsx(
                     "border-2",
-                    vault_submitted
+                    submission_status === 'locked' && completion_percentage === 100
                         ? "bg-emerald-50 border-emerald-300"
-                        : "bg-white border-slate-200"
+                        : completion_percentage === 100 
+                            ? "bg-blue-50 border-blue-200"
+                            : "bg-white border-slate-200 shadow-sm"
                 )}>
                     <CardContent className="pt-6">
                         <div className="flex items-center justify-between">
-                            <div>
+                            <div className="space-y-1">
                                 <h3 className="font-semibold text-gray-900 text-lg flex items-center gap-2">
-                                    <ShieldCheck className={clsx("h-5 w-5", vault_submitted ? "text-emerald-600" : "text-slate-400")} />
+                                    <ShieldCheck className={clsx(
+                                        "h-5 w-5", 
+                                        submission_status === 'locked' && completion_percentage === 100 ? "text-emerald-600" : "text-slate-400"
+                                    )} />
                                     Submit to Underwriting
                                 </h3>
-                                <p className="text-sm text-gray-600 mt-1">
-                                    {vault_submitted
+                                <p className="text-sm text-gray-600">
+                                    {submission_status === 'locked' && completion_percentage === 100
                                         ? `Vault was submitted to underwriting${client_profile.data_vault_submitted_at ? ` on ${format_date(client_profile.data_vault_submitted_at)}` : ""}.`
-                                        : "Once all documents are ready, submit this vault to the underwriting team for review."
+                                        : completion_percentage === 100
+                                            ? submission_status === 'submitted'
+                                                ? "Client has submitted their vault. Please review and send to underwriting."
+                                                : "All documents are ready! You can now submit this vault to the underwriting team."
+                                            : "Awaiting all required documents before submission to underwriting is available."
                                     }
                                 </p>
                             </div>
 
-                            {vault_submitted ? (
-                                <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300 border text-sm px-4 py-2">
-                                    <CheckCircle className="h-4 w-4 mr-2" />
-                                    Submitted
-                                </Badge>
-                            ) : (
-                                <Button
-                                    onClick={() => set_is_submit_confirm_open(true)}
-                                    className="bg-slate-800 hover:bg-slate-900 text-white"
-                                >
-                                    <ShieldCheck className="h-4 w-4 mr-2" />
-                                    Submit to Underwriting
-                                </Button>
-                            )}
+                            <div className="flex items-center gap-3">
+                                {submission_status === 'locked' && completion_percentage === 100 ? (
+                                    <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300 border text-sm px-4 py-2">
+                                        <CheckCircle className="h-4 w-4 mr-2" />
+                                        Submitted
+                                    </Badge>
+                                ) : (
+                                    <Button
+                                        onClick={() => set_is_submit_confirm_open(true)}
+                                        disabled={completion_percentage < 100 || is_submitting_vault}
+                                        className={clsx(
+                                            "min-w-[180px]",
+                                            completion_percentage === 100 
+                                                ? "bg-slate-800 hover:bg-slate-900 text-white shadow-lg" 
+                                                : "bg-gray-100 text-gray-400 border-gray-200"
+                                        )}
+                                    >
+                                        {is_submitting_vault ? (
+                                            <>
+                                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                                Submitting...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <ShieldCheck className="h-4 w-4 mr-2" />
+                                                Submit to Underwriting
+                                            </>
+                                        )}
+                                    </Button>
+                                )}
+                            </div>
                         </div>
                     </CardContent>
                 </Card>

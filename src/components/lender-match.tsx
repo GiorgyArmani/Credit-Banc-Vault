@@ -86,6 +86,11 @@ const DEFAULT_DEAL: DealSummary = {
   capitalRequested: 0,
   state: "",
   industry: "",
+  proposedLoanType: "",
+  loanPurpose: "",
+  businessStartDate: "",
+  numOwners: "",
+  ownershipDetails: [],
 };
 
 // ─── Matching Engine ──────────────────────────────────────────────────────────
@@ -163,6 +168,20 @@ interface ClientOption {
   company_name: string;
   company_state: string;
   industry: string;
+  proposed_loan_type: string;
+  loan_purpose: string;
+  business_start_date: string;
+  number_of_owners: string;
+  owner_1_name: string;
+  owner_1_ownership_pct: number;
+  owner_2_name?: string;
+  owner_2_ownership_pct?: number;
+  owner_3_name?: string;
+  owner_3_ownership_pct?: number;
+  owner_4_name?: string;
+  owner_4_ownership_pct?: number;
+  owner_5_name?: string;
+  owner_5_ownership_pct?: number;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -194,10 +213,18 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
     const supabase = createClient();
     supabase
       .from("client_data_vault")
-      .select("id, client_name, company_name, company_state, industry")
+      .select(`
+        id, client_name, company_name, company_state, industry, 
+        proposed_loan_type, loan_purpose, business_start_date, number_of_owners,
+        owner_1_name, owner_1_ownership_pct,
+        owner_2_name, owner_2_ownership_pct,
+        owner_3_name, owner_3_ownership_pct,
+        owner_4_name, owner_4_ownership_pct,
+        owner_5_name, owner_5_ownership_pct
+      `)
       .order("client_name", { ascending: true })
       .then(({ data }) => {
-        if (data) setClientList(data as ClientOption[]);
+        if (data) setClientList(data as any as ClientOption[]);
       });
   }, []);
 
@@ -229,6 +256,17 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
         businessName: analysis.business_name || client?.company_name || "",
         ownerName: analysis.owner_name || client?.client_name || "",
         capitalRequested: Number(analysis.capital_requested) || 0,
+        proposedLoanType: client?.proposed_loan_type || "",
+        loanPurpose: client?.loan_purpose || "",
+        businessStartDate: client?.business_start_date ? new Date(client.business_start_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : "",
+        numOwners: client?.number_of_owners || "",
+        ownershipDetails: [
+          { name: client?.owner_1_name || "", pct: Number(client?.owner_1_ownership_pct) || 0 },
+          { name: client?.owner_2_name || "", pct: Number(client?.owner_2_ownership_pct) || 0 },
+          { name: client?.owner_3_name || "", pct: Number(client?.owner_3_ownership_pct) || 0 },
+          { name: client?.owner_4_name || "", pct: Number(client?.owner_4_ownership_pct) || 0 },
+          { name: client?.owner_5_name || "", pct: Number(client?.owner_5_ownership_pct) || 0 },
+        ].filter(o => o.name && o.pct > 0),
       };
       
       setDeal(newDeal);
@@ -335,12 +373,16 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
         <div className="flex flex-wrap gap-2">
           {[
             { label: "FICO", value: deal.fico && deal.fico > 0 ? String(deal.fico) : null },
-            { label: "TIB", value: deal.tibMonths && deal.tibMonths > 0 ? `${deal.tibMonths}mo` : null },
+            { label: "TIB", value: deal.tibMonths && deal.tibMonths > 0 ? `${deal.tibMonths}mo ${deal.businessStartDate ? `(${deal.businessStartDate})` : ""}` : null },
             { label: "Avg Revenue", value: deal.avgRevenue && deal.avgRevenue > 0 ? fmt$(deal.avgRevenue) : null },
             { label: "Neg Days", value: deal.totalNegDays && deal.totalNegDays > 0 ? String(deal.totalNegDays) : null },
             { label: "Positions", value: deal.numOpenPositions && deal.numOpenPositions > 0 ? String(deal.numOpenPositions) : null },
             { label: "Deposits", value: deal.avgMonthlyDeposits && deal.avgMonthlyDeposits > 0 ? String(deal.avgMonthlyDeposits) : null },
             { label: "Requested", value: deal.capitalRequested && deal.capitalRequested > 0 ? fmt$(deal.capitalRequested) : null },
+            { label: "Type", value: deal.proposedLoanType || null },
+            { label: "Purpose", value: deal.loanPurpose || null },
+            { label: "Start Date", value: deal.businessStartDate || null },
+            { label: "Owners", value: deal.numOwners || null },
             { label: "Bankruptcy", value: deal.hasBankruptcy ? "Yes" : null },
           ].filter((p) => p.value !== null).map(({ label, value }) => (
             <div key={label} className="flex items-center gap-1.5 bg-gray-900 border border-gray-700 rounded-lg px-2.5 py-1">
@@ -349,6 +391,22 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
             </div>
           ))}
         </div>
+
+        {/* Ownership Details */}
+        {deal.ownershipDetails.length > 0 && (
+          <div className="mt-4 pt-4 border-t border-gray-700/50">
+            <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2">Ownership Structure</div>
+            <div className="flex flex-wrap gap-4">
+              {deal.ownershipDetails.map((owner, idx) => (
+                <div key={idx} className="flex items-center gap-2">
+                  <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                  <span className="text-xs text-gray-300">{owner.name}</span>
+                  <span className="text-xs font-mono font-bold text-blue-400">{owner.pct}%</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
       
       {loadingLenders && (

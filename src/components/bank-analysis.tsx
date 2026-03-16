@@ -62,6 +62,11 @@ export interface DealSummary {
   capitalRequested: number;   // from Q3
   state: string;              // 2-letter
   industry: string;           // from Q1
+  proposedLoanType: string;
+  loanPurpose: string;
+  businessStartDate: string;
+  numOwners: string;
+  ownershipDetails: { name: string; pct: number }[];
 }
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];

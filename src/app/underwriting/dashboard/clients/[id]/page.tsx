@@ -41,6 +41,7 @@ import { fetchInternalNotes, addInternalNote } from "@/app/actions/internal-note
 import { toast } from "sonner";
 import clsx from "clsx";
 import { format } from "date-fns";
+import { LoanFundedDialog } from "@/components/loan-funded-dialog";
 
 enum ComponentState {
     LOADING = "LOADING",
@@ -442,6 +443,12 @@ export default function UnderwritingClientDetailsPage() {
                         </DialogFooter>
                     </DialogContent>
                 </Dialog>
+
+                <LoanFundedDialog 
+                    clientId={client_id} 
+                    clientName={client_profile.client_name} 
+                    onSuccess={fetch_client_details}
+                />
             </div>
 
             {/* Profile Hero */}

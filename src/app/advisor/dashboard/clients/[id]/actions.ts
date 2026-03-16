@@ -72,7 +72,21 @@ export async function requestDocuments(clientId: string, documentIds: string[]) 
             throw new Error("Failed to update document requirements in database");
         }
 
-        // 5. GHL Sync: Add requested tags for each document
+        // 5. Update submission status to 'documents_requested'
+        // This ensures the vault is no longer marked as 'locked' or 'submitted'
+        const { error: statusError } = await supabaseAdmin
+            .from("submissions")
+            .upsert({
+                user_id: client.user_id,
+                status: 'documents_requested',
+                updated_at: new Date().toISOString()
+            }, { onConflict: 'user_id' });
+
+        if (statusError) {
+            console.error("Error updating submission status:", statusError);
+        }
+
+        // 6. GHL Sync: Add requested tags for each document
         if (client.ghl_contact_id) {
             const tagsToAdd = docDefs
                 .map(d => d.ghl_tag)
@@ -397,7 +411,11 @@ export async function removeRequestedDocument(clientId: string, documentCode: st
 
         if (deleteError) throw new Error(`Failed to remove document request: ${deleteError.message}`);
 
-        // 5. Revalidate
+        // 5. Check if completion is now 100% and update status if needed
+        // (Optional: we could leave it as is and let the UI/advisor handle it, 
+        // but for a truly dynamic feel, we might want to reset if it was 'documents_requested')
+        
+        // 6. Revalidate
         revalidatePath(`/advisor/dashboard/clients/${clientId}`);
 
         return { success: true };

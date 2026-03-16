@@ -155,7 +155,7 @@ export default function UnderwritingDashboardPage() {
                     submission_status: sub?.status || "in_progress"
                 };
 
-                if (sub?.status === 'submitted') {
+                if (sub?.status === 'locked') {
                     ready_list.push(info);
                 } else {
                     active_list.push(info);
@@ -174,7 +174,7 @@ export default function UnderwritingDashboardPage() {
     }
 
     function render_client_card(client: ClientReviewInfo) {
-        const isReady = client.submission_status === 'submitted';
+        const isReady = client.submission_status === 'locked';
 
         return (
             <Card
@@ -197,7 +197,7 @@ export default function UnderwritingDashboardPage() {
                                         ? "bg-emerald-100 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
                                         : "bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-100"
                                 )}>
-                                    {isReady ? "Ready for Review" : "In Progress"}
+                                    {client.submission_status === 'locked' ? "Ready for Review" : client.submission_status === 'submitted' ? "Submitted" : "In Progress"}
                                 </Badge>
                                 <span className="text-[10px] font-bold text-slate-400">
                                     {client.document_count}/{client.total_required_docs} Docs

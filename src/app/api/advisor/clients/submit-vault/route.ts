@@ -24,6 +24,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createClient as createAdminClient } from '@supabase/supabase-js';
 import { ghlAddTags } from '@/lib/ghl-api';
+import { send_underwriting_vault_ready_notification } from '@/lib/email';
 
 const supabase_admin = createAdminClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -92,7 +93,7 @@ export async function POST(request: Request) {
         // Fetch client and verify ownership
         const { data: client, error: client_error } = await supabase_admin
             .from('client_data_vault')
-            .select('id, user_id, client_name, ghl_contact_id, advisor_id, data_vault_submitted_at')
+            .select('id, user_id, client_name, company_name, ghl_contact_id, advisor_id, data_vault_submitted_at, capital_requested')
             .eq('id', client_id)
             .maybeSingle();
 
@@ -149,7 +150,7 @@ export async function POST(request: Request) {
             .upsert({
                 user_id: client.user_id,
                 advisor_id: advisor_data.id,
-                status: 'submitted',
+                status: 'locked',
                 submitted_at,
             }, { onConflict: 'user_id' });
 
@@ -158,6 +159,55 @@ export async function POST(request: Request) {
             console.error('⚠️ Error upserting submissions record (non-fatal):', submission_error);
         } else {
             console.log(`✅ Submissions record upserted for user: ${client.user_id}`);
+
+            // ========================================================================
+            // STEP 7: NOTIFY UNDERWRITING
+            // ========================================================================
+            try {
+                const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://vault.creditbanc.io';
+                
+                // 7a. Get all underwriting users for notifications
+                const { data: underwriting_users } = await supabase_admin
+                    .from('users')
+                    .select('id, email, first_name, last_name')
+                    .eq('role', 'underwriting');
+
+                if (underwriting_users && underwriting_users.length > 0) {
+                    // 7b. In-app notifications
+                    const notifications = underwriting_users.map(u => ({
+                        user_id: u.id,
+                        client_id: client.id,
+                        title: "New Vault Ready for Review",
+                        message: `${client.client_name} (${client.company_name}) has been approved by ${advisor_data.first_name} and is ready for review.`
+                    }));
+
+                    await supabase_admin.from('in_app_notifications').insert(notifications);
+                    console.log(`✅ In-app notifications sent to ${underwriting_users.length} underwriters`);
+
+                    // 7c. Email notifications
+                    for (const u of underwriting_users) {
+                        if (u.email) {
+                            try {
+                                await send_underwriting_vault_ready_notification({
+                                    underwriter_email: u.email,
+                                    client_name: client.client_name,
+                                    company_name: client.company_name,
+                                    advisor_name: `${advisor_data.first_name} ${advisor_data.last_name}`,
+                                    capital_requested: client.capital_requested || 0,
+                                    client_profile_url: `${appUrl}/underwriting/dashboard/clients/${client.id}`
+                                });
+                            } catch (email_err) {
+                                console.error(`⚠️ Error sending email to underwriter ${u.email}:`, email_err);
+                            }
+                        }
+                    }
+                    console.log(`✅ Email notifications dispatched to the underwriting team`);
+                } else {
+                    console.warn('⚠️ No underwriting users found to notify');
+                }
+            } catch (notify_error) {
+                console.error('⚠️ Error notifying underwriting (non-fatal):', notify_error);
+            }
         }
 
         return NextResponse.json({

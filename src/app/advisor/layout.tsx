@@ -70,8 +70,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </header>
 
         {/* Topbar (Desktop) */}
-        <header className="hidden md:flex sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b h-16 items-center px-8 justify-between">
-          <div className="text-lg font-bold text-gray-800 tracking-tight">{currentTitle}</div>
+        <header className="hidden md:flex sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b h-16 items-center px-8 justify-end">
           <div className="flex items-center gap-4">
             <NotificationBell />
           </div>

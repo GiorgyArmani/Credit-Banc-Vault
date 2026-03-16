@@ -48,6 +48,30 @@ export interface AdvisorDocumentNotificationData {
 }
 
 /**
+ * Interface for advisor vault submission notification data
+ */
+export interface AdvisorVaultSubmissionData {
+  advisor_name: string;
+  advisor_email: string;
+  client_name: string;
+  company_name: string;
+  submission_date: string;
+  login_url: string;
+}
+
+/**
+ * Interface for underwriting vault ready notification data
+ */
+export interface UnderwritingVaultReadyData {
+  underwriter_email: string;
+  client_name: string;
+  company_name: string;
+  advisor_name: string;
+  capital_requested: number;
+  client_profile_url: string;
+}
+
+/**
  * Creates Nodemailer transporter with SMTP credentials
  * Uses Mailgun SMTP through LeadConnector
  */
@@ -951,6 +975,312 @@ export async function send_support_ticket_email(data: SupportTicketEmailData) {
     replyTo: data.email,
     subject: `Support Ticket: ${data.subject}`,
     text: `New support ticket from ${data.name} (${data.email})\n\nSubject: ${data.subject}\n\nMessage:\n${data.message}`,
+    html: html_content,
+  };
+
+  return await transporter.sendMail(mail_options);
+}
+
+/**
+ * ============================================================================
+ * VAULT SUBMISSION NOTIFICATION FUNCTIONS
+ * ============================================================================
+ */
+
+/**
+ * Generates HTML for advisor vault submission notification
+ */
+export function generate_advisor_vault_submission_html(data: AdvisorVaultSubmissionData): string {
+  const { advisor_name, client_name, company_name, submission_date, login_url } = data;
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>New Vault Submission: ${client_name}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f6f9fc;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse;">
+    <tr>
+      <td align="center" style="padding: 40px 0;">
+        <table role="presentation" style="width: 600px; max-width: 100%; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+          
+          <!-- Header -->
+          <tr>
+            <td style="padding: 40px 40px 20px; text-align: center; background-color: #10b981;">
+              <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 700;">New Vault Submission</h1>
+            </td>
+          </tr>
+
+          <!-- Message -->
+          <tr>
+            <td style="padding: 40px 40px 20px;">
+              <h2 style="margin: 0 0 16px; color: #1e293b; font-size: 20px; font-weight: 600;">Hi ${advisor_name},</h2>
+              <p style="margin: 0 0 16px; color: #475569; font-size: 16px; line-height: 1.6;">
+                Great news! Your client <strong>${client_name}</strong> (${company_name}) has just submitted their Credit Banc Vault for review.
+              </p>
+              
+              <div style="background-color: #f0fdf4; border: 1px solid #dcfce7; border-radius: 12px; padding: 24px; margin-bottom: 24px;">
+                <p style="margin: 0 0 8px; color: #166534; font-size: 14px;"><strong>Submission Date:</strong> ${submission_date}</p>
+                <p style="margin: 0; color: #166534; font-size: 14px;"><strong>Client:</strong> ${client_name}</p>
+                <p style="margin: 4px 0 0; color: #166534; font-size: 14px;"><strong>Company:</strong> ${company_name}</p>
+              </div>
+
+              <p style="margin: 0 0 24px; color: #475569; font-size: 16px; line-height: 1.6;">
+                Please log in to your advisor portal to review the documents and complete the submission to underwriting.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Action Button -->
+          <tr>
+            <td style="padding: 0 40px 40px;" align="center">
+              <a href="${login_url}" style="display: inline-block; background-color: #10b981; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-size: 16px; font-weight: 600;">
+                Review Submission
+              </a>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding: 40px; text-align: center; color: #94a3b8; font-size: 13px; line-height: 1.6; border-top: 1px solid #f1f5f9;">
+              <p style="margin: 0;">© ${new Date().getFullYear()} Credit Banc Vault. This is an automated notification.</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `;
+}
+
+/**
+ * Sends notification email to advisor about vault submission
+ */
+export async function send_advisor_vault_submission_notification(data: AdvisorVaultSubmissionData) {
+  const transporter = create_smtp_transporter();
+
+  const from_email = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  const from_name = process.env.SMTP_FROM_NAME || 'Credit Banc Vault';
+
+  const html_content = generate_advisor_vault_submission_html(data);
+
+  const mail_options = {
+    from: `${from_name} <${from_email}>`,
+    to: data.advisor_email,
+    subject: `New Vault Submission: ${data.client_name}`,
+    html: html_content,
+  };
+
+  return await transporter.sendMail(mail_options);
+}
+
+/**
+ * Generates HTML for underwriting vault ready notification
+ */
+export function generate_underwriting_vault_ready_html(data: UnderwritingVaultReadyData): string {
+  const { client_name, company_name, advisor_name, capital_requested, client_profile_url } = data;
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vault Ready for Underwriting: ${client_name}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f6f9fc;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse;">
+    <tr>
+      <td align="center" style="padding: 40px 0;">
+        <table role="presentation" style="width: 600px; max-width: 100%; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+          
+          <!-- Header -->
+          <tr>
+            <td style="padding: 40px 40px 20px; text-align: center; background-color: #1e293b;">
+              <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 700;">Vault Ready for Underwriting</h1>
+            </td>
+          </tr>
+
+          <!-- Message -->
+          <tr>
+            <td style="padding: 40px 40px 20px;">
+              <h2 style="margin: 0 0 16px; color: #1e293b; font-size: 20px; font-weight: 600;">Action Required</h2>
+              <p style="margin: 0 0 16px; color: #475569; font-size: 16px; line-height: 1.6;">
+                The advisor <strong>${advisor_name}</strong> has reviewed and approved the vault for <strong>${client_name}</strong>. It is now ready for underwriting.
+              </p>
+              
+              <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px; margin-bottom: 24px;">
+                <p style="margin: 0 0 8px; color: #334155; font-size: 14px;"><strong>Client:</strong> ${client_name}</p>
+                <p style="margin: 0 0 8px; color: #334155; font-size: 14px;"><strong>Company:</strong> ${company_name}</p>
+                <p style="margin: 0 0 8px; color: #334155; font-size: 14px;"><strong>Advisor:</strong> ${advisor_name}</p>
+                <p style="margin: 0; color: #334155; font-size: 14px;"><strong>Capital Requested:</strong> ${new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(capital_requested)}</p>
+              </div>
+
+              <p style="margin: 0 0 24px; color: #475569; font-size: 16px; line-height: 1.6;">
+                Click the button below to view the client profile on the underwriting dashboard.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Action Button -->
+          <tr>
+            <td style="padding: 0 40px 40px;" align="center">
+              <a href="${client_profile_url}" style="display: inline-block; background-color: #1e293b; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-size: 16px; font-weight: 600;">
+                View Client Profile
+              </a>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding: 40px; text-align: center; color: #94a3b8; font-size: 13px; line-height: 1.6; border-top: 1px solid #f1f5f9;">
+              <p style="margin: 0;">© ${new Date().getFullYear()} Credit Banc Vault. Confidential Internal Use Only.</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `;
+}
+
+/**
+ * Sends notification email to underwriting team
+ */
+export async function send_underwriting_vault_ready_notification(data: UnderwritingVaultReadyData) {
+  const transporter = create_smtp_transporter();
+
+  const from_email = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  const from_name = process.env.SMTP_FROM_NAME || 'Credit Banc Vault';
+  const recipient_email = data.underwriter_email || process.env.UNDERWRITING_EMAIL || 'underwriting@creditbanc.io';
+
+  const html_content = generate_underwriting_vault_ready_html(data);
+
+  const mail_options = {
+    from: `${from_name} <${from_email}>`,
+    to: recipient_email,
+    subject: `Vault Ready: ${data.client_name} - ${data.company_name}`,
+    html: html_content,
+  };
+
+  console.log(`📧 Attempting to send underwriting email to: ${recipient_email}`);
+
+  try {
+    const result = await transporter.sendMail(mail_options);
+    console.log(`✅ SMTP Result for ${data.client_name}:`, result.messageId);
+    return result;
+  } catch (error) {
+    console.error(`❌ SMTP Error sending to ${recipient_email}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * ============================================================================
+ * LOAN FUNDED NOTIFICATION FUNCTIONS
+ * ============================================================================
+ */
+
+export interface LoanFundedNotificationData {
+  advisor_name: string;
+  advisor_email: string;
+  client_name: string;
+  total_amount: string;
+  lender: string;
+  funding_date: string;
+  login_url: string;
+}
+
+export function generate_loan_funded_notification_html(data: LoanFundedNotificationData): string {
+  const { advisor_name, client_name, total_amount, lender, funding_date, login_url } = data;
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Congratulations! Loan Funded for ${client_name}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f6f9fc;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse;">
+    <tr>
+      <td align="center" style="padding: 40px 0;">
+        <table role="presentation" style="width: 600px; max-width: 100%; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+          
+          <!-- Header -->
+          <tr>
+            <td style="padding: 40px 40px 20px; text-align: center; background-color: #10b981;">
+              <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 700;">🎉 Loan Funded!</h1>
+            </td>
+          </tr>
+
+          <!-- Message -->
+          <tr>
+            <td style="padding: 40px 40px 20px;">
+              <h2 style="margin: 0 0 16px; color: #1e293b; font-size: 20px; font-weight: 600;">Hi ${advisor_name},</h2>
+              <p style="margin: 0 0 16px; color: #475569; font-size: 16px; line-height: 1.6;">
+                Great news! The loan for your client <strong>${client_name}</strong> has been successfully funded.
+              </p>
+              
+              <div style="background-color: #f0fdf4; border: 1px solid #dcfce7; border-radius: 12px; padding: 24px; margin-bottom: 24px;">
+                <p style="margin: 0 0 8px; color: #166534; font-size: 14px;"><strong>Funding Date:</strong> ${funding_date}</p>
+                <p style="margin: 0 0 8px; color: #166534; font-size: 14px;"><strong>Lender:</strong> ${lender}</p>
+                <p style="margin: 0; color: #166534; font-size: 14px;"><strong>Amount Funded:</strong> ${total_amount}</p>
+              </div>
+
+              <p style="margin: 0 0 24px; color: #475569; font-size: 16px; line-height: 1.6;">
+                You can review the full details and next steps in your advisor portal.
+              </p>
+            </td>
+          </tr>
+
+           <!-- Action Button -->
+          <tr>
+            <td style="padding: 0 40px 40px;" align="center">
+              <a href="${login_url}" style="display: inline-block; background-color: #10b981; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-size: 16px; font-weight: 600;">
+                Go to Advisor Portal
+              </a>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding: 40px; text-align: center; color: #94a3b8; font-size: 13px; line-height: 1.6; border-top: 1px solid #f1f5f9;">
+              <p style="margin: 0;">© ${new Date().getFullYear()} Credit Banc Vault. This is an automated notification.</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `;
+}
+
+export async function send_loan_funded_notification(data: LoanFundedNotificationData) {
+  const transporter = create_smtp_transporter();
+
+  const from_email = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  const from_name = process.env.SMTP_FROM_NAME || 'Credit Banc Vault';
+
+  const html_content = generate_loan_funded_notification_html(data);
+
+  const mail_options = {
+    from: `${from_name} <${from_email}>`,
+    to: data.advisor_email,
+    subject: `🎉 Loan Funded for ${data.client_name}!`,
     html: html_content,
   };
 
