@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useEffect } from "react";
 import LenderMatch from "./lender-match";
 import { createClient } from "@/lib/supabase/client";
 
@@ -442,216 +442,6 @@ function OpenPositions({
   );
 }
 
-// ─── Possible Offers ──────────────────────────────────────────────────────────
-
-function PossibleOffers({ avgRevenue }: { avgRevenue: number }) {
-  const [factorRate, setFactorRate] = useState("1.45");
-  const [dailyPayment, setDailyPayment] = useState("500");
-
-  const factor = parseFloat(factorRate) || 1.45;
-  const daily = parseFloat(dailyPayment) || 500;
-
-  const offers = TERM_MONTHS.map((months) => {
-    const tradingDays = months * 22; // ~22 business days/month
-    const advanceAmount = avgRevenue > 0 ? (avgRevenue * months) / factor : 0;
-    const rtr = advanceAmount * factor;
-    const payment = tradingDays > 0 ? rtr / tradingDays : 0;
-    const customAdvance = daily * tradingDays / factor;
-
-    return { months, tradingDays, advanceAmount, rtr, payment, customAdvance };
-  });
-
-  return (
-    <div className="rounded-xl border border-[#30363d] bg-[#161b22] overflow-hidden">
-      <div className="px-4 py-3 bg-[#1c2128] border-b border-[#30363d] flex items-center justify-between flex-wrap gap-3">
-        <span className="text-xs font-bold tracking-[0.15em] uppercase text-[#8b949e]">Possible Offers</span>
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <label className="text-[10px] text-[#8b949e] uppercase tracking-wider whitespace-nowrap">Factor Rate</label>
-            <input
-              type="text"
-              value={factorRate}
-              onChange={(e) => setFactorRate(e.target.value)}
-              className="w-20 bg-[#0d1117] border border-[#30363d] rounded px-2 py-1 text-sm font-mono text-[#e6edf3] text-center focus:outline-none focus:border-[#388bfd] transition-colors"
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <label className="text-[10px] text-[#8b949e] uppercase tracking-wider whitespace-nowrap">Daily Payment</label>
-            <input
-              type="text"
-              value={dailyPayment}
-              onChange={(e) => setDailyPayment(e.target.value)}
-              className="w-24 bg-[#0d1117] border border-[#30363d] rounded px-2 py-1 text-sm font-mono text-[#e6edf3] text-right focus:outline-none focus:border-[#388bfd] transition-colors"
-            />
-          </div>
-        </div>
-      </div>
-
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="border-b border-[#30363d]">
-              <th className="text-left px-4 py-2 text-[#8b949e] font-medium">Terms</th>
-              {TERM_MONTHS.map((m) => (
-                <th key={m} className="text-center px-2 py-2 text-[#8b949e] font-medium whitespace-nowrap min-w-[90px]">
-                  {m} Mo.
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {[
-              {
-                label: `Factor ${factor.toFixed(2)}`,
-                getValue: (o: (typeof offers)[0]) =>
-                  avgRevenue > 0 ? formatMoney(o.advanceAmount) : "—",
-                highlight: true,
-              },
-              {
-                label: "Daily Payment",
-                getValue: (o: (typeof offers)[0]) =>
-                  avgRevenue > 0 ? formatMoney(o.payment) : "—",
-                highlight: false,
-              },
-              {
-                label: "Custom Advance",
-                getValue: (o: (typeof offers)[0]) => formatMoney(o.customAdvance),
-                highlight: false,
-              },
-              {
-                label: "RTR",
-                getValue: (o: (typeof offers)[0]) =>
-                  avgRevenue > 0 ? formatMoney(o.rtr) : "—",
-                highlight: false,
-              },
-            ].map((row, ri) => (
-              <tr key={ri} className={`border-b border-[#21262d] ${ri % 2 === 0 ? "bg-[#161b22]" : "bg-[#13191f]"}`}>
-                <td className={`px-4 py-2 font-medium sticky left-0 z-10 whitespace-nowrap ${row.highlight ? "text-[#58a6ff]" : "text-[#c9d1d9]"}`}
-                  style={{ background: ri % 2 === 0 ? "#161b22" : "#13191f" }}>
-                  {row.label}
-                </td>
-                {offers.map((o) => (
-                  <td key={o.months} className={`px-2 py-2 text-center font-mono ${row.highlight ? "text-[#3fb950] font-semibold" : "text-[#c9d1d9]"}`}>
-                    {row.getValue(o)}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-// ─── Reverse Consolidation ────────────────────────────────────────────────────
-
-interface MCADeal {
-  balance: string;
-  payment: string;
-  daysLeft: string;
-}
-
-function ReverseConsolidation() {
-  const [businessName, setBusinessName] = useState("");
-  const [deals, setDeals] = useState<MCADeal[]>(Array(5).fill(null).map(() => ({ balance: "", payment: "", daysLeft: "" })));
-  const [newFunding, setNewFunding] = useState({ factor: "1.35", discount: "", term: "", payment: "" });
-
-  const updateDeal = (i: number, f: keyof MCADeal, v: string) =>
-    setDeals(deals.map((d, di) => (di === i ? { ...d, [f]: v } : d)));
-
-  const existingBalances = deals.reduce((s, d) => s + parseMoney(d.balance), 0);
-  const dailyMCAach = deals.reduce((s, d) => s + parseMoney(d.payment), 0);
-
-  return (
-    <div className="rounded-xl border border-[#30363d] bg-[#161b22] overflow-hidden">
-      <div className="px-4 py-3 bg-[#1c2128] border-b border-[#30363d]">
-        <span className="text-xs font-bold tracking-[0.15em] uppercase text-[#8b949e]">Reverse Consolidation Worksheet</span>
-      </div>
-
-      <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Left: Deal inputs */}
-        <div>
-          <div className="mb-4">
-            <label className="text-[10px] text-[#8b949e] uppercase tracking-wider block mb-1">Business DBA Name</label>
-            <TextInput value={businessName} onChange={setBusinessName} placeholder="Business name..." />
-          </div>
-
-          <div className="space-y-3">
-            {deals.map((deal, i) => (
-              <div key={i} className="rounded-lg border border-[#21262d] p-3 bg-[#13191f]">
-                <div className="text-[10px] text-[#8b949e] uppercase tracking-wider mb-2 font-semibold">
-                  MCA Deal #{i + 1}
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  {(["balance", "payment", "daysLeft"] as const).map((f) => (
-                    <div key={f}>
-                      <label className="text-[10px] text-[#8b949e] block mb-0.5 capitalize">
-                        {f === "daysLeft" ? "Days Left" : f.charAt(0).toUpperCase() + f.slice(1)}
-                      </label>
-                      <CurrencyInput
-                        value={deal[f]}
-                        onChange={(v) => updateDeal(i, f, v)}
-                        placeholder={f === "daysLeft" ? "0" : "$0"}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Right: Summary */}
-        <div>
-          <div className="rounded-lg border border-[#30363d] overflow-hidden">
-            <div className="px-3 py-2 bg-[#1c2128] border-b border-[#30363d]">
-              <span className="text-[10px] font-bold tracking-wider uppercase text-[#8b949e]">Consolidation Summary</span>
-            </div>
-            <div className="divide-y divide-[#21262d]">
-              {[
-                { label: "Existing Balances", value: formatMoney(existingBalances), accent: false },
-                { label: "Daily MCA ACH", value: formatMoney(dailyMCAach), accent: false },
-                { label: "New Funding Amount", value: "", input: true, field: "payment" },
-                { label: "Total Funding", value: formatMoney(existingBalances + parseMoney(newFunding.payment)), accent: true },
-                { label: "Factor Rate", value: "", input: true, field: "factor" },
-                { label: "Discount", value: "", input: true, field: "discount" },
-                { label: "Term", value: "", input: true, field: "term" },
-                {
-                  label: "RTR",
-                  value: formatMoney((existingBalances + parseMoney(newFunding.payment)) * (parseFloat(newFunding.factor) || 1)),
-                  accent: true,
-                },
-              ].map((row, i) => (
-                <div key={i} className="flex items-center justify-between px-3 py-2">
-                  <span className={`text-xs ${row.accent ? "text-[#58a6ff] font-semibold" : "text-[#8b949e]"}`}>
-                    {row.label}
-                  </span>
-                  {row.input ? (
-                    <div className="w-32">
-                      <CurrencyInput
-                        value={newFunding[row.field as keyof typeof newFunding]}
-                        onChange={(v) => setNewFunding({ ...newFunding, [row.field!]: v })}
-                        placeholder="0"
-                      />
-                    </div>
-                  ) : (
-                    <span className={`text-xs font-mono ${row.accent ? "text-[#3fb950] font-bold" : "text-[#e6edf3]"}`}>
-                      {row.value}
-                    </span>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// (Duplicate interface removed)
-
 // ─── Main Component ───────────────────────────────────────────────────────────
 // NOTE: Lender matching logic lives in LenderMatch.tsx — import separately.
 
@@ -708,7 +498,7 @@ export default function BankAnalysis() {
   const [state, setState] = useState("");
   const [industry, setIndustry] = useState("");
 
-  const [activeTab, setActiveTab] = useState<"analysis" | "positions" | "offers" | "recon">("analysis");
+  const [activeTab, setActiveTab] = useState<"analysis" | "positions">("analysis");
 
   // ── Month range selector ────────────────────────────────────────────────
   const [monthRange, setMonthRange] = useState<3 | 6 | 8 | 12>(3);
@@ -925,8 +715,6 @@ export default function BankAnalysis() {
   const TABS = [
     { id: "analysis" as const, label: "Bank Analysis" },
     { id: "positions" as const, label: "Open Positions" },
-    { id: "offers" as const, label: "Possible Offers" },
-    { id: "recon" as const, label: "Reverse Consolidation" },
   ];
 
   return (
@@ -1198,20 +986,6 @@ export default function BankAnalysis() {
           <OpenPositions positions={positions} avgRevenue={avgRevenue} onChange={setPositions} />
         )}
 
-        {/* Tab: Possible Offers */}
-        {activeTab === "offers" && (
-          <div>
-            {avgRevenue === 0 && (
-              <div className="mb-4 rounded-lg border border-[#f0883e]/30 bg-[#f0883e]/5 px-4 py-3 text-xs text-[#f0883e] font-mono">
-                ⚠ Enter bank statement data in the Bank Analysis tab to calculate offer amounts based on average revenue.
-              </div>
-            )}
-            <PossibleOffers avgRevenue={avgRevenue} />
-          </div>
-        )}
-
-        {/* Tab: Reverse Consolidation */}
-        {activeTab === "recon" && <ReverseConsolidation />}
 
       </div>
     </div>
