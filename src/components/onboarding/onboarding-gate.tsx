@@ -4,6 +4,7 @@ import { useRouter, usePathname } from 'next/navigation'
 import { useOnboardingStatus } from './use-onboarding-status'
 import { PremiumLoader } from '../ui/premium-loader'
 import { motion, AnimatePresence } from 'framer-motion'
+import { updateLoanStatus, getClientPipelineHistory } from '@/app/actions/pipeline'
 
 type OnboardingGateProps = { children: ReactNode }
 
@@ -39,6 +40,26 @@ export default function OnboardingGate({ children }: OnboardingGateProps) {
       router.push('/onboarding')
     }
   }, [needsOnboarding, loading, pathname, router])
+
+  // Pipeline sync: Move to 'onboarding' if currently in 'created'
+  const { vaultId } = useOnboardingStatus()
+  useEffect(() => {
+    if (loading || !vaultId) return
+
+    async function syncPipeline() {
+      try {
+        const history = await getClientPipelineHistory(vaultId!)
+        if (history.length === 1 && history[0].status === 'created') {
+          await updateLoanStatus(vaultId!, 'onboarding', 'Client accessed the vault for the first time')
+          console.log('✅ Pipeline status auto-advanced to "onboarding"')
+        }
+      } catch (err) {
+        console.error('⚠️ Pipeline auto-sync error:', err)
+      }
+    }
+
+    syncPipeline()
+  }, [loading, vaultId])
 
   // Lock body scroll only during initial loading
   useEffect(() => {

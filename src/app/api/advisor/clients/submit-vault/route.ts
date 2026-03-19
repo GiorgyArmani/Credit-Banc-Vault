@@ -208,6 +208,16 @@ export async function POST(request: Request) {
             } catch (notify_error) {
                 console.error('⚠️ Error notifying underwriting (non-fatal):', notify_error);
             }
+            // ========================================
+            // STEP 8: UPDATE PIPELINE STATUS
+            // ========================================
+            try {
+                const { updateLoanStatus } = await import('@/app/actions/pipeline');
+                await updateLoanStatus(client.id, 'under_review', `Vault submitted by advisor ${advisor_data.first_name}`);
+                console.log(`✅ Pipeline status updated to "under_review" for client: ${client.id}`);
+            } catch (pipeline_error) {
+                console.error('⚠️ Error updating pipeline status (non-fatal):', pipeline_error);
+            }
         }
 
         return NextResponse.json({

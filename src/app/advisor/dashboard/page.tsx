@@ -26,6 +26,8 @@ import {
 } from "lucide-react";
 import AdvisorWebsiteTour from "@/components/tour/advisor-website-tour";
 import { Badge } from "@/components/ui/badge";
+import { getBulkLatestStatus, type LoanStatus } from "@/app/actions/pipeline";
+import { LoanPipelineBadge } from "@/components/loan-pipeline-status";
 
 /**
  * Stat Card Component
@@ -84,6 +86,8 @@ export default function AdvisorDashboard() {
     company_name: string;
     status: string;
     submitted_at: string;
+    vault_id?: string;
+    pipeline_status?: LoanStatus;
   }
 
   interface ActivityItem {
@@ -231,13 +235,25 @@ export default function AdvisorDashboard() {
         .limit(5);
 
       if (recentSubsData) {
-        setRecentApps(recentSubsData.map((s: any) => ({
+        const apps = recentSubsData.map((s: any) => ({
           id: s.id,
           status: s.status,
           submitted_at: s.submitted_at || new Date().toISOString(),
           client_name: s.client_data_vault?.client_name || s.client_data_vault?.[0]?.client_name || 'Unknown Client',
-          company_name: s.client_data_vault?.company_name || s.client_data_vault?.[0]?.company_name || 'Unknown Company'
-        })));
+          company_name: s.client_data_vault?.company_name || s.client_data_vault?.[0]?.company_name || 'Unknown Company',
+          vault_id: s.client_data_vault?.id || s.client_data_vault?.[0]?.id,
+        }));
+
+        // Bulk-fetch pipeline statuses for recent apps
+        const vaultIds = apps.map((a: any) => a.vault_id).filter(Boolean);
+        if (vaultIds.length > 0) {
+          const pipelineMap = await getBulkLatestStatus(vaultIds);
+          apps.forEach((a: any) => {
+            if (a.vault_id) a.pipeline_status = pipelineMap.get(a.vault_id) ?? "created";
+          });
+        }
+
+        setRecentApps(apps);
       }
 
       // Fetch recent activity
@@ -453,13 +469,17 @@ export default function AdvisorDashboard() {
                         </div>
                       </div>
                       <div className="text-right">
-                        <Badge className={`uppercase tracking-widest text-[9px] px-2 py-0.5 border ${app.status === 'locked' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' :
-                          app.status === 'documents_requested' ? 'bg-red-100 text-red-700 border-red-200' :
-                            app.status === 'submitted' ? 'bg-blue-100 text-blue-700 border-blue-200' :
-                              'bg-slate-100 text-slate-700 border-slate-200'
-                          }`}>
-                          {app.status === 'documents_requested' ? 'Action Needed' : app.status}
-                        </Badge>
+                        {app.pipeline_status ? (
+                          <LoanPipelineBadge currentStatus={app.pipeline_status} />
+                        ) : (
+                          <Badge className={`uppercase tracking-widest text-[9px] px-2 py-0.5 border ${app.status === 'locked' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' :
+                            app.status === 'documents_requested' ? 'bg-red-100 text-red-700 border-red-200' :
+                              app.status === 'submitted' ? 'bg-blue-100 text-blue-700 border-blue-200' :
+                                'bg-slate-100 text-slate-700 border-slate-200'
+                            }`}>
+                            {app.status === 'documents_requested' ? 'Action Needed' : app.status}
+                          </Badge>
+                        )}
                         <p className="text-[10px] font-bold text-emerald-900/40 mt-1">{formatDate(app.submitted_at)}</p>
                       </div>
                     </div>

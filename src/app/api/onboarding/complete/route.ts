@@ -24,6 +24,23 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: 'Failed to update user' }, { status: 500 });
         }
 
+        // Update Loan Pipeline status
+        try {
+            const { data: vault } = await supabase
+                .from('client_data_vault')
+                .select('id')
+                .eq('user_id', user.id)
+                .single();
+
+            if (vault) {
+                const { updateLoanStatus } = await import('@/app/actions/pipeline');
+                await updateLoanStatus(vault.id, 'onboarding', 'Client completed onboarding (Profile & Contract)');
+                console.log('✅ Pipeline status updated to "onboarding" (complete)');
+            }
+        } catch (pipeline_error) {
+            console.error('⚠️ Error updating pipeline status (non-fatal):', pipeline_error);
+        }
+
         return NextResponse.json({ success: true });
 
     } catch (error: any) {

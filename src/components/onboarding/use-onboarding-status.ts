@@ -8,6 +8,7 @@ export function useOnboardingStatus() {
   const [dataVaultCompleted, setDataVaultCompleted] = useState(false)
   const [contractCompleted, setContractCompleted] = useState(false)
   const [clientName, setClientName] = useState<string | null>(null)
+  const [vaultId, setVaultId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null)
   const timeoutRef = useRef<number | null>(null)
@@ -34,7 +35,7 @@ export function useOnboardingStatus() {
           .maybeSingle(),
         supabase
           .from("client_data_vault")
-          .select("data_vault_submitted_at, contract_completed, client_name")
+          .select("id, data_vault_submitted_at, contract_completed, client_name")
           .eq("user_id", user.id)
           .maybeSingle()
       ])
@@ -48,6 +49,7 @@ export function useOnboardingStatus() {
 
       // ALWAYS set the client name if we got data, regardless of onboarding status
       setClientName(vaultData?.client_name || null)
+      setVaultId(vaultData?.id || null)
 
       // If user is an advisor, skip onboarding entirely
       if (userData?.role === "advisor" || userData?.role === "underwriting") {
@@ -148,5 +150,5 @@ export function useOnboardingStatus() {
   // We trust the refetch() and auth listeners to handle state correctly.
 
 
-  return { needsOnboarding, dataVaultCompleted, contractCompleted, clientName, loading, refetch }
+  return { needsOnboarding, dataVaultCompleted, contractCompleted, clientName, vaultId, loading, refetch }
 }

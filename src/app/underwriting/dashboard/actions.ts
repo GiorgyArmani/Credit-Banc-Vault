@@ -224,3 +224,19 @@ export async function fundLoanAction(clientId: string, data: {
         return { success: false, error: error.message };
     }
 }
+
+export async function markDocumentAsViewed(documentId: string) {
+    const supabase = await createClient();
+    const { error } = await supabase
+        .from("user_documents")
+        .update({ viewed_at: new Date().toISOString() })
+        .eq("id", documentId)
+        .is("viewed_at", null); // Only update if not already viewed
+
+    if (error) {
+        console.error("markDocumentAsViewed error:", error);
+        return { success: false, error: error.message };
+    }
+
+    return { success: true };
+}

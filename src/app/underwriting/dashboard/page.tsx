@@ -24,6 +24,8 @@ import {
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import clsx from "clsx";
+import { getBulkLatestStatus, type LoanStatus } from "@/app/actions/pipeline";
+import { LoanPipelineBadge } from "@/components/loan-pipeline-status";
 
 enum ComponentState {
     LOADING = "LOADING",
@@ -44,6 +46,7 @@ interface ClientReviewInfo {
     document_count: number;
     total_required_docs: number;
     submission_status?: string;
+    pipeline_status?: LoanStatus;
 }
 
 export default function UnderwritingDashboardPage() {
@@ -162,6 +165,13 @@ export default function UnderwritingDashboardPage() {
                 }
             }
 
+            // Fetch bulk pipeline statuses
+            const allVaultIds = [...ready_list, ...active_list].map(c => c.id);
+            const pipelineMap = await getBulkLatestStatus(allVaultIds);
+
+            ready_list.forEach(c => { c.pipeline_status = pipelineMap.get(c.id) ?? "created"; });
+            active_list.forEach(c => { c.pipeline_status = pipelineMap.get(c.id) ?? "created"; });
+
             set_submitted_clients(ready_list);
             set_active_vaults(active_list);
             set_component_state(ComponentState.SUCCESS);
@@ -191,14 +201,18 @@ export default function UnderwritingDashboardPage() {
                     <div className="flex items-start justify-between">
                         <div className="space-y-1">
                             <div className="flex items-center gap-2 mb-2">
-                                <Badge className={clsx(
-                                    "uppercase tracking-tighter font-black text-[9px] px-2 py-0.5 border",
-                                    isReady
-                                        ? "bg-emerald-100 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
-                                        : "bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-100"
-                                )}>
-                                    {client.submission_status === 'locked' ? "Ready for Review" : client.submission_status === 'submitted' ? "Submitted" : "In Progress"}
-                                </Badge>
+                                {client.pipeline_status ? (
+                                    <LoanPipelineBadge currentStatus={client.pipeline_status} />
+                                ) : (
+                                    <Badge className={clsx(
+                                        "uppercase tracking-tighter font-black text-[9px] px-2 py-0.5 border",
+                                        isReady
+                                            ? "bg-emerald-100 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
+                                            : "bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-100"
+                                    )}>
+                                        {client.submission_status === 'locked' ? "Ready for Review" : client.submission_status === 'submitted' ? "Submitted" : "In Progress"}
+                                    </Badge>
+                                )}
                                 <span className="text-[10px] font-bold text-slate-400">
                                     {client.document_count}/{client.total_required_docs} Docs
                                 </span>

@@ -36,12 +36,14 @@ import {
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
-import { notifyAdvisor } from "../../actions";
+import { notifyAdvisor, markDocumentAsViewed } from "../../actions";
 import { fetchInternalNotes, addInternalNote } from "@/app/actions/internal-notes";
 import { toast } from "sonner";
 import clsx from "clsx";
 import { format } from "date-fns";
 import { LoanFundedDialog } from "@/components/loan-funded-dialog";
+import { getClientPipelineHistory, updateLoanStatus, type LoanStatus, type PipelineStatusEntry } from "@/app/actions/pipeline";
+import { LoanPipelineFull, PIPELINE_STEPS } from "@/components/loan-pipeline-status";
 
 enum ComponentState {
     LOADING = "LOADING",
@@ -104,6 +106,8 @@ interface UserDocument {
     custom_label: string | null;
     upload_date: string;
     storage_path: string;
+    viewed_at: string | null;
+    uploaded_by_role?: 'advisor' | 'client';
 }
 
 interface InternalNote {
@@ -138,6 +142,11 @@ export default function UnderwritingClientDetailsPage() {
     const [notes, set_notes] = useState<InternalNote[]>([]);
     const [new_standalone_note, set_new_standalone_note] = useState("");
     const [is_adding_note, set_is_adding_note] = useState(false);
+
+    // Pipeline state
+    const [pipeline_history, set_pipeline_history] = useState<PipelineStatusEntry[]>([]);
+    const [current_pipeline_status, set_current_pipeline_status] = useState<LoanStatus>("created");
+    const [is_advancing_status, set_is_advancing_status] = useState(false);
 
     useEffect(() => {
         if (client_id) fetch_client_details();
@@ -227,7 +236,32 @@ export default function UnderwritingClientDetailsPage() {
                 set_notes(notesRes.notes || []);
             }
 
+            // 6. Fetch pipeline history
+            const history = await getClientPipelineHistory(client_id);
+            set_pipeline_history(history);
+            if (history.length > 0) {
+                set_current_pipeline_status(history[history.length - 1].status as LoanStatus);
+            }
+
             set_component_state(ComponentState.SUCCESS);
+
+            // 7. Auto-mark active documents as viewed for underwriting
+            // This happens only once when they open the profile
+            if (docs && docs.length > 0) {
+                const unviewedIds = docs
+                    .filter(d => !d.viewed_at)
+                    .map(d => d.id);
+                
+                if (unviewedIds.length > 0) {
+                    // Start marking them in the background
+                    Promise.all(unviewedIds.map(id => markDocumentAsViewed(id)))
+                        .then(results => {
+                            const failed = results.filter(r => !r.success);
+                            if (failed.length > 0) console.warn("Some documents failed to mark as viewed");
+                        })
+                        .catch(err => console.error("Error auto-marking documents as viewed:", err));
+                }
+            }
 
         } catch (err: any) {
             console.error("fetch_client_details error:", err);
@@ -319,6 +353,24 @@ export default function UnderwritingClientDetailsPage() {
             }
         } finally {
             set_is_adding_note(false);
+        }
+    }
+
+    async function handleAdvanceStatus(newStatus: LoanStatus) {
+        set_is_advancing_status(true);
+        try {
+            const res = await updateLoanStatus(client_id, newStatus);
+            if (res.success) {
+                toast.success(`Status updated to "${newStatus.replace(/_/g, " ")}"`); 
+                // Refresh pipeline
+                const history = await getClientPipelineHistory(client_id);
+                set_pipeline_history(history);
+                set_current_pipeline_status(newStatus);
+            } else {
+                toast.error(res.error || "Failed to update status");
+            }
+        } finally {
+            set_is_advancing_status(false);
         }
     }
 
@@ -450,6 +502,54 @@ export default function UnderwritingClientDetailsPage() {
                     onSuccess={fetch_client_details}
                 />
             </div>
+
+            {/* Pipeline Status Card */}
+            <Card className="bg-white border-slate-200 rounded-[2.5rem] shadow-sm overflow-hidden">
+                <CardHeader className="px-8 pt-8 pb-4">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <CardTitle className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">Funding Pipeline</CardTitle>
+                            <CardDescription className="text-slate-400 font-bold text-xs mt-1">Current stage: <span className="text-slate-700 uppercase">{current_pipeline_status.replace(/_/g, " ")}</span></CardDescription>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            {/* Next step button */}
+                            {(() => {
+                                const currentIdx = PIPELINE_STEPS.findIndex((s: { status: LoanStatus }) => s.status === current_pipeline_status);
+                                const nextStep = currentIdx >= 0 && currentIdx < PIPELINE_STEPS.length - 1 ? PIPELINE_STEPS[currentIdx + 1] : null;
+                                return nextStep ? (
+                                    <Button
+                                        size="sm"
+                                        className="h-9 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-black uppercase tracking-widest text-[9px] shadow-lg shadow-emerald-500/20"
+                                        onClick={() => handleAdvanceStatus(nextStep.status)}
+                                        disabled={is_advancing_status}
+                                    >
+                                        {is_advancing_status ? <Loader2 className="w-4 h-4 animate-spin" /> : `→ ${nextStep.shortLabel}`}
+                                    </Button>
+                                ) : null;
+                            })()}
+                            {/* Decline button */}
+                            {current_pipeline_status !== "declined" && current_pipeline_status !== "funded" && (
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-9 border-red-200 text-red-500 hover:bg-red-50 rounded-xl font-black uppercase tracking-widest text-[9px]"
+                                    onClick={() => handleAdvanceStatus("declined")}
+                                    disabled={is_advancing_status}
+                                >
+                                    Decline
+                                </Button>
+                            )}
+                        </div>
+                    </div>
+                </CardHeader>
+                <CardContent className="px-8 pb-8">
+                    <LoanPipelineFull
+                        currentStatus={current_pipeline_status}
+                        history={pipeline_history}
+                        onStatusChange={handleAdvanceStatus}
+                    />
+                </CardContent>
+            </Card>
 
             {/* Profile Hero */}
             <Card className="bg-slate-900 text-white border-slate-800 rounded-[3rem] shadow-2xl overflow-hidden relative">
@@ -738,6 +838,19 @@ export default function UnderwritingClientDetailsPage() {
                                                             <div className="flex items-center gap-3 min-w-0">
                                                                 <FileText className="w-4 h-4 text-slate-300" />
                                                                 <p className="text-sm font-bold text-slate-700 truncate">{doc.custom_label || doc.name}</p>
+                                                                {doc.uploaded_by_role && (
+                                                                    <Badge variant="outline" className={clsx(
+                                                                        "text-[8px] font-black uppercase px-2 h-4 border-none shrink-0",
+                                                                        doc.uploaded_by_role === 'advisor' ? "bg-blue-50 text-blue-500" : "bg-slate-50 text-slate-400"
+                                                                    )}>
+                                                                        {doc.uploaded_by_role === 'advisor' ? "By Advisor" : "By Client"}
+                                                                    </Badge>
+                                                                )}
+                                                                {!doc.viewed_at && (
+                                                                    <Badge className="bg-emerald-500 text-white border-none text-[8px] font-black uppercase px-2 h-4 scale-90 origin-left animate-pulse">
+                                                                        NEW
+                                                                    </Badge>
+                                                                )}
                                                             </div>
                                                             <Button
                                                                 size="sm"
@@ -773,7 +886,14 @@ export default function UnderwritingClientDetailsPage() {
                                                     <ExternalLink className="w-4 h-4" />
                                                 </div>
                                                 <div className="min-w-0">
-                                                    <p className="text-sm font-bold text-slate-700 truncate">{doc.custom_label || doc.name}</p>
+                                                    <div className="flex items-center gap-2">
+                                                        <p className="text-sm font-bold text-slate-700 truncate">{doc.custom_label || doc.name}</p>
+                                                        {!doc.viewed_at && (
+                                                            <Badge className="bg-emerald-500 text-white border-none text-[8px] font-black uppercase px-2 h-4 scale-90 origin-left animate-pulse">
+                                                                NEW
+                                                            </Badge>
+                                                        )}
+                                                    </div>
                                                     <p className="text-[9px] font-bold text-slate-400 uppercase">{doc.category || 'External'}</p>
                                                 </div>
                                             </div>

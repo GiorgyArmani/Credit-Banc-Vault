@@ -167,6 +167,7 @@ export async function POST(request: Request) {
                     category: doc_code,
                     doc_code: doc_code,
                     custom_label: standardized_name,
+                    uploaded_by_role: 'advisor',
                     metadata: { tags: [doc_code], uploaded_by: 'advisor', advisor_id: advisor_data.id },
                 })
                 .select('id')

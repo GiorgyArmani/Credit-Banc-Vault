@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
 import { ghlAddTags, ghlUpdateContact } from "@/lib/ghl-api";
 import { syncUnifiedClientData } from "@/lib/user-management";
+import { updateLoanStatus } from "@/app/actions/pipeline";
 
 /**
  * requestNewDocument
@@ -81,6 +82,9 @@ export async function requestDocuments(clientId: string, documentIds: string[]) 
                 status: 'documents_requested',
                 updated_at: new Date().toISOString()
             }, { onConflict: 'user_id' });
+        
+        // 5.1 Update Loan Pipeline status
+        await updateLoanStatus(clientId, 'documents_requested', `Advisor requested ${documentIds.length} new documents`);
 
         if (statusError) {
             console.error("Error updating submission status:", statusError);

@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -47,6 +47,7 @@ interface UserDocument {
   upload_date: string;
   storage_path: string;
   tags?: string[];
+  uploaded_by_role?: 'advisor' | 'client';
 }
 
 type ChecklistInfo = { progress: number; complete: boolean };
@@ -183,6 +184,7 @@ function DocumentCard({
               doc_code: docType.code, // Populate doc_code for backward compatibility
               // Use standardized name as custom label
               custom_label: standardizedName,
+              uploaded_by_role: 'client',
               metadata: { tags: [docType.code] },
             })
             .select("*")

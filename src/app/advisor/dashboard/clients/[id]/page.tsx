@@ -57,6 +57,8 @@ import clsx from "clsx";
 import { format } from "date-fns";
 import { Textarea } from "@/components/ui/textarea";
 import { EditProfileModal } from "./edit-profile-modal";
+import { LoanPipelineFull, PIPELINE_STEPS } from "@/components/loan-pipeline-status";
+import { getClientPipelineHistory, updateLoanStatus, type LoanStatus, type PipelineStatusEntry } from "@/app/actions/pipeline";
 
 /**
  * ============================================================================
@@ -218,6 +220,10 @@ export default function AdvisorClientDetailsPage() {
     const [is_remove_request_modal_open, set_is_remove_request_modal_open] = useState(false);
     const [doc_to_remove_request, set_doc_to_remove_request] = useState<{ code: string; label: string } | null>(null);
     const [is_removing_request, set_is_removing_request] = useState(false);
+    
+    // Pipeline state
+    const [pipeline_history, set_pipeline_history] = useState<PipelineStatusEntry[]>([]);
+    const [current_pipeline_status, set_current_pipeline_status] = useState<LoanStatus>("created");
 
     // ============================================
     // FETCH CLIENT DATA ON MOUNT
@@ -466,6 +472,21 @@ export default function AdvisorClientDetailsPage() {
                 set_notes(notes_res.notes || []);
             }
 
+            // ============================================
+            // STEP 10: FETCH PIPELINE HISTORY
+            // ============================================
+            const history = await getClientPipelineHistory(client_id);
+            if (history) {
+                set_pipeline_history(history);
+                if (history.length > 0) {
+                    // Sort by date to get the latest status
+                    const sortedHistory = [...history].sort((a, b) => 
+                        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+                    );
+                    set_current_pipeline_status(sortedHistory[0].status as LoanStatus);
+                }
+            }
+
             set_component_state(ComponentState.SUCCESS);
 
         } catch (err: any) {
@@ -580,6 +601,27 @@ export default function AdvisorClientDetailsPage() {
     }
 
     /**
+     * handle_status_change: Updates the client's loan pipeline status
+     */
+    async function handle_status_change(newStatus: LoanStatus, note: string = "Updated by advisor") {
+        try {
+            const res = await updateLoanStatus(client_id, newStatus, note);
+            if (res.success) {
+                // Refresh state
+                const history = await getClientPipelineHistory(client_id);
+                set_pipeline_history(history);
+                set_current_pipeline_status(newStatus);
+                toast.success(`Pipeline updated to ${newStatus}`);
+            } else {
+                toast.error("Failed to update pipeline");
+            }
+        } catch (err) {
+            console.error('❌ Pipeline update error:', err);
+            toast.error("Error updating pipeline");
+        }
+    }
+
+    /**
      * handle-submit-vault: Submits the client's vault to underwriting via advisor endpoint
      */
     async function handle_submit_vault() {
@@ -596,6 +638,7 @@ export default function AdvisorClientDetailsPage() {
                 toast.success('Vault submitted to underwriting successfully!');
                 set_vault_submitted(true);
                 set_is_submit_confirm_open(false);
+                fetch_client_details(); // Refresh pipeline status
             } else {
                 toast.error(result.error || 'Submission failed');
             }
@@ -1128,6 +1171,49 @@ export default function AdvisorClientDetailsPage() {
                                 </div>
                             </div>
                         </div>
+                    </CardContent>
+                </Card>
+
+                {/* Funding Pipeline Visualization */}
+                <Card className="border-emerald-100 bg-white">
+                    <CardHeader className="pb-2">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                                <RefreshCw className="h-5 w-5 text-emerald-600" />
+                                <CardTitle className="text-lg">Funding Pipeline</CardTitle>
+                            </div>
+                            <div className="flex gap-2">
+                                {/* Only show advance button for advisor-controlled stages */}
+                                {(() => {
+                                    const currentIdx = PIPELINE_STEPS.findIndex((s: any) => s.status === current_pipeline_status);
+                                    // Advisor can advance from created -> onboarding -> docs_requested -> docs_received
+                                    const canAdvance = currentIdx >= 0 && currentIdx < 3; // up to docs_requested
+                                    const nextStep = canAdvance ? PIPELINE_STEPS[currentIdx + 1] : null;
+
+                                    if (!nextStep) return null;
+
+                                    return (
+                                        <Button
+                                            size="sm"
+                                            className="h-8 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-black uppercase tracking-widest text-[9px] shadow-lg shadow-emerald-500/20"
+                                            onClick={() => handle_status_change(nextStep.status as LoanStatus, `Advanced by advisor`)}
+                                        >
+                                            {`Mark ${nextStep.shortLabel} Completed`}
+                                        </Button>
+                                    );
+                                })()}
+                            </div>
+                        </div>
+                        <CardDescription>
+                            Current progress of the client's funding application. Click any stage to move the pipeline (Underwriter/Advisor access).
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <LoanPipelineFull 
+                            currentStatus={current_pipeline_status} 
+                            history={pipeline_history}
+                            onStatusChange={(status) => handle_status_change(status, `Directly set by advisor`)}
+                        />
                     </CardContent>
                 </Card>
 

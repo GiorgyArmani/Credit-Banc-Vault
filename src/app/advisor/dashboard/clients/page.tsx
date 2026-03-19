@@ -24,6 +24,8 @@ import {
     DollarSign
 } from "lucide-react";
 import clsx from "clsx";
+import { getBulkLatestStatus, type LoanStatus } from "@/app/actions/pipeline";
+import { LoanPipelineBadge } from "@/components/loan-pipeline-status";
 
 /**
  * ============================================================================
@@ -48,6 +50,7 @@ interface ClientInfo {
     created_at: string;
     document_count: number;
     total_required_docs: number;
+    pipeline_status?: LoanStatus;
 }
 
 export default function AdvisorClientsListPage() {
@@ -209,7 +212,16 @@ export default function AdvisorClientsListPage() {
                         total_required_docs: allRequiredCodes.size,
                     };
                 })
-            );
+            ) as ClientInfo[];
+
+            // 3. Bulk-fetch pipeline statuses
+            const vaultIds = clients_data.map(c => c.id);
+            if (vaultIds.length > 0) {
+                const pipelineMap = await getBulkLatestStatus(vaultIds);
+                clients_with_doc_counts.forEach(client => {
+                    client.pipeline_status = pipelineMap.get(client.id) ?? "created";
+                });
+            }
 
             set_clients(clients_with_doc_counts);
             set_filtered_clients(clients_with_doc_counts);
@@ -320,8 +332,15 @@ export default function AdvisorClientsListPage() {
                                 {client.company_name}
                             </CardDescription>
                         </div>
-                        <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center group-hover:bg-emerald-500 group-hover:text-white transition-all duration-300">
-                            <ChevronRight className="h-5 w-5 transition-transform duration-300 group-hover:translate-x-0.5" />
+                        <div className="flex items-center gap-2">
+                            {client.pipeline_status && (
+                                <div className="scale-75 origin-right">
+                                    <LoanPipelineBadge currentStatus={client.pipeline_status} />
+                                </div>
+                            )}
+                            <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center group-hover:bg-emerald-500 group-hover:text-white transition-all duration-300">
+                                <ChevronRight className="h-5 w-5 transition-transform duration-300 group-hover:translate-x-0.5" />
+                            </div>
                         </div>
                     </div>
                 </CardHeader>
