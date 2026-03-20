@@ -31,7 +31,8 @@ import {
     ShieldCheck,
     UserCog,
     Trash2,
-    X
+    X,
+    FileSignature
 } from "lucide-react";
 import {
     Dialog,
@@ -50,12 +51,13 @@ import {
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { requestDocuments, deleteClientFile, deleteClientVault, removeRequestedDocument } from "./actions";
+import { requestDocuments, deleteClientFile, deleteClientVault, removeRequestedDocument, addManualFundingApplication } from "./actions";
 import { fetchInternalNotes, addInternalNote } from "@/app/actions/internal-notes";
 import { toast } from "sonner";
 import clsx from "clsx";
 import { format } from "date-fns";
 import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import { EditProfileModal } from "./edit-profile-modal";
 import { LoanPipelineFull, PIPELINE_STEPS } from "@/components/loan-pipeline-status";
 import { getClientPipelineHistory, updateLoanStatus, type LoanStatus, type PipelineStatusEntry } from "@/app/actions/pipeline";
@@ -118,6 +120,8 @@ interface ClientProfile {
     credit_score: string;
     created_at: string;
     data_vault_submitted_at: string | null;
+    contract_completed: boolean;
+    contract_completed_at: string | null;
 }
 
 /**
@@ -198,6 +202,11 @@ export default function AdvisorClientDetailsPage() {
 
     // error-message-state: Stores specific error message
     const [error_message, set_error_message] = useState<string>("");
+
+    // Manual Funding Application state
+    const [is_manual_funding_modal_open, set_is_manual_funding_modal_open] = useState(false);
+    const [funding_file, set_funding_file] = useState<File | null>(null);
+    const [is_uploading_funding, set_is_uploading_funding] = useState(false);
 
     // Internal Notes state
     const [notes, set_notes] = useState<InternalNote[]>([]);
@@ -347,7 +356,9 @@ export default function AdvisorClientDetailsPage() {
           avg_monthly_deposits,
           credit_score,
           created_at,
-          data_vault_submitted_at
+          data_vault_submitted_at,
+          contract_completed,
+          contract_completed_at
         `)
                 .eq("id", client_id)
                 .maybeSingle();
@@ -675,6 +686,38 @@ export default function AdvisorClientDetailsPage() {
             toast.error('An unexpected error occurred');
         } finally {
             set_is_resending(false);
+        }
+    }
+
+    /**
+     * handle_manual_funding_upload: Uploads a manually signed funding application
+     */
+    async function handle_manual_funding_upload() {
+        if (!funding_file) {
+            toast.error("Please select a file to upload");
+            return;
+        }
+
+        set_is_uploading_funding(true);
+        try {
+            const formData = new FormData();
+            formData.append("file", funding_file);
+
+            const result = await addManualFundingApplication(client_id, formData);
+
+            if (result.success) {
+                toast.success("Funding application uploaded and synced successfully!");
+                set_is_manual_funding_modal_open(false);
+                set_funding_file(null);
+                fetch_client_details(); // Refresh page data
+            } else {
+                toast.error(result.error || "Failed to upload funding application");
+            }
+        } catch (error: any) {
+            console.error("Manual upload error:", error);
+            toast.error("An unexpected error occurred during upload");
+        } finally {
+            set_is_uploading_funding(false);
         }
     }
 
@@ -1077,6 +1120,19 @@ export default function AdvisorClientDetailsPage() {
 
                             {/* Right-side actions: completion badge + resend button */}
                             <div className="flex items-center gap-3 flex-shrink-0">
+                                {/* Manual Funding Application Upload Button - Only if not completed */}
+                                {!client_profile.contract_completed && (
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => set_is_manual_funding_modal_open(true)}
+                                        className="bg-emerald-50 border-emerald-500 text-emerald-600 hover:bg-emerald-100"
+                                    >
+                                        <FileSignature className="h-4 w-4 mr-2" />
+                                        Add Funding Application
+                                    </Button>
+                                )}
+
                                 {/* Resend Login Credentials Button */}
                                 <Button
                                     variant="outline"
@@ -1684,6 +1740,63 @@ export default function AdvisorClientDetailsPage() {
                                     <>
                                         <Trash2 className="h-4 w-4 mr-2" />
                                         Yes, Delete
+                                    </>
+                                )}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+
+                {/* Manual Funding Application Upload Modal */}
+                <Dialog open={is_manual_funding_modal_open} onOpenChange={set_is_manual_funding_modal_open}>
+                    <DialogContent className="sm:max-w-md">
+                        <DialogHeader>
+                            <DialogTitle className="flex items-center gap-2">
+                                <FileSignature className="h-5 w-5 text-emerald-600" />
+                                Add Funding Application
+                            </DialogTitle>
+                            <DialogDescription>
+                                Upload a signed Funding Application (PDF) for <strong>{client_profile.client_name}</strong>.
+                                This will mark the contract as completed and sync the document with GHL.
+                            </DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-4 py-4">
+                            <div className="space-y-2">
+                                <Label htmlFor="funding_file">Select Signed PDF *</Label>
+                                <Input
+                                    id="funding_file"
+                                    type="file"
+                                    accept=".pdf"
+                                    onChange={(e) => set_funding_file(e.target.files?.[0] || null)}
+                                    className="cursor-pointer"
+                                />
+                            </div>
+                        </div>
+                        <DialogFooter>
+                            <Button
+                                variant="ghost"
+                                onClick={() => {
+                                    set_is_manual_funding_modal_open(false);
+                                    set_funding_file(null);
+                                }}
+                                disabled={is_uploading_funding}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                onClick={handle_manual_funding_upload}
+                                disabled={is_uploading_funding || !funding_file}
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                            >
+                                {is_uploading_funding ? (
+                                    <>
+                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                        Uploading...
+                                    </>
+                                ) : (
+                                    <>
+                                        <UploadCloud className="h-4 w-4 mr-2" />
+                                        Upload & Complete
                                     </>
                                 )}
                             </Button>

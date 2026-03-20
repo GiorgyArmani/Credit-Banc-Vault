@@ -28,6 +28,7 @@ import {
   Plus,
   Trash2
 } from "lucide-react";
+import { addManualFundingApplication } from "@/app/advisor/dashboard/clients/[id]/actions";
 
 
 // Estados de EE.UU.
@@ -253,6 +254,10 @@ export default function ClientSignupForm() {
   const [show_success, set_show_success] = useState(false);
   const [created_client_email, set_created_client_email] = useState("");
   const [created_client_name, set_created_client_name] = useState("");
+
+  // ===== Already Signed Funding Application =====
+  const [has_already_signed, set_has_already_signed] = useState(false);
+  const [signed_document_file, set_signed_document_file] = useState<File | null>(null);
 
   // Check if current user is an advisor
   // This determines the success flow: redirect to login page (client) vs stay on page (advisor)
@@ -492,6 +497,9 @@ export default function ClientSignupForm() {
         // ===== GHL Tags =====
         // These tags will be sent to Go High Level for contact categorization
         ghl_tags: generate_ghl_tags(),
+
+        // ===== Contract Completion =====
+        contract_completed: has_already_signed,
       };
 
       const res = await fetch("/api/client-signup", {
@@ -506,6 +514,19 @@ export default function ClientSignupForm() {
       }
 
       const result = await res.json();
+
+      // If already signed, upload the document
+      if (has_already_signed && signed_document_file && result.data.vault_id) {
+        const formData = new FormData();
+        formData.append("file", signed_document_file);
+        try {
+          await addManualFundingApplication(result.data.vault_id, formData);
+        } catch (upload_err) {
+          console.error("Error uploading funding application:", upload_err);
+          // We don't fail the whole signup if just the file upload fails, 
+          // but maybe we should show a warning.
+        }
+      }
 
       // Handle success based on context
       if (is_advisor_context) {
@@ -1668,7 +1689,6 @@ export default function ClientSignupForm() {
                       </SelectContent>
                     </Select>
                   </div>
-
                   <div>
                     <Label htmlFor="additional_notes" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-3 block ml-1">Additional Information *</Label>
                     <Textarea
@@ -1681,6 +1701,41 @@ export default function ClientSignupForm() {
                       required
                     />
                   </div>
+
+                  {/* Manual Funding Application Upload - Only show in Advisor Context */}
+                  {is_advisor_context && (
+                    <div className="bg-emerald-50/50 rounded-3xl p-8 mb-8 border border-emerald-100">
+                      <div className="flex items-start space-x-3 mb-4">
+                        <Checkbox
+                          id="has_already_signed"
+                          checked={has_already_signed}
+                          onCheckedChange={(checked) => set_has_already_signed(checked as boolean)}
+                        />
+                        <Label htmlFor="has_already_signed" className="text-sm font-bold text-emerald-950 cursor-pointer">
+                          Client has already signed a Funding Application outside the vault
+                        </Label>
+                      </div>
+
+                      {has_already_signed && (
+                        <div className="space-y-4 animate-fade-in">
+                          <Label htmlFor="signed_document" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">
+                            Upload Signed Application (PDF) *
+                          </Label>
+                          <Input
+                            id="signed_document"
+                            type="file"
+                            accept=".pdf"
+                            onChange={(e) => set_signed_document_file(e.target.files?.[0] || null)}
+                            className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6 py-3 cursor-pointer"
+                            required={has_already_signed}
+                          />
+                          <p className="text-[10px] font-bold text-emerald-600/60 ml-1 italic">
+                            * The vault will be marked as completed and the document will be synced.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Documents Requested Section */}
                   {/* This section tracks which documents need to be collected from the client */}

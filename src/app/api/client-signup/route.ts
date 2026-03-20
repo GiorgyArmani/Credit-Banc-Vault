@@ -577,6 +577,8 @@ export async function POST(request: Request) {
       status: 'active',
       submitted_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
+      contract_completed: body.contract_completed || false,
+      contract_completed_at: body.contract_completed ? new Date().toISOString() : null,
     };
 
     // First try to upsert based on user_id

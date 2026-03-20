@@ -6,7 +6,107 @@ import { revalidatePath } from "next/cache";
 import { ghlAddTags, ghlUpdateContact } from "@/lib/ghl-api";
 import { syncUnifiedClientData } from "@/lib/user-management";
 import { updateLoanStatus } from "@/app/actions/pipeline";
+import { ghlSyncDocument } from "@/lib/ghl-document-sync";
 
+/**
+ * addManualFundingApplication
+ * 
+ * Allows an advisor to manually upload a signed funding application (contract)
+ * for a client. 
+ */
+export async function addManualFundingApplication(clientId: string, formData: FormData) {
+    try {
+        const supabase = await createClient();
+
+        // 1. Get authenticated advisor
+        const { data: { user: advisorUser } } = await supabase.auth.getUser();
+        if (!advisorUser) {
+            throw new Error("Unauthorized");
+        }
+
+        const file = formData.get("file") as File;
+        if (!file) {
+            throw new Error("No file provided");
+        }
+
+        // 2. Verify client and get user_id
+        const { data: client, error: clientError } = await supabase
+            .from("client_data_vault")
+            .select("user_id, ghl_contact_id, advisor_id")
+            .eq("id", clientId)
+            .single();
+
+        if (clientError || !client) {
+            throw new Error("Client not found");
+        }
+
+        // 3. Upload to storage
+        const supabaseAdmin = createAdminClient();
+        const fileName = `${Date.now()}_funding_application.pdf`;
+        const storagePath = `${client.user_id}/${fileName}`;
+
+        const { error: uploadError } = await supabaseAdmin.storage
+            .from("user-documents")
+            .upload(storagePath, file);
+
+        if (uploadError) {
+            throw new Error(`Upload failed: ${uploadError.message}`);
+        }
+
+        // 4. Create user_documents record
+        const { data: doc, error: docError } = await supabaseAdmin
+            .from("user_documents")
+            .insert({
+                user_id: client.user_id,
+                name: file.name || "funding_application.pdf",
+                size: file.size,
+                type: file.type || "application/pdf",
+                storage_path: storagePath,
+                category: "funding_application",
+                doc_code: "funding_application",
+                status: "verified"
+            })
+            .select()
+            .single();
+
+        if (docError) {
+            // Cleanup storage if DB fails
+            await supabaseAdmin.storage.from("user-documents").remove([storagePath]);
+            throw new Error(`Database error: ${docError.message}`);
+        }
+
+        // 5. Update client_data_vault
+        const { error: vaultUpdateError } = await supabaseAdmin
+            .from("client_data_vault")
+            .update({
+                contract_completed: true,
+                contract_completed_at: new Date().toISOString()
+            })
+            .eq("id", clientId);
+
+        if (vaultUpdateError) {
+            console.error("Vault update error:", vaultUpdateError);
+        }
+
+        // 6. Update pipeline status
+        await updateLoanStatus(clientId, "documents_received", "Funding application uploaded manually by advisor");
+
+        // 7. Sync to GHL
+        try {
+            await ghlSyncDocument(supabaseAdmin, doc.id, client.user_id, "funding_application");
+        } catch (ghlError) {
+            console.error("GHL Sync Error (non-fatal):", ghlError);
+        }
+
+        revalidatePath(`/advisor/dashboard/clients/${clientId}`);
+        revalidatePath(`/advisor/dashboard/clients`);
+
+        return { success: true };
+    } catch (error: any) {
+        console.error("Exception in addManualFundingApplication:", error);
+        return { success: false, error: error.message || "An unexpected error occurred" };
+    }
+}
 /**
  * requestNewDocument
  * 
@@ -79,8 +179,7 @@ export async function requestDocuments(clientId: string, documentIds: string[]) 
             .from("submissions")
             .upsert({
                 user_id: client.user_id,
-                status: 'documents_requested',
-                updated_at: new Date().toISOString()
+                status: 'documents_requested'
             }, { onConflict: 'user_id' });
         
         // 5.1 Update Loan Pipeline status
