@@ -442,8 +442,6 @@ function OpenPositions({
   );
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
-// NOTE: Lender matching logic lives in LenderMatch.tsx — import separately.
 
 interface ClientOption {
   id: string;
@@ -801,7 +799,7 @@ export default function BankAnalysis() {
         {/* Business & Financial Information */}
         <div className="rounded-xl border border-[#30363d] bg-[#161b22] p-5 mb-6 shadow-xl">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            
+
             {/* Left Column: Business Details */}
             <div className="lg:col-span-8 space-y-6">
               <div>
@@ -881,7 +879,7 @@ export default function BankAnalysis() {
                   <div className="w-1.5 h-6 bg-[#3fb950] rounded-full" />
                   <h3 className="text-xs font-bold tracking-[0.2em] uppercase text-[#e6edf3]">Economic Data</h3>
                 </div>
-                
+
                 <div className="space-y-3">
                   <div className="p-3 rounded-lg bg-[#0d1117] border border-[#30363d] hover:border-[#3fb950]/30 transition-colors">
                     <span className="text-[9px] text-[#8b949e] uppercase tracking-widest block mb-1">Avg Annual Revenue (Vault)</span>

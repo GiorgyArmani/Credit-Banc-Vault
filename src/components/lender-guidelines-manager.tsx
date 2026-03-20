@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { toast } from "sonner";
 
 interface Lender {
   id: string;
@@ -35,10 +36,27 @@ const INITIAL_LENDER: Partial<Lender> = {
   lender_name: "",
   specialty: "MCA",
   min_fico: 0,
+  min_sbss: 0,
   time_in_business_months: 0,
-  avg_monthly_revenue: 0,
   negative_days: 0,
   monthly_deposits: 0,
+  avg_monthly_revenue: 0,
+  avg_daily_balance: 0,
+  preferred_industries: "",
+  restricted_industries: "",
+  restricted_industry_exceptions: "",
+  restricted_states: "",
+  ownership_percentage: 0,
+  number_of_positions: 0,
+  bankruptcies: "",
+  tax_liens_limit: "",
+  min_funding: 0,
+  max_funding: 0,
+  auto_decline_reasons: "",
+  holdback_percentage: 0,
+  payment_type: "",
+  consolidation_positions: 0,
+  additional_info: "",
 };
 
 export default function LenderGuidelinesManager() {
@@ -73,31 +91,77 @@ export default function LenderGuidelinesManager() {
   }, [lenders, searchTerm]);
 
   async function handleSave() {
-    if (!editingLender?.lender_name) return;
+    if (!editingLender?.lender_name) {
+      toast.error("Lender name is required");
+      return;
+    }
     setIsSaving(true);
 
     const { id, ...data } = editingLender;
+
+    // Filter to only include valid DB columns, skipping system fields or UI-only fields
+    const payload = {
+      lender_name: data.lender_name,
+      specialty: data.specialty,
+      min_fico: data.min_fico,
+      min_sbss: data.min_sbss,
+      time_in_business_months: data.time_in_business_months,
+      negative_days: data.negative_days,
+      monthly_deposits: data.monthly_deposits,
+      avg_monthly_revenue: data.avg_monthly_revenue,
+      avg_daily_balance: data.avg_daily_balance,
+      preferred_industries: data.preferred_industries,
+      restricted_industries: data.restricted_industries,
+      restricted_industry_exceptions: data.restricted_industry_exceptions,
+      restricted_states: data.restricted_states,
+      ownership_percentage: data.ownership_percentage,
+      number_of_positions: data.number_of_positions,
+      bankruptcies: data.bankruptcies,
+      tax_liens_limit: data.tax_liens_limit,
+      min_funding: data.min_funding,
+      max_funding: data.max_funding,
+      auto_decline_reasons: data.auto_decline_reasons,
+      holdback_percentage: data.holdback_percentage,
+      payment_type: data.payment_type,
+      consolidation_positions: data.consolidation_positions,
+      additional_info: data.additional_info,
+    };
     
     if (id) {
       // Update
-      const { error } = await supabase
+      const { data: updated, error } = await supabase
         .from("lender_guidelines")
-        .update(data)
-        .eq("id", id);
-      if (!error) {
-        setLenders(prev => prev.map(l => l.id === id ? { ...l, ...data } : l));
+        .update(payload)
+        .eq("id", id)
+        .select()
+        .single();
+
+      if (!error && updated) {
+        setLenders(prev => prev.map(l => l.id === id ? { ...l, ...payload, id } as Lender : l));
         setEditingLender(null);
+        toast.success("Guidelines updated successfully");
+      } else {
+        console.error("Error updating lender:", error);
+        if (!error && !updated) {
+           toast.error("No rows were updated. Check your permissions (RLS policies).");
+        } else {
+           toast.error(`Error saving: ${error?.message || "Unknown error"}`);
+        }
       }
     } else {
       // Insert
       const { data: inserted, error } = await supabase
         .from("lender_guidelines")
-        .insert(data)
+        .insert(payload)
         .select()
         .single();
       if (!error && inserted) {
         setLenders(prev => [...prev, inserted].sort((a, b) => a.lender_name.localeCompare(b.lender_name)));
         setEditingLender(null);
+        toast.success("New lender guidelines added");
+      } else {
+        console.error("Error inserting lender:", error);
+        toast.error(`Error saving: ${error?.message || "Unknown error"}`);
       }
     }
     setIsSaving(false);
@@ -108,8 +172,20 @@ export default function LenderGuidelinesManager() {
     const { error } = await supabase.from("lender_guidelines").delete().eq("id", id);
     if (!error) {
       setLenders(prev => prev.filter(l => l.id !== id));
+      toast.success("Lender guidelines removed");
+    } else {
+      toast.error(`Error deleting: ${error?.message || "Unknown error"}`);
     }
   }
+
+  const handleNumberChange = (field: keyof Lender, value: string, isFloat = false) => {
+    if (value === "") {
+      setEditingLender(prev => prev ? ({ ...prev, [field]: null }) : null);
+      return;
+    }
+    const num = isFloat ? parseFloat(value) : parseInt(value);
+    setEditingLender(prev => prev ? ({ ...prev, [field]: isNaN(num) ? null : num }) : null);
+  };
 
   return (
     <div className="flex flex-col h-full space-y-4">
@@ -179,6 +255,14 @@ export default function LenderGuidelinesManager() {
                       <span>Max Neg</span>
                       <span className="text-[#c9d1d9]">{lender.negative_days ?? "—"}</span>
                     </div>
+                    <div className="flex justify-between border-b border-[#30363d] pb-1">
+                      <span>SBSS</span>
+                      <span className="text-[#c9d1d9]">{lender.min_sbss || "—"}</span>
+                    </div>
+                    <div className="flex justify-between border-b border-[#30363d] pb-1">
+                      <span>Min Dep</span>
+                      <span className="text-[#c9d1d9]">${((lender.monthly_deposits || 0)/1000).toFixed(0)}k</span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -241,8 +325,17 @@ export default function LenderGuidelinesManager() {
                     <label className="text-xs font-semibold text-[#8b949e] uppercase tracking-wider">Min FICO</label>
                     <input 
                       type="number"
-                      value={editingLender.min_fico || ""}
-                      onChange={e => setEditingLender({...editingLender, min_fico: parseInt(e.target.value)})}
+                      value={editingLender.min_fico ?? ""}
+                      onChange={e => handleNumberChange("min_fico", e.target.value)}
+                      className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#58a6ff]"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-[#8b949e] uppercase tracking-wider">Min SBSS</label>
+                    <input 
+                      type="number"
+                      value={editingLender.min_sbss ?? ""}
+                      onChange={e => handleNumberChange("min_sbss", e.target.value)}
                       className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#58a6ff]"
                     />
                   </div>
@@ -250,8 +343,8 @@ export default function LenderGuidelinesManager() {
                     <label className="text-xs font-semibold text-[#8b949e] uppercase tracking-wider">Min TIB (Mo)</label>
                     <input 
                       type="number"
-                      value={editingLender.time_in_business_months || ""}
-                      onChange={e => setEditingLender({...editingLender, time_in_business_months: parseInt(e.target.value)})}
+                      value={editingLender.time_in_business_months ?? ""}
+                      onChange={e => handleNumberChange("time_in_business_months", e.target.value)}
                       className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#58a6ff]"
                     />
                   </div>
@@ -259,8 +352,17 @@ export default function LenderGuidelinesManager() {
                     <label className="text-xs font-semibold text-[#8b949e] uppercase tracking-wider">Min Revenue</label>
                     <input 
                       type="number"
-                      value={editingLender.avg_monthly_revenue || ""}
-                      onChange={e => setEditingLender({...editingLender, avg_monthly_revenue: parseFloat(e.target.value)})}
+                      value={editingLender.avg_monthly_revenue ?? ""}
+                      onChange={e => handleNumberChange("avg_monthly_revenue", e.target.value, true)}
+                      className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#58a6ff]"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-[#8b949e] uppercase tracking-wider">Avg Daily Bal</label>
+                    <input 
+                      type="number"
+                      value={editingLender.avg_daily_balance ?? ""}
+                      onChange={e => handleNumberChange("avg_daily_balance", e.target.value, true)}
                       className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#58a6ff]"
                     />
                   </div>
@@ -269,7 +371,7 @@ export default function LenderGuidelinesManager() {
                     <input 
                       type="number"
                       value={editingLender.negative_days ?? ""}
-                      onChange={e => setEditingLender({...editingLender, negative_days: parseInt(e.target.value)})}
+                      onChange={e => handleNumberChange("negative_days", e.target.value)}
                       className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#58a6ff]"
                     />
                   </div>
@@ -277,8 +379,8 @@ export default function LenderGuidelinesManager() {
                     <label className="text-xs font-semibold text-[#8b949e] uppercase tracking-wider">Min Deposits</label>
                     <input 
                       type="number"
-                      value={editingLender.monthly_deposits || ""}
-                      onChange={e => setEditingLender({...editingLender, monthly_deposits: parseInt(e.target.value)})}
+                      value={editingLender.monthly_deposits ?? ""}
+                      onChange={e => handleNumberChange("monthly_deposits", e.target.value)}
                       className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#58a6ff]"
                     />
                   </div>
@@ -287,7 +389,7 @@ export default function LenderGuidelinesManager() {
                     <input 
                       type="number"
                       value={editingLender.number_of_positions ?? ""}
-                      onChange={e => setEditingLender({...editingLender, number_of_positions: parseInt(e.target.value)})}
+                      onChange={e => handleNumberChange("number_of_positions", e.target.value)}
                       className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#58a6ff]"
                     />
                   </div>
@@ -295,8 +397,8 @@ export default function LenderGuidelinesManager() {
                     <label className="text-xs font-semibold text-[#8b949e] uppercase tracking-wider">Min Funding</label>
                     <input 
                       type="number"
-                      value={editingLender.min_funding || ""}
-                      onChange={e => setEditingLender({...editingLender, min_funding: parseFloat(e.target.value)})}
+                      value={editingLender.min_funding ?? ""}
+                      onChange={e => handleNumberChange("min_funding", e.target.value, true)}
                       className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#58a6ff]"
                     />
                   </div>
@@ -304,8 +406,44 @@ export default function LenderGuidelinesManager() {
                     <label className="text-xs font-semibold text-[#8b949e] uppercase tracking-wider">Max Funding</label>
                     <input 
                       type="number"
-                      value={editingLender.max_funding || ""}
-                      onChange={e => setEditingLender({...editingLender, max_funding: parseFloat(e.target.value)})}
+                      value={editingLender.max_funding ?? ""}
+                      onChange={e => handleNumberChange("max_funding", e.target.value, true)}
+                      className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#58a6ff]"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-[#8b949e] uppercase tracking-wider">Consol. Positions</label>
+                    <input 
+                      type="number"
+                      value={editingLender.consolidation_positions ?? ""}
+                      onChange={e => handleNumberChange("consolidation_positions", e.target.value)}
+                      className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#58a6ff]"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-[#8b949e] uppercase tracking-wider">Min Ownership %</label>
+                    <input 
+                      type="number"
+                      value={editingLender.ownership_percentage ?? ""}
+                      onChange={e => handleNumberChange("ownership_percentage", e.target.value, true)}
+                      className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#58a6ff]"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-[#8b949e] uppercase tracking-wider">Tax Liens Limit</label>
+                    <input 
+                      type="text"
+                      value={editingLender.tax_liens_limit ?? ""}
+                      onChange={e => setEditingLender({...editingLender, tax_liens_limit: e.target.value})}
+                      className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#58a6ff]"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-[#8b949e] uppercase tracking-wider">Holdback %</label>
+                    <input 
+                      type="number"
+                      value={editingLender.holdback_percentage ?? ""}
+                      onChange={e => handleNumberChange("holdback_percentage", e.target.value, true)}
                       className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#58a6ff]"
                     />
                   </div>
@@ -336,12 +474,41 @@ export default function LenderGuidelinesManager() {
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-[#8b949e] uppercase tracking-wider">Restricted Industries</label>
+                    <label className="text-xs font-semibold text-[#8b949e] uppercase tracking-wider">Restricted Ind (Comma separated)</label>
                     <textarea 
                       value={editingLender.restricted_industries || ""}
                       onChange={e => setEditingLender({...editingLender, restricted_industries: e.target.value})}
                       rows={2}
                       className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#58a6ff] resize-none"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-[#8b949e] uppercase tracking-wider">Industry Exceptions</label>
+                    <textarea 
+                      value={editingLender.restricted_industry_exceptions || ""}
+                      onChange={e => setEditingLender({...editingLender, restricted_industry_exceptions: e.target.value})}
+                      rows={2}
+                      className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#58a6ff] resize-none"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-[#8b949e] uppercase tracking-wider">Bankruptcies (Criteria)</label>
+                    <input 
+                      type="text"
+                      value={editingLender.bankruptcies || ""}
+                      onChange={e => setEditingLender({...editingLender, bankruptcies: e.target.value})}
+                      placeholder="e.g. 3 years since discharge"
+                      className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#58a6ff]"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-[#8b949e] uppercase tracking-wider">Payment Type</label>
+                    <input 
+                      type="text"
+                      value={editingLender.payment_type || ""}
+                      onChange={e => setEditingLender({...editingLender, payment_type: e.target.value})}
+                      placeholder="e.g. Daily ACH, Weekly"
+                      className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#58a6ff]"
                     />
                   </div>
                   <div className="space-y-1.5">
