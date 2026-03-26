@@ -15,6 +15,8 @@ import { Shield, Clock, Sparkles } from 'lucide-react';
 import { useOnboardingStatus } from '@/components/onboarding/use-onboarding-status';
 import WebsiteTour from '@/components/tour/website-tour';
 import { Button } from '@/components/ui/button';
+import { LoanPipelineFull } from '@/components/loan-pipeline-status';
+import { getClientPipelineHistory, PipelineStatusEntry, LoanStatus } from '@/app/actions/pipeline';
 
 import { Suspense } from 'react';
 
@@ -40,9 +42,24 @@ export default function DashboardPage() {
 
 function DashboardContent() {
   const supabase = createClient();
-  const { clientName, dataVaultCompleted } = useOnboardingStatus();
+  const { clientName, dataVaultCompleted, vaultId } = useOnboardingStatus();
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [isVaultSubmitted, setIsVaultSubmitted] = useState(false);
+  const [pipelineHistory, setPipelineHistory] = useState<PipelineStatusEntry[]>([]);
+  const [currentStatus, setCurrentStatus] = useState<LoanStatus>("created");
+
+  useEffect(() => {
+    async function fetchPipeline() {
+      if (vaultId) {
+        const history = await getClientPipelineHistory(vaultId);
+        setPipelineHistory(history);
+        if (history.length > 0) {
+          setCurrentStatus(history[history.length - 1].status);
+        }
+      }
+    }
+    fetchPipeline();
+  }, [vaultId]);
 
   const handleChecklist = useCallback((info: { progress: number; complete: boolean; isSubmitted?: boolean }) => {
     setIsVaultSubmitted(!!info.isSubmitted && info.complete);
@@ -166,6 +183,20 @@ function DashboardContent() {
 
               <ProfileDisplay onLoad={onProfileLoad} />
             </div>
+
+            {/* PIPELINE VISUALIZATION */}
+            <Card className="bg-white border-emerald-50 overflow-hidden rounded-[2.5rem] shadow-sm">
+              <CardHeader className="pb-4 pt-10 px-10">
+                <CardTitle className="text-2xl font-black text-emerald-950 tracking-tighter uppercase">Application Status</CardTitle>
+                <p className="text-emerald-900/60 font-bold">Track your application progress through our underwriting pipeline.</p>
+              </CardHeader>
+              <CardContent className="px-10 pb-10">
+                <LoanPipelineFull 
+                  currentStatus={currentStatus} 
+                  history={pipelineHistory} 
+                />
+              </CardContent>
+            </Card>
 
             <Card className="bg-white border-emerald-50 overflow-hidden rounded-[2.5rem] shadow-sm">
               <CardHeader className="pb-0 pt-10 px-10">

@@ -149,19 +149,19 @@ export function generate_client_welcome_email_html(data: ClientWelcomeEmailData)
           <!-- Credentials Box -->
           <tr>
             <td style="padding: 0 40px 20px;">
-              <table role="presentation" style="width: 100%; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border-radius: 12px; padding: 24px;">
+              <table role="presentation" style="width: 100%; background-color: #10b981; border-radius: 12px; padding: 24px;">
                 <tr>
                   <td>
                     <h3 style="margin: 0 0 20px; color: #ffffff; font-size: 20px; font-weight: 600;">🔐 Your Login Credentials</h3>
                     
                     <div style="margin-bottom: 16px;">
-                      <p style="margin: 0 0 4px; color: rgba(255, 255, 255, 0.9); font-size: 14px; font-weight: 600;">Email:</p>
-                      <p style="margin: 0; color: #ffffff; font-size: 18px; font-weight: 700; font-family: monospace; background-color: rgba(255, 255, 255, 0.2); padding: 12px; border-radius: 6px;">${client_email}</p>
+                      <p style="margin: 0 0 4px; color: #ffffff; font-size: 14px; font-weight: 600;">Email:</p>
+                      <p style="margin: 0; color: #ffffff; font-size: 18px; font-weight: 700; font-family: monospace; background-color: #0ea271; padding: 12px; border-radius: 6px;">${client_email}</p>
                     </div>
                     
                     <div style="margin-bottom: 16px;">
-                      <p style="margin: 0 0 4px; color: rgba(255, 255, 255, 0.9); font-size: 14px; font-weight: 600;">Temporary Password:</p>
-                      <p style="margin: 0; color: #ffffff; font-size: 18px; font-weight: 700; font-family: monospace; background-color: rgba(255, 255, 255, 0.2); padding: 12px; border-radius: 6px;">${client_password}</p>
+                      <p style="margin: 0 0 4px; color: #ffffff; font-size: 14px; font-weight: 600;">Temporary Password:</p>
+                      <p style="margin: 0; color: #ffffff; font-size: 18px; font-weight: 700; font-family: monospace; background-color: #0ea271; padding: 12px; border-radius: 6px;">${client_password}</p>
                     </div>
 
                     <div style="background-color: #fef3c7; border-radius: 8px; padding: 12px; margin-top: 16px;">
@@ -396,7 +396,7 @@ export function generate_advisor_welcome_email_html(data: AdvisorWelcomeEmailDat
           
           <!-- Logo Section -->
           <tr>
-            <td style="padding: 40px 40px 20px; text-align: center; background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
+            <td style="padding: 40px 40px 20px; text-align: center; background-color: #10b981;">
               <h1 style="margin: 0; color: #ffffff; font-size: 28px; font-weight: 700;">Credit Banc Vault</h1>
             </td>
           </tr>
@@ -419,18 +419,18 @@ export function generate_advisor_welcome_email_html(data: AdvisorWelcomeEmailDat
           <!-- Welcome Info Box -->
           <tr>
             <td style="padding: 0 40px 20px;">
-              <table role="presentation" style="width: 100%; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border-radius: 12px; padding: 24px;">
+              <table role="presentation" style="width: 100%; background-color: #10b981; border-radius: 12px; padding: 24px;">
                 <tr>
                   <td>
                     <h3 style="margin: 0 0 20px; color: #ffffff; font-size: 20px; font-weight: 600;">🚀 Get Started</h3>
                     
-                    <p style="margin: 0 0 16px; color: rgba(255, 255, 255, 0.95); font-size: 16px; line-height: 1.6;">
+                    <p style="margin: 0 0 16px; color: #ffffff; font-size: 16px; line-height: 1.6;">
                       Your advisor account is ready! Use the email address you signed up with and the password you created to log in.
                     </p>
 
                     <div style="margin-bottom: 16px;">
-                      <p style="margin: 0 0 4px; color: rgba(255, 255, 255, 0.9); font-size: 14px; font-weight: 600;">Login Email:</p>
-                      <p style="margin: 0; color: #ffffff; font-size: 18px; font-weight: 700; font-family: monospace; background-color: rgba(255, 255, 255, 0.2); padding: 12px; border-radius: 6px;">${advisor_email}</p>
+                      <p style="margin: 0 0 4px; color: #ffffff; font-size: 14px; font-weight: 600;">Login Email:</p>
+                      <p style="margin: 0; color: #ffffff; font-size: 18px; font-weight: 700; font-family: monospace; background-color: #0ea271; padding: 12px; border-radius: 6px;">${advisor_email}</p>
                     </div>
                   </td>
                 </tr>
@@ -564,7 +564,7 @@ export function generate_password_reset_email_html(data: PasswordResetEmailData)
           
           <!-- Logo Section -->
           <tr>
-            <td style="padding: 40px 40px 20px; text-align: center; background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
+            <td style="padding: 40px 40px 20px; text-align: center; background-color: #10b981;">
               <h1 style="margin: 0; color: #ffffff; font-size: 28px; font-weight: 700;">Credit Banc Vault</h1>
             </td>
           </tr>
