@@ -12,7 +12,7 @@ import { NextResponse, type NextRequest } from "next/server";
  * 4. Protects role-specific routes (e.g., only advisors can access /advisor/*)
  */
 export async function middleware(request: NextRequest) {
-  let response = NextResponse.next({
+  let supabaseResponse = NextResponse.next({
     request: {
       headers: request.headers,
     },
@@ -30,11 +30,11 @@ export async function middleware(request: NextRequest) {
           cookiesToSet.forEach(({ name, value, options }) =>
             request.cookies.set(name, value),
           );
-          response = NextResponse.next({
+          supabaseResponse = NextResponse.next({
             request,
           });
           cookiesToSet.forEach(({ name, value, options }) =>
-            response.cookies.set(name, value, options),
+            supabaseResponse.cookies.set(name, value, options),
           );
         },
       },
@@ -63,15 +63,23 @@ export async function middleware(request: NextRequest) {
     "/",
   ];
 
+  // Helper to create a redirect response that preserves cookies
+  const redirectWithCookies = (url: string | URL) => {
+    const redirectResponse = NextResponse.redirect(new URL(url, request.url));
+    // Copy all cookies from supabaseResponse to the redirect response
+    supabaseResponse.cookies.getAll().forEach((cookie) => {
+      redirectResponse.cookies.set(cookie.name, cookie.value, cookie);
+    });
+    return redirectResponse;
+  };
+
   // If user is not authenticated and trying to access protected route
   if (!user && !publicPaths.some((p) => path.startsWith(p))) {
-    return NextResponse.redirect(new URL("/auth/login", request.url));
+    return redirectWithCookies("/auth/login");
   }
 
   // If user is authenticated, check role-based access
   if (user) {
-
-
     // Get user's role from database
     const { data: userData } = await supabase
       .from("users")
@@ -105,9 +113,7 @@ export async function middleware(request: NextRequest) {
               free: "/dashboard",
             };
 
-            return NextResponse.redirect(
-              new URL(redirectMap[userRole] || "/dashboard", request.url)
-            );
+            return redirectWithCookies(redirectMap[userRole] || "/dashboard");
           }
         }
       }
@@ -123,9 +129,7 @@ export async function middleware(request: NextRequest) {
       };
 
       if (userRole === "advisor" || userRole === "underwriting") {
-        return NextResponse.redirect(
-          new URL(redirectMap[userRole], request.url)
-        );
+        return redirectWithCookies(redirectMap[userRole]);
       }
     }
 
@@ -137,14 +141,11 @@ export async function middleware(request: NextRequest) {
         premium: "/dashboard",
         free: "/dashboard",
       };
-      return NextResponse.redirect(
-        new URL(redirectMap[userRole], request.url)
-      );
+      return redirectWithCookies(redirectMap[userRole]);
     }
-
   }
 
-  return response;
+  return supabaseResponse;
 }
 
 // Configure which routes the middleware should run on

@@ -283,8 +283,29 @@ export default function UnderwritingClientDetailsPage() {
             document.body.appendChild(a); a.click();
             document.body.removeChild(a); URL.revokeObjectURL(url);
         } catch (err) {
-            toast.error("Error downloading document");
+            toast.error(`Error downloading ${doc.name}`);
         }
+    }
+
+    /**
+     * download_all_documents: Downloads all documents in a category sequentially
+     */
+    async function download_all_documents(docs: UserDocument[]) {
+        if (docs.length === 0) return;
+        
+        toast.info(`Preparing to download ${docs.length} files...`);
+        
+        for (let i = 0; i < docs.length; i++) {
+            const doc = docs[i];
+            await download_document(doc);
+            
+            // Add a small delay between downloads
+            if (i < docs.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 800));
+            }
+        }
+        
+        toast.success("All downloads initiated!");
     }
 
     async function handleNotifyAdvisor() {
@@ -829,6 +850,19 @@ export default function UnderwritingClientDetailsPage() {
                                                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{isUploaded ? "Ready for inspection" : "Awaiting submission"}</p>
                                                     </div>
                                                 </div>
+
+                                                {/* Download All button - only if multiple documents */}
+                                                {categoryDocs.length > 1 && (
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        onClick={() => download_all_documents(categoryDocs)}
+                                                        className="h-8 border-emerald-200 text-emerald-600 hover:bg-emerald-50 rounded-xl font-black uppercase tracking-widest text-[9px] px-3 transition-all flex items-center gap-2"
+                                                    >
+                                                        <Download className="w-3.5 h-3.5" />
+                                                        Download All
+                                                    </Button>
+                                                )}
                                             </div>
 
                                             {isUploaded && (

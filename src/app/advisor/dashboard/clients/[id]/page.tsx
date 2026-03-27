@@ -530,8 +530,30 @@ export default function AdvisorClientDetailsPage() {
             URL.revokeObjectURL(url);
         } catch (err: any) {
             console.error("❌ Download error:", err);
-            alert("Error downloading document. Please try again.");
+            toast.error(`Error downloading ${doc.name}. Please try again.`);
         }
+    }
+
+    /**
+     * download_all_documents: Downloads all documents in a category sequentially
+     */
+    async function download_all_documents(docs: UserDocument[]) {
+        if (docs.length === 0) return;
+        
+        toast.info(`Preparing to download ${docs.length} files...`);
+        
+        // Use a for...of loop for sequential downloads with delays
+        for (let i = 0; i < docs.length; i++) {
+            const doc = docs[i];
+            await download_document(doc);
+            
+            // Add a small delay between downloads to ensure browser captures all of them
+            if (i < docs.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 800));
+            }
+        }
+        
+        toast.success("All downloads initiated!");
     }
 
     /**
@@ -996,6 +1018,19 @@ export default function AdvisorClientDetailsPage() {
                     </div>
 
                     <div className="flex items-center gap-2">
+                        {/* Download All button - only if multiple documents */}
+                        {category_docs.length > 1 && (
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => download_all_documents(category_docs)}
+                                className="border-blue-400 text-blue-600 hover:bg-blue-50 text-xs px-3"
+                            >
+                                <Download className="h-3.5 w-3.5 mr-1" />
+                                Download All
+                            </Button>
+                        )}
+
                         {/* Upload button for advisor */}
                         <Button
                             variant="outline"
