@@ -627,7 +627,7 @@ export default function ClientSignupForm() {
 
           <CardContent className="p-4 md:p-8 lg:p-10">
             {/* Progress Steps */}
-            <div className="flex items-center justify-between mb-12 md:mb-16 overflow-x-auto pb-4 px-2">
+            <div className="flex items-center justify-between mb-12 md:mb-16 overflow-x-auto pt-4 pb-8 px-4 scrollbar-hide">
               {[
                 { num: 1, label: "Contact", icon: Building2 },
                 { num: 2, label: "Location", icon: MapPin },
@@ -637,15 +637,18 @@ export default function ClientSignupForm() {
                 { num: 6, label: "Final", icon: Clock },
               ].map((s, idx) => (
                 <div key={s.num} className="flex items-center shrink-0">
-                  <div className="flex flex-col items-center">
+                  <div 
+                    className="flex flex-col items-center cursor-pointer group"
+                    onClick={() => set_step(s.num)}
+                  >
                     <div
-                      className={`w-12 h-12 md:w-14 md:h-14 rounded-2xl flex items-center justify-center font-black transition-all duration-500
+                      className={`w-12 h-12 md:w-14 md:h-14 rounded-2xl flex items-center justify-center font-black transition-all duration-500 group-hover:scale-110 active:scale-95
                         ${step === s.num ? "bg-emerald-500 text-white shadow-xl shadow-emerald-500/20 scale-110" :
                           step > s.num ? "bg-emerald-50 text-emerald-500 border border-emerald-100" : "bg-slate-50 text-slate-300 border border-slate-100"}`}
                     >
                       {step > s.num ? <CheckCircle2 className="w-6 h-6" /> : <s.icon className="w-6 h-6" />}
                     </div>
-                    <span className={`text-[10px] font-black uppercase tracking-widest mt-3 transition-colors duration-500 ${step === s.num ? "text-emerald-950" : "text-slate-400"}`}>
+                    <span className={`text-[10px] font-black uppercase tracking-widest mt-3 transition-colors duration-500 ${step === s.num ? "text-emerald-950" : "text-slate-400 group-hover:text-emerald-900"}`}>
                       {s.label}
                     </span>
                   </div>
@@ -731,10 +734,10 @@ export default function ClientSignupForm() {
                   <div className="flex justify-end pt-10">
                     <Button
                       onClick={() => set_step(2)}
-                      className="h-16 px-10 bg-emerald-500 hover:bg-emerald-600 text-white font-black rounded-2xl shadow-xl shadow-emerald-500/20 transition-all active:scale-95 text-lg"
+                      className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black rounded-2xl px-10 py-6 shadow-xl shadow-emerald-500/20 transition-all active:scale-95"
                     >
                       Next: Location
-                      <ChevronRight className="ml-2 w-6 h-6" />
+                      <ChevronRight className="ml-2 w-5 h-5" />
                     </Button>
                   </div>
                 </div>
@@ -846,14 +849,14 @@ export default function ClientSignupForm() {
                     <Button
                       onClick={() => set_step(1)}
                       variant="outline"
-                      className="h-14 px-8 border-2 border-emerald-100 text-emerald-950 font-black rounded-2xl hover:bg-emerald-50 transition-all active:scale-95"
+                      className="border-2 border-emerald-600 text-emerald-600 hover:bg-emerald-50 px-8 py-6 rounded-2xl font-black transition-all active:scale-95"
                     >
-                      <ChevronLeft className="mr-2 w-5 h-5" />
+                      <ChevronLeft className="mr-2 w-5 h-5 text-emerald-600" />
                       Previous
                     </Button>
                     <Button
                       onClick={() => set_step(3)}
-                      className="h-14 px-10 bg-emerald-500 hover:bg-emerald-600 text-white font-black rounded-2xl shadow-xl shadow-emerald-500/20 transition-all active:scale-95"
+                      className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black rounded-2xl px-10 py-6 shadow-xl shadow-emerald-500/20 transition-all active:scale-95"
                     >
                       Next: Financials
                       <ChevronRight className="ml-2 w-5 h-5" />
@@ -977,14 +980,14 @@ export default function ClientSignupForm() {
                     <Button
                       onClick={() => set_step(2)}
                       variant="outline"
-                      className="border-2 border-emerald-600 text-emerald-600 hover:bg-emerald-50 px-8 py-6"
+                      className="border-2 border-emerald-600 text-emerald-600 hover:bg-emerald-50 px-8 py-6 rounded-2xl font-black transition-all active:scale-95"
                     >
-                      <ChevronLeft className="mr-2 w-5 h-5" />
+                      <ChevronLeft className="mr-2 w-5 h-5 text-emerald-600" />
                       Previous
                     </Button>
                     <Button
                       onClick={() => set_step(4)}
-                      className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white px-8 py-6 shadow-lg"
+                      className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black rounded-2xl px-10 py-6 shadow-xl shadow-emerald-500/20 transition-all active:scale-95"
                     >
                       Next: Owners
                       <ChevronRight className="ml-2 w-5 h-5" />
@@ -1180,14 +1183,14 @@ export default function ClientSignupForm() {
                     <Button
                       onClick={() => set_step(3)}
                       variant="outline"
-                      className="h-14 px-8 border-2 border-emerald-100 text-emerald-950 font-black rounded-2xl hover:bg-emerald-50 transition-all active:scale-95"
+                      className="border-2 border-emerald-600 text-emerald-600 hover:bg-emerald-50 px-8 py-6 rounded-2xl font-black transition-all active:scale-95"
                     >
-                      <ChevronLeft className="mr-2 w-5 h-5" />
+                      <ChevronLeft className="mr-2 w-5 h-5 text-emerald-600" />
                       Previous
                     </Button>
                     <Button
                       onClick={() => set_step(5)}
-                      className="h-14 px-10 bg-emerald-500 hover:bg-emerald-600 text-white font-black rounded-2xl shadow-xl shadow-emerald-500/20 transition-all active:scale-95"
+                      className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black rounded-2xl px-10 py-6 shadow-xl shadow-emerald-500/20 transition-all active:scale-95"
                     >
                       Next: Credit
                       <ChevronRight className="ml-2 w-5 h-5" />
@@ -1650,14 +1653,14 @@ export default function ClientSignupForm() {
                     <Button
                       onClick={() => set_step(4)}
                       variant="outline"
-                      className="border-2 border-emerald-600 text-emerald-600 hover:bg-emerald-50 px-8 py-6"
+                      className="border-2 border-emerald-600 text-emerald-600 hover:bg-emerald-50 px-8 py-6 rounded-2xl font-black transition-all active:scale-95"
                     >
-                      <ChevronLeft className="mr-2 w-5 h-5" />
+                      <ChevronLeft className="mr-2 w-5 h-5 text-emerald-600" />
                       Previous
                     </Button>
                     <Button
                       onClick={() => set_step(6)}
-                      className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white px-8 py-6 shadow-lg"
+                      className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black rounded-2xl px-10 py-6 shadow-xl shadow-emerald-500/20 transition-all active:scale-95"
                     >
                       Next: Final Details
                       <ChevronRight className="ml-2 w-5 h-5" />
@@ -1826,15 +1829,15 @@ export default function ClientSignupForm() {
                     <Button
                       onClick={() => set_step(5)}
                       variant="outline"
-                      className="h-14 px-8 border-2 border-emerald-100 text-emerald-950 font-black rounded-2xl hover:bg-emerald-50 transition-all active:scale-95"
+                      className="border-2 border-emerald-600 text-emerald-600 hover:bg-emerald-50 px-8 py-6 rounded-2xl font-black transition-all active:scale-95"
                     >
-                      <ChevronLeft className="mr-2 w-5 h-5" />
+                      <ChevronLeft className="mr-2 w-5 h-5 text-emerald-600" />
                       Previous
                     </Button>
                     <Button
                       onClick={handle_submit}
                       disabled={submitting}
-                      className="h-14 px-12 bg-emerald-500 hover:bg-emerald-600 text-white font-black rounded-2xl shadow-xl shadow-emerald-500/20 transition-all active:scale-95 disabled:opacity-50"
+                      className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black rounded-2xl px-12 py-6 shadow-xl shadow-emerald-500/20 transition-all active:scale-95 disabled:opacity-50"
                     >
                       {submitting ? (
                         <>
