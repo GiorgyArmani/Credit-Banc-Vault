@@ -10,16 +10,16 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-// ─── Pipeline step definitions ───────────────────────────────────────────────
+// ─── Pipeline step definitions ─────────────────────────────────────────
 
 export const PIPELINE_STEPS: { status: LoanStatus; label: string; shortLabel: string }[] = [
-  { status: "created",              label: "Application Created",    shortLabel: "Created" },
-  { status: "onboarding",           label: "Client Onboarding",      shortLabel: "Onboarding" },
-  { status: "documents_requested",  label: "Documents Requested",    shortLabel: "Docs Requested" },
-  { status: "documents_received",   label: "Documents Received",     shortLabel: "Docs In" },
-  { status: "under_review",         label: "Under Review",           shortLabel: "In Review" },
-  { status: "lender_matched",       label: "Lender Matched",         shortLabel: "Matched" },
-  { status: "funded",               label: "Loan Funded",            shortLabel: "Funded" },
+  { status: "created", label: "Application Created", shortLabel: "Created" },
+  { status: "onboarding", label: "Client Onboarding", shortLabel: "Onboarding" },
+  { status: "documents_requested", label: "Documents Requested", shortLabel: "Docs Requested" },
+  { status: "documents_received", label: "Documents Received", shortLabel: "Docs In" },
+  { status: "under_review", label: "Under Review", shortLabel: "In Review" },
+  { status: "lender_matched", label: "Lender Matched", shortLabel: "Matched" },
+  { status: "funded", label: "Loan Funded", shortLabel: "Funded" },
 ];
 
 const DECLINED_STATUS: LoanStatus = "declined";
@@ -51,8 +51,8 @@ interface LoanPipelineFullProps {
 }
 
 export function LoanPipelineFull({ currentStatus, history, onStatusChange, className, showAllSteps = true }: LoanPipelineFullProps) {
-  const displayedSteps = showAllSteps 
-    ? PIPELINE_STEPS 
+  const displayedSteps = showAllSteps
+    ? PIPELINE_STEPS
     : PIPELINE_STEPS.filter(s => s.status !== 'created' && s.status !== 'onboarding');
 
   const isDeclined = currentStatus === DECLINED_STATUS;
@@ -60,10 +60,10 @@ export function LoanPipelineFull({ currentStatus, history, onStatusChange, class
 
   // Map status → history entry for tooltip (ensure we show the LATEST entry for bi-directional moves)
   const historyMap = new Map<LoanStatus, PipelineStatusEntry>();
-  const sortedHistory = [...history].sort((a, b) => 
+  const sortedHistory = [...history].sort((a, b) =>
     new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
   );
-  
+
   for (const entry of sortedHistory) {
     historyMap.set(entry.status as LoanStatus, entry);
   }
@@ -108,7 +108,7 @@ export function LoanPipelineFull({ currentStatus, history, onStatusChange, class
                 return (
                   <Tooltip key={step.status}>
                     <TooltipTrigger asChild>
-                      <div 
+                      <div
                         className={cn(
                           "flex flex-col items-center gap-2 min-w-0 transition-opacity",
                           onStatusChange ? "cursor-pointer hover:opacity-80" : "cursor-default"
@@ -122,8 +122,8 @@ export function LoanPipelineFull({ currentStatus, history, onStatusChange, class
                             isCompleted
                               ? "bg-emerald-500 border-emerald-500 text-white shadow-lg shadow-emerald-200"
                               : isCurrent
-                              ? "bg-white border-emerald-400 text-emerald-500 shadow-lg shadow-emerald-100 ring-4 ring-emerald-100"
-                              : "bg-white border-slate-200 text-slate-300"
+                                ? "bg-white border-emerald-400 text-emerald-500 shadow-lg shadow-emerald-100 ring-4 ring-emerald-100"
+                                : "bg-white border-slate-200 text-slate-300"
                           )}
                         >
                           {isCompleted ? (
@@ -181,14 +181,14 @@ interface LoanPipelineBadgeProps {
 }
 
 const STATUS_CONFIG: Record<LoanStatus, { label: string; color: string }> = {
-  created:              { label: "Created",           color: "bg-slate-100 text-slate-600 border-slate-200" },
-  onboarding:           { label: "Onboarding",        color: "bg-blue-100 text-blue-700 border-blue-200" },
-  documents_requested:  { label: "Docs Requested",    color: "bg-amber-100 text-amber-700 border-amber-200" },
-  documents_received:   { label: "Docs Received",     color: "bg-cyan-100 text-cyan-700 border-cyan-200" },
-  under_review:         { label: "Under Review",      color: "bg-purple-100 text-purple-700 border-purple-200" },
-  lender_matched:       { label: "Lender Matched",    color: "bg-indigo-100 text-indigo-700 border-indigo-200" },
-  funded:               { label: "Funded 🎉",         color: "bg-emerald-100 text-emerald-700 border-emerald-200" },
-  declined:             { label: "Declined",          color: "bg-red-100 text-red-700 border-red-200" },
+  created: { label: "Created", color: "bg-slate-100 text-slate-600 border-slate-200" },
+  onboarding: { label: "Onboarding", color: "bg-blue-100 text-blue-700 border-blue-200" },
+  documents_requested: { label: "Docs Requested", color: "bg-amber-100 text-amber-700 border-amber-200" },
+  documents_received: { label: "Docs Received", color: "bg-cyan-100 text-cyan-700 border-cyan-200" },
+  under_review: { label: "Under Review", color: "bg-purple-100 text-purple-700 border-purple-200" },
+  lender_matched: { label: "Lender Matched", color: "bg-indigo-100 text-indigo-700 border-indigo-200" },
+  funded: { label: "Funded 🎉", color: "bg-emerald-100 text-emerald-700 border-emerald-200" },
+  declined: { label: "Declined", color: "bg-red-100 text-red-700 border-red-200" },
 };
 
 export function LoanPipelineBadge({ currentStatus, className }: LoanPipelineBadgeProps) {
