@@ -16,7 +16,7 @@ import { useOnboardingStatus } from '@/components/onboarding/use-onboarding-stat
 import WebsiteTour from '@/components/tour/website-tour';
 import { Button } from '@/components/ui/button';
 import { LoanPipelineFull } from '@/components/loan-pipeline-status';
-import { getClientPipelineHistory, PipelineStatusEntry, LoanStatus } from '@/app/actions/pipeline';
+import { getClientPipelineHistory, updateLoanStatus, PipelineStatusEntry, LoanStatus } from '@/app/actions/pipeline';
 
 import { Suspense } from 'react';
 
@@ -51,7 +51,19 @@ function DashboardContent() {
   useEffect(() => {
     async function fetchPipeline() {
       if (vaultId) {
-        const history = await getClientPipelineHistory(vaultId);
+        let history = await getClientPipelineHistory(vaultId);
+        
+        // Check if we need to auto-advance to "documents_requested"
+        const latestStatus = history.length > 0 ? history[history.length - 1].status : "created";
+        
+        if (latestStatus === "created" || latestStatus === "onboarding") {
+          const result = await updateLoanStatus(vaultId, "documents_requested", "Auto-transitioned on vault access");
+          if (result.success) {
+            // Re-fetch history to get the new entry
+            history = await getClientPipelineHistory(vaultId);
+          }
+        }
+        
         setPipelineHistory(history);
         if (history.length > 0) {
           setCurrentStatus(history[history.length - 1].status);
@@ -194,6 +206,7 @@ function DashboardContent() {
                 <LoanPipelineFull 
                   currentStatus={currentStatus} 
                   history={pipelineHistory} 
+                  showAllSteps={false}
                 />
               </CardContent>
             </Card>

@@ -47,11 +47,16 @@ interface LoanPipelineFullProps {
   history: PipelineStatusEntry[];
   onStatusChange?: (status: LoanStatus) => void;
   className?: string;
+  showAllSteps?: boolean;
 }
 
-export function LoanPipelineFull({ currentStatus, history, onStatusChange, className }: LoanPipelineFullProps) {
+export function LoanPipelineFull({ currentStatus, history, onStatusChange, className, showAllSteps = true }: LoanPipelineFullProps) {
+  const displayedSteps = showAllSteps 
+    ? PIPELINE_STEPS 
+    : PIPELINE_STEPS.filter(s => s.status !== 'created' && s.status !== 'onboarding');
+
   const isDeclined = currentStatus === DECLINED_STATUS;
-  const currentIndex = isDeclined ? -1 : getStepIndex(currentStatus);
+  const currentIndex = isDeclined ? -1 : displayedSteps.findIndex(s => s.status === currentStatus);
 
   // Map status → history entry for tooltip (ensure we show the LATEST entry for bi-directional moves)
   const historyMap = new Map<LoanStatus, PipelineStatusEntry>();
@@ -90,12 +95,12 @@ export function LoanPipelineFull({ currentStatus, history, onStatusChange, class
               style={{
                 width: currentIndex <= 0
                   ? "0%"
-                  : `${(currentIndex / (PIPELINE_STEPS.length - 1)) * 100}%`,
+                  : `${(currentIndex / (displayedSteps.length - 1)) * 100}%`,
               }}
             />
 
             <div className="flex justify-between relative z-10">
-              {PIPELINE_STEPS.map((step, idx) => {
+              {displayedSteps.map((step, idx) => {
                 const isCompleted = idx < currentIndex;
                 const isCurrent = idx === currentIndex;
                 const historyEntry = historyMap.get(step.status);
