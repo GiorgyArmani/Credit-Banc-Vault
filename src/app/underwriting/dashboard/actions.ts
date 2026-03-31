@@ -226,7 +226,7 @@ export async function fundLoanAction(clientId: string, data: {
 }
 
 export async function markDocumentAsViewed(documentId: string) {
-    const supabase = await createClient();
+    const supabase = createAdminClient();
     const { error } = await supabase
         .from("user_documents")
         .update({ viewed_at: new Date().toISOString() })
