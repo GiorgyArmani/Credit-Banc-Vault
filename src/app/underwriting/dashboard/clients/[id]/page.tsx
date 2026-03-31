@@ -245,23 +245,6 @@ export default function UnderwritingClientDetailsPage() {
 
             set_component_state(ComponentState.SUCCESS);
 
-            // 7. Auto-mark active documents as viewed for underwriting
-            // This happens only once when they open the profile
-            if (docs && docs.length > 0) {
-                const unviewedIds = docs
-                    .filter(d => !d.viewed_at)
-                    .map(d => d.id);
-                
-                if (unviewedIds.length > 0) {
-                    // Start marking them in the background
-                    Promise.all(unviewedIds.map(id => markDocumentAsViewed(id)))
-                        .then(results => {
-                            const failed = results.filter(r => !r.success);
-                            if (failed.length > 0) console.warn("Some documents failed to mark as viewed");
-                        })
-                        .catch(err => console.error("Error auto-marking documents as viewed:", err));
-                }
-            }
 
         } catch (err: any) {
             console.error("fetch_client_details error:", err);
@@ -282,6 +265,16 @@ export default function UnderwritingClientDetailsPage() {
             a.href = url; a.download = doc.name;
             document.body.appendChild(a); a.click();
             document.body.removeChild(a); URL.revokeObjectURL(url);
+
+            // Mark as viewed if not already
+            if (!doc.viewed_at) {
+                const res = await markDocumentAsViewed(doc.id);
+                if (res.success) {
+                    set_documents(prev => prev.map(d => 
+                        d.id === doc.id ? { ...d, viewed_at: new Date().toISOString() } : d
+                    ));
+                }
+            }
         } catch (err) {
             toast.error(`Error downloading ${doc.name}`);
         }
@@ -885,6 +878,9 @@ export default function UnderwritingClientDetailsPage() {
                                                                         NEW
                                                                     </Badge>
                                                                 )}
+                                                                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tight ml-auto">
+                                                                    {format(new Date(doc.upload_date), "MMM d, yyyy")}
+                                                                </span>
                                                             </div>
                                                             <Button
                                                                 size="sm"
@@ -928,7 +924,12 @@ export default function UnderwritingClientDetailsPage() {
                                                             </Badge>
                                                         )}
                                                     </div>
-                                                    <p className="text-[9px] font-bold text-slate-400 uppercase">{doc.category || 'External'}</p>
+                                                    <div className="flex items-center justify-between">
+                                                        <p className="text-[9px] font-bold text-slate-400 uppercase">{doc.category || 'External'}</p>
+                                                        <span className="text-[9px] text-slate-400 font-bold ml-4">
+                                                            {format(new Date(doc.upload_date), "MMM d, yyyy")}
+                                                        </span>
+                                                    </div>
                                                 </div>
                                             </div>
                                             <Button
