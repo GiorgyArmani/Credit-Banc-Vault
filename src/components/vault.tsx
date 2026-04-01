@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import clsx from "clsx";
 import {
-  Upload, Trash2, Star, Download, FileText, Pencil, CheckCircle2, AlertCircle, X, ChevronDown
+  Upload, Trash2, Star, Download, FileText, Pencil, CheckCircle2, AlertCircle, X, ChevronDown, ChevronRight, Eye, MoreVertical
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter
@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { PremiumLoader } from "./ui/premium-loader";
 import { Send } from "lucide-react";
+import DocumentPreviewModal from "@/components/pdf/pdf-viewer";
 
 /**
  * DocumentType: Interface for documents requested for the user
@@ -29,11 +30,8 @@ interface DocumentType {
   ghlTag?: string;
 }
 
-// type RequiredCode is no longer needed
-
 /**
  * UserDocument: Interface for documents stored in the database
- * Includes metadata like tags for advisor/underwriting categorization
  */
 interface UserDocument {
   id: string;
@@ -48,13 +46,14 @@ interface UserDocument {
   storage_path: string;
   tags?: string[];
   uploaded_by_role?: 'advisor' | 'client';
+  status?: string;
+  metadata?: any;
 }
 
 type ChecklistInfo = { progress: number; complete: boolean };
 
 /**
  * DocumentCard: Individual card component for each document type
- * Handles file selection, upload, and display of uploaded files for a specific document type
  */
 interface DocumentCardProps {
   docType: DocumentType;
@@ -65,7 +64,11 @@ interface DocumentCardProps {
   onEdit: (doc: UserDocument) => void;
   onToggleFavorite: (doc: UserDocument) => void;
   onDownload: (doc: UserDocument) => void;
+  onPreview: (doc: UserDocument) => void;
   clientName: string | null;
+  isApproved?: boolean;
+  isRejected?: boolean;
+  rejectionReason?: string;
 }
 
 function DocumentCard({
@@ -77,20 +80,19 @@ function DocumentCard({
   onEdit,
   onToggleFavorite,
   onDownload,
-  clientName
+  onPreview,
+  clientName,
+  isApproved = false,
+  isRejected = false,
+  rejectionReason
 }: DocumentCardProps) {
   const supabase = createClient();
   const { toast } = useToast();
 
-  // State for handling file selection and upload
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [customName, setCustomName] = useState("");
 
-  /**
-   * Filter documents to only show those matching this card's document type
-   * Includes support for legacy codes (e.g. old driver's license front/back)
-   */
   const relevantDocs = documents.filter(doc =>
     doc.category === docType.code ||
     (doc as any).doc_code === docType.code ||
@@ -101,18 +103,15 @@ function DocumentCard({
   const hasDocuments = relevantDocs.length > 0;
   //@ts-ignore
   const isComplete = hasDocuments && relevantDocs.length >= (docType.minFiles || 1);
+  const isReadyForReview = isComplete && !isApproved && !isRejected;
 
-  /**
-   * handleFileSelect: Triggered when user selects files
-   * Enforces maxFiles limit
-   */
+  const [isExpanded, setIsExpanded] = useState(!isApproved || isRejected || !isComplete);
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
     const newFiles = Array.from(e.target.files);
 
-    //@ts-ignore
     const max = docType.maxFiles || 1;
-    //@ts-ignore
     const multiple = docType.multiple || false;
 
     if (!multiple && newFiles.length > 1) {
@@ -138,7 +137,6 @@ function DocumentCard({
       setCustomName(newFiles[0].name.replace(/\.[^.]+$/, ""));
     } else {
       setSelectedFiles(prev => [...prev, ...newFiles]);
-      setCustomName(""); // Disable custom name for batch
     }
   };
 
@@ -146,303 +144,223 @@ function DocumentCard({
     setSelectedFiles(prev => prev.filter((_, i) => i !== index));
   };
 
-  /**
-   * handleUpload: Uploads all selected files
-   */
   const handleUpload = async () => {
     if (selectedFiles.length === 0 || !userId) return;
-
     setUploading(true);
     let successCount = 0;
-    let failCount = 0;
-
     try {
       for (const file of selectedFiles) {
+        const ext = file.name.split(".").pop() || "bin";
+        const standardizedName = `${docType.label} - ${clientName || "Client"}`;
+        const normalized = `${docType.code}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.${ext}`;
+        const filePath = `${userId}/${normalized}`;
+
+        const { error: upErr } = await supabase.storage
+          .from("user-documents")
+          .upload(filePath, file, { upsert: true });
+        if (upErr) throw upErr;
+
+        const { data, error: dbErr } = await supabase
+          .from("user_documents")
+          .insert({
+            user_id: userId,
+            name: `${standardizedName}.${ext}`,
+            size: file.size,
+            type: file.type,
+            storage_path: filePath,
+            category: docType.code,
+            doc_code: docType.code,
+            custom_label: standardizedName,
+            uploaded_by_role: 'client',
+            metadata: { tags: [docType.code] },
+          })
+          .select("*")
+          .single();
+        if (dbErr) throw dbErr;
+
         try {
-          // Generate unique filename with standardized pattern
-          const ext = file.name.split(".").pop() || "bin";
-          const standardizedName = `${docType.label} - ${clientName || "Client"}`;
-          const normalized = `${docType.code}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.${ext}`;
-          const filePath = `${userId}/${normalized}`;
+          await fetch("/api/uploads", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              document_id: data.id,
+              storage_path: data.storage_path,
+              doc_code: docType.code
+            }),
+          });
+        } catch (e) {}
 
-          // Upload file
-          const { error: upErr } = await supabase.storage
-            .from("user-documents")
-            .upload(filePath, file, { upsert: true });
-          if (upErr) throw upErr;
-
-          // Create database record
-          const { data, error: dbErr } = await supabase
-            .from("user_documents")
-            .insert({
-              user_id: userId,
-              name: `${standardizedName}.${ext}`,
-              size: file.size,
-              type: file.type,
-              storage_path: filePath,
-              category: docType.code,
-              doc_code: docType.code, // Populate doc_code for backward compatibility
-              // Use standardized name as custom label
-              custom_label: standardizedName,
-              uploaded_by_role: 'client',
-              metadata: { tags: [docType.code] },
-            })
-            .select("*")
-            .single();
-          if (dbErr) throw dbErr;
-
-          // Optional: Notify backend
-          try {
-            await fetch("/api/uploads", {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({
-                document_id: data.id,
-                storage_path: data.storage_path,
-                doc_code: docType.code
-              }),
-            });
-          } catch (apiError) {
-            console.error("API notification failed:", apiError);
-          }
-
-          // Add submitted tag to GHL for dynamic documents
-          if (!docType.isCore) {
-            try {
-              await fetch("/api/vault/mark-submitted", {
-                method: "POST",
-                headers: { "content-type": "application/json" },
-                body: JSON.stringify({ doc_code: docType.code }),
-              });
-            } catch (ghlError) {
-              console.error("Failed to update GHL tag:", ghlError);
-            }
-          }
-
-          successCount++;
-        } catch (err) {
-          console.error("Error uploading file:", file.name, err);
-          failCount++;
-        }
+        successCount++;
       }
-
       if (successCount > 0) {
-        toast({
-          title: "Upload complete",
-          description: `Successfully uploaded ${successCount} file(s).${failCount > 0 ? ` Failed: ${failCount}` : ""}`
-        });
+        toast({ title: "Upload complete", description: `Successfully uploaded ${successCount} file(s).` });
         setSelectedFiles([]);
-        setCustomName("");
         onUploadComplete();
-      } else {
-        throw new Error("Failed to upload files");
       }
-
     } catch (err: any) {
-      toast({
-        title: "Upload error",
-        description: err.message,
-        variant: "destructive"
-      });
+      toast({ title: "Upload error", description: err.message, variant: "destructive" });
     } finally {
       setUploading(false);
     }
   };
 
-  /**
-   * clearSelection: Removes the selected file without uploading
-   * Allows user to change their mind before submitting
-   */
-  const clearSelection = () => {
-    setSelectedFiles([]);
-    setCustomName("");
-  };
-
   return (
     <div className={clsx(
-      "border-2 rounded-[2rem] p-8 transition-all duration-300",
-      isComplete ? "bg-emerald-50 border-emerald-200 shadow-sm" : "bg-white border-emerald-50 shadow-sm hover:shadow-md"
+      "rounded-[2.5rem] border-2 transition-all duration-500 overflow-hidden shadow-sm group",
+      isApproved
+        ? "bg-emerald-50/30 border-emerald-100/50 hover:border-emerald-200"
+        : isRejected
+          ? "bg-rose-50/30 border-rose-100/50 hover:border-rose-200"
+          : isReadyForReview
+            ? "bg-amber-50/30 border-amber-100/50 hover:border-amber-200"
+            : "bg-white border-emerald-50 hover:border-emerald-100 hover:shadow-md"
     )}>
-      {/* Card Header */}
-      <div className="flex items-start justify-between mb-4">
-        <div className="flex items-center gap-3">
-          {isComplete ? (
-            <CheckCircle2 className="h-6 w-6 text-emerald-600 flex-shrink-0" />
-          ) : (
-            <AlertCircle className="h-6 w-6 text-gray-400 flex-shrink-0" />
-          )}
+      <div
+        className="p-8 cursor-pointer flex items-center justify-between gap-4"
+        onClick={() => setIsExpanded(!isExpanded)}
+      >
+        <div className="flex items-center gap-5">
+          <div className={clsx(
+            "w-14 h-14 rounded-2xl flex items-center justify-center shadow-inner transition-all duration-500",
+            isApproved
+              ? "bg-emerald-500 text-white scale-110"
+              : isRejected
+                ? "bg-rose-500 text-white"
+                : isReadyForReview
+                  ? "bg-amber-500 text-white"
+                  : "bg-emerald-50 text-emerald-500 group-hover:scale-105"
+          )}>
+            {isApproved ? <CheckCircle2 className="h-7 w-7" /> :
+              isRejected ? <AlertCircle className="h-7 w-7" /> :
+                isReadyForReview ? <AlertCircle className="h-7 w-7" /> : <FileText className="h-7 w-7" />}
+          </div>
           <div>
-            <h3 className="text-xl font-black text-emerald-950 tracking-tight">{docType.label}</h3>
+            <h3 className="text-xl font-black text-emerald-950 tracking-tighter uppercase leading-none">
+              {docType.label}
+            </h3>
+            <div className="flex items-center gap-2 mt-2">
+              <span className={clsx(
+                "text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md border",
+                isApproved
+                  ? "bg-emerald-100 text-emerald-700 border-emerald-200"
+                  : isRejected
+                    ? "bg-rose-100 text-rose-700 border-rose-200"
+                    : isReadyForReview
+                      ? "bg-amber-100 text-amber-700 border-amber-200"
+                      : "bg-slate-100 text-slate-500 border-slate-200"
+              )}>
+                {isApproved ? "Approved" : 
+                 isRejected ? "Action Required" : 
+                 isReadyForReview ? "Ready for Review" : "Awaiting Upload"}
+              </span>
+              {/* Rejection reason moved to expanded area or more prominent block */}
+              {relevantDocs.length > 0 && (
+                <span className="text-[10px] font-bold text-emerald-900/40 uppercase tracking-widest flex items-center gap-1">
+                  <div className="w-1 h-1 rounded-full bg-emerald-900/20" />
+                  {relevantDocs.length} File{relevantDocs.length !== 1 ? 's' : ''}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {!isExpanded && (isApproved || isRejected || isReadyForReview) && (
+            <span className={clsx(
+              "hidden md:flex text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full border",
+              isApproved 
+                ? "bg-emerald-100 text-emerald-700 border-emerald-200"
+                : isRejected
+                  ? "bg-rose-100 text-rose-700 border-rose-200"
+                  : "bg-amber-100 text-amber-700 border-amber-200"
+            )}>
+              {isApproved ? "Approved" : isRejected ? "Action Req." : "Reviewing"}
+            </span>
+          )}
+          <div className={clsx(
+            "w-8 h-8 rounded-full flex items-center justify-center transition-all",
+            isExpanded ? "bg-emerald-100 text-emerald-600 rotate-180" : "bg-slate-50 text-slate-400"
+          )}>
+            <ChevronDown className="h-4 w-4" />
           </div>
         </div>
       </div>
 
-      {/* Upload Area */}
-      {/* @ts-ignore */}
-      {(selectedFiles.length === 0 || docType.multiple) && (
-        <div className="mb-4">
-          <label className={clsx(
-            "flex flex-col items-center justify-center border-2 border-dashed rounded-lg p-6 cursor-pointer transition",
-            isComplete
-              ? "border-emerald-300 bg-white hover:bg-emerald-50"
-              : "border-gray-300 bg-gray-50 hover:bg-gray-100"
-          )}>
-            <Upload className={clsx(
-              "h-8 w-8 mb-2",
-              isComplete ? "text-emerald-600" : "text-gray-400"
-            )} />
-            <span className="text-sm font-medium text-gray-700">
-              Click to upload {docType.label}
-            </span>
-            <span className="text-xs text-gray-500 mt-1">
-              {/* @ts-ignore */}
-              {docType.multiple ? `Up to ${docType.maxFiles} files` : "Single file"} supported
-            </span>
-            <input
-              type="file"
-              onChange={handleFileSelect}
-              className="hidden"
-              accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx"
-              // @ts-ignore
-              multiple={docType.multiple}
-            />
-          </label>
-        </div>
-      )}
-
-      {/* Selected Files Preview (Before Upload) */}
-      {selectedFiles.length > 0 && (
-        <div className="mb-4 bg-white border border-gray-200 rounded-lg p-4">
-          <h4 className="text-sm font-medium text-gray-700 mb-2">Selected for Upload:</h4>
-          <div className="space-y-2 mb-3">
-            {selectedFiles.map((file, idx) => (
-              <div key={idx} className="flex items-center justify-between bg-gray-50 p-2 rounded">
-                <div className="flex items-center gap-2 overflow-hidden">
-                  <FileText className="h-4 w-4 text-blue-600 flex-shrink-0" />
-                  <span className="text-sm text-gray-700 truncate">{file.name}</span>
-                  <span className="text-xs text-gray-500">({(file.size / 1024).toFixed(0)} KB)</span>
+      {isExpanded && (
+        <div className="px-8 pb-8 space-y-6 animate-in slide-in-from-top-2 duration-300">
+          {/* Prominent Rejection Feedback */}
+          {isRejected && rejectionReason && (
+            <div className="bg-rose-50 border border-rose-200 rounded-2xl p-6 relative overflow-hidden group/feedback animate-pulse">
+              <div className="absolute top-0 left-0 w-1 h-full bg-rose-500" />
+              <div className="flex items-start gap-4">
+                <div className="mt-1 bg-rose-100 p-2 rounded-xl text-rose-600">
+                  <AlertCircle className="h-5 w-5" />
                 </div>
-                <button
-                  onClick={() => removeSelectedFile(idx)}
-                  className="text-gray-400 hover:text-red-600"
-                >
-                  <X className="h-4 w-4" />
-                </button>
+                <div className="flex-1">
+                  <h4 className="text-sm font-bold text-rose-900 mb-1">Action Required: Advisor Feedback</h4>
+                  <p className="text-sm text-rose-700 leading-relaxed">
+                    "{rejectionReason}"
+                  </p>
+                  <p className="mt-4 text-[11px] font-medium text-rose-500/80 uppercase tracking-wider">
+                    Please upload a replacement file below to resolve this.
+                  </p>
+                </div>
               </div>
-            ))}
-          </div>
-
-          {/* Custom Name Input (Only for single file) */}
-          {selectedFiles.length === 1 && (
-            <Input
-              value={customName}
-              onChange={(e) => setCustomName(e.target.value)}
-              placeholder="Custom file name (optional)"
-              className="mb-3"
-            />
+            </div>
+          )}
+          {(selectedFiles.length === 0 || docType.multiple) && (
+            <div className="pt-2">
+              <label className={clsx(
+                "flex flex-col items-center justify-center border-2 border-dashed rounded-[1.5rem] p-8 cursor-pointer transition-all group/upload",
+                isComplete ? "border-emerald-200 bg-white" : "border-emerald-100 bg-emerald-50/10"
+              )}>
+                <Upload className="h-6 w-6 text-emerald-500 mb-2" />
+                <span className="text-sm font-bold text-emerald-950">Click to upload</span>
+                <input type="file" onChange={handleFileSelect} className="hidden" multiple={docType.multiple} />
+              </label>
+            </div>
           )}
 
-          <Button
-            onClick={handleUpload}
-            disabled={uploading}
-            className="w-full bg-emerald-500 hover:bg-emerald-600 font-black rounded-full h-12 shadow-lg shadow-emerald-500/20 transition-all active:scale-95"
-          >
-            {uploading ? (
-              <>
-                <Upload className="h-4 w-4 mr-2 animate-bounce" />
-                Uploading...
-              </>
-            ) : (
-              <>
-                <Upload className="h-4 w-4 mr-2" />
-                Upload File(s)
-              </>
-            )}
-          </Button>
-        </div>
-      )}
-
-      {/* Uploaded Documents List */}
-      {relevantDocs.length > 0 && (
-        <div className="space-y-3 mt-4 pt-4 border-t border-emerald-100">
-          <div className="flex items-center justify-between mb-1">
-            <h4 className="text-xs font-bold text-emerald-900 uppercase tracking-widest">
-              Uploaded Files ({relevantDocs.length})
-            </h4>
-          </div>
-          <div className={clsx(
-            "space-y-2 pr-1",
-            relevantDocs.length > 2 ? "max-h-[220px] overflow-y-auto custom-scrollbar" : ""
-          )}>
-            {relevantDocs.map((doc) => (
-              <div
-                key={doc.id}
-                className="bg-white border border-emerald-100 shadow-sm rounded-xl p-3 flex flex-col gap-2 transition-all hover:border-emerald-200"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0 flex items-center gap-2">
-                    <FileText className="h-4 w-4 text-emerald-500 shrink-0" />
-                    <div className="min-w-0">
-                      <p className="font-bold text-gray-900 text-[13px] truncate">
-                        {doc.custom_label || doc.name}
-                      </p>
-                      <p className="text-[10px] text-gray-400 font-medium">
-                        {(doc.size / 1024).toFixed(0)} KB • {new Date(doc.upload_date).toLocaleDateString()}
-                      </p>
-                    </div>
+          {selectedFiles.length > 0 && (
+            <div className="bg-white border border-emerald-100 rounded-xl p-4">
+              <div className="space-y-2 mb-4">
+                {selectedFiles.map((file, idx) => (
+                  <div key={idx} className="flex items-center justify-between bg-emerald-50/50 p-2 rounded-lg text-xs">
+                    <span className="truncate flex-1 pr-2">{file.name}</span>
+                    <button onClick={() => removeSelectedFile(idx)}><X className="h-3 w-3" /></button>
                   </div>
-                  <button
-                    onClick={() => onToggleFavorite(doc)}
-                    className="p-1 shrink-0 transition-transform active:scale-90"
-                  >
-                    <Star className={clsx(
-                      "h-4 w-4",
-                      doc.is_favorite
-                        ? "text-yellow-500 fill-yellow-500"
-                        : "text-gray-300 hover:text-gray-400"
-                    )} />
-                  </button>
-                </div>
-
-                <div className="flex items-center gap-1.5 mt-1">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => onDownload(doc)}
-                    className="h-7 px-2 text-[10px] font-bold text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 uppercase tracking-tight"
-                  >
-                    Download
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => onEdit(doc)}
-                    className="h-7 px-2 text-[10px] font-bold text-slate-600 hover:text-slate-700 hover:bg-slate-50 uppercase tracking-tight"
-                  >
-                    Edit
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => onDelete(doc)}
-                    className="h-7 px-2 text-[10px] font-bold text-red-500 hover:text-red-600 hover:bg-red-50 uppercase tracking-tight"
-                  >
-                    Delete
-                  </Button>
-                </div>
+                ))}
               </div>
-            ))}
-          </div>
+              <Button onClick={handleUpload} disabled={uploading} className="w-full bg-emerald-500 text-white rounded-full">
+                {uploading ? "Uploading..." : "Start Upload"}
+              </Button>
+            </div>
+          )}
+
+          {relevantDocs.length > 0 && (
+            <div className="space-y-2 pt-4 border-t border-emerald-100/50">
+              <h4 className="text-[10px] font-black uppercase tracking-widest text-emerald-900/40">Uploaded Files</h4>
+              {relevantDocs.map(doc => (
+                <div key={doc.id} className="bg-white border border-emerald-100 rounded-xl p-3 flex items-center justify-between">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-bold truncate">{doc.custom_label || doc.name}</p>
+                    <p className="text-[9px] text-gray-400">{(doc.size/1024).toFixed(0)} KB • {new Date(doc.upload_date).toLocaleDateString()}</p>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Button variant="ghost" size="sm" onClick={() => onPreview(doc)} className="h-7 px-2 text-[10px]">View</Button>
+                    <Button variant="ghost" size="sm" onClick={() => onDownload(doc)} className="h-7 px-2 text-[10px]">Download</Button>
+                    <Button variant="ghost" size="sm" onClick={() => onDelete(doc)} className="h-7 px-2 text-[10px] text-rose-500">Delete</Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-/**
- * Main Vault Component: Manages all client documents
- * Displays individual cards for each required document type
- */
 export default function Vault({
   onChecklist,
   clientName,
@@ -456,569 +374,240 @@ export default function Vault({
   const { toast } = useToast();
 
   const [userId, setUserId] = useState<string | null>(null);
+  const [vaultId, setVaultId] = useState<string | null>(null);
   const [documents, setDocuments] = useState<UserDocument[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadingDynamic, setLoadingDynamic] = useState(true);
+  const [approvals, setApprovals] = useState<Set<string>>(new Set());
   const [submitting, setSubmitting] = useState(false);
-  const [editDoc, setEditDoc] = useState<UserDocument | null>(null);
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [dynamicDocs, setDynamicDocs] = useState<DocumentType[]>([]);
   const [expandedCore, setExpandedCore] = useState(true);
   const [expandedAdditional, setExpandedAdditional] = useState(true);
+  const [preview_modal, set_preview_modal] = useState<{ isOpen: boolean; doc: UserDocument | null }>({
+    isOpen: false,
+    doc: null
+  });
 
-  // Dynamic documents state
-  const [dynamicDocs, setDynamicDocs] = useState<DocumentType[]>([]);
-  const [loadingDynamic, setLoadingDynamic] = useState(true);
-
-  /**
-   * handleSubmission: Submits the vault and tags the user in GHL
-   */
-  const handleSubmission = async () => {
-    setSubmitting(true);
-    try {
-      const res = await fetch("/api/vault/submit", {
-        method: "POST",
-      });
-      const data = await res.json();
-
-      if (!res.ok) throw new Error(data.error || "Failed to submit vault");
-
-      toast({
-        title: "Vault Submitted",
-        description: "Your documents have been submitted successfully.",
-      });
-      setIsSubmitted(true);
-    } catch (error: any) {
-      toast({
-        title: "Submission Error",
-        description: error.message,
-        variant: "destructive",
-      });
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  /**
-   * Initialize component: Get authenticated user and fetch their documents
-   */
   useEffect(() => {
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       setUserId(user.id);
-      await fetchDocuments(user.id);
-      await fetchDynamicRequirements();
+      
+      const { data: vault } = await supabase.from("client_data_vault").select("id").eq("user_id", user.id).single();
+      const vid = vault?.id || '';
+      setVaultId(vid);
+
+      await Promise.all([
+        fetchDocuments(user.id),
+        fetchDynamicRequirements(),
+        fetchApprovals(vid)
+      ]);
+      setLoading(false);
+      setLoadingDynamic(false);
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const fetchApprovals = async (vid: string) => {
+    if (!vid) return;
+    try {
+      const { data } = await supabase.from("document_category_approvals").select("doc_code").eq("client_vault_id", vid);
+      setApprovals(new Set(data?.map(d => d.doc_code) || []));
+    } catch (e) {}
+  };
 
   const fetchDynamicRequirements = async () => {
     try {
-      console.log('🔄 Fetching dynamic document requirements...');
       const res = await fetch('/api/vault/requirements');
-      if (!res.ok) throw new Error('Failed to fetch requirements');
-
+      if (!res.ok) throw new Error('Fail');
       const data = await res.json();
-      console.log('📥 Received requirements data:', {
-        coreCount: data.coreCount,
-        dynamicCount: data.dynamicCount,
-        totalRequirements: data.requirements?.length,
-        requirements: data.requirements
-      });
-
-      // Use ALL requirements from API (both core and dynamic)
-      const allDocs = (data.requirements || []).map((doc: any) => ({
-        code: doc.code,
-        label: doc.label,
-        multiple: doc.multiple,
-        minFiles: doc.minFiles,
-        maxFiles: doc.maxFiles,
-        isCore: doc.isCore,
-        ghlTag: doc.ghlTag,
-      }));
-
-      console.log('✅ Using API requirements:', {
-        count: allDocs.length,
-        coreCount: allDocs.filter((d: any) => d.isCore).length,
-        dynamicCount: allDocs.filter((d: any) => !d.isCore).length,
-        documents: allDocs.map((d: any) => ({ code: d.code, label: d.label, isCore: d.isCore }))
-      });
-
-      setDynamicDocs(allDocs);
-    } catch (error: any) {
-      console.error('❌ Failed to load dynamic documents:', error);
-      toast({
-        title: "Warning",
-        description: "Could not load document requirements. Please refresh the page.",
-        variant: "default"
-      });
-      setDynamicDocs([]);
-    } finally {
-      setLoadingDynamic(false);
-    }
+      setDynamicDocs(data.requirements || []);
+    } catch (e) {}
   };
 
-  /**
-   * fetchDocuments: Retrieves all documents for the authenticated user
-   * Maps database metadata to include tags array for easier manipulation
-   */
   const fetchDocuments = async (uid: string, silent = false) => {
-    if (!silent) setLoading(true);
     try {
-      // 1. Fetch user documents
-      const { data, error } = await supabase
-        .from("user_documents")
-        .select("*")
-        .eq("user_id", uid)
-        .order("upload_date", { ascending: false });
-      if (error) throw error;
-
-      // Map documents and extract tags from metadata
-      const mapped = (data || []).map((d: any) => ({
-        ...d,
-        tags: Array.isArray(d?.metadata?.tags) ? d.metadata.tags : [],
-      })) as UserDocument[];
-
-      setDocuments(mapped);
-
-      // 2. Check if vault was already submitted
-      const { data: vaultData } = await supabase
-        .from("client_data_vault")
-        .select("data_vault_submitted_at")
-        .eq("user_id", uid)
-        .maybeSingle();
-
-      if (vaultData?.data_vault_submitted_at) {
-        setIsSubmitted(true);
-      }
-    } catch (err: any) {
-      toast({
-        title: "Error",
-        description: err.message,
-        variant: "destructive"
-      });
-    } finally {
-      if (!silent) setLoading(false);
-    }
+      const { data } = await supabase.from("user_documents").select("*").eq("user_id", uid).order("upload_date", { ascending: false });
+      setDocuments(data || []);
+      const { data: v } = await supabase.from("client_data_vault").select("data_vault_submitted_at").eq("user_id", uid).maybeSingle();
+      if (v?.data_vault_submitted_at) setIsSubmitted(true);
+    } catch (e) {}
   };
 
-  /**
-   * confirmEdit: Updates document metadata (name, category, tags)
-   * Advisors/underwriting can add tags for categorization and workflow management
-   */
-  const confirmEdit = async () => {
-    if (!editDoc) return;
-    try {
-      const { error } = await supabase
-        .from("user_documents")
-        .update({
-          custom_label: editDoc.custom_label,
-          category: editDoc.category,
-          metadata: { tags: editDoc.tags ?? [] },
-        })
-        .eq("id", editDoc.id);
-      if (error) throw error;
-
-      setDocuments((prev) =>
-        prev.map((d) => (d.id === editDoc.id ? editDoc : d))
-      );
-      setEditDoc(null);
-      toast({
-        title: "Updated",
-        description: "Document updated successfully."
-      });
-    } catch (err: any) {
-      toast({
-        title: "Error",
-        description: err.message,
-        variant: "destructive"
-      });
-    }
-  };
-
-  /**
-   * toggleFavorite: Marks/unmarks a document as favorite
-   * Useful for quickly accessing important documents
-   */
-  const toggleFavorite = async (doc: UserDocument) => {
-    try {
-      const { error } = await supabase
-        .from("user_documents")
-        .update({ is_favorite: !doc.is_favorite })
-        .eq("id", doc.id);
-      if (error) throw error;
-
-      setDocuments((prev) =>
-        prev.map((d) =>
-          d.id === doc.id ? { ...d, is_favorite: !doc.is_favorite } : d
-        )
-      );
-    } catch (err: any) {
-      toast({
-        title: "Error",
-        description: err.message,
-        variant: "destructive"
-      });
-    }
-  };
-
-  /**
-   * handleDelete: Removes document from storage and database
-   * Permanently deletes the file
-   */
   const handleDelete = async (doc: UserDocument) => {
-    try {
-      // Delete from storage bucket
-      await supabase.storage
-        .from("user-documents")
-        .remove([doc.storage_path]);
-
-      // Delete database record
-      await supabase
-        .from("user_documents")
-        .delete()
-        .eq("id", doc.id);
-
-      setDocuments((prev) => prev.filter((d) => d.id !== doc.id));
-      toast({
-        title: "Deleted",
-        description: `${doc.custom_label || doc.name} removed.`
-      });
-    } catch (err: any) {
-      toast({
-        title: "Error",
-        description: err.message,
-        variant: "destructive"
-      });
-    }
+    await supabase.storage.from("user-documents").remove([doc.storage_path]);
+    await supabase.from("user_documents").delete().eq("id", doc.id);
+    setDocuments(prev => prev.filter(d => d.id !== doc.id));
   };
 
-  /**
-   * handleDownload: Downloads a document from Supabase storage
-   * Creates a temporary download link and triggers download
-   */
   const handleDownload = async (doc: UserDocument) => {
-    try {
-      const { data, error } = await supabase.storage
-        .from("user-documents")
-        .download(doc.storage_path);
-      if (error) throw error;
-
-      // Create blob URL and trigger download
-      const url = URL.createObjectURL(data);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = doc.name;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } catch (err: any) {
-      toast({
-        title: "Download error",
-        description: err.message,
-        variant: "destructive"
-      });
-    }
+    const { data } = await supabase.storage.from("user-documents").download(doc.storage_path);
+    if (!data) return;
+    const url = URL.createObjectURL(data);
+    const a = document.createElement("a");
+    a.href = url; a.download = doc.name; a.click();
   };
 
-  /**
-   * uploadedByCode: Map of document codes to count of uploaded documents
-   * Used for checklist progress calculation
-   */
-  const uploadedByCode = useMemo(() => {
-    const map = new Map<string, number>();
-    documents.forEach((doc) => {
-      const cat = doc.category;
-      const dCode = (doc as any).doc_code;
-      if (cat) map.set(cat, (map.get(cat) || 0) + 1);
-      if (dCode && dCode !== cat) map.set(dCode, (map.get(dCode) || 0) + 1);
-    });
-    return map;
-  }, [documents]);
-
-  /**
-   * allRequiredDocs: All documents from API (core + dynamic)
-   * Previously merged hardcoded REQUIRED_DOCS with API data, now uses only API
-   */
-  const allRequiredDocs = useMemo(() => {
-    return dynamicDocs as DocumentType[];
-  }, [dynamicDocs]);
-
-  const coreRequirements = useMemo(() => {
-    return allRequiredDocs.filter(d => d.isCore);
-  }, [allRequiredDocs]);
-
-  const additionalRequests = useMemo(() => {
-    return allRequiredDocs.filter(d => !d.isCore);
-  }, [allRequiredDocs]);
-
-  /**
-   * checklist: Array showing status of each required document (core + dynamic)
-   * Includes count of uploaded files for each document type
-   */
   const checklist = useMemo(() => {
-    return allRequiredDocs.map((r) => {
-      // @ts-ignore
-      const legacyCount = r.legacyCodes?.reduce((acc, code) => acc + (uploadedByCode.get(code) || 0), 0) || 0;
-      const count = (uploadedByCode.get(r.code) || 0) + legacyCount;
-      // @ts-ignore
-      const minRequired = r.minFiles || 1;
+    return dynamicDocs.map(r => {
+      const docs = documents.filter(d => d.category === r.code || (d as any).doc_code === r.code);
+      const count = docs.length;
+      const isApproved = approvals.has(r.code);
+      const isRejected = !isApproved && docs.some(d => d.status === 'rejected');
+      
+      // Robust extraction of rejection reason
+      let rejectionReason = "";
+      const rejectedDoc = docs.find(d => d.status === 'rejected');
+      if (rejectedDoc?.metadata) {
+        if (typeof rejectedDoc.metadata === 'string') {
+           try {
+             const meta = JSON.parse(rejectedDoc.metadata);
+             rejectionReason = meta.rejection_reason || meta.reason || "";
+           } catch {
+             rejectionReason = rejectedDoc.metadata;
+           }
+        } else {
+           rejectionReason = rejectedDoc.metadata.rejection_reason || rejectedDoc.metadata.reason || "";
+        }
+      }
 
-      return {
-        ...r,
-        count,
-        has: count >= minRequired,
-      };
+      return { ...r, count, has: isApproved, isApproved, isRejected, rejectionReason, hasDocs: count >= (r.minFiles || 1) };
     });
-  }, [allRequiredDocs, uploadedByCode]);
+  }, [dynamicDocs, documents, approvals]);
 
-  /**
-   * progressPct: Percentage of required documents that have been uploaded
-   * Used for progress bar and dashboard notifications
-   * Includes both core documents and dynamic documents requested via GHL tags
-   */
   const progressPct = useMemo(() => {
-    const total = allRequiredDocs.length;
-    const have = checklist.filter((c) => c.has).length;
+    const total = dynamicDocs.length;
+    const have = checklist.filter(c => c.has).length;
     return total > 0 ? Math.round((have / total) * 100) : 0;
-  }, [checklist, allRequiredDocs]);
+  }, [checklist, dynamicDocs]);
 
-  const allComplete = checklist.every((c) => c.has);
+  const allComplete = checklist.every(c => c.has);
+
+  // Trigger real-time toast for rejections on load
+  useEffect(() => {
+    if (!loading && !loadingDynamic && checklist.length > 0) {
+      const rejectedItems = checklist.filter(c => c.isRejected);
+      if (rejectedItems.length > 0) {
+        const docNames = rejectedItems.map(item => item.label).join(", ");
+        toast({
+          title: "Action Required",
+          description: `Your advisor requested updates for: ${docNames}. Please check the cards with red badges for feedback.`,
+          variant: "destructive"
+        });
+      }
+    }
+  }, [loading, loadingDynamic]); // Run once when loading completes
 
   useEffect(() => {
     if (!loading && !loadingDynamic) {
-      onLoad?.();
+      onChecklist?.({ progress: progressPct, complete: allComplete, isSubmitted });
     }
-  }, [loading, loadingDynamic, onLoad]);
+  }, [progressPct, allComplete, isSubmitted, loading, loadingDynamic, onChecklist]);
 
-  /**
-   * Notify parent component (dashboard) of checklist progress
-   * Allows dashboard to show overall completion status
-   */
-  useEffect(() => {
-    onChecklist?.({ progress: progressPct, complete: allComplete, isSubmitted });
-  }, [progressPct, allComplete, isSubmitted, onChecklist]);
+  const handleSubmission = async () => {
+    setSubmitting(true);
+    await fetch("/api/vault/submit", { method: "POST" });
+    setIsSubmitted(true);
+    setSubmitting(false);
+  };
 
-  if (loading || loadingDynamic) {
-    return <PremiumLoader message="Syncing your document vault..." fullScreen={false} />;
-  }
+  if (loading || loadingDynamic) return <PremiumLoader message="Syncing vault..." fullScreen={false} />;
+
+  const coreDocs = checklist.filter(d => d.isCore);
+  const addDocs = checklist.filter(d => !d.isCore);
 
   return (
     <div className="w-full space-y-8">
-      {/* Progress Overview - Shows overall completion status */}
-      <div id="tour-progress" className="bg-gradient-to-br from-emerald-50 to-blue-50 border border-emerald-200 rounded-xl p-6">
+      <div className="bg-gradient-to-br from-emerald-50 to-blue-50 border border-emerald-200 rounded-xl p-6">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h2 className="text-xl font-semibold text-gray-900">
-              Document Checklist
-            </h2>
-            <p className="text-sm text-gray-600 mt-1">
-              Everything underwriting needs, in one place.
-              <br />
-              Upload bank statements, ID, a voided business check, and any additional documents requested.
-              <br />
-              You don’t need to do this all at once. Upload what you have and come back anytime.
-            </p>
+            <h2 className="text-xl font-semibold text-gray-900">Document Checklist</h2>
+            <p className="text-sm text-gray-600 mt-1">Upload required documents to move forward with underwriting.</p>
           </div>
           <div className="text-right">
-            <div className="text-3xl font-bold text-emerald-600">
-              {progressPct}% Complete
-            </div>
-            <div className="text-sm text-gray-600">
-              {progressPct === 0 && "Don’t worry. Everyone starts here."}
-              {progressPct > 0 && progressPct < 25 && "Good start."}
-              {progressPct >= 25 && progressPct < 50 && "Good start."}
-              {progressPct >= 50 && progressPct < 75 && "Halfway there."}
-              {progressPct >= 75 && progressPct < 100 && "Almost done."}
-              {progressPct === 100 && "Ready for underwriting."}
-            </div>
+            <div className="text-3xl font-bold text-emerald-600">{progressPct}%</div>
+            <div className="text-xs text-gray-500 uppercase font-bold tracking-widest">Progress</div>
           </div>
         </div>
         <Progress value={progressPct} className="h-3" />
-        <div className="mt-4 flex items-center justify-between text-sm">
-          <span className="text-gray-600">
-            {checklist.filter(c => c.has).length} of {allRequiredDocs.length} documents uploaded
-          </span>
-          {allComplete && (
-            <span className="flex items-center gap-2 text-emerald-600 font-medium">
-              <CheckCircle2 className="h-4 w-4" />
-              All documents complete
-            </span>
-          )}
-        </div>
-
         {allComplete && !isSubmitted && (
           <div className="mt-6 flex justify-end">
-            <Button
-              onClick={handleSubmission}
-              disabled={submitting}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white"
-            >
-              {submitting ? (
-                <>Submitting...</>
-              ) : (
-                <>
-                  <Send className="w-4 h-4 mr-2" />
-                  Submit Vault
-                </>
-              )}
+            <Button onClick={handleSubmission} disabled={submitting} className="bg-emerald-600 text-white">
+              {submitting ? "Submitting..." : "Submit Vault"}
             </Button>
           </div>
         )}
-
-        {isSubmitted && allComplete && (
-          <div className="mt-4 p-4 bg-emerald-100 border border-emerald-200 rounded-lg flex items-center gap-2 text-emerald-800">
-            <CheckCircle2 className="h-5 w-5" />
-            <span className="font-medium">Vault Submitted Successfully!</span>
-          </div>
-        )}
       </div>
 
-      {/* Document Cards Grid - Core 9 + Dynamic documents */}
-      <div id="tour-vault" className="space-y-8">
-        {loadingDynamic ? (
-          <div className="text-center py-8">
-            <p className="text-gray-500">Loading document requirements...</p>
-          </div>
-        ) : (
-          <>
-            {/* Core Requirements Section */}
-            {coreRequirements.length > 0 && (
-              <div className="space-y-4">
-                <button
-                  onClick={() => setExpandedCore(!expandedCore)}
-                  className="flex items-center gap-2 group hover:text-emerald-600 transition-colors"
-                >
-                  <ChevronDown className={clsx(
-                    "h-5 w-5 transition-transform duration-200",
-                    !expandedCore && "-rotate-90"
-                  )} />
-                  <h3 className="text-lg font-bold text-gray-900">Core Requirements</h3>
-                  <span className="text-sm font-normal text-gray-500">
-                    ({coreRequirements.length} documents)
-                  </span>
-                </button>
-
-                {expandedCore && (
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-in fade-in slide-in-from-top-2 duration-300">
-                    {coreRequirements.map((docType) => (
-                      <DocumentCard
-                        key={docType.code}
-                        docType={docType}
-                        documents={documents}
-                        userId={userId || ""}
-                        clientName={clientName}
-                        onUploadComplete={() => fetchDocuments(userId || "", true)}
-                        onDelete={handleDelete}
-                        onEdit={setEditDoc}
-                        onToggleFavorite={toggleFavorite}
-                        onDownload={handleDownload}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Additional Requests Section */}
-            {additionalRequests.length > 0 && (
-              <div className="space-y-4 border-t pt-8">
-                <button
-                  onClick={() => setExpandedAdditional(!expandedAdditional)}
-                  className="flex items-center gap-2 group hover:text-blue-600 transition-colors"
-                >
-                  <ChevronDown className={clsx(
-                    "h-5 w-5 transition-transform duration-200",
-                    !expandedAdditional && "-rotate-90"
-                  )} />
-                  <h3 className="text-lg font-bold text-gray-900">Additional Requests</h3>
-                  <span className="text-sm font-normal text-gray-500">
-                    ({additionalRequests.length} documents)
-                  </span>
-                </button>
-
-                {expandedAdditional && (
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-in fade-in slide-in-from-top-2 duration-300">
-                    {additionalRequests.map((docType) => (
-                      <DocumentCard
-                        key={docType.code}
-                        docType={docType}
-                        documents={documents}
-                        userId={userId || ""}
-                        clientName={clientName}
-                        onUploadComplete={() => fetchDocuments(userId || "", true)}
-                        onDelete={handleDelete}
-                        onEdit={setEditDoc}
-                        onToggleFavorite={toggleFavorite}
-                        onDownload={handleDownload}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </>
-        )}
-      </div>
-
-      {/* Edit Document Modal - Allows editing of document metadata and tags */}
-      <Dialog open={!!editDoc} onOpenChange={() => setEditDoc(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Edit Document</DialogTitle>
-          </DialogHeader>
-          {editDoc && (
-            <div className="space-y-4">
-              {/* Custom Label Input */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Document Name
-                </label>
-                <Input
-                  value={editDoc.custom_label || ""}
-                  onChange={(e) => setEditDoc({
-                    ...editDoc,
-                    custom_label: e.target.value
-                  })}
-                  placeholder="Enter custom name"
-                />
-              </div>
-
-              {/* Tags Input - Important for advisor/underwriting workflow */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Tags (comma separated)
-                </label>
-                <Input
-                  value={editDoc.tags?.join(", ") || ""}
-                  onChange={(e) => setEditDoc({
-                    ...editDoc,
-                    tags: e.target.value
-                      .split(",")
-                      .map(t => t.trim())
-                      .filter(Boolean)
-                  })}
-                  placeholder="e.g., verified, reviewed, needs-attention"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  Add tags for categorization and workflow management
-                </p>
-              </div>
+      <div className="space-y-8">
+        {coreDocs.length > 0 && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 mb-4">
+              <div className="h-px flex-1 bg-emerald-100" />
+              <h3 className="text-xs font-black uppercase tracking-[0.2em] text-emerald-900/40">Core Requirements</h3>
+              <div className="h-px flex-1 bg-emerald-100" />
             </div>
-          )}
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setEditDoc(null)}
-            >
-              Cancel
-            </Button>
-            <Button onClick={confirmEdit}>
-              Save Changes
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {coreDocs.map(d => (
+                <DocumentCard
+                  key={d.code}
+                  docType={d}
+                  documents={documents}
+                  userId={userId || ""}
+                  clientName={clientName}
+                  onUploadComplete={() => fetchDocuments(userId || "", true)}
+                  onDelete={handleDelete}
+                  onEdit={() => {}}
+                  onToggleFavorite={() => {}}
+                  onDownload={handleDownload}
+                  onPreview={d => set_preview_modal({ isOpen: true, doc: d })}
+                  isApproved={d.isApproved}
+                  isRejected={d.isRejected}
+                  rejectionReason={d.rejectionReason}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {addDocs.length > 0 && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 mb-4">
+              <div className="h-px flex-1 bg-blue-100" />
+              <h3 className="text-xs font-black uppercase tracking-[0.2em] text-blue-900/40">Additional Requests</h3>
+              <div className="h-px flex-1 bg-blue-100" />
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {addDocs.map(d => (
+                <DocumentCard
+                  key={d.code}
+                  docType={d}
+                  documents={documents}
+                  userId={userId || ""}
+                  clientName={clientName}
+                  onUploadComplete={() => fetchDocuments(userId || "", true)}
+                  onDelete={handleDelete}
+                  onEdit={() => {}}
+                  onToggleFavorite={() => {}}
+                  onDownload={handleDownload}
+                  onPreview={d => set_preview_modal({ isOpen: true, doc: d })}
+                  isApproved={d.isApproved}
+                  isRejected={d.isRejected}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <DocumentPreviewModal 
+        isOpen={preview_modal.isOpen}
+        onClose={() => set_preview_modal({ isOpen: false, doc: null })}
+        docName={preview_modal.doc?.custom_label || preview_modal.doc?.name || ""}
+        storagePath={preview_modal.doc?.storage_path || ""}
+        fileType={preview_modal.doc?.type}
+      />
     </div>
   );
 }

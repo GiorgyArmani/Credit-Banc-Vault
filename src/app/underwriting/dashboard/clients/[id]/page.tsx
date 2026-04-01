@@ -23,8 +23,15 @@ import {
     Bell,
     ExternalLink,
     Clock,
-    Plus
+    Plus,
+    ChevronDown,
+    ChevronUp,
+    Eye,
+    Star,
+    Trash2,
+    Pencil
 } from "lucide-react";
+import DocumentPreviewModal from "@/components/pdf/pdf-viewer";
 import {
     Dialog,
     DialogContent,
@@ -132,20 +139,28 @@ export default function UnderwritingClientDetailsPage() {
     const [error_message, set_error_message] = useState<string>("");
 
     const [is_notify_modal_open, set_is_notify_modal_open] = useState(false);
-    const [selected_missing_docs, setSelected_missing_docs] = useState<string[]>([]);
+    const [selected_missing_docs, set_selected_missing_docs] = useState<string[]>([]);
     const [all_available_docs, set_all_available_docs] = useState<{ code: string; label: string }[]>([]);
     const [selected_extra_docs, set_selected_extra_docs] = useState<string[]>([]);
     const [custom_note, set_custom_note] = useState("");
-    const [is_notifying, setIs_notifying] = useState(false);
+    const [is_notifying, set_is_notifying] = useState(false);
 
     // Internal Notes state
     const [notes, set_notes] = useState<InternalNote[]>([]);
     const [new_standalone_note, set_new_standalone_note] = useState("");
     const [is_adding_note, set_is_adding_note] = useState(false);
 
-    // Pipeline state
-    const [pipeline_history, set_pipeline_history] = useState<PipelineStatusEntry[]>([]);
+    // Documents state enhancement
+    const [approvals, set_approvals] = useState<Set<string>>(new Set());
+    const [expanded_categories, set_expanded_categories] = useState<Set<string>>(new Set());
+    const [preview_modal, set_preview_modal] = useState<{ isOpen: boolean; doc: UserDocument | null }>({
+        isOpen: false,
+        doc: null,
+    });
+
+    // Pipeline State
     const [current_pipeline_status, set_current_pipeline_status] = useState<LoanStatus>("created");
+    const [pipeline_history, set_pipeline_history] = useState<PipelineStatusEntry[]>([]);
     const [is_advancing_status, set_is_advancing_status] = useState(false);
 
     useEffect(() => {
@@ -239,12 +254,15 @@ export default function UnderwritingClientDetailsPage() {
             // 6. Fetch pipeline history
             const history = await getClientPipelineHistory(client_id);
             set_pipeline_history(history);
-            if (history.length > 0) {
-                set_current_pipeline_status(history[history.length - 1].status as LoanStatus);
-            }
+
+            // 7. Fetch approvals for this client
+            const { data: categoryApprovals } = await supabase
+                .from("document_category_approvals")
+                .select("doc_code")
+                .eq("client_vault_id", client_id);
+            set_approvals(new Set((categoryApprovals || []).map(a => a.doc_code)));
 
             set_component_state(ComponentState.SUCCESS);
-
 
         } catch (err: any) {
             console.error("fetch_client_details error:", err);
@@ -307,7 +325,7 @@ export default function UnderwritingClientDetailsPage() {
             return;
         }
 
-        setIs_notifying(true);
+        set_is_notifying(true);
         try {
             // Construct the final note content with ALL requested items
             let items_summary = "";
@@ -332,7 +350,7 @@ export default function UnderwritingClientDetailsPage() {
             if (res.success) {
                 toast.success("Advisor notified successfully!");
                 set_is_notify_modal_open(false);
-                setSelected_missing_docs([]);
+                set_selected_missing_docs([]);
                 set_selected_extra_docs([]);
                 set_custom_note("");
                 // Refresh notes since notifyAdvisor might have added a system note/audit trail
@@ -344,7 +362,7 @@ export default function UnderwritingClientDetailsPage() {
                 toast.error(res.error || "Failed to notify advisor");
             }
         } finally {
-            setIs_notifying(false);
+            set_is_notifying(false);
         }
     }
 
@@ -380,12 +398,257 @@ export default function UnderwritingClientDetailsPage() {
                 const history = await getClientPipelineHistory(client_id);
                 set_pipeline_history(history);
                 set_current_pipeline_status(newStatus);
-            } else {
-                toast.error(res.error || "Failed to update status");
             }
         } finally {
             set_is_advancing_status(false);
         }
+    }
+    /**
+     * render_outstanding_banner: UI component for the top alert in underwriting
+     */
+    function render_outstanding_banner(required_docs: { code: string; label: string }[]) {
+        const outstanding = required_docs.filter(
+            doc_type => !approvals.has(doc_type.code) || get_documents_by_category(doc_type.code).length === 0
+        );
+
+        if (outstanding.length === 0) return null;
+
+        return (
+            <div className="bg-amber-50 border-2 border-amber-200 rounded-[2rem] p-6 mb-8 shadow-xl shadow-amber-500/5">
+                <div className="flex items-start gap-4">
+                    <div className="bg-amber-100 p-3 rounded-2xl">
+                        <AlertCircle className="h-7 w-7 text-amber-600" />
+                    </div>
+                    <div className="flex-1">
+                        <div className="flex items-center gap-3 mb-3">
+                            <h4 className="text-amber-900 font-black text-sm uppercase tracking-widest">
+                                Vault Health Check: {outstanding.length} Pending Actions
+                            </h4>
+                            <Badge className="bg-amber-500 text-white border-none font-black text-[10px] uppercase px-3">Attention Required</Badge>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            {outstanding.map(doc => {
+                                const category_docs = get_documents_by_category(doc.code);
+                                const is_pending_upload = category_docs.length === 0;
+                                
+                                return (
+                                    <Badge 
+                                        key={doc.code}
+                                        variant="outline"
+                                        className={clsx(
+                                            "cursor-pointer hover:shadow-lg hover:scale-105 active:scale-95 transition-all px-4 py-2 border-2 rounded-xl text-[10px] font-black uppercase tracking-widest",
+                                            is_pending_upload 
+                                                ? "bg-red-50 text-red-500 border-red-100 hover:bg-red-100" 
+                                                : "bg-amber-100/50 text-amber-700 border-amber-200 hover:bg-amber-200"
+                                        )}
+                                        onClick={() => {
+                                            if (!expanded_categories.has(doc.code)) {
+                                                toggle_category_expansion(doc.code);
+                                            }
+                                            const el = document.getElementById(`category-${doc.code}`);
+                                            setTimeout(() => el?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
+                                        }}
+                                    >
+                                        {doc.label} {is_pending_upload ? "• Missing" : "• Awaiting Advisor"}
+                                    </Badge>
+                                );
+                            })}
+                        </div>
+                        <p className="text-[10px] font-bold text-amber-600 mt-4 uppercase tracking-[0.2em] opacity-80 italic">
+                            * Advisors must verify all documents before underwriting final review.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    /**
+     * get_documents_by_category: Groups documents by their category
+     */
+    function get_documents_by_category(category_code: string): UserDocument[] {
+        return documents.filter(doc => doc.category === category_code);
+    }
+
+    /**
+     * toggle_category_expansion: Expands or collapses a document category section
+     */
+    function toggle_category_expansion(code: string) {
+        set_expanded_categories(prev => {
+            const next = new Set(prev);
+            if (next.has(code)) next.delete(code);
+            else next.add(code);
+            return next;
+        });
+    }
+
+    function format_file_size(bytes: number): string {
+        if (!bytes) return "0 Bytes";
+        const k = 1024;
+        const sizes = ["Bytes", "KB", "MB", "GB"];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+    }
+
+    /**
+     * render_document_card: Renders individual document card with download/preview for underwriting
+     */
+    function render_document_card(doc: UserDocument) {
+        return (
+            <Card
+                key={doc.id}
+                className="hover:shadow-md transition-shadow group border-slate-100 bg-white"
+            >
+                <CardContent className="p-4">
+                    <div className="flex items-start justify-between">
+                        <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-2">
+                                <FileText className="h-5 w-5 text-slate-300 flex-shrink-0" />
+                                <h4 className="font-bold text-slate-900 truncate">
+                                    {doc.custom_label || doc.name}
+                                </h4>
+                                {doc.uploaded_by_role && (
+                                    <Badge variant="outline" className={clsx(
+                                        "text-[8px] font-black uppercase px-2 h-4 border-none shrink-0",
+                                        doc.uploaded_by_role === 'advisor' ? "bg-blue-50 text-blue-500" : "bg-slate-50 text-slate-400"
+                                    )}>
+                                        {doc.uploaded_by_role === 'advisor' ? "By Advisor" : "By Client"}
+                                    </Badge>
+                                )}
+                                {!doc.viewed_at && (
+                                    <Badge className="bg-emerald-500 text-white border-none text-[8px] font-black uppercase px-2 h-4 scale-90 origin-left animate-pulse">
+                                        NEW
+                                    </Badge>
+                                )}
+                            </div>
+
+                            <div className="space-y-1 text-xs text-slate-500">
+                                <p className="truncate">{doc.name}</p>
+                                <div className="flex items-center gap-3 font-bold opacity-60">
+                                    <span>{format_file_size(doc.size)}</span>
+                                    <span>•</span>
+                                    <span>Uploaded {format(new Date(doc.upload_date), "MMM d, yyyy")}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 ml-4 flex-shrink-0">
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => set_preview_modal({ isOpen: true, doc })}
+                                className="h-8 w-8 p-0 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
+                                title="Preview Document"
+                            >
+                                <Eye className="h-4 w-4" />
+                            </Button>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => download_document(doc)}
+                                className="h-8 w-8 p-0 text-slate-400 hover:text-slate-900"
+                                title="Download File"
+                            >
+                                <Download className="h-4 w-4" />
+                            </Button>
+                        </div>
+                    </div>
+                </CardContent>
+            </Card>
+        );
+    }
+
+    /**
+     * render_document_category: Renders a category section with its documents for underwriting
+     */
+    function render_document_category(doc_type: { code: string; label: string }) {
+        const category_docs = documents.filter(d => d.category === doc_type.code);
+        const has_docs = category_docs.length > 0;
+        const is_approved = approvals.has(doc_type.code);
+        const is_expanded = expanded_categories.has(doc_type.code);
+
+        // Define status theme
+        const status = is_approved ? 'approved' : has_docs ? 'uploaded' : 'pending';
+        
+        const themes = {
+            approved: "bg-emerald-50 border-emerald-200",
+            uploaded: "bg-amber-50 border-amber-200",
+            pending: "bg-slate-50 border-slate-100 opacity-60"
+        };
+
+        return (
+            <div
+                key={doc_type.code}
+                id={`category-${doc_type.code}`}
+                className={clsx(
+                    "border rounded-[2rem] transition-all duration-300 shadow-sm overflow-hidden",
+                    themes[status]
+                )}
+            >
+                {/* Category Header */}
+                <div 
+                    className="flex items-center justify-between p-5 cursor-pointer hover:bg-black/[0.02] active:scale-[0.995] transition-all"
+                    onClick={() => toggle_category_expansion(doc_type.code)}
+                >
+                    <div className="flex items-center gap-4">
+                        <div className={clsx(
+                            "w-12 h-12 rounded-2xl flex items-center justify-center shadow-sm transition-colors",
+                            status === 'approved' ? "bg-emerald-500 text-white" :
+                            status === 'uploaded' ? "bg-amber-500 text-white" : "bg-white border border-slate-200 text-slate-300"
+                        )}>
+                            {status === 'approved' ? <ShieldCheck className="h-6 w-6" /> :
+                             status === 'uploaded' ? <CheckCircle2 className="h-6 w-6" /> : <Clock className="h-6 w-6" />}
+                        </div>
+                        <div>
+                            <h3 className="font-black text-slate-900 leading-tight uppercase tracking-tighter">{doc_type.label}</h3>
+                            <div className="flex items-center gap-2 mt-1">
+                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                    {status === 'approved' ? 'Advisor Verified' :
+                                     status === 'uploaded' ? 'Ready for Audit' : 'Awaiting Submission'}
+                                </p>
+                                {has_docs && (
+                                    <>
+                                        <div className="w-1 h-1 rounded-full bg-slate-300" />
+                                        <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest">
+                                            {category_docs.length} File{category_docs.length > 1 ? 's' : ''}
+                                        </p>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                        {/* Download All if multiple docs */}
+                        {has_docs && category_docs.length > 1 && (
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    download_all_documents(category_docs);
+                                }}
+                                className="border-emerald-200 text-emerald-600 hover:bg-emerald-50 rounded-xl h-8 px-3 font-black text-[9px] uppercase tracking-widest shadow-lg shadow-emerald-500/10"
+                            >
+                                <Download className="h-3.5 w-3.5 mr-1" />
+                                Download All
+                            </Button>
+                        )}
+                        
+                        <div className="w-px h-6 bg-slate-200 mx-1" />
+                        
+                        {is_expanded ? <ChevronUp className="h-5 w-5 text-slate-400" /> : <ChevronDown className="h-5 w-5 text-slate-400" />}
+                    </div>
+                </div>
+
+                {/* Docs List if expanded */}
+                {is_expanded && has_docs && (
+                    <div className="px-5 pb-5 space-y-3">
+                        {category_docs.map(doc => render_document_card(doc))}
+                    </div>
+                )}
+            </div>
+        );
     }
 
     if (component_state === ComponentState.LOADING) {
@@ -451,8 +714,8 @@ export default function UnderwritingClientDetailsPage() {
                                                     id={`missing-${doc.code}`}
                                                     checked={selected_missing_docs.includes(doc.label)}
                                                     onCheckedChange={(checked) => {
-                                                        if (checked) setSelected_missing_docs([...selected_missing_docs, doc.label]);
-                                                        else setSelected_missing_docs(selected_missing_docs.filter(l => l !== doc.label));
+                                                        if (checked) set_selected_missing_docs([...selected_missing_docs, doc.label]);
+                                                        else set_selected_missing_docs(selected_missing_docs.filter(l => l !== doc.label));
                                                     }}
                                                 />
                                                 <label htmlFor={`missing-${doc.code}`} className={clsx("text-sm font-bold leading-none cursor-pointer", is_done ? "text-slate-400 line-through font-medium" : "text-slate-700")}>
@@ -516,6 +779,9 @@ export default function UnderwritingClientDetailsPage() {
                     onSuccess={fetch_client_details}
                 />
             </div>
+
+            {/* Outstanding Documents Banner */}
+            {render_outstanding_banner(required_docs)}
 
             {/* Pipeline Status Card */}
             <Card className="bg-white border-slate-200 rounded-[2.5rem] shadow-sm overflow-hidden">
@@ -822,132 +1088,36 @@ export default function UnderwritingClientDetailsPage() {
 
                     {/* Required Documents Section */}
                     <div className="space-y-4">
-                        <h3 className="text-xs font-black uppercase tracking-[0.3em] text-slate-400 flex items-center gap-3">
-                            <FileText className="w-4 h-4" /> Required Document Packet
+                        <h3 className="text-xs font-black uppercase tracking-[0.3em] text-slate-400 flex items-center gap-3 ml-2">
+                            <FileText className="w-4 h-4" /> Required Review Packet
                         </h3>
-                        <div className="grid gap-4">
-                            {required_docs.map((docType) => {
-                                const categoryDocs = documents.filter(d => d.category === docType.code);
-                                const isUploaded = categoryDocs.length > 0;
-
-                                return (
-                                    <Card key={docType.code} className={clsx("rounded-[2rem] transition-all", isUploaded ? "border-emerald-100 bg-emerald-50/20" : "border-slate-100 bg-slate-50/30")}>
-                                        <CardContent className="p-6">
-                                            <div className="flex items-center justify-between mb-2">
-                                                <div className="flex items-center gap-4">
-                                                    <div className={clsx("w-10 h-10 rounded-xl flex items-center justify-center", isUploaded ? "bg-emerald-500 text-white shadow-lg shadow-emerald-500/20" : "bg-slate-200 text-slate-400")}>
-                                                        {isUploaded ? <ShieldCheck className="w-5 h-5" /> : <Clock className="w-5 h-5" />}
-                                                    </div>
-                                                    <div>
-                                                        <h4 className="text-slate-900 font-black uppercase tracking-tighter">{docType.label}</h4>
-                                                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{isUploaded ? "Ready for inspection" : "Awaiting submission"}</p>
-                                                    </div>
-                                                </div>
-
-                                                {/* Download All button - only if multiple documents */}
-                                                {categoryDocs.length > 1 && (
-                                                    <Button
-                                                        variant="outline"
-                                                        size="sm"
-                                                        onClick={() => download_all_documents(categoryDocs)}
-                                                        className="h-8 border-emerald-200 text-emerald-600 hover:bg-emerald-50 rounded-xl font-black uppercase tracking-widest text-[9px] px-3 transition-all flex items-center gap-2"
-                                                    >
-                                                        <Download className="w-3.5 h-3.5" />
-                                                        Download All
-                                                    </Button>
-                                                )}
-                                            </div>
-
-                                            {isUploaded && (
-                                                <div className="mt-4 space-y-2 border-t border-emerald-100/50 pt-4">
-                                                    {categoryDocs.map(doc => (
-                                                        <div key={doc.id} className="flex items-center justify-between p-3 bg-white rounded-xl border border-emerald-100 shadow-sm group">
-                                                            <div className="flex items-center gap-3 min-w-0">
-                                                                <FileText className="w-4 h-4 text-slate-300" />
-                                                                <p className="text-sm font-bold text-slate-700 truncate">{doc.custom_label || doc.name}</p>
-                                                                {doc.uploaded_by_role && (
-                                                                    <Badge variant="outline" className={clsx(
-                                                                        "text-[8px] font-black uppercase px-2 h-4 border-none shrink-0",
-                                                                        doc.uploaded_by_role === 'advisor' ? "bg-blue-50 text-blue-500" : "bg-slate-50 text-slate-400"
-                                                                    )}>
-                                                                        {doc.uploaded_by_role === 'advisor' ? "By Advisor" : "By Client"}
-                                                                    </Badge>
-                                                                )}
-                                                                {!doc.viewed_at && (
-                                                                    <Badge className="bg-emerald-500 text-white border-none text-[8px] font-black uppercase px-2 h-4 scale-90 origin-left animate-pulse">
-                                                                        NEW
-                                                                    </Badge>
-                                                                )}
-                                                                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tight ml-auto">
-                                                                    {format(new Date(doc.upload_date), "MMM d, yyyy")}
-                                                                </span>
-                                                            </div>
-                                                            <Button
-                                                                size="sm"
-                                                                variant="ghost"
-                                                                onClick={() => download_document(doc)}
-                                                                className="h-8 w-8 p-0 rounded-lg hover:bg-emerald-500 hover:text-white transition-colors"
-                                                            >
-                                                                <Download className="w-4 h-4" />
-                                                            </Button>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            )}
-                                        </CardContent>
-                                    </Card>
-                                );
-                            })}
+                        <div className="space-y-4">
+                            {required_docs.map((docType) => render_document_category(docType))}
                         </div>
                     </div>
 
                     {/* Uncategorized Documents Section */}
                     {documents.filter(d => !required_docs.some(r => r.code === d.category)).length > 0 && (
-                        <div className="space-y-4 pt-4 border-t border-slate-100">
-                            <h3 className="text-xs font-black uppercase tracking-[0.3em] text-slate-400 flex items-center gap-3">
-                                <Plus className="w-4 h-4" /> Additional Context Files
+                        <div className="space-y-4 pt-8 border-t border-slate-100">
+                            <h3 className="text-xs font-black uppercase tracking-[0.3em] text-slate-400 flex items-center gap-3 ml-2">
+                                <Plus className="w-4 h-4" /> Miscellaneous Files
                             </h3>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                {documents.filter(d => !required_docs.some(r => r.code === d.category)).map(doc => (
-                                    <Card key={doc.id} className="rounded-2xl border-slate-100 bg-white hover:border-emerald-200 transition-colors group">
-                                        <CardContent className="p-4 flex items-center justify-between">
-                                            <div className="flex items-center gap-3 min-w-0">
-                                                <div className="w-8 h-8 rounded-lg bg-slate-50 flex items-center justify-center text-slate-300 group-hover:bg-emerald-50 group-hover:text-emerald-500 transition-colors">
-                                                    <ExternalLink className="w-4 h-4" />
-                                                </div>
-                                                <div className="min-w-0">
-                                                    <div className="flex items-center gap-2">
-                                                        <p className="text-sm font-bold text-slate-700 truncate">{doc.custom_label || doc.name}</p>
-                                                        {!doc.viewed_at && (
-                                                            <Badge className="bg-emerald-500 text-white border-none text-[8px] font-black uppercase px-2 h-4 scale-90 origin-left animate-pulse">
-                                                                NEW
-                                                            </Badge>
-                                                        )}
-                                                    </div>
-                                                    <div className="flex items-center justify-between">
-                                                        <p className="text-[9px] font-bold text-slate-400 uppercase">{doc.category || 'External'}</p>
-                                                        <span className="text-[9px] text-slate-400 font-bold ml-4">
-                                                            {format(new Date(doc.upload_date), "MMM d, yyyy")}
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                onClick={() => download_document(doc)}
-                                                className="h-8 w-8 p-0"
-                                            >
-                                                <Download className="w-4 h-4" />
-                                            </Button>
-                                        </CardContent>
-                                    </Card>
-                                ))}
+                            <div className="grid grid-cols-1 gap-4">
+                                {documents.filter(d => !required_docs.some(r => r.code === d.category)).map(doc => render_document_card(doc))}
                             </div>
                         </div>
                     )}
                 </div>
             </div>
+
+            {/* Document Preview Modal */}
+            <DocumentPreviewModal 
+                isOpen={preview_modal.isOpen}
+                onClose={() => set_preview_modal({ isOpen: false, doc: null })}
+                docName={preview_modal.doc?.custom_label || preview_modal.doc?.name || ""}
+                storagePath={preview_modal.doc?.storage_path || ""}
+                fileType={preview_modal.doc?.type}
+            />
         </div>
     );
 }

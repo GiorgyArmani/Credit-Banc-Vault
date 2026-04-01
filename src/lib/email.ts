@@ -1286,3 +1286,122 @@ export async function send_loan_funded_notification(data: LoanFundedNotification
 
   return await transporter.sendMail(mail_options);
 }
+
+/**
+ * ============================================================================
+ * DOCUMENT REJECTION NOTIFICATION FUNCTIONS
+ * ============================================================================
+ */
+
+/**
+ * Interface for document rejection notification data
+ */
+export interface DocumentRejectionEmailData {
+  client_name: string;
+  client_email: string;
+  doc_label: string;
+  rejection_reason: string;
+  advisor_name: string;
+  login_url: string;
+}
+
+/**
+ * Generates HTML for document rejection email
+ */
+export function generate_document_rejection_email_html(data: DocumentRejectionEmailData): string {
+  const { client_name, doc_label, rejection_reason, advisor_name, login_url } = data;
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Action Required: Document Update Needed</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f6f9fc;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse;">
+    <tr>
+      <td align="center" style="padding: 40px 0;">
+        <table role="presentation" style="width: 600px; max-width: 100%; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+          
+          <!-- Header -->
+          <tr>
+            <td style="padding: 40px 40px 20px; text-align: center; background-color: #ef4444;">
+              <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 700;">Action Required</h1>
+            </td>
+          </tr>
+
+          <!-- Message -->
+          <tr>
+            <td style="padding: 40px 40px 20px;">
+              <h2 style="margin: 0 0 16px; color: #1e293b; font-size: 20px; font-weight: 600;">Hi ${client_name},</h2>
+              <p style="margin: 0 0 16px; color: #475569; font-size: 16px; line-height: 1.6;">
+                Your advisor <strong>${advisor_name}</strong> has reviewed your uploaded documents and found that one of them needs to be updated or replaced.
+              </p>
+              
+              <div style="background-color: #fef2f2; border: 1px solid #fee2e2; border-radius: 12px; padding: 24px; margin-bottom: 24px;">
+                <p style="margin: 0 0 8px; color: #b91c1c; font-size: 14px;"><strong>Document Category:</strong> ${doc_label}</p>
+                <p style="margin: 0; color: #b91c1c; font-size: 14px;"><strong>Advisor Feedback:</strong> ${rejection_reason}</p>
+              </div>
+
+              <p style="margin: 0 0 24px; color: #475569; font-size: 16px; line-height: 1.6;">
+                Please log in to your Credit Banc Vault to upload the correct file so we can move forward with your funding application.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Action Button -->
+          <tr>
+            <td style="padding: 0 40px 40px;" align="center">
+              <a href="${login_url}" style="display: inline-block; background-color: #ef4444; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-size: 16px; font-weight: 600;">
+                Update Document
+              </a>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding: 40px; text-align: center; color: #94a3b8; font-size: 13px; line-height: 1.6; border-top: 1px solid #f1f5f9;">
+              <p style="margin: 0;">© ${new Date().getFullYear()} Credit Banc Vault. If you have any questions, please contact your advisor.</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `;
+}
+
+/**
+ * Sends rejection notification email to client
+ */
+export async function send_document_rejection_email(data: DocumentRejectionEmailData) {
+  const transporter = create_smtp_transporter();
+
+  const from_email = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  const from_name = process.env.SMTP_FROM_NAME || 'Credit Banc Vault';
+
+  const html_content = generate_document_rejection_email_html(data);
+
+  const mail_options = {
+    from: `${from_name} <${from_email}>`,
+    to: data.client_email,
+    subject: `Action Required: Please update your ${data.doc_label}`,
+    html: html_content,
+  };
+
+  console.log(`📧 Sending document rejection email to ${data.client_email} for ${data.doc_label}`);
+  
+  try {
+    const info = await transporter.sendMail(mail_options);
+    console.log(`✅ Rejection email sent: ${info.messageId}`);
+    return info;
+  } catch (error) {
+    console.error(`❌ Failed to send rejection email to ${data.client_email}:`, error);
+    throw error;
+  }
+}

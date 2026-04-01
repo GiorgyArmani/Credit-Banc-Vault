@@ -527,3 +527,257 @@ export async function removeRequestedDocument(clientId: string, documentCode: st
         return { success: false, error: error.message || "An unexpected error occurred" };
     }
 }
+
+/**
+ * approveDocumentCategory
+ * 
+ * Allows an advisor to mark a category as approved.
+ */
+export async function approveDocumentCategory(clientId: string, docCode: string) {
+    try {
+        const supabase = await createClient();
+        const { data: { user: advisorUser } } = await supabase.auth.getUser();
+        if (!advisorUser) throw new Error("Unauthorized");
+
+        const { data: client } = await supabase
+            .from("client_data_vault")
+            .select("id, advisor_id, user_id")
+            .eq("id", clientId)
+            .single();
+
+        if (!client) throw new Error("Client not found");
+
+        const { data: advisorData } = await supabase
+            .from("advisors")
+            .select("id")
+            .eq("user_id", advisorUser.id)
+            .single();
+
+        if (!advisorData || client.advisor_id !== advisorData.id) {
+            throw new Error("Access denied");
+        }
+
+        const supabaseAdmin = createAdminClient();
+        const { error } = await supabaseAdmin
+            .from("document_category_approvals")
+            .upsert({
+                client_vault_id: clientId,
+                doc_code: docCode,
+                approved_by: advisorUser.id,
+                approved_at: new Date().toISOString()
+            }, { onConflict: 'client_vault_id, doc_code' });
+
+        if (error) {
+            console.error("Supabase error in approveDocumentCategory:", error);
+            throw error;
+        }
+
+        // 4. Clear 'rejected' status on documents in this category
+        await supabaseAdmin
+            .from("user_documents")
+            .update({ status: 'ready', metadata: {} }) // Clear rejection reason too
+            .eq("user_id", client.user_id)
+            .eq("doc_code", docCode)
+            .eq("status", "rejected");
+
+        revalidatePath(`/advisor/dashboard/clients/${clientId}`);
+        return { success: true };
+    } catch (error: any) {
+        console.error("Exception in approveDocumentCategory:", error);
+        return { success: false, error: error.message || "An unexpected error occurred" };
+    }
+}
+
+/**
+ * rejectDocumentCategory
+ * 
+ * Allows an advisor to reject a document category, notify the client,
+ * and provide feedback on why it was rejected.
+ */
+export async function rejectDocumentCategory(clientId: string, docCode: string, docLabel: string, reason: string) {
+    try {
+        const supabase = await createClient();
+        const { data: { user: advisorUser } } = await supabase.auth.getUser();
+        if (!advisorUser) throw new Error("Unauthorized");
+
+        // 1. Verify advisor ownership
+        const { data: client } = await supabase
+            .from("client_data_vault")
+            .select("id, advisor_id, client_email, client_name, user_id")
+            .eq("id", clientId)
+            .single();
+
+        if (!client) throw new Error("Client not found");
+
+        const { data: advisorData } = await supabase
+            .from("advisors")
+            .select("id, first_name, last_name")
+            .eq("user_id", advisorUser.id)
+            .single();
+
+        if (!advisorData || client.advisor_id !== advisorData.id) {
+            throw new Error("Access denied");
+        }
+
+        const supabaseAdmin = createAdminClient();
+
+        // 2. Delete any existing approval
+        await supabaseAdmin
+            .from("document_category_approvals")
+            .delete()
+            .eq("client_vault_id", clientId)
+            .eq("doc_code", docCode);
+
+        // 3. Update documents in this category to 'rejected' status and store reason
+        const { error: updateError } = await supabaseAdmin
+            .from("user_documents")
+            .update({ 
+                status: 'rejected',
+                metadata: { 
+                    rejection_reason: reason,
+                    rejected_at: new Date().toISOString(),
+                    rejected_by: advisorUser.id
+                } 
+            })
+            .eq("user_id", client.user_id)
+            .eq("doc_code", docCode);
+
+        if (updateError) {
+            console.error("❌ Error updating document status:", updateError);
+        } else {
+            console.log(`✅ Documents in ${docCode} marked as rejected with reason: ${reason}`);
+        }
+
+        // 4. Create In-App Notification
+        await supabaseAdmin
+            .from("in_app_notifications")
+            .insert({
+                user_id: client.user_id,
+                client_id: clientId,
+                title: `Action Required: ${docLabel}`,
+                message: `Your advisor has requested a replacement for ${docLabel}. Reason: ${reason}`
+            });
+
+        // 5. Send Email Notification
+        try {
+            const { send_document_rejection_email } = await import("@/lib/email");
+            await send_document_rejection_email({
+                client_name: client.client_name,
+                client_email: client.client_email,
+                doc_label: docLabel,
+                rejection_reason: reason,
+                advisor_name: `${advisorData.first_name} ${advisorData.last_name}`,
+                login_url: `${process.env.NEXT_PUBLIC_SITE_URL || 'https://vault.creditbanc.io'}/auth/login`
+            });
+        } catch (emailErr) {
+            console.error("Failed to send rejection email:", emailErr);
+        }
+
+        revalidatePath(`/advisor/dashboard/clients/${clientId}`);
+        return { success: true };
+    } catch (error: any) {
+        console.error("Exception in rejectDocumentCategory:", error);
+        return { success: false, error: error.message || "An unexpected error occurred" };
+    }
+}
+
+/**
+ * renameClientFile
+ * 
+ * Allows an advisor to update the display name (custom_label) of a file.
+ */
+export async function renameClientFile(clientId: string, documentId: string, newLabel: string) {
+    try {
+        const supabase = await createClient();
+        const { data: { user: advisorUser } } = await supabase.auth.getUser();
+        if (!advisorUser) throw new Error("Unauthorized");
+
+        const { data: client } = await supabase
+            .from("client_data_vault")
+            .select("id, advisor_id")
+            .eq("id", clientId)
+            .single();
+
+        if (!client) throw new Error("Client not found");
+
+        const { data: advisorData } = await supabase
+            .from("advisors")
+            .select("id")
+            .eq("user_id", advisorUser.id)
+            .single();
+
+        if (!advisorData || client.advisor_id !== advisorData.id) {
+            throw new Error("Access denied");
+        }
+
+        const supabaseAdmin = createAdminClient();
+        const { error } = await supabaseAdmin
+            .from("user_documents")
+            .update({ custom_label: newLabel })
+            .eq("id", documentId);
+
+        if (error) throw error;
+
+        revalidatePath(`/advisor/dashboard/clients/${clientId}`);
+        return { success: true };
+    } catch (error: any) {
+        console.error("Exception in renameClientFile:", error);
+        return { success: false, error: error.message || "An unexpected error occurred" };
+    }
+}
+
+/**
+ * generateMagicLink
+ * 
+ * Allows an advisor to generate a one-time magic login link for a client.
+ * Returns the secure action link which can be shared manually.
+ */
+export async function generateMagicLink(clientId: string) {
+    try {
+        const supabase = await createClient();
+        
+        // 1. Get authenticated advisor
+        const { data: { user: advisorUser } } = await supabase.auth.getUser();
+        if (!advisorUser) throw new Error("Unauthorized");
+
+        // 2. Fetch client email and verify ownership
+        const { data: client, error: clientError } = await supabase
+            .from("client_data_vault")
+            .select("client_email, advisor_id")
+            .eq("id", clientId)
+            .single();
+
+        if (clientError || !client) throw new Error("Client not found");
+
+        const { data: advisorData } = await supabase
+            .from("advisors")
+            .select("id")
+            .eq("user_id", advisorUser.id)
+            .single();
+
+        if (!advisorData || client.advisor_id !== advisorData.id) {
+            throw new Error("Access denied: You do not own this client");
+        }
+
+        // 3. Generate Magic Link via Admin Client
+        const supabaseAdmin = createAdminClient();
+        const { data, error } = await supabaseAdmin.auth.admin.generateLink({
+            type: 'magiclink',
+            email: client.client_email,
+        });
+
+        if (error) throw new Error(`Failed to generate link: ${error.message}`);
+        
+        const hashed_token = data.properties.hashed_token;
+        if (!hashed_token) throw new Error("Supabase did not return a hashed_token for the magic link.");
+
+        // 4. Construct our PKCE-compatible /auth/confirm link
+        const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://vault.creditbanc.io";
+        const confirmUrl = `${siteUrl}/auth/confirm?token_hash=${hashed_token}&type=email&next=/dashboard`;
+
+        return { success: true, link: confirmUrl };
+    } catch (error: any) {
+        console.error("Exception in generateMagicLink:", error);
+        return { success: false, error: error.message || "An unexpected error occurred" };
+    }
+}

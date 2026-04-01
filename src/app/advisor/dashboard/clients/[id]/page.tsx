@@ -26,13 +26,18 @@ import {
     Plus,
     RefreshCw,
     Send,
+    Link,
     UploadCloud,
     CheckCircle,
     ShieldCheck,
     UserCog,
     Trash2,
     X,
-    FileSignature
+    FileSignature,
+    ChevronDown,
+    ChevronUp,
+    Pencil,
+    XCircle
 } from "lucide-react";
 import {
     Dialog,
@@ -51,7 +56,17 @@ import {
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { requestDocuments, deleteClientFile, deleteClientVault, removeRequestedDocument, addManualFundingApplication } from "./actions";
+import {
+    requestDocuments,
+    deleteClientFile,
+    deleteClientVault,
+    removeRequestedDocument,
+    addManualFundingApplication,
+    approveDocumentCategory,
+    rejectDocumentCategory,
+    renameClientFile,
+    generateMagicLink
+} from "./actions";
 import { fetchInternalNotes, addInternalNote } from "@/app/actions/internal-notes";
 import { toast } from "sonner";
 import clsx from "clsx";
@@ -61,6 +76,7 @@ import { Label } from "@/components/ui/label";
 import { EditProfileModal } from "./edit-profile-modal";
 import { LoanPipelineFull, PIPELINE_STEPS } from "@/components/loan-pipeline-status";
 import { getClientPipelineHistory, updateLoanStatus, type LoanStatus, type PipelineStatusEntry } from "@/app/actions/pipeline";
+import DocumentPreviewModal from "@/components/pdf/pdf-viewer";
 
 /**
  * ============================================================================
@@ -186,6 +202,7 @@ export default function AdvisorClientDetailsPage() {
 
     // resend-credentials-state: Tracks loading state for credential resend
     const [is_resending, set_is_resending] = useState(false);
+    const [is_generating_magic_link, set_is_generating_magic_link] = useState(false);
 
     // upload-for-client-state: Controls for advisor document upload modal
     const [is_upload_modal_open, set_is_upload_modal_open] = useState(false);
@@ -229,10 +246,32 @@ export default function AdvisorClientDetailsPage() {
     const [is_remove_request_modal_open, set_is_remove_request_modal_open] = useState(false);
     const [doc_to_remove_request, set_doc_to_remove_request] = useState<{ code: string; label: string } | null>(null);
     const [is_removing_request, set_is_removing_request] = useState(false);
-    
+
     // Pipeline state
     const [pipeline_history, set_pipeline_history] = useState<PipelineStatusEntry[]>([]);
     const [current_pipeline_status, set_current_pipeline_status] = useState<LoanStatus>("created");
+
+    // Rejection state
+    const [is_reject_modal_open, set_is_reject_modal_open] = useState(false);
+    const [reject_doc_type, set_reject_doc_type] = useState<{ code: string; label: string } | null>(null);
+    const [reject_reason, set_reject_reason] = useState("");
+    const [is_rejecting, set_is_rejecting] = useState(false);
+
+    // Approval state
+    const [is_approving_modal_open, setIs_approving_modal_open] = useState(false);
+    const [category_to_approve, set_category_to_approve] = useState<{ code: string; label: string } | null>(null);
+    const [is_approving, set_is_approving] = useState(false);
+
+    // NEW: Document Management UX State
+    const [approvals, set_approvals] = useState<Set<string>>(new Set());
+    const [expanded_categories, set_expanded_categories] = useState<Set<string>>(new Set());
+    const [preview_modal, set_preview_modal] = useState<{ isOpen: boolean; doc: UserDocument | null }>({
+        isOpen: false,
+        doc: null
+    });
+    const [renaming_file, set_renaming_file] = useState<{ id: string; label: string } | null>(null);
+    const [is_renaming_loading, setIs_renaming_loading] = useState(false);
+    const [is_approving_loading, setIs_approving_loading] = useState(false);
 
     // ============================================
     // FETCH CLIENT DATA ON MOUNT
@@ -491,1465 +530,1910 @@ export default function AdvisorClientDetailsPage() {
                 set_pipeline_history(history);
                 if (history.length > 0) {
                     // Sort by date to get the latest status
-                    const sortedHistory = [...history].sort((a, b) => 
+                    const sortedHistory = [...history].sort((a, b) =>
                         new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
                     );
                     set_current_pipeline_status(sortedHistory[0].status as LoanStatus);
                 }
             }
 
-            set_component_state(ComponentState.SUCCESS);
+            // ============================================
+            // STEP 8: FETCH DOCUMENT CATEGORY APPROVALS
+            // ============================================
+            const { data: approvals_data, error: approvals_error } = await supabase
+                .from("document_category_approvals")
+                .select("doc_code")
+                .eq("client_vault_id", client_id);
 
-        } catch (err: any) {
-            console.error("❌ Unexpected error:", err);
-            set_error_message(err.message || "An unexpected error occurred.");
+            if (approvals_error) {
+                console.error("❌ Error fetching approvals:", approvals_error);
+            } else {
+                set_approvals(new Set(approvals_data.map(a => a.doc_code)));
+            }
+
+            set_component_state(ComponentState.SUCCESS);
+        } catch (error: any) {
+            console.error("❌ Unexpected error:", error);
+            set_error_message(error.message || "An unexpected error occurred.");
             set_component_state(ComponentState.ERROR);
         }
     }
 
-    /**
-     * download-document: Downloads a document from Supabase storage
-     * Creates a temporary download link and triggers browser download
-     */
-    async function download_document(doc: UserDocument) {
-        try {
-            const { data, error } = await supabase.storage
-                .from("user-documents")
-                .download(doc.storage_path);
-
-            if (error) throw error;
-
-            // Create blob URL and trigger download
-            const url = URL.createObjectURL(data);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = doc.name;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-        } catch (err: any) {
-            console.error("❌ Download error:", err);
-            toast.error(`Error downloading ${doc.name}. Please try again.`);
-        }
-    }
-
-    /**
-     * download_all_documents: Downloads all documents in a category sequentially
-     */
-    async function download_all_documents(docs: UserDocument[]) {
-        if (docs.length === 0) return;
-        
-        toast.info(`Preparing to download ${docs.length} files...`);
-        
-        // Use a for...of loop for sequential downloads with delays
-        for (let i = 0; i < docs.length; i++) {
-            const doc = docs[i];
-            await download_document(doc);
-            
-            // Add a small delay between downloads to ensure browser captures all of them
-            if (i < docs.length - 1) {
-                await new Promise(resolve => setTimeout(resolve, 800));
-            }
-        }
-        
-        toast.success("All downloads initiated!");
-    }
-
-    /**
-     * get-documents-by-category: Groups documents by their category
-     */
-    function get_documents_by_category(category_code: string): UserDocument[] {
-        return documents.filter(doc => doc.category === category_code);
-    }
-
-    /**
-     * format-date: Formats ISO date string to readable format
-     */
-    function format_date(iso_string: string): string {
-        const date = new Date(iso_string);
-        return date.toLocaleDateString("en-US", {
-            month: "short",
-            day: "numeric",
-            year: "numeric"
-        });
-    }
-
-    /**
-     * format-currency: Formats number as USD currency
-     */
-    function format_currency(amount: number): string {
-        return new Intl.NumberFormat("en-US", {
-            style: "currency",
-            currency: "USD",
-            minimumFractionDigits: 0,
-            maximumFractionDigits: 0,
-        }).format(amount);
-    }
-
-    /**
-     * format-file-size: Formats bytes to readable file size
-     */
-    function format_file_size(bytes: number): string {
-        if (bytes < 1024) return bytes + " B";
-        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
-        return (bytes / (1024 * 1024)).toFixed(1) + " MB";
-    }
-
-    /**
-     * handle-advisor-upload: Uploads selected files on behalf of the client
-     * Sends multipart/form-data to the new advisor-specific upload endpoint
-     */
-    async function handle_advisor_upload() {
-        if (upload_files.length === 0 || !upload_doc_code) return;
-
-        set_is_uploading(true);
-        try {
-            const form = new FormData();
-            form.append('client_id', client_id);
-            form.append('doc_code', upload_doc_code);
-            upload_files.forEach(f => form.append('file', f));
-
-            const res = await fetch('/api/advisor/clients/upload', {
-                method: 'POST',
-                body: form,
-            });
-            const result = await res.json();
-
-            if (result.success) {
-                toast.success(`${result.uploaded} file(s) uploaded successfully!`);
-                set_is_upload_modal_open(false);
-                set_upload_files([]);
-                set_upload_doc_code("");
-                fetch_client_details(); // Refresh to show new docs
-            } else {
-                toast.error(result.error || 'Upload failed');
-            }
-        } catch (err: any) {
-            console.error('❌ Upload error:', err);
-            toast.error('An unexpected error occurred during upload');
-        } finally {
-            set_is_uploading(false);
-        }
-    }
-
-    /**
-     * handle_status_change: Updates the client's loan pipeline status
-     */
-    async function handle_status_change(newStatus: LoanStatus, note: string = "Updated by advisor") {
-        try {
-            const res = await updateLoanStatus(client_id, newStatus, note);
-            if (res.success) {
-                // Refresh state
-                const history = await getClientPipelineHistory(client_id);
-                set_pipeline_history(history);
-                set_current_pipeline_status(newStatus);
-                toast.success(`Pipeline updated to ${newStatus}`);
-            } else {
-                toast.error("Failed to update pipeline");
-            }
-        } catch (err) {
-            console.error('❌ Pipeline update error:', err);
-            toast.error("Error updating pipeline");
-        }
-    }
-
-    /**
-     * handle-submit-vault: Submits the client's vault to underwriting via advisor endpoint
-     */
-    async function handle_submit_vault() {
-        set_is_submitting_vault(true);
-        try {
-            const res = await fetch('/api/advisor/clients/submit-vault', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ client_id }),
-            });
-            const result = await res.json();
-
-            if (result.success) {
-                toast.success('Vault submitted to underwriting successfully!');
-                set_vault_submitted(true);
-                set_is_submit_confirm_open(false);
-                fetch_client_details(); // Refresh pipeline status
-            } else {
-                toast.error(result.error || 'Submission failed');
-            }
-        } catch (err: any) {
-            console.error('❌ Submit vault error:', err);
-            toast.error('An unexpected error occurred');
-        } finally {
-            set_is_submitting_vault(false);
-        }
-    }
-
-    /**
-     * handle-resend-credentials: Calls the API to reset the client's password
-     * and resend their login credentials via email
-     */
-    async function handle_resend_credentials() {
-        set_is_resending(true);
-        try {
-            const response = await fetch('/api/clients/resend-credentials', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ client_id }),
-            });
-
-            const result = await response.json();
-
-            if (result.success) {
-                toast.success('Login credentials sent! Check the client\'s inbox.');
-            } else {
-                toast.error(result.error || 'Failed to resend credentials');
-            }
-        } catch (err: any) {
-            console.error('❌ Resend error:', err);
-            toast.error('An unexpected error occurred');
-        } finally {
-            set_is_resending(false);
-        }
-    }
-
-    /**
-     * handle_manual_funding_upload: Uploads a manually signed funding application
-     */
-    async function handle_manual_funding_upload() {
-        if (!funding_file) {
-            toast.error("Please select a file to upload");
-            return;
-        }
-
-        set_is_uploading_funding(true);
-        try {
-            const formData = new FormData();
-            formData.append("file", funding_file);
-
-            const result = await addManualFundingApplication(client_id, formData);
-
-            if (result.success) {
-                toast.success("Funding application uploaded and synced successfully!");
-                set_is_manual_funding_modal_open(false);
-                set_funding_file(null);
-                fetch_client_details(); // Refresh page data
-            } else {
-                toast.error(result.error || "Failed to upload funding application");
-            }
-        } catch (error: any) {
-            console.error("Manual upload error:", error);
-            toast.error("An unexpected error occurred during upload");
-        } finally {
-            set_is_uploading_funding(false);
-        }
-    }
-
-    /**
-     * handle-request-document: Triggers the server action to request multiple new documents
-     */
-    async function handle_request_document() {
-        if (selected_doc_ids.length === 0) {
-            toast.error("Please select at least one document");
-            return;
-        }
-
-        set_is_requesting(true);
-        try {
-            const result = await requestDocuments(client_id, selected_doc_ids);
-
-            if (result.success) {
-                toast.success(`${selected_doc_ids.length} document(s) requested successfully!`);
-                set_is_request_modal_open(false);
-                set_selected_doc_ids([]);
-                set_request_search_query("");
-                // Refresh data to show new requirements
-                fetch_client_details();
-            } else {
-                toast.error(result.error || "Failed to request documents");
-            }
-        } catch (err: any) {
-            console.error("❌ Request error:", err);
-            toast.error("An unexpected error occurred");
-        } finally {
-            set_is_requesting(false);
-        }
-    }
-
-    async function handle_add_note() {
-        if (!new_standalone_note.trim()) return;
-
-        set_is_adding_note(true);
-        try {
-            const result = await addInternalNote(client_id, new_standalone_note, "advisor");
-            if (result.success) {
-                toast.success("Note added!");
-                set_new_standalone_note("");
-                // Refresh notes
-                const notes_res = await fetchInternalNotes(client_id);
-                if (notes_res.success && notes_res.notes) set_notes(notes_res.notes);
-            } else {
-                toast.error(result.error || "Failed to add note");
-            }
-        } catch (err: any) {
-            console.error("❌ Add note error:", err);
-            toast.error("An unexpected error occurred");
-        } finally {
-            set_is_adding_note(false);
-        }
-    }
-
-    async function handle_delete_file() {
-        if (!file_to_delete) return;
-
-        set_is_deleting_file(true);
-        try {
-            const result = await deleteClientFile(client_id, file_to_delete.id);
-            if (result.success) {
-                toast.success("File deleted successfully");
-                set_is_delete_file_modal_open(false);
-                set_file_to_delete(null);
-                fetch_client_details(); // Refresh documents
-            } else {
-                toast.error(result.error || "Failed to delete file");
-            }
-        } catch (err: any) {
-            console.error("❌ Delete file error:", err);
-            toast.error("An unexpected error occurred");
-        } finally {
-            set_is_deleting_file(false);
-        }
-    }
-
-    async function handle_delete_vault() {
-        set_is_deleting_vault(true);
-        try {
-            const result = await deleteClientVault(client_id);
-            if (result.success) {
-                toast.success("Client vault deleted successfully");
-                router.push("/advisor/dashboard/clients");
-            } else {
-                toast.error(result.error || "Failed to delete vault");
-            }
-        } catch (err: any) {
-            console.error("❌ Delete vault error:", err);
-            toast.error("An unexpected error occurred");
-        } finally {
-            set_is_deleting_vault(false);
-        }
-    }
-
-    async function handle_remove_request() {
-        if (!doc_to_remove_request) return;
-
-        set_is_removing_request(true);
-        try {
-            const result = await removeRequestedDocument(client_id, doc_to_remove_request.code);
-            if (result.success) {
-                toast.success(`Request for ${doc_to_remove_request.label} removed`);
-                set_is_remove_request_modal_open(false);
-                set_doc_to_remove_request(null);
-                fetch_client_details(); // Refresh requirements
-            } else {
-                toast.error(result.error || "Failed to remove request");
-            }
-        } catch (err: any) {
-            console.error("❌ Remove request error:", err);
-            toast.error("An unexpected error occurred");
-        } finally {
-            set_is_removing_request(false);
-        }
-    }
-
     // ============================================
-    // RENDER FUNCTIONS FOR DIFFERENT STATES
-    // ============================================
+        // NEW: HELPER FUNCTIONS FOR DOCUMENT UX
+        // ============================================
 
-    /**
-     * render-loading-state: Shows loading spinner
-     */
-    function render_loading_state() {
-        return (
-            <div className="flex flex-col items-center justify-center min-h-[400px]">
-                <Loader2 className="h-12 w-12 text-emerald-600 animate-spin mb-4" />
-                <p className="text-gray-600">Loading client details...</p>
-            </div>
-        );
-    }
+        /**
+         * toggle_category_expansion: Expands/collapses a doc category
+         */
+        const toggle_category_expansion = (code: string) => {
+            const new_expanded = new Set(expanded_categories);
+            if (new_expanded.has(code)) {
+                new_expanded.delete(code);
+            } else {
+                new_expanded.add(code);
+            }
+            set_expanded_categories(new_expanded);
+        };
 
-    /**
-     * render-error-state: Shows error message
-     */
-    function render_error_state() {
-        return (
-            <div className="flex flex-col items-center justify-center min-h-[400px]">
-                <div className="bg-red-50 border border-red-200 rounded-xl p-8 max-w-md text-center">
-                    <AlertCircle className="h-12 w-12 text-red-600 mx-auto mb-4" />
-                    <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                        Error Loading Client
-                    </h3>
-                    <p className="text-gray-600 mb-4">{error_message}</p>
-                    <Button
-                        onClick={() => router.push("/advisor/dashboard/clients")}
-                        variant="outline"
-                    >
-                        <ArrowLeft className="h-4 w-4 mr-2" />
-                        Back to Clients
-                    </Button>
+        /**
+         * handle_approve_category: Records advisor approval for a category
+         */
+        async function handle_approve_category() {
+            if (!category_to_approve) return;
+
+            setIs_approving_loading(true);
+            try {
+                const result = await approveDocumentCategory(client_id, category_to_approve.code);
+                if (result.success) {
+                    toast.success(`Category "${category_to_approve.label}" approved!`);
+                    const new_approvals = new Set(approvals);
+                    new_approvals.add(category_to_approve.code);
+                    set_approvals(new_approvals);
+                    setIs_approving_modal_open(false);
+                    set_category_to_approve(null);
+                } else {
+                    toast.error(result.error || "Failed to approve category.");
+                }
+            } catch (error) {
+                toast.error("An unexpected error occurred.");
+            } finally {
+                setIs_approving_loading(false);
+            }
+        }
+
+        /**
+         * handle_rename_submit: Inline rename of a file
+         */
+        async function handle_rename_submit(newLabel: string) {
+            if (!renaming_file || !newLabel.trim()) return;
+
+            setIs_renaming_loading(true);
+            try {
+                const result = await renameClientFile(client_id, renaming_file.id, newLabel.trim());
+                if (result.success) {
+                    toast.success("File renamed successfully");
+                    set_documents(prev => prev.map(d =>
+                        d.id === renaming_file.id ? { ...d, custom_label: newLabel.trim() } : d
+                    ));
+                    set_renaming_file(null);
+                } else {
+                    toast.error(result.error || "Failed to rename file.");
+                }
+            } catch (error) {
+                toast.error("An unexpected error occurred.");
+            } finally {
+                setIs_renaming_loading(false);
+            }
+        }
+
+        /**
+         * handle_copy_magic_link: Generates and copies a magic login link
+         */
+        async function handle_copy_magic_link() {
+            set_is_generating_magic_link(true);
+            try {
+                const result = await generateMagicLink(client_id);
+                if (result.success && result.link) {
+                    await navigator.clipboard.writeText(result.link);
+                    toast.success("Magic link copied to clipboard!");
+                } else {
+                    toast.error(result.error || "Failed to generate magic link.");
+                }
+            } catch (err: any) {
+                console.error("❌ Magic link error:", err);
+                toast.error("An unexpected error occurred");
+            } finally {
+                set_is_generating_magic_link(false);
+            }
+        }
+
+        /**
+         * OutstandingDocumentsBanner: UI component for the top alert
+         */
+        function render_outstanding_banner(required_docs: { code: string; label: string }[]) {
+            const outstanding = required_docs.filter(
+                doc_type => !approvals.has(doc_type.code) || get_documents_by_category(doc_type.code).length === 0
+            );
+
+            const missing_uploads = required_docs.filter(
+                doc_type => get_documents_by_category(doc_type.code).length === 0
+            );
+
+            if (outstanding.length === 0) return null;
+
+            return (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 shadow-sm">
+                    <div className="flex items-start gap-4">
+                        <div className="bg-amber-100 p-2 rounded-lg">
+                            <AlertCircle className="h-6 w-6 text-amber-600" />
+                        </div>
+                        <div className="flex-1">
+                            <h4 className="text-amber-900 font-bold text-sm uppercase tracking-wider mb-1">
+                                Action Required: {outstanding.length} Outstanding Items
+                            </h4>
+                            <div className="flex flex-wrap gap-2 mt-2">
+                                {outstanding.map(doc => {
+                                    const is_pending_upload = get_documents_by_category(doc.code).length === 0;
+                                    return (
+                                        <Badge
+                                            key={doc.code}
+                                            variant="outline"
+                                            className={clsx(
+                                                "cursor-pointer hover:shadow-md transition-all px-3 py-1 border-2",
+                                                is_pending_upload
+                                                    ? "bg-red-50 text-red-700 border-red-200"
+                                                    : "bg-yellow-50 text-yellow-700 border-yellow-200"
+                                            )}
+                                            onClick={() => {
+                                                // Expand and scroll to category
+                                                if (!expanded_categories.has(doc.code)) {
+                                                    toggle_category_expansion(doc.code);
+                                                }
+                                                const el = document.getElementById(`category-${doc.code}`);
+                                                el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                            }}
+                                        >
+                                            {doc.label} {is_pending_upload ? "(Missing)" : "(Pending Approval)"}
+                                        </Badge>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    </div>
                 </div>
-            </div>
-        );
-    }
+            );
+        }
 
-    /**
-     * render-access-denied-state: Shows access denied message
-     */
-    function render_access_denied_state() {
-        return (
-            <div className="flex flex-col items-center justify-center min-h-[400px]">
-                <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-8 max-w-md text-center">
-                    <AlertCircle className="h-12 w-12 text-yellow-600 mx-auto mb-4" />
-                    <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                        Access Denied
-                    </h3>
-                    <p className="text-gray-600 mb-4">
-                        You do not have permission to view this client's information.
-                    </p>
-                    <Button
-                        onClick={() => router.push("/advisor/dashboard/clients")}
-                        variant="outline"
-                    >
-                        <ArrowLeft className="h-4 w-4 mr-2" />
-                        Back to Clients
-                    </Button>
+        /**
+         * download-document: Downloads a document from Supabase storage
+         * Creates a temporary download link and triggers browser download
+         */
+        async function download_document(doc: UserDocument) {
+            try {
+                const { data, error } = await supabase.storage
+                    .from("user-documents")
+                    .download(doc.storage_path);
+
+                if (error) throw error;
+
+                // Create blob URL and trigger download
+                const url = URL.createObjectURL(data);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = doc.name;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            } catch (err: any) {
+                console.error("❌ Download error:", err);
+                toast.error(`Error downloading ${doc.name}. Please try again.`);
+            }
+        }
+
+        /**
+         * download_all_documents: Downloads all documents in a category sequentially
+         */
+        async function download_all_documents(docs: UserDocument[]) {
+            if (docs.length === 0) return;
+
+            toast.info(`Preparing to download ${docs.length} files...`);
+
+            // Use a for...of loop for sequential downloads with delays
+            for (let i = 0; i < docs.length; i++) {
+                const doc = docs[i];
+                await download_document(doc);
+
+                // Add a small delay between downloads to ensure browser captures all of them
+                if (i < docs.length - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 800));
+                }
+            }
+
+            toast.success("All downloads initiated!");
+        }
+
+        /**
+         * get-documents-by-category: Groups documents by their category
+         */
+        function get_documents_by_category(category_code: string): UserDocument[] {
+            return documents.filter(doc => doc.category === category_code);
+        }
+
+        /**
+         * format-date: Formats ISO date string to readable format
+         */
+        function format_date(iso_string: string): string {
+            const date = new Date(iso_string);
+            return date.toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+                year: "numeric"
+            });
+        }
+
+        /**
+         * format-currency: Formats number as USD currency
+         */
+        function format_currency(amount: number): string {
+            return new Intl.NumberFormat("en-US", {
+                style: "currency",
+                currency: "USD",
+                minimumFractionDigits: 0,
+                maximumFractionDigits: 0,
+            }).format(amount);
+        }
+
+        /**
+         * format-file-size: Formats bytes to readable file size
+         */
+        function format_file_size(bytes: number): string {
+            if (bytes < 1024) return bytes + " B";
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+            return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+        }
+
+        /**
+         * handle-advisor-upload: Uploads selected files on behalf of the client
+         * Sends multipart/form-data to the new advisor-specific upload endpoint
+         */
+        async function handle_advisor_upload() {
+            if (upload_files.length === 0 || !upload_doc_code) return;
+
+            set_is_uploading(true);
+            try {
+                const form = new FormData();
+                form.append('client_id', client_id);
+                form.append('doc_code', upload_doc_code);
+                upload_files.forEach(f => form.append('file', f));
+
+                const res = await fetch('/api/advisor/clients/upload', {
+                    method: 'POST',
+                    body: form,
+                });
+                const result = await res.json();
+
+                if (result.success) {
+                    toast.success(`${result.uploaded} file(s) uploaded successfully!`);
+                    set_is_upload_modal_open(false);
+                    set_upload_files([]);
+                    set_upload_doc_code("");
+                    fetch_client_details(); // Refresh to show new docs
+                } else {
+                    toast.error(result.error || 'Upload failed');
+                }
+            } catch (err: any) {
+                console.error('❌ Upload error:', err);
+                toast.error('An unexpected error occurred during upload');
+            } finally {
+                set_is_uploading(false);
+            }
+        }
+
+        /**
+         * handle_status_change: Updates the client's loan pipeline status
+         */
+        async function handle_status_change(newStatus: LoanStatus, note: string = "Updated by advisor") {
+            try {
+                const res = await updateLoanStatus(client_id, newStatus, note);
+                if (res.success) {
+                    // Refresh state
+                    const history = await getClientPipelineHistory(client_id);
+                    set_pipeline_history(history);
+                    set_current_pipeline_status(newStatus);
+                    toast.success(`Pipeline updated to ${newStatus}`);
+                } else {
+                    toast.error("Failed to update pipeline");
+                }
+            } catch (err) {
+                console.error('❌ Pipeline update error:', err);
+                toast.error("Error updating pipeline");
+            }
+        }
+
+        /**
+         * handle-submit-vault: Submits the client's vault to underwriting via advisor endpoint
+         */
+        async function handle_submit_vault() {
+            set_is_submitting_vault(true);
+            try {
+                const res = await fetch('/api/advisor/clients/submit-vault', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ client_id }),
+                });
+                const result = await res.json();
+
+                if (result.success) {
+                    toast.success('Vault submitted to underwriting successfully!');
+                    set_vault_submitted(true);
+                    set_is_submit_confirm_open(false);
+                    fetch_client_details(); // Refresh pipeline status
+                } else {
+                    toast.error(result.error || 'Submission failed');
+                }
+            } catch (err: any) {
+                console.error('❌ Submit vault error:', err);
+                toast.error('An unexpected error occurred');
+            } finally {
+                set_is_submitting_vault(false);
+            }
+        }
+
+        /**
+         * handle-resend-credentials: Calls the API to reset the client's password
+         * and resend their login credentials via email
+         */
+        async function handle_resend_credentials() {
+            set_is_resending(true);
+            try {
+                const response = await fetch('/api/clients/resend-credentials', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ client_id }),
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    toast.success('Login credentials sent! Check the client\'s inbox.');
+                } else {
+                    toast.error(result.error || 'Failed to resend credentials');
+                }
+            } catch (err: any) {
+                console.error('❌ Resend error:', err);
+                toast.error('An unexpected error occurred');
+            } finally {
+                set_is_resending(false);
+            }
+        }
+
+        /**
+         * handle_reject_category: Processes a document category rejection
+         */
+        async function handle_reject_category() {
+            if (!reject_doc_type) return;
+            if (!reject_reason.trim()) {
+                toast.error("Please provide a reason for rejection");
+                return;
+            }
+
+            set_is_rejecting(true);
+            try {
+                const result = await rejectDocumentCategory(
+                    client_id, 
+                    reject_doc_type.code, 
+                    reject_doc_type.label, 
+                    reject_reason
+                );
+
+                if (result.success) {
+                    toast.success(`${reject_doc_type.label} rejected. Client has been notified.`);
+                    set_is_reject_modal_open(false);
+                    set_reject_reason("");
+                    
+                    // Refresh data
+                    await fetch_client_details();
+                } else {
+                    toast.error(result.error || "Failed to reject category");
+                }
+            } catch (err: any) {
+                console.error("❌ Rejection error:", err);
+                toast.error("An unexpected error occurred during rejection");
+            } finally {
+                set_is_rejecting(false);
+            }
+        }
+
+        /**
+         * handle_manual_funding_upload: Uploads a manually signed funding application
+         */
+        async function handle_manual_funding_upload() {
+            if (!funding_file) {
+                toast.error("Please select a file to upload");
+                return;
+            }
+
+            set_is_uploading_funding(true);
+            try {
+                const formData = new FormData();
+                formData.append("file", funding_file);
+
+                const result = await addManualFundingApplication(client_id, formData);
+
+                if (result.success) {
+                    toast.success("Funding application uploaded and synced successfully!");
+                    set_is_manual_funding_modal_open(false);
+                    set_funding_file(null);
+                    fetch_client_details(); // Refresh page data
+                } else {
+                    toast.error(result.error || "Failed to upload funding application");
+                }
+            } catch (error: any) {
+                console.error("Manual upload error:", error);
+                toast.error("An unexpected error occurred during upload");
+            } finally {
+                set_is_uploading_funding(false);
+            }
+        }
+
+        /**
+         * handle-request-document: Triggers the server action to request multiple new documents
+         */
+        async function handle_request_document() {
+            if (selected_doc_ids.length === 0) {
+                toast.error("Please select at least one document");
+                return;
+            }
+
+            set_is_requesting(true);
+            try {
+                const result = await requestDocuments(client_id, selected_doc_ids);
+
+                if (result.success) {
+                    toast.success(`${selected_doc_ids.length} document(s) requested successfully!`);
+                    set_is_request_modal_open(false);
+                    set_selected_doc_ids([]);
+                    set_request_search_query("");
+                    // Refresh data to show new requirements
+                    fetch_client_details();
+                } else {
+                    toast.error(result.error || "Failed to request documents");
+                }
+            } catch (err: any) {
+                console.error("❌ Request error:", err);
+                toast.error("An unexpected error occurred");
+            } finally {
+                set_is_requesting(false);
+            }
+        }
+
+        async function handle_add_note() {
+            if (!new_standalone_note.trim()) return;
+
+            set_is_adding_note(true);
+            try {
+                const result = await addInternalNote(client_id, new_standalone_note, "advisor");
+                if (result.success) {
+                    toast.success("Note added!");
+                    set_new_standalone_note("");
+                    // Refresh notes
+                    const notes_res = await fetchInternalNotes(client_id);
+                    if (notes_res.success && notes_res.notes) set_notes(notes_res.notes);
+                } else {
+                    toast.error(result.error || "Failed to add note");
+                }
+            } catch (err: any) {
+                console.error("❌ Add note error:", err);
+                toast.error("An unexpected error occurred");
+            } finally {
+                set_is_adding_note(false);
+            }
+        }
+
+        async function handle_delete_file() {
+            if (!file_to_delete) return;
+
+            set_is_deleting_file(true);
+            try {
+                const result = await deleteClientFile(client_id, file_to_delete.id);
+                if (result.success) {
+                    toast.success("File deleted successfully");
+                    set_is_delete_file_modal_open(false);
+                    set_file_to_delete(null);
+                    fetch_client_details(); // Refresh documents
+                } else {
+                    toast.error(result.error || "Failed to delete file");
+                }
+            } catch (err: any) {
+                console.error("❌ Delete file error:", err);
+                toast.error("An unexpected error occurred");
+            } finally {
+                set_is_deleting_file(false);
+            }
+        }
+
+        async function handle_delete_vault() {
+            set_is_deleting_vault(true);
+            try {
+                const result = await deleteClientVault(client_id);
+                if (result.success) {
+                    toast.success("Client vault deleted successfully");
+                    router.push("/advisor/dashboard/clients");
+                } else {
+                    toast.error(result.error || "Failed to delete vault");
+                }
+            } catch (err: any) {
+                console.error("❌ Delete vault error:", err);
+                toast.error("An unexpected error occurred");
+            } finally {
+                set_is_deleting_vault(false);
+            }
+        }
+
+        async function handle_remove_request() {
+            if (!doc_to_remove_request) return;
+
+            set_is_removing_request(true);
+            try {
+                const result = await removeRequestedDocument(client_id, doc_to_remove_request.code);
+                if (result.success) {
+                    toast.success(`Request for ${doc_to_remove_request.label} removed`);
+                    set_is_remove_request_modal_open(false);
+                    set_doc_to_remove_request(null);
+                    fetch_client_details(); // Refresh requirements
+                } else {
+                    toast.error(result.error || "Failed to remove request");
+                }
+            } catch (err: any) {
+                console.error("❌ Remove request error:", err);
+                toast.error("An unexpected error occurred");
+            } finally {
+                set_is_removing_request(false);
+            }
+        }
+
+        // ============================================
+        // RENDER FUNCTIONS FOR DIFFERENT STATES
+        // ============================================
+
+        /**
+         * render-loading-state: Shows loading spinner
+         */
+        function render_loading_state() {
+            return (
+                <div className="flex flex-col items-center justify-center min-h-[400px]">
+                    <Loader2 className="h-12 w-12 text-emerald-600 animate-spin mb-4" />
+                    <p className="text-gray-600">Loading client details...</p>
                 </div>
-            </div>
-        );
-    }
+            );
+        }
 
-    /**
-     * render-document-card: Renders individual document card with download
-     */
-    function render_document_card(doc: UserDocument) {
-        return (
-            <Card
-                key={doc.id}
-                className="hover:shadow-md transition-shadow"
-            >
-                <CardContent className="pt-6">
-                    <div className="flex items-start justify-between">
-                        <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-2">
-                                <FileText className="h-5 w-5 text-gray-400 flex-shrink-0" />
-                                <h4 className="font-medium text-gray-900 truncate">
-                                    {doc.custom_label || doc.name}
-                                </h4>
-                                {doc.is_favorite && (
-                                    <Star className="h-4 w-4 text-yellow-500 fill-yellow-500 flex-shrink-0" />
-                                )}
+        /**
+         * render-error-state: Shows error message
+         */
+        function render_error_state() {
+            return (
+                <div className="flex flex-col items-center justify-center min-h-[400px]">
+                    <div className="bg-red-50 border border-red-200 rounded-xl p-8 max-w-md text-center">
+                        <AlertCircle className="h-12 w-12 text-red-600 mx-auto mb-4" />
+                        <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                            Error Loading Client
+                        </h3>
+                        <p className="text-gray-600 mb-4">{error_message}</p>
+                        <Button
+                            onClick={() => router.push("/advisor/dashboard/clients")}
+                            variant="outline"
+                        >
+                            <ArrowLeft className="h-4 w-4 mr-2" />
+                            Back to Clients
+                        </Button>
+                    </div>
+                </div>
+            );
+        }
+
+        /**
+         * render-access-denied-state: Shows access denied message
+         */
+        function render_access_denied_state() {
+            return (
+                <div className="flex flex-col items-center justify-center min-h-[400px]">
+                    <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-8 max-w-md text-center">
+                        <AlertCircle className="h-12 w-12 text-yellow-600 mx-auto mb-4" />
+                        <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                            Access Denied
+                        </h3>
+                        <p className="text-gray-600 mb-4">
+                            You do not have permission to view this client's information.
+                        </p>
+                        <Button
+                            onClick={() => router.push("/advisor/dashboard/clients")}
+                            variant="outline"
+                        >
+                            <ArrowLeft className="h-4 w-4 mr-2" />
+                            Back to Clients
+                        </Button>
+                    </div>
+                </div>
+            );
+        }
+
+        /**
+         * render-document-card: Renders individual document card with download
+         */
+        function render_document_card(doc: UserDocument) {
+            return (
+                <Card
+                    key={doc.id}
+                    className="hover:shadow-md transition-shadow"
+                >
+                    <CardContent className="pt-6">
+                        <div className="flex items-start justify-between">
+                            <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 mb-2">
+                                    <FileText className="h-5 w-5 text-gray-400 flex-shrink-0" />
+                                    <h4 className="font-medium text-gray-900 truncate">
+                                        {doc.custom_label || doc.name}
+                                    </h4>
+                                    {doc.is_favorite && (
+                                        <Star className="h-4 w-4 text-yellow-500 fill-yellow-500 flex-shrink-0" />
+                                    )}
+                                </div>
+
+                                <div className="space-y-1 text-sm text-gray-600">
+                                    <p className="truncate">{doc.name}</p>
+                                    <div className="flex items-center gap-3 text-xs">
+                                        <span>{format_file_size(doc.size)}</span>
+                                        <span>•</span>
+                                        <span>Uploaded {format_date(doc.upload_date)}</span>
+                                    </div>
+                                </div>
                             </div>
 
-                            <div className="space-y-1 text-sm text-gray-600">
-                                <p className="truncate">{doc.name}</p>
-                                <div className="flex items-center gap-3 text-xs">
-                                    <span>{format_file_size(doc.size)}</span>
-                                    <span>•</span>
-                                    <span>Uploaded {format_date(doc.upload_date)}</span>
+                            <div className="flex items-center gap-2 ml-4 flex-shrink-0">
+                                {/* NEW: Preview Button */}
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => set_preview_modal({ isOpen: true, doc })}
+                                    className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
+                                    title="Preview Document"
+                                >
+                                    <Eye className="h-4 w-4" />
+                                </Button>
+
+                                {/* NEW: Rename Button */}
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => set_renaming_file({ id: doc.id, label: doc.custom_label || doc.name })}
+                                    className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                                    title="Rename File"
+                                >
+                                    <Pencil className="h-4 w-4" />
+                                </Button>
+
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => download_document(doc)}
+                                    title="Download File"
+                                >
+                                    <Download className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => {
+                                        set_file_to_delete(doc);
+                                        set_is_delete_file_modal_open(true);
+                                    }}
+                                    className="text-red-500 hover:text-red-600 hover:bg-red-50"
+                                    title="Delete File"
+                                >
+                                    <Trash2 className="h-4 w-4" />
+                                </Button>
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
+            );
+        }
+
+        /**
+         * render_document_category: Renders a category section with its documents
+         */
+        function render_document_category(doc_type: { code: string; label: string }) {
+            const category_docs = get_documents_by_category(doc_type.code);
+            const has_docs = category_docs.length > 0;
+            const is_approved = approvals.has(doc_type.code);
+            const is_expanded = expanded_categories.has(doc_type.code);
+
+            // Define status theme
+            const status = is_approved ? 'approved' : has_docs ? 'uploaded' : 'pending';
+
+            const themes = {
+                approved: "bg-emerald-50 border-emerald-200",
+                uploaded: "bg-amber-50 border-amber-200",
+                pending: "bg-gray-50 border-gray-100"
+            };
+
+            return (
+                <div
+                    key={doc_type.code}
+                    id={`category-${doc_type.code}`}
+                    className={clsx(
+                        "border rounded-2xl transition-all duration-300 shadow-sm overflow-hidden",
+                        themes[status]
+                    )}
+                >
+                    {/* Category Header - Clickable to expand/collapse */}
+                    <div
+                        className="flex items-center justify-between p-5 cursor-pointer hover:bg-black/[0.02] active:scale-[0.99] transition-all"
+                        onClick={() => toggle_category_expansion(doc_type.code)}
+                    >
+                        <div className="flex items-center gap-4">
+                            <div className={clsx(
+                                "w-12 h-12 rounded-xl flex items-center justify-center shadow-sm transition-colors",
+                                status === 'approved' ? "bg-emerald-500 text-white" :
+                                    status === 'uploaded' ? "bg-amber-500 text-white" : "bg-white border border-gray-200 text-gray-400"
+                            )}>
+                                {status === 'approved' ? <ShieldCheck className="h-6 w-6" /> :
+                                    status === 'uploaded' ? <CheckCircle2 className="h-6 w-6" /> : <AlertCircle className="h-6 w-6" />}
+                            </div>
+                            <div>
+                                <h3 className="font-bold text-gray-900 leading-tight">{doc_type.label}</h3>
+                                <div className="flex items-center gap-2 mt-1">
+                                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        {status === 'approved' ? 'Advisor Approved' :
+                                            status === 'uploaded' ? 'Ready for Review' : 'Awaiting Upload'}
+                                    </p>
+                                    {has_docs && (
+                                        <>
+                                            <div className="w-1 h-1 rounded-full bg-gray-300" />
+                                            <p className="text-xs font-bold text-gray-700">
+                                                {category_docs.length} File{category_docs.length > 1 ? 's' : ''}
+                                            </p>
+                                        </>
+                                    )}
                                 </div>
                             </div>
                         </div>
 
-                        <div className="flex items-center gap-2 ml-4 flex-shrink-0">
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => download_document(doc)}
-                            >
-                                <Download className="h-4 w-4" />
-                            </Button>
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => {
-                                    set_file_to_delete(doc);
-                                    set_is_delete_file_modal_open(true);
-                                }}
-                                className="text-red-500 hover:text-red-600 hover:bg-red-50"
-                            >
-                                <Trash2 className="h-4 w-4" />
-                            </Button>
-                        </div>
-                    </div>
-                </CardContent>
-            </Card>
-        );
-    }
-
-    /**
-     * render_document_category: Renders a category section with its documents
-     */
-    function render_document_category(doc_type: { code: string; label: string }) {
-        const category_docs = get_documents_by_category(doc_type.code);
-        const has_docs = category_docs.length > 0;
-
-        return (
-            <div
-                key={doc_type.code}
-                className={clsx(
-                    "border rounded-xl p-6",
-                    has_docs ? "bg-emerald-50 border-emerald-200" : "bg-gray-50 border-gray-200"
-                )}
-            >
-                {/* Category Header */}
-                <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-3">
-                        {has_docs ? (
-                            <CheckCircle2 className="h-6 w-6 text-emerald-600" />
-                        ) : (
-                            <AlertCircle className="h-6 w-6 text-gray-400" />
-                        )}
-                        <div>
-                            <h3 className="font-semibold text-gray-900">{doc_type.label}</h3>
-                            <p className="text-sm text-gray-600">
-                                {has_docs
-                                    ? `${category_docs.length} document${category_docs.length > 1 ? 's' : ''} uploaded`
-                                    : "Not uploaded yet"
-                                }
-                            </p>
-                        </div>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                        {/* Download All button - only if multiple documents */}
-                        {category_docs.length > 1 && (
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => download_all_documents(category_docs)}
-                                className="border-blue-400 text-blue-600 hover:bg-blue-50 text-xs px-3"
-                            >
-                                <Download className="h-3.5 w-3.5 mr-1" />
-                                Download All
-                            </Button>
-                        )}
-
-                        {/* Upload button for advisor */}
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                                set_upload_doc_code(doc_type.code);
-                                set_upload_doc_label(doc_type.label);
-                                set_upload_files([]);
-                                set_is_upload_modal_open(true);
-                            }}
-                            className="border-emerald-500 text-emerald-700 hover:bg-emerald-50 text-xs"
-                        >
-                            <UploadCloud className="h-3.5 w-3.5 mr-1" />
-                            Upload
-                        </Button>
-
-                        <Badge
-                            variant="outline"
-                            className={clsx(
-                                "font-semibold border",
-                                has_docs
-                                    ? "bg-emerald-100 text-emerald-800 border-emerald-300"
-                                    : "bg-gray-100 text-gray-600 border-gray-300"
-                            )}
-                        >
-                            {has_docs ? "Complete" : "Pending"}
-                        </Badge>
-
-                        {/* Remove Requested Document button (only if no files uploaded and it's a dynamic req) */}
-                        {!has_docs && (
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    set_doc_to_remove_request(doc_type);
-                                    set_is_remove_request_modal_open(true);
-                                }}
-                                className="h-8 w-8 p-0 text-gray-400 hover:text-red-500 hover:bg-red-50"
-                                title="Remove Request"
-                            >
-                                <X className="h-4 w-4" />
-                            </Button>
-                        )}
-                    </div>
-                </div>
-
-                {/* Document List */}
-                {has_docs && (
-                    <div className="space-y-3 mt-4">
-                        {category_docs.map(doc => render_document_card(doc))}
-                    </div>
-                )}
-            </div>
-        );
-    }
-
-    /**
-     * render-success-state: Shows complete client details and documents
-     */
-    function render_success_state() {
-        if (!client_profile) return null;
-
-        // Calculate document completion statistics
-        const total_required = required_docs.length;
-        const completed_categories = required_docs.filter(
-            doc_type => get_documents_by_category(doc_type.code).length > 0
-        ).length;
-        const completion_percentage = total_required > 0
-            ? Math.round((completed_categories / total_required) * 100)
-            : 100;
-
-        // Get additional documents (not in required categories)
-        const additional_docs = documents.filter(
-            doc => !required_docs.some(type => type.code === doc.category)
-        );
-
-        return (
-            <div className="space-y-6">
-                {/* Back Button */}
-                <Button
-                    variant="ghost"
-                    onClick={() => router.push("/advisor/dashboard/clients")}
-                    className="mb-4"
-                >
-                    <ArrowLeft className="h-4 w-4 mr-2" />
-                    Back to Clients
-                </Button>
-
-                {/* Client Profile Header */}
-                <Card>
-                    <CardHeader>
-                        <div className="flex items-start justify-between">
-                            <div>
-                                <CardTitle className="text-2xl">{client_profile.client_name}</CardTitle>
-                                <CardDescription className="mt-2 text-base">
-                                    {client_profile.company_name}
-                                </CardDescription>
-                            </div>
-
-                            {/* Center-side actions: Edit Profile & Delete Vault */}
-                            <div className="flex-1 px-8 flex items-center gap-3">
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => set_is_edit_modal_open(true)}
-                                    className="border-blue-500 text-blue-600 hover:bg-blue-50"
-                                >
-                                    <UserCog className="h-4 w-4 mr-2" />
-                                    Edit Profile
-                                </Button>
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => set_is_delete_vault_modal_open(true)}
-                                    className="border-red-500 text-red-600 hover:bg-red-50"
-                                >
-                                    <Trash2 className="h-4 w-4 mr-2" />
-                                    Delete Vault
-                                </Button>
-                            </div>
-
-                            {/* Right-side actions: completion badge + resend button */}
-                            <div className="flex items-center gap-3 flex-shrink-0">
-                                {/* Manual Funding Application Upload Button - Only if not completed */}
-                                {!client_profile.contract_completed && (
+                        <div className="flex items-center gap-3">
+                            {/* Approval/Rejection Actions (Advisor Only) */}
+                            {status === 'uploaded' && (
+                                <div className="flex items-center gap-2">
                                     <Button
                                         variant="outline"
                                         size="sm"
-                                        onClick={() => set_is_manual_funding_modal_open(true)}
-                                        className="bg-emerald-50 border-emerald-500 text-emerald-600 hover:bg-emerald-100"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            set_category_to_approve(doc_type);
+                                            setIs_approving_modal_open(true);
+                                        }}
+                                        className="bg-emerald-600 text-white hover:bg-emerald-700 border-none rounded-xl h-9 px-4 font-black text-[10px] uppercase tracking-widest shadow-lg shadow-emerald-600/20"
                                     >
-                                        <FileSignature className="h-4 w-4 mr-2" />
-                                        Add Funding Application
+                                        <ShieldCheck className="h-3.5 w-3.5 mr-2" />
+                                        Approve
                                     </Button>
-                                )}
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            set_reject_doc_type(doc_type);
+                                            set_is_reject_modal_open(true);
+                                        }}
+                                        className="bg-red-50 text-red-600 hover:bg-red-100 border-red-200 rounded-xl h-9 px-4 font-black text-[10px] uppercase tracking-widest"
+                                    >
+                                        <XCircle className="h-3.5 w-3.5 mr-2" />
+                                        Reject
+                                    </Button>
+                                </div>
+                            )}
 
-                                {/* Resend Login Credentials Button */}
+                            {/* Upload button for advisor */}
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    set_upload_doc_code(doc_type.code);
+                                    set_upload_doc_label(doc_type.label);
+                                    set_upload_files([]);
+                                    set_is_upload_modal_open(true);
+                                }}
+                                className="bg-white/80 border-gray-200 text-gray-700 hover:bg-white rounded-xl h-9 px-3 text-[10px] font-black uppercase tracking-widest"
+                            >
+                                <UploadCloud className="h-3.5 w-3.5 mr-1.5" />
+                                Upload
+                            </Button>
+
+                            <div className="w-px h-6 bg-gray-200 mx-1" />
+
+                            {is_expanded ? <ChevronUp className="h-5 w-5 text-gray-400" /> : <ChevronDown className="h-5 w-5 text-gray-400" />}
+
+                            {/* Remove Requested Document button (only if no files uploaded and it's a dynamic req) */}
+                            {!has_docs && (
                                 <Button
-                                    variant="outline"
+                                    variant="ghost"
                                     size="sm"
-                                    onClick={handle_resend_credentials}
-                                    disabled={is_resending}
-                                    className="border-blue-500 text-blue-600 hover:bg-blue-50 disabled:opacity-60"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        set_doc_to_remove_request(doc_type);
+                                        set_is_remove_request_modal_open(true);
+                                    }}
+                                    className="h-8 w-8 p-0 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg"
+                                    title="Remove Request"
                                 >
-                                    {is_resending ? (
-                                        <>
-                                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                            Sending...
-                                        </>
-                                    ) : (
-                                        <>
-                                            <Send className="h-4 w-4 mr-2" />
-                                            Resend Login Credentials
-                                        </>
-                                    )}
+                                    <X className="h-4 w-4" />
                                 </Button>
-
-                                {/* Document Completion Badge */}
-                                <Badge
-                                    variant="outline"
-                                    className={clsx(
-                                        "text-lg px-4 py-2 font-semibold border-2",
-                                        completion_percentage >= 100
-                                            ? "bg-emerald-100 text-emerald-800 border-emerald-300"
-                                            : completion_percentage >= 50
-                                                ? "bg-yellow-100 text-yellow-800 border-yellow-300"
-                                                : "bg-red-100 text-red-800 border-red-300"
-                                    )}
-                                >
-                                    {completion_percentage}% Complete
-                                </Badge>
-                            </div>
-                        </div>
-                    </CardHeader>
-
-                    <CardContent>
-                        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-                            {/* Contact Information */}
-                            <div className="space-y-3">
-                                <h4 className="font-semibold text-gray-900 mb-3">Contact Information</h4>
-                                <div className="flex items-center text-sm text-gray-600">
-                                    <Mail className="h-4 w-4 mr-2 text-gray-400" />
-                                    <span className="truncate">{client_profile.client_email}</span>
-                                </div>
-                                <div className="flex items-center text-sm text-gray-600">
-                                    <Phone className="h-4 w-4 mr-2 text-gray-400" />
-                                    <span>{client_profile.client_phone}</span>
-                                </div>
-                                <div className="flex items-center text-sm text-gray-600">
-                                    <Calendar className="h-4 w-4 mr-2 text-gray-400" />
-                                    <span>Created {format_date(client_profile.created_at)}</span>
-                                </div>
-                            </div>
-
-                            {/* Business Information */}
-                            <div className="space-y-3">
-                                <h4 className="font-semibold text-gray-900 mb-3">Business Information</h4>
-                                <div className="flex items-center text-sm text-gray-600">
-                                    <Building2 className="h-4 w-4 mr-2 text-gray-400" />
-                                    <span>{client_profile.legal_entity_type}</span>
-                                </div>
-                                <div className="text-sm text-gray-600">
-                                    <span className="text-gray-500">Location:</span>{" "}
-                                    {client_profile.company_city}, {client_profile.company_state}
-                                </div>
-                                <div className="text-sm text-gray-600">
-                                    <span className="text-gray-500">Started:</span>{" "}
-                                    {format_date(client_profile.business_start_date)}
-                                </div>
-                            </div>
-
-                            {/* Financial Information */}
-                            <div className="space-y-3">
-                                <h4 className="font-semibold text-gray-900 mb-3">Financial Information</h4>
-                                <div className="bg-emerald-50 rounded-lg p-3">
-                                    <p className="text-xs text-gray-600 mb-1">Capital Requested</p>
-                                    <p className="text-lg font-bold text-emerald-700">
-                                        {format_currency(client_profile.capital_requested)}
-                                    </p>
-                                </div>
-                                <div className="text-sm text-gray-600">
-                                    <span className="text-gray-500">Avg Monthly Revenue:</span>{" "}
-                                    {format_currency(client_profile.avg_monthly_deposits)}
-                                </div>
-                                <div className="text-sm text-gray-600">
-                                    <span className="text-gray-500">Credit Score:</span>{" "}
-                                    {client_profile.credit_score}
-                                </div>
-                            </div>
-                        </div>
-                    </CardContent>
-                </Card>
-
-                {/* Funding Pipeline Visualization */}
-                <Card className="border-emerald-100 bg-white">
-                    <CardHeader className="pb-2">
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                                <RefreshCw className="h-5 w-5 text-emerald-600" />
-                                <CardTitle className="text-lg">Funding Pipeline</CardTitle>
-                            </div>
-                            <div className="flex gap-2">
-                                {/* Only show advance button for advisor-controlled stages */}
-                                {(() => {
-                                    const currentIdx = PIPELINE_STEPS.findIndex((s: any) => s.status === current_pipeline_status);
-                                    // Advisor can advance from created -> onboarding -> docs_requested -> docs_received
-                                    const canAdvance = currentIdx >= 0 && currentIdx < 3; // up to docs_requested
-                                    const nextStep = canAdvance ? PIPELINE_STEPS[currentIdx + 1] : null;
-
-                                    if (!nextStep) return null;
-
-                                    return (
-                                        <Button
-                                            size="sm"
-                                            className="h-8 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-black uppercase tracking-widest text-[9px] shadow-lg shadow-emerald-500/20"
-                                            onClick={() => handle_status_change(nextStep.status as LoanStatus, `Advanced by advisor`)}
-                                        >
-                                            {`Mark ${nextStep.shortLabel} Completed`}
-                                        </Button>
-                                    );
-                                })()}
-                            </div>
-                        </div>
-                        <CardDescription>
-                            Current progress of the client's funding application. Click any stage to move the pipeline (Underwriter/Advisor access).
-                        </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        <LoanPipelineFull 
-                            currentStatus={current_pipeline_status} 
-                            history={pipeline_history}
-                            onStatusChange={(status) => handle_status_change(status, `Directly set by advisor`)}
-                        />
-                    </CardContent>
-                </Card>
-
-                {/* Internal Communication Section */}
-                <Card className="border-amber-200 bg-amber-50/30">
-                    <CardHeader className="pb-3">
-                        <div className="flex items-center gap-2">
-                            <MessageSquare className="h-5 w-5 text-amber-600" />
-                            <CardTitle className="text-lg text-amber-900">Internal Communication</CardTitle>
-                        </div>
-                        <CardDescription className="text-amber-700/80">
-                            Shared notes between Advisor and Underwriting for this client.
-                        </CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                        {/* Notes Feed */}
-                        <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
-                            {notes.length === 0 ? (
-                                <div className="text-center py-8 bg-white/50 rounded-lg border border-dashed border-amber-200">
-                                    <p className="text-sm text-amber-600">No internal notes yet.</p>
-                                </div>
-                            ) : (
-                                notes.map((note) => (
-                                    <div key={note.id} className="bg-white p-3 rounded-lg border border-amber-100 shadow-sm">
-                                        <div className="flex justify-between items-start mb-1">
-                                            <span className="font-semibold text-sm text-gray-900 uppercase tracking-tight">
-                                                {note.author_name} ({note.author_role})
-                                            </span>
-                                            <span className="text-[10px] text-gray-400">
-                                                {format(new Date(note.created_at), "MMM d, h:mm a")}
-                                            </span>
-                                        </div>
-                                        <p className="text-sm text-gray-700 whitespace-pre-wrap">{note.content}</p>
-                                    </div>
-                                ))
                             )}
                         </div>
+                    </div>
 
-                        {/* Add Note Input */}
-                        <div className="space-y-2 pt-2 border-t border-amber-100">
-                            <Textarea
-                                placeholder="Add an internal note for underwriting..."
-                                value={new_standalone_note}
-                                onChange={(e) => set_new_standalone_note(e.target.value)}
-                                className="bg-white border-amber-200 focus:ring-amber-500 min-h-[80px]"
-                            />
-                            <div className="flex justify-end">
-                                <Button
-                                    onClick={handle_add_note}
-                                    disabled={is_adding_note || !new_standalone_note.trim()}
-                                    className="bg-amber-600 hover:bg-amber-700 text-white"
-                                    size="sm"
-                                >
-                                    {is_adding_note ? "Adding..." : "Post Note"}
-                                </Button>
-                            </div>
-                        </div>
-                    </CardContent>
-                </Card>
-
-                {/* Document Status Overview */}
-                <Card>
-                    <CardHeader>
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <CardTitle>Document Upload Status</CardTitle>
-                                <CardDescription>
-                                    {completed_categories} of {total_required} required document categories completed
-                                </CardDescription>
-                            </div>
-
-                            {/* Request New Document Button */}
-                            <Button
-                                onClick={() => set_is_request_modal_open(true)}
-                                variant="outline"
-                                className="border-emerald-600 text-emerald-600 hover:bg-emerald-50"
-                            >
-                                <Plus className="h-4 w-4 mr-2" />
-                                Request New Document
-                            </Button>
-                        </div>
-                    </CardHeader>
-                    <CardContent>
-                        {/* Progress Bar */}
-                        <div className="w-full bg-gray-200 rounded-full h-3 mb-6">
-                            <div
-                                className={clsx(
-                                    "h-3 rounded-full transition-all",
-                                    completion_percentage >= 100 ? "bg-emerald-600" :
-                                        completion_percentage >= 50 ? "bg-yellow-500" :
-                                            "bg-red-500"
-                                )}
-                                style={{ width: `${Math.min(completion_percentage, 100)}%` }}
-                            />
-                        </div>
-
-                        {/* Required Documents */}
-                        <div className="space-y-4">
-                            <h4 className="font-semibold text-gray-900">Required Documents</h4>
-                            {required_docs.map(doc_type => render_document_category(doc_type))}
-                        </div>
-
-                        {/* Additional Documents */}
-                        {additional_docs.length > 0 && (
-                            <div className="space-y-4 mt-6">
-                                <h4 className="font-semibold text-gray-900">Additional Documents</h4>
-                                <div className="space-y-3">
-                                    {additional_docs.map(doc => render_document_card(doc))}
-                                </div>
-                            </div>
-                        )}
-
-                        {/* No Documents Message */}
-                        {documents.length === 0 && (
-                            <div className="text-center py-8 text-gray-600">
-                                <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                                <p>No documents uploaded yet</p>
-                                <p className="text-sm text-gray-500 mt-2">
-                                    Client will receive instructions to upload required documents
-                                </p>
-                            </div>
-                        )}
-                    </CardContent>
-                </Card>
-
-                {/* Submit to Underwriting Section */}
-                <Card className={clsx(
-                    "border-2",
-                    submission_status === 'locked' && completion_percentage === 100
-                        ? "bg-emerald-50 border-emerald-300"
-                        : completion_percentage === 100 
-                            ? "bg-blue-50 border-blue-200"
-                            : "bg-white border-slate-200 shadow-sm"
-                )}>
-                    <CardContent className="pt-6">
-                        <div className="flex items-center justify-between">
-                            <div className="space-y-1">
-                                <h3 className="font-semibold text-gray-900 text-lg flex items-center gap-2">
-                                    <ShieldCheck className={clsx(
-                                        "h-5 w-5", 
-                                        submission_status === 'locked' && completion_percentage === 100 ? "text-emerald-600" : "text-slate-400"
-                                    )} />
-                                    Submit to Underwriting
-                                </h3>
-                                <p className="text-sm text-gray-600">
-                                    {submission_status === 'locked' && completion_percentage === 100
-                                        ? `Vault was submitted to underwriting${client_profile.data_vault_submitted_at ? ` on ${format_date(client_profile.data_vault_submitted_at)}` : ""}.`
-                                        : completion_percentage === 100
-                                            ? submission_status === 'submitted'
-                                                ? "Client has submitted their vault. Please review and send to underwriting."
-                                                : "All documents are ready! You can now submit this vault to the underwriting team."
-                                            : "Awaiting all required documents before submission to underwriting is available."
-                                    }
-                                </p>
-                            </div>
-
-                            <div className="flex items-center gap-3">
-                                {submission_status === 'locked' && completion_percentage === 100 ? (
-                                    <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300 border text-sm px-4 py-2">
-                                        <CheckCircle className="h-4 w-4 mr-2" />
-                                        Submitted
-                                    </Badge>
-                                ) : (
+                    {/* Sub-header with Download All if expanded and multiple docs */}
+                    {is_expanded && has_docs && (
+                        <div className="px-5 pb-5 space-y-4">
+                            {category_docs.length > 1 && (
+                                <div className="flex justify-end">
                                     <Button
-                                        onClick={() => set_is_submit_confirm_open(true)}
-                                        disabled={completion_percentage < 100 || is_submitting_vault}
-                                        className={clsx(
-                                            "min-w-[180px]",
-                                            completion_percentage === 100 
-                                                ? "bg-slate-800 hover:bg-slate-900 text-white shadow-lg" 
-                                                : "bg-gray-100 text-gray-400 border-gray-200"
-                                        )}
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => download_all_documents(category_docs)}
+                                        className="border-blue-200 text-blue-600 hover:bg-blue-50 text-[10px] h-8 px-3 rounded-lg font-bold uppercase tracking-widest"
                                     >
-                                        {is_submitting_vault ? (
-                                            <>
-                                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                                Submitting...
-                                            </>
-                                        ) : (
-                                            <>
-                                                <ShieldCheck className="h-4 w-4 mr-2" />
-                                                Submit to Underwriting
-                                            </>
-                                        )}
+                                        <Download className="h-3.5 w-3.5 mr-1.5" />
+                                        Download All Files
                                     </Button>
-                                )}
+                                </div>
+                            )}
+                            <div className="space-y-3">
+                                {category_docs.map(doc => render_document_card(doc))}
                             </div>
                         </div>
-                    </CardContent>
-                </Card>
+                    )}
+                </div>
+            );
+        }
 
-                {/* Upload Document Modal */}
-                <Dialog open={is_upload_modal_open} onOpenChange={(open) => {
-                    if (!is_uploading) {
-                        set_is_upload_modal_open(open);
-                        if (!open) set_upload_files([]);
-                    }
-                }}>
-                    <DialogContent className="sm:max-w-md">
-                        <DialogHeader>
-                            <DialogTitle>Upload Document for Client</DialogTitle>
-                            <DialogDescription>
-                                Upload <strong>{upload_doc_label || upload_doc_code}</strong> on behalf of {client_profile.client_name}.
-                                The file will appear in their vault.
-                            </DialogDescription>
-                        </DialogHeader>
+        /**
+         * render-success-state: Shows complete client details and documents
+         */
+        function render_success_state() {
+            if (!client_profile) return null;
 
-                        <div className="py-4 space-y-4">
-                            {/* File picker */}
-                            <div
-                                className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center cursor-pointer hover:border-emerald-400 hover:bg-emerald-50 transition-colors"
-                                onClick={() => document.getElementById('advisor-file-input')?.click()}
-                            >
-                                <UploadCloud className="h-8 w-8 text-gray-400 mx-auto mb-2" />
-                                <p className="text-sm text-gray-600">
-                                    {upload_files.length > 0
-                                        ? `${upload_files.length} file(s) selected`
-                                        : "Click to select files"
-                                    }
-                                </p>
-                                {upload_files.length > 0 && (
-                                    <ul className="mt-2 text-xs text-gray-500 space-y-1">
-                                        {upload_files.map((f, i) => (
-                                            <li key={i}>{f.name} ({(f.size / 1024).toFixed(1)} KB)</li>
-                                        ))}
-                                    </ul>
-                                )}
-                            </div>
-                            <input
-                                id="advisor-file-input"
-                                type="file"
-                                multiple
-                                className="hidden"
-                                onChange={(e) => {
-                                    if (e.target.files) {
-                                        set_upload_files(Array.from(e.target.files));
-                                    }
-                                }}
-                            />
-                        </div>
+            // Calculate document completion statistics
+            const total_required = required_docs.length;
+            // NEW: Counting only approved categories
+            const completed_categories = required_docs.filter(
+                doc_type => approvals.has(doc_type.code)
+            ).length;
+            const completion_percentage = total_required > 0
+                ? Math.round((completed_categories / total_required) * 100)
+                : 100;
 
-                        <DialogFooter>
-                            <Button
-                                variant="ghost"
-                                onClick={() => {
-                                    set_is_upload_modal_open(false);
-                                    set_upload_files([]);
-                                }}
-                                disabled={is_uploading}
-                            >
-                                Cancel
-                            </Button>
-                            <Button
-                                onClick={handle_advisor_upload}
-                                disabled={upload_files.length === 0 || is_uploading}
-                                className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                            >
-                                {is_uploading ? (
-                                    <>
-                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                        Uploading...
-                                    </>
-                                ) : (
-                                    <>
-                                        <UploadCloud className="h-4 w-4 mr-2" />
-                                        Upload {upload_files.length > 0 ? `(${upload_files.length})` : ""}
-                                    </>
-                                )}
-                            </Button>
-                        </DialogFooter>
-                    </DialogContent>
-                </Dialog>
+            // Get additional documents (not in required categories)
+            const additional_docs = documents.filter(
+                doc => !required_docs.some(type => type.code === doc.category)
+            );
 
-                {/* Submit to Underwriting Confirmation Modal */}
-                <Dialog open={is_submit_confirm_open} onOpenChange={(open) => {
-                    if (!is_submitting_vault) set_is_submit_confirm_open(open);
-                }}>
-                    <DialogContent className="sm:max-w-md">
-                        <DialogHeader>
-                            <DialogTitle>Submit Vault to Underwriting?</DialogTitle>
-                            <DialogDescription>
-                                You are about to submit <strong>{client_profile.client_name}</strong>'s vault to the underwriting team for review.
-                                This will notify underwriting and mark the vault as submitted.
-                            </DialogDescription>
-                        </DialogHeader>
-                        <DialogFooter>
-                            <Button
-                                variant="ghost"
-                                onClick={() => set_is_submit_confirm_open(false)}
-                                disabled={is_submitting_vault}
-                            >
-                                Cancel
-                            </Button>
-                            <Button
-                                onClick={handle_submit_vault}
-                                disabled={is_submitting_vault}
-                                className="bg-slate-800 hover:bg-slate-900 text-white"
-                            >
-                                {is_submitting_vault ? (
-                                    <>
-                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                        Submitting...
-                                    </>
-                                ) : (
-                                    <>
-                                        <ShieldCheck className="h-4 w-4 mr-2" />
-                                        Yes, Submit
-                                    </>
-                                )}
-                            </Button>
-                        </DialogFooter>
-                    </DialogContent>
-                </Dialog>
-                {/* Request Document Modal */}
-                <Dialog open={is_request_modal_open} onOpenChange={set_is_request_modal_open}>
-                    <DialogContent className="sm:max-w-md flex flex-col max-h-[90vh]">
-                        <DialogHeader>
-                            <DialogTitle>Request New Document</DialogTitle>
-                            <DialogDescription>
-                                Select document types to request from {client_profile.client_name}.
-                                They will see these requirements in their vault.
-                            </DialogDescription>
-                        </DialogHeader>
+            return (
+                <div className="space-y-6">
+                    {/* Back Button */}
+                    <Button
+                        variant="ghost"
+                        onClick={() => router.push("/advisor/dashboard/clients")}
+                        className="mb-4"
+                    >
+                        <ArrowLeft className="h-4 w-4 mr-2" />
+                        Back to Clients
+                    </Button>
 
-                        <div className="py-2 space-y-4 flex-1 overflow-hidden flex flex-col">
-                            {/* Search Input */}
-                            <div className="relative">
-                                <Input
-                                    placeholder="Search document types..."
-                                    value={request_search_query}
-                                    onChange={(e) => set_request_search_query(e.target.value)}
-                                    className="pl-9"
-                                />
-                                <Plus className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 rotate-45" />
-                            </div>
+                    {/* NEW: Outstanding Actions Banner */}
+                    {render_outstanding_banner(required_docs)}
 
-                            {/* Checklist */}
-                            <div className="border rounded-lg overflow-hidden flex flex-col flex-1">
-                                <div className="overflow-y-auto p-4 space-y-3 max-h-[300px]">
-                                    {all_doc_types
-                                        .filter(type => !required_docs.some(r => r.code === type.code))
-                                        .filter(type =>
-                                            type.label.toLowerCase().includes(request_search_query.toLowerCase()) ||
-                                            type.code.toLowerCase().includes(request_search_query.toLowerCase())
-                                        )
-                                        .map((type) => (
-                                            <div key={type.id} className="flex items-center space-x-3 group">
-                                                <Checkbox
-                                                    id={`doc-${type.id}`}
-                                                    checked={selected_doc_ids.includes(type.id)}
-                                                    onCheckedChange={(checked) => {
-                                                        if (checked) {
-                                                            set_selected_doc_ids([...selected_doc_ids, type.id]);
-                                                        } else {
-                                                            set_selected_doc_ids(selected_doc_ids.filter(id => id !== type.id));
-                                                        }
-                                                    }}
-                                                />
-                                                <label
-                                                    htmlFor={`doc-${type.id}`}
-                                                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex-1 group-hover:text-emerald-600 transition-colors"
-                                                >
-                                                    {type.label}
-                                                </label>
-                                            </div>
-                                        ))
-                                    }
+                    {/* Client Profile Header */}
+                    <Card>
+                        <CardHeader>
+                            <div className="flex items-start justify-between">
+                                <div>
+                                    <CardTitle className="text-2xl">{client_profile.client_name}</CardTitle>
+                                    <CardDescription className="mt-2 text-base">
+                                        {client_profile.company_name}
+                                    </CardDescription>
+                                </div>
 
-                                    {all_doc_types.filter(type => !required_docs.some(r => r.code === type.code)).length === 0 && (
-                                        <div className="text-center py-8">
-                                            <p className="text-sm text-gray-500">
-                                                All available document types have already been requested.
-                                            </p>
-                                        </div>
+                                {/* Center-side actions: Edit Profile & Delete Vault */}
+                                <div className="flex-1 px-8 flex items-center gap-3">
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => set_is_edit_modal_open(true)}
+                                        className="border-blue-500 text-blue-600 hover:bg-blue-50"
+                                    >
+                                        <UserCog className="h-4 w-4 mr-2" />
+                                        Edit Profile
+                                    </Button>
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => set_is_delete_vault_modal_open(true)}
+                                        className="border-red-500 text-red-600 hover:bg-red-50"
+                                    >
+                                        <Trash2 className="h-4 w-4 mr-2" />
+                                        Delete Vault
+                                    </Button>
+                                </div>
+
+                                {/* Right-side actions: completion badge + resend button */}
+                                <div className="flex items-center gap-3 flex-shrink-0">
+                                    {/* Manual Funding Application Upload Button - Only if not completed */}
+                                    {!client_profile.contract_completed && (
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => set_is_manual_funding_modal_open(true)}
+                                            className="bg-emerald-50 border-emerald-500 text-emerald-600 hover:bg-emerald-100"
+                                        >
+                                            <FileSignature className="h-4 w-4 mr-2" />
+                                            Add Funding Application
+                                        </Button>
                                     )}
 
-                                    {all_doc_types.filter(type => !required_docs.some(r => r.code === type.code)).length > 0 &&
-                                        all_doc_types.filter(type =>
-                                            !required_docs.some(r => r.code === type.code) &&
-                                            (type.label.toLowerCase().includes(request_search_query.toLowerCase()) ||
-                                                type.code.toLowerCase().includes(request_search_query.toLowerCase()))
-                                        ).length === 0 && (
-                                            <div className="text-center py-8">
-                                                <p className="text-sm text-gray-500">
-                                                    No document types match "{request_search_query}"
-                                                </p>
-                                            </div>
+                                    {/* Credential Management Group */}
+                                    <div className="flex flex-col gap-2">
+                                        {/* Resend Login Credentials Button */}
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={handle_resend_credentials}
+                                            disabled={is_resending}
+                                            className="border-blue-500 text-blue-600 hover:bg-blue-50 disabled:opacity-60 w-full"
+                                        >
+                                            {is_resending ? (
+                                                <>
+                                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                                    Sending...
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Send className="h-4 w-4 mr-2" />
+                                                    Resend Login Credentials
+                                                </>
+                                            )}
+                                        </Button>
+
+                                        {/* Copy Magic Link Button */}
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={handle_copy_magic_link}
+                                            disabled={is_generating_magic_link}
+                                            className="border-emerald-500 text-emerald-600 hover:bg-emerald-50 disabled:opacity-60 w-full"
+                                        >
+                                            {is_generating_magic_link ? (
+                                                <>
+                                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                                    Generating...
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Link className="h-4 w-4 mr-2" />
+                                                    Copy Magic Link
+                                                </>
+                                            )}
+                                        </Button>
+                                    </div>
+
+                                    {/* Document Completion Badge */}
+                                    <Badge
+                                        variant="outline"
+                                        className={clsx(
+                                            "text-lg px-4 py-2 font-semibold border-2",
+                                            completion_percentage >= 100
+                                                ? "bg-emerald-100 text-emerald-800 border-emerald-300"
+                                                : completion_percentage >= 50
+                                                    ? "bg-yellow-100 text-yellow-800 border-yellow-300"
+                                                    : "bg-red-100 text-red-800 border-red-300"
                                         )}
+                                    >
+                                        {completion_percentage}% Complete
+                                    </Badge>
                                 </div>
                             </div>
-                        </div>
+                        </CardHeader>
 
-                        <DialogFooter className="pt-2">
-                            <div className="flex items-center justify-between w-full">
-                                <p className="text-xs font-bold text-gray-400">
-                                    {selected_doc_ids.length} selected
-                                </p>
+                        <CardContent>
+                            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                                {/* Contact Information */}
+                                <div className="space-y-3">
+                                    <h4 className="font-semibold text-gray-900 mb-3">Contact Information</h4>
+                                    <div className="flex items-center text-sm text-gray-600">
+                                        <Mail className="h-4 w-4 mr-2 text-gray-400" />
+                                        <span className="truncate">{client_profile.client_email}</span>
+                                    </div>
+                                    <div className="flex items-center text-sm text-gray-600">
+                                        <Phone className="h-4 w-4 mr-2 text-gray-400" />
+                                        <span>{client_profile.client_phone}</span>
+                                    </div>
+                                    <div className="flex items-center text-sm text-gray-600">
+                                        <Calendar className="h-4 w-4 mr-2 text-gray-400" />
+                                        <span>Created {format_date(client_profile.created_at)}</span>
+                                    </div>
+                                </div>
+
+                                {/* Business Information */}
+                                <div className="space-y-3">
+                                    <h4 className="font-semibold text-gray-900 mb-3">Business Information</h4>
+                                    <div className="flex items-center text-sm text-gray-600">
+                                        <Building2 className="h-4 w-4 mr-2 text-gray-400" />
+                                        <span>{client_profile.legal_entity_type}</span>
+                                    </div>
+                                    <div className="text-sm text-gray-600">
+                                        <span className="text-gray-500">Location:</span>{" "}
+                                        {client_profile.company_city}, {client_profile.company_state}
+                                    </div>
+                                    <div className="text-sm text-gray-600">
+                                        <span className="text-gray-500">Started:</span>{" "}
+                                        {format_date(client_profile.business_start_date)}
+                                    </div>
+                                </div>
+
+                                {/* Financial Information */}
+                                <div className="space-y-3">
+                                    <h4 className="font-semibold text-gray-900 mb-3">Financial Information</h4>
+                                    <div className="bg-emerald-50 rounded-lg p-3">
+                                        <p className="text-xs text-gray-600 mb-1">Capital Requested</p>
+                                        <p className="text-lg font-bold text-emerald-700">
+                                            {format_currency(client_profile.capital_requested)}
+                                        </p>
+                                    </div>
+                                    <div className="text-sm text-gray-600">
+                                        <span className="text-gray-500">Avg Monthly Revenue:</span>{" "}
+                                        {format_currency(client_profile.avg_monthly_deposits)}
+                                    </div>
+                                    <div className="text-sm text-gray-600">
+                                        <span className="text-gray-500">Credit Score:</span>{" "}
+                                        {client_profile.credit_score}
+                                    </div>
+                                </div>
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    {/* Funding Pipeline Visualization */}
+                    <Card className="border-emerald-100 bg-white">
+                        <CardHeader className="pb-2">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                    <RefreshCw className="h-5 w-5 text-emerald-600" />
+                                    <CardTitle className="text-lg">Funding Pipeline</CardTitle>
+                                </div>
                                 <div className="flex gap-2">
+                                    {/* Only show advance button for advisor-controlled stages */}
+                                    {(() => {
+                                        const currentIdx = PIPELINE_STEPS.findIndex((s: any) => s.status === current_pipeline_status);
+                                        // Advisor can advance from created -> onboarding -> docs_requested -> docs_received
+                                        const canAdvance = currentIdx >= 0 && currentIdx < 3; // up to docs_requested
+                                        const nextStep = canAdvance ? PIPELINE_STEPS[currentIdx + 1] : null;
+
+                                        if (!nextStep) return null;
+
+                                        return (
+                                            <Button
+                                                size="sm"
+                                                className="h-8 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-black uppercase tracking-widest text-[9px] shadow-lg shadow-emerald-500/20"
+                                                onClick={() => handle_status_change(nextStep.status as LoanStatus, `Advanced by advisor`)}
+                                            >
+                                                {`Mark ${nextStep.shortLabel} Completed`}
+                                            </Button>
+                                        );
+                                    })()}
+                                </div>
+                            </div>
+                            <CardDescription>
+                                Current progress of the client's funding application. Click any stage to move the pipeline (Underwriter/Advisor access).
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <LoanPipelineFull
+                                currentStatus={current_pipeline_status}
+                                history={pipeline_history}
+                                onStatusChange={(status) => handle_status_change(status, `Directly set by advisor`)}
+                            />
+                        </CardContent>
+                    </Card>
+
+                    {/* Internal Communication Section */}
+                    <Card className="border-amber-200 bg-amber-50/30">
+                        <CardHeader className="pb-3">
+                            <div className="flex items-center gap-2">
+                                <MessageSquare className="h-5 w-5 text-amber-600" />
+                                <CardTitle className="text-lg text-amber-900">Internal Communication</CardTitle>
+                            </div>
+                            <CardDescription className="text-amber-700/80">
+                                Shared notes between Advisor and Underwriting for this client.
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                            {/* Notes Feed */}
+                            <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                                {notes.length === 0 ? (
+                                    <div className="text-center py-8 bg-white/50 rounded-lg border border-dashed border-amber-200">
+                                        <p className="text-sm text-amber-600">No internal notes yet.</p>
+                                    </div>
+                                ) : (
+                                    notes.map((note) => (
+                                        <div key={note.id} className="bg-white p-3 rounded-lg border border-amber-100 shadow-sm">
+                                            <div className="flex justify-between items-start mb-1">
+                                                <span className="font-semibold text-sm text-gray-900 uppercase tracking-tight">
+                                                    {note.author_name} ({note.author_role})
+                                                </span>
+                                                <span className="text-[10px] text-gray-400">
+                                                    {format(new Date(note.created_at), "MMM d, h:mm a")}
+                                                </span>
+                                            </div>
+                                            <p className="text-sm text-gray-700 whitespace-pre-wrap">{note.content}</p>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+
+                            {/* Add Note Input */}
+                            <div className="space-y-2 pt-2 border-t border-amber-100">
+                                <Textarea
+                                    placeholder="Add an internal note for underwriting..."
+                                    value={new_standalone_note}
+                                    onChange={(e) => set_new_standalone_note(e.target.value)}
+                                    className="bg-white border-amber-200 focus:ring-amber-500 min-h-[80px]"
+                                />
+                                <div className="flex justify-end">
+                                    <Button
+                                        onClick={handle_add_note}
+                                        disabled={is_adding_note || !new_standalone_note.trim()}
+                                        className="bg-amber-600 hover:bg-amber-700 text-white"
+                                        size="sm"
+                                    >
+                                        {is_adding_note ? "Adding..." : "Post Note"}
+                                    </Button>
+                                </div>
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    {/* Document Status Overview */}
+                    <Card>
+                        <CardHeader>
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <CardTitle>Document Upload Status</CardTitle>
+                                    <CardDescription>
+                                        {completed_categories} of {total_required} required document categories completed
+                                    </CardDescription>
+                                </div>
+
+                                {/* Request New Document Button */}
+                                <Button
+                                    onClick={() => set_is_request_modal_open(true)}
+                                    variant="outline"
+                                    className="border-emerald-600 text-emerald-600 hover:bg-emerald-50"
+                                >
+                                    <Plus className="h-4 w-4 mr-2" />
+                                    Request New Document
+                                </Button>
+                            </div>
+                        </CardHeader>
+                        <CardContent>
+                            {/* Progress Bar */}
+                            <div className="w-full bg-gray-200 rounded-full h-3 mb-6">
+                                <div
+                                    className={clsx(
+                                        "h-3 rounded-full transition-all",
+                                        completion_percentage >= 100 ? "bg-emerald-600" :
+                                            completion_percentage >= 50 ? "bg-yellow-500" :
+                                                "bg-red-500"
+                                    )}
+                                    style={{ width: `${Math.min(completion_percentage, 100)}%` }}
+                                />
+                            </div>
+
+                            {/* Required Documents */}
+                            <div className="space-y-4">
+                                <h4 className="font-semibold text-gray-900">Required Documents</h4>
+                                {required_docs.map(doc_type => render_document_category(doc_type))}
+                            </div>
+
+                            {/* Additional Documents */}
+                            {additional_docs.length > 0 && (
+                                <div className="space-y-4 mt-6">
+                                    <h4 className="font-semibold text-gray-900">Additional Documents</h4>
+                                    <div className="space-y-3">
+                                        {additional_docs.map(doc => render_document_card(doc))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* No Documents Message */}
+                            {documents.length === 0 && (
+                                <div className="text-center py-8 text-gray-600">
+                                    <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                                    <p>No documents uploaded yet</p>
+                                    <p className="text-sm text-gray-500 mt-2">
+                                        Client will receive instructions to upload required documents
+                                    </p>
+                                </div>
+                            )}
+                        </CardContent>
+                    </Card>
+
+                    {/* Submit to Underwriting Section */}
+                    <Card className={clsx(
+                        "border-2",
+                        submission_status === 'locked' && completion_percentage === 100
+                            ? "bg-emerald-50 border-emerald-300"
+                            : completion_percentage === 100
+                                ? "bg-blue-50 border-blue-200"
+                                : "bg-white border-slate-200 shadow-sm"
+                    )}>
+                        <CardContent className="pt-6">
+                            <div className="flex items-center justify-between">
+                                <div className="space-y-1">
+                                    <h3 className="font-semibold text-gray-900 text-lg flex items-center gap-2">
+                                        <ShieldCheck className={clsx(
+                                            "h-5 w-5",
+                                            submission_status === 'locked' && completion_percentage === 100 ? "text-emerald-600" : "text-slate-400"
+                                        )} />
+                                        Submit to Underwriting
+                                    </h3>
+                                    <p className="text-sm text-gray-600">
+                                        {submission_status === 'locked' && completion_percentage === 100
+                                            ? `Vault was submitted to underwriting${client_profile.data_vault_submitted_at ? ` on ${format_date(client_profile.data_vault_submitted_at)}` : ""}.`
+                                            : completion_percentage === 100
+                                                ? submission_status === 'submitted'
+                                                    ? "Client has submitted their vault. Please review and send to underwriting."
+                                                    : "All documents are ready! You can now submit this vault to the underwriting team."
+                                                : "Awaiting all required documents before submission to underwriting is available."
+                                        }
+                                    </p>
+                                </div>
+
+                                <div className="flex items-center gap-3">
+                                    {submission_status === 'locked' && completion_percentage === 100 ? (
+                                        <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300 border text-sm px-4 py-2">
+                                            <CheckCircle className="h-4 w-4 mr-2" />
+                                            Submitted
+                                        </Badge>
+                                    ) : (
+                                        <Button
+                                            onClick={() => set_is_submit_confirm_open(true)}
+                                            disabled={completion_percentage < 100 || is_submitting_vault}
+                                            className={clsx(
+                                                "min-w-[180px]",
+                                                completion_percentage === 100
+                                                    ? "bg-slate-800 hover:bg-slate-900 text-white shadow-lg"
+                                                    : "bg-gray-100 text-gray-400 border-gray-200"
+                                            )}
+                                        >
+                                            {is_submitting_vault ? (
+                                                <>
+                                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                                    Submitting...
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <ShieldCheck className="h-4 w-4 mr-2" />
+                                                    Submit to Underwriting
+                                                </>
+                                            )}
+                                        </Button>
+                                    )}
+                                </div>
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    {/* Document Preview Modal */}
+                    <DocumentPreviewModal
+                        isOpen={preview_modal.isOpen}
+                        onClose={() => set_preview_modal({ isOpen: false, doc: null })}
+                        docName={preview_modal.doc?.custom_label || preview_modal.doc?.name || ""}
+                        storagePath={preview_modal.doc?.storage_path || ""}
+                        fileType={preview_modal.doc?.type}
+                    />
+
+                    {/* Rename File Dialog */}
+                    <Dialog open={!!renaming_file} onOpenChange={(open) => !open && set_renaming_file(null)}>
+                        <DialogContent className="sm:max-w-md bg-white border-2 border-blue-100 rounded-3xl overflow-hidden p-0">
+                            <div className="bg-blue-600 p-6 text-white">
+                                <div className="flex items-center gap-3 mb-2">
+                                    <div className="bg-white/20 p-2 rounded-xl">
+                                        <Pencil className="h-5 w-5" />
+                                    </div>
+                                    <DialogTitle className="text-xl font-bold tracking-tight">Rename Document</DialogTitle>
+                                </div>
+                                <DialogDescription className="text-blue-100 font-medium">
+                                    Give this file a descriptive name for better organization.
+                                </DialogDescription>
+                            </div>
+                            <div className="p-6 space-y-4">
+                                <div className="space-y-2">
+                                    <Label htmlFor="new-name" className="text-gray-900 font-black uppercase tracking-widest text-[10px]">New File Name</Label>
+                                    <Input
+                                        id="new-name"
+                                        defaultValue={renaming_file?.label}
+                                        placeholder="e.g., Bank Statement Jan 2024"
+                                        className="h-12 border-2 border-gray-100 focus:border-blue-500 rounded-2xl font-medium"
+                                        onBlur={(e) => set_renaming_file(prev => prev ? { ...prev, label: e.target.value } : null)}
+                                    />
+                                </div>
+                                <DialogFooter className="flex sm:justify-between items-center bg-gray-50 -mx-6 -mb-6 p-6 mt-4 border-t border-gray-100">
                                     <Button
                                         variant="ghost"
-                                        onClick={() => set_is_request_modal_open(false)}
-                                        disabled={is_requesting}
+                                        onClick={() => set_renaming_file(null)}
+                                        className="font-bold text-gray-500 uppercase tracking-widest text-[10px] hover:bg-gray-200"
                                     >
                                         Cancel
                                     </Button>
                                     <Button
-                                        onClick={handle_request_document}
-                                        disabled={selected_doc_ids.length === 0 || is_requesting}
-                                        className="bg-emerald-600 hover:bg-emerald-700 text-white min-w-[140px]"
+                                        onClick={() => handle_rename_submit(renaming_file?.label || "")}
+                                        disabled={is_renaming_loading}
+                                        className="bg-blue-600 hover:bg-blue-700 text-white rounded-xl h-10 px-6 font-black uppercase tracking-widest text-[10px] shadow-lg shadow-blue-600/20"
                                     >
-                                        {is_requesting ? (
-                                            <>
-                                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                                Requesting...
-                                            </>
-                                        ) : (
-                                            `Request ${selected_doc_ids.length > 1 ? 'Documents' : 'Document'}`
-                                        )}
+                                        {is_renaming_loading ? <Loader2 className="h-3 w-3 animate-spin mr-2" /> : null}
+                                        Save New Name
+                                    </Button>
+                                </DialogFooter>
+                            </div>
+                        </DialogContent>
+                    </Dialog>
+
+                    {/* Categories Approval Confirmation Dialog */}
+                    <Dialog open={is_approving_modal_open} onOpenChange={(open) => !open && setIs_approving_modal_open(false)}>
+                        <DialogContent className="sm:max-w-md bg-white border-2 border-emerald-100 rounded-3xl overflow-hidden p-0">
+                            <div className="bg-emerald-600 p-8 text-white text-center">
+                                <div className="bg-white/20 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-inner">
+                                    <ShieldCheck className="h-8 w-8" />
+                                </div>
+                                <DialogTitle className="text-2xl font-black tracking-tight mb-2 uppercase">Review Completed?</DialogTitle>
+                                <DialogDescription className="text-emerald-50 font-medium">
+                                    Did you review all files on this category?
+                                    <br />
+                                    <span className="block mt-2 opacity-80 text-xs italic text-emerald-100">
+                                        "{category_to_approve?.label}"
+                                    </span>
+                                </DialogDescription>
+                            </div>
+                            <div className="p-8">
+                                <p className="text-gray-600 text-sm leading-relaxed text-center mb-6">
+                                    Marking this as approved will update the client's progress and notify them that these documents are verified.
+                                </p>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <Button
+                                        variant="outline"
+                                        onClick={() => setIs_approving_modal_open(false)}
+                                        className="border-2 border-gray-100 hover:bg-gray-50 text-gray-500 font-bold uppercase tracking-widest text-[10px] h-12 rounded-2xl"
+                                    >
+                                        No, Keep Reviewing
+                                    </Button>
+                                    <Button
+                                        onClick={handle_approve_category}
+                                        disabled={is_approving_loading}
+                                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-black uppercase tracking-widest text-[10px] h-12 rounded-2xl shadow-xl shadow-emerald-600/20"
+                                    >
+                                        {is_approving_loading ? <Loader2 className="h-3 w-3 animate-spin mr-2" /> : null}
+                                        Yes, All Good!
                                     </Button>
                                 </div>
                             </div>
-                        </DialogFooter>
-                    </DialogContent>
-                </Dialog>
+                        </DialogContent>
+                    </Dialog>
 
-                {/* Edit Profile Modal */}
-                {client_profile && (
-                    <EditProfileModal
-                        isOpen={is_edit_modal_open}
-                        onClose={() => set_is_edit_modal_open(false)}
-                        onSuccess={fetch_client_details}
-                        clientData={client_profile}
-                    />
-                )}
+                    {/* Advisor upload modal */}
+                    <Dialog open={is_upload_modal_open} onOpenChange={(open) => {
+                        if (!is_uploading) {
+                            set_is_upload_modal_open(open);
+                            if (!open) set_upload_files([]);
+                        }
+                    }}>
+                        <DialogContent className="sm:max-w-md">
+                            <DialogHeader>
+                                <DialogTitle>Upload Document for Client</DialogTitle>
+                                <DialogDescription>
+                                    Upload <strong>{upload_doc_label || upload_doc_code}</strong> on behalf of {client_profile.client_name}.
+                                    The file will appear in their vault.
+                                </DialogDescription>
+                            </DialogHeader>
 
-                {/* Delete File Confirmation Modal */}
-                <Dialog open={is_delete_file_modal_open} onOpenChange={set_is_delete_file_modal_open}>
-                    <DialogContent className="sm:max-w-md">
-                        <DialogHeader>
-                            <DialogTitle>Delete Document?</DialogTitle>
-                            <DialogDescription>
-                                Are you sure you want to delete <strong>{file_to_delete?.custom_label || file_to_delete?.name}</strong>?
-                                This action cannot be undone.
-                            </DialogDescription>
-                        </DialogHeader>
-                        <DialogFooter>
-                            <Button
-                                variant="ghost"
-                                onClick={() => {
-                                    set_is_delete_file_modal_open(false);
-                                    set_file_to_delete(null);
-                                }}
-                                disabled={is_deleting_file}
-                            >
-                                Cancel
-                            </Button>
-                            <Button
-                                onClick={handle_delete_file}
-                                disabled={is_deleting_file}
-                                className="bg-red-600 hover:bg-red-700 text-white"
-                            >
-                                {is_deleting_file ? (
-                                    <>
-                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                        Deleting...
-                                    </>
-                                ) : (
-                                    <>
-                                        <Trash2 className="h-4 w-4 mr-2" />
-                                        Yes, Delete
-                                    </>
-                                )}
-                            </Button>
-                        </DialogFooter>
-                    </DialogContent>
-                </Dialog>
-
-                {/* Manual Funding Application Upload Modal */}
-                <Dialog open={is_manual_funding_modal_open} onOpenChange={set_is_manual_funding_modal_open}>
-                    <DialogContent className="sm:max-w-md">
-                        <DialogHeader>
-                            <DialogTitle className="flex items-center gap-2">
-                                <FileSignature className="h-5 w-5 text-emerald-600" />
-                                Add Funding Application
-                            </DialogTitle>
-                            <DialogDescription>
-                                Upload a signed Funding Application (PDF) for <strong>{client_profile.client_name}</strong>.
-                                This will mark the contract as completed and sync the document with GHL.
-                            </DialogDescription>
-                        </DialogHeader>
-                        <div className="space-y-4 py-4">
-                            <div className="space-y-2">
-                                <Label htmlFor="funding_file">Select Signed PDF *</Label>
-                                <Input
-                                    id="funding_file"
+                            <div className="py-4 space-y-4">
+                                {/* File picker */}
+                                <div
+                                    className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center cursor-pointer hover:border-emerald-400 hover:bg-emerald-50 transition-colors"
+                                    onClick={() => document.getElementById('advisor-file-input')?.click()}
+                                >
+                                    <UploadCloud className="h-8 w-8 text-gray-400 mx-auto mb-2" />
+                                    <p className="text-sm text-gray-600">
+                                        {upload_files.length > 0
+                                            ? `${upload_files.length} file(s) selected`
+                                            : "Click to select files"
+                                        }
+                                    </p>
+                                    {upload_files.length > 0 && (
+                                        <ul className="mt-2 text-xs text-gray-500 space-y-1">
+                                            {upload_files.map((f, i) => (
+                                                <li key={i}>{f.name} ({(f.size / 1024).toFixed(1)} KB)</li>
+                                            ))}
+                                        </ul>
+                                    )}
+                                </div>
+                                <input
+                                    id="advisor-file-input"
                                     type="file"
-                                    accept=".pdf"
-                                    onChange={(e) => set_funding_file(e.target.files?.[0] || null)}
-                                    className="cursor-pointer"
+                                    multiple
+                                    className="hidden"
+                                    onChange={(e) => {
+                                        if (e.target.files) {
+                                            set_upload_files(Array.from(e.target.files));
+                                        }
+                                    }}
                                 />
                             </div>
-                        </div>
-                        <DialogFooter>
-                            <Button
-                                variant="ghost"
-                                onClick={() => {
-                                    set_is_manual_funding_modal_open(false);
-                                    set_funding_file(null);
-                                }}
-                                disabled={is_uploading_funding}
-                            >
-                                Cancel
-                            </Button>
-                            <Button
-                                onClick={handle_manual_funding_upload}
-                                disabled={is_uploading_funding || !funding_file}
-                                className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                            >
-                                {is_uploading_funding ? (
-                                    <>
-                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                        Uploading...
-                                    </>
-                                ) : (
-                                    <>
-                                        <UploadCloud className="h-4 w-4 mr-2" />
-                                        Upload & Complete
-                                    </>
-                                )}
-                            </Button>
-                        </DialogFooter>
-                    </DialogContent>
-                </Dialog>
 
-                {/* Delete Vault Confirmation Modal */}
-                <Dialog open={is_delete_vault_modal_open} onOpenChange={set_is_delete_vault_modal_open}>
-                    <DialogContent className="sm:max-w-md">
-                        <DialogHeader>
-                            <DialogTitle className="text-red-600">Permanently Delete Vault?</DialogTitle>
-                            <DialogDescription>
-                                This will permanently delete <strong>{client_profile.client_name}</strong>'s data vault, including all uploaded documents and profile information.
-                                This action is <strong>irreversible</strong>.
-                            </DialogDescription>
-                        </DialogHeader>
-                        <DialogFooter>
-                            <Button
-                                variant="ghost"
-                                onClick={() => set_is_delete_vault_modal_open(false)}
-                                disabled={is_deleting_vault}
-                            >
-                                Cancel
-                            </Button>
-                            <Button
-                                onClick={handle_delete_vault}
-                                disabled={is_deleting_vault}
-                                className="bg-red-600 hover:bg-red-700 text-white"
-                            >
-                                {is_deleting_vault ? (
-                                    <>
-                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                        Deleting Vault...
-                                    </>
-                                ) : (
-                                    <>
-                                        <Trash2 className="h-4 w-4 mr-2" />
-                                        Permanently Delete
-                                    </>
-                                )}
-                            </Button>
-                        </DialogFooter>
-                    </DialogContent>
-                </Dialog>
+                            <DialogFooter>
+                                <Button
+                                    variant="ghost"
+                                    onClick={() => {
+                                        set_is_upload_modal_open(false);
+                                        set_upload_files([]);
+                                    }}
+                                    disabled={is_uploading}
+                                >
+                                    Cancel
+                                </Button>
+                                <Button
+                                    onClick={handle_advisor_upload}
+                                    disabled={upload_files.length === 0 || is_uploading}
+                                    className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                                >
+                                    {is_uploading ? (
+                                        <>
+                                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                            Uploading...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <UploadCloud className="h-4 w-4 mr-2" />
+                                            Upload {upload_files.length > 0 ? `(${upload_files.length})` : ""}
+                                        </>
+                                    )}
+                                </Button>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
 
-                {/* Remove Request Confirmation Modal */}
-                <Dialog open={is_remove_request_modal_open} onOpenChange={set_is_remove_request_modal_open}>
-                    <DialogContent className="sm:max-w-md">
-                        <DialogHeader>
-                            <DialogTitle>Remove Document Request?</DialogTitle>
-                            <DialogDescription>
-                                Are you sure you want to remove the request for <strong>{doc_to_remove_request?.label}</strong>?
-                                The client will no longer see this as a required document.
-                            </DialogDescription>
-                        </DialogHeader>
-                        <DialogFooter>
-                            <Button
-                                variant="ghost"
-                                onClick={() => {
-                                    set_is_remove_request_modal_open(false);
-                                    set_doc_to_remove_request(null);
-                                }}
-                                disabled={is_removing_request}
-                            >
-                                Cancel
-                            </Button>
-                            <Button
-                                onClick={handle_remove_request}
-                                disabled={is_removing_request}
-                                className="bg-red-600 hover:bg-red-700 text-white"
-                            >
-                                {is_removing_request ? (
-                                    <>
-                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                        Removing...
-                                    </>
-                                ) : (
-                                    "Remove Request"
-                                )}
-                            </Button>
-                        </DialogFooter>
-                    </DialogContent>
-                </Dialog>
+                    {/* Submit to Underwriting Confirmation Modal */}
+                    <Dialog open={is_submit_confirm_open} onOpenChange={(open) => {
+                        if (!is_submitting_vault) set_is_submit_confirm_open(open);
+                    }}>
+                        <DialogContent className="sm:max-w-md">
+                            <DialogHeader>
+                                <DialogTitle>Submit Vault to Underwriting?</DialogTitle>
+                                <DialogDescription>
+                                    You are about to submit <strong>{client_profile.client_name}</strong>'s vault to the underwriting team for review.
+                                    This will notify underwriting and mark the vault as submitted.
+                                </DialogDescription>
+                            </DialogHeader>
+                            <DialogFooter>
+                                <Button
+                                    variant="ghost"
+                                    onClick={() => set_is_submit_confirm_open(false)}
+                                    disabled={is_submitting_vault}
+                                >
+                                    Cancel
+                                </Button>
+                                <Button
+                                    onClick={handle_submit_vault}
+                                    disabled={is_submitting_vault}
+                                    className="bg-slate-800 hover:bg-slate-900 text-white"
+                                >
+                                    {is_submitting_vault ? (
+                                        <>
+                                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                            Submitting...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <ShieldCheck className="h-4 w-4 mr-2" />
+                                            Yes, Submit
+                                        </>
+                                    )}
+                                </Button>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
+
+                    {/* Request Document Modal */}
+                    <Dialog open={is_request_modal_open} onOpenChange={set_is_request_modal_open}>
+                        <DialogContent className="sm:max-w-md flex flex-col max-h-[90vh]">
+                            <DialogHeader>
+                                <DialogTitle>Request New Document</DialogTitle>
+                                <DialogDescription>
+                                    Select document types to request from {client_profile.client_name}.
+                                    They will see these requirements in their vault.
+                                </DialogDescription>
+                            </DialogHeader>
+
+                            <div className="py-2 space-y-4 flex-1 overflow-hidden flex flex-col">
+                                {/* Search Input */}
+                                <div className="relative">
+                                    <Input
+                                        placeholder="Search document types..."
+                                        value={request_search_query}
+                                        onChange={(e) => set_request_search_query(e.target.value)}
+                                        className="pl-9"
+                                    />
+                                    <Plus className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 rotate-45" />
+                                </div>
+
+                                {/* Checklist */}
+                                <div className="border rounded-lg overflow-hidden flex flex-col flex-1">
+                                    <div className="overflow-y-auto p-4 space-y-3 max-h-[300px]">
+                                        {all_doc_types
+                                            .filter(type => !required_docs.some(r => r.code === type.code))
+                                            .filter(type =>
+                                                type.label.toLowerCase().includes(request_search_query.toLowerCase()) ||
+                                                type.code.toLowerCase().includes(request_search_query.toLowerCase())
+                                            )
+                                            .map((type) => (
+                                                <div key={type.id} className="flex items-center space-x-3 group">
+                                                    <Checkbox
+                                                        id={`doc-${type.id}`}
+                                                        checked={selected_doc_ids.includes(type.id)}
+                                                        onCheckedChange={(checked) => {
+                                                            if (checked) {
+                                                                set_selected_doc_ids([...selected_doc_ids, type.id]);
+                                                            } else {
+                                                                set_selected_doc_ids(selected_doc_ids.filter(id => id !== type.id));
+                                                            }
+                                                        }}
+                                                    />
+                                                    <label
+                                                        htmlFor={`doc-${type.id}`}
+                                                        className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex-1 group-hover:text-emerald-600 transition-colors"
+                                                    >
+                                                        {type.label}
+                                                    </label>
+                                                </div>
+                                            ))
+                                        }
+
+                                        {all_doc_types.filter(type => !required_docs.some(r => r.code === type.code)).length === 0 && (
+                                            <div className="text-center py-8">
+                                                <p className="text-sm text-gray-500">
+                                                    All available document types have already been requested.
+                                                </p>
+                                            </div>
+                                        )}
+
+                                        {all_doc_types.filter(type => !required_docs.some(r => r.code === type.code)).length > 0 &&
+                                            all_doc_types.filter(type =>
+                                                !required_docs.some(r => r.code === type.code) &&
+                                                (type.label.toLowerCase().includes(request_search_query.toLowerCase()) ||
+                                                    type.code.toLowerCase().includes(request_search_query.toLowerCase()))
+                                            ).length === 0 && (
+                                                <div className="text-center py-8">
+                                                    <p className="text-sm text-gray-500">
+                                                        No document types match "{request_search_query}"
+                                                    </p>
+                                                </div>
+                                            )}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <DialogFooter className="pt-2">
+                                <div className="flex items-center justify-between w-full">
+                                    <p className="text-xs font-bold text-gray-400">
+                                        {selected_doc_ids.length} selected
+                                    </p>
+                                    <div className="flex gap-2">
+                                        <Button
+                                            variant="ghost"
+                                            onClick={() => set_is_request_modal_open(false)}
+                                            disabled={is_requesting}
+                                        >
+                                            Cancel
+                                        </Button>
+                                        <Button
+                                            onClick={handle_request_document}
+                                            disabled={selected_doc_ids.length === 0 || is_requesting}
+                                            className="bg-emerald-600 hover:bg-emerald-700 text-white min-w-[140px]"
+                                        >
+                                            {is_requesting ? (
+                                                <>
+                                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                                    Requesting...
+                                                </>
+                                            ) : (
+                                                `Request ${selected_doc_ids.length > 1 ? 'Documents' : 'Document'}`
+                                            )}
+                                        </Button>
+                                    </div>
+                                </div>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
+
+                    {/* Edit Profile Modal */}
+                    {client_profile && (
+                        <EditProfileModal
+                            isOpen={is_edit_modal_open}
+                            onClose={() => set_is_edit_modal_open(false)}
+                            onSuccess={fetch_client_details}
+                            clientData={client_profile}
+                        />
+                    )}
+
+                    {/* Delete File Confirmation Modal */}
+                    <Dialog open={is_delete_file_modal_open} onOpenChange={set_is_delete_file_modal_open}>
+                        <DialogContent className="sm:max-w-md">
+                            <DialogHeader>
+                                <DialogTitle>Delete Document?</DialogTitle>
+                                <DialogDescription>
+                                    Are you sure you want to delete <strong>{file_to_delete?.custom_label || file_to_delete?.name}</strong>?
+                                    This action cannot be undone.
+                                </DialogDescription>
+                            </DialogHeader>
+                            <DialogFooter>
+                                <Button
+                                    variant="ghost"
+                                    onClick={() => {
+                                        set_is_delete_file_modal_open(false);
+                                        set_file_to_delete(null);
+                                    }}
+                                    disabled={is_deleting_file}
+                                >
+                                    Cancel
+                                </Button>
+                                <Button
+                                    onClick={handle_delete_file}
+                                    disabled={is_deleting_file}
+                                    className="bg-red-600 hover:bg-red-700 text-white"
+                                >
+                                    {is_deleting_file ? (
+                                        <>
+                                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                            Deleting...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Trash2 className="h-4 w-4 mr-2" />
+                                            Yes, Delete
+                                        </>
+                                    )}
+                                </Button>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
+
+                    {/* Manual Funding Application Upload Modal */}
+                    <Dialog open={is_manual_funding_modal_open} onOpenChange={set_is_manual_funding_modal_open}>
+                        <DialogContent className="sm:max-w-md">
+                            <DialogHeader>
+                                <DialogTitle className="flex items-center gap-2">
+                                    <FileSignature className="h-5 w-5 text-emerald-600" />
+                                    Add Funding Application
+                                </DialogTitle>
+                                <DialogDescription>
+                                    Upload a signed Funding Application (PDF) for <strong>{client_profile.client_name}</strong>.
+                                    This will mark the contract as completed and sync the document with GHL.
+                                </DialogDescription>
+                            </DialogHeader>
+                            <div className="space-y-4 py-4">
+                                <div className="space-y-2">
+                                    <Label htmlFor="funding_file">Select Signed PDF *</Label>
+                                    <Input
+                                        id="funding_file"
+                                        type="file"
+                                        accept=".pdf"
+                                        onChange={(e) => set_funding_file(e.target.files?.[0] || null)}
+                                        className="cursor-pointer"
+                                    />
+                                </div>
+                            </div>
+                            <DialogFooter>
+                                <Button
+                                    variant="ghost"
+                                    onClick={() => {
+                                        set_is_manual_funding_modal_open(false);
+                                        set_funding_file(null);
+                                    }}
+                                    disabled={is_uploading_funding}
+                                >
+                                    Cancel
+                                </Button>
+                                <Button
+                                    onClick={handle_manual_funding_upload}
+                                    disabled={is_uploading_funding || !funding_file}
+                                    className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                                >
+                                    {is_uploading_funding ? (
+                                        <>
+                                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                            Uploading...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <UploadCloud className="h-4 w-4 mr-2" />
+                                            Upload & Complete
+                                        </>
+                                    )}
+                                </Button>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
+
+                    {/* Delete Vault Confirmation Modal */}
+                    <Dialog open={is_delete_vault_modal_open} onOpenChange={set_is_delete_vault_modal_open}>
+                        <DialogContent className="sm:max-w-md">
+                            <DialogHeader>
+                                <DialogTitle className="text-red-600">Permanently Delete Vault?</DialogTitle>
+                                <DialogDescription>
+                                    This will permanently delete <strong>{client_profile.client_name}</strong>'s data vault, including all uploaded documents and profile information.
+                                    This action is <strong>irreversible</strong>.
+                                </DialogDescription>
+                            </DialogHeader>
+                            <DialogFooter>
+                                <Button
+                                    variant="ghost"
+                                    onClick={() => set_is_delete_vault_modal_open(false)}
+                                    disabled={is_deleting_vault}
+                                >
+                                    Cancel
+                                </Button>
+                                <Button
+                                    onClick={handle_delete_vault}
+                                    disabled={is_deleting_vault}
+                                    className="bg-red-600 hover:bg-red-700 text-white"
+                                >
+                                    {is_deleting_vault ? (
+                                        <>
+                                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                            Deleting Vault...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Trash2 className="h-4 w-4 mr-2" />
+                                            Permanently Delete
+                                        </>
+                                    )}
+                                </Button>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
+
+                    {/* Remove Request Confirmation Modal */}
+                    <Dialog open={is_remove_request_modal_open} onOpenChange={set_is_remove_request_modal_open}>
+                        <DialogContent className="sm:max-w-md">
+                            <DialogHeader>
+                                <DialogTitle>Remove Document Request?</DialogTitle>
+                                <DialogDescription>
+                                    Are you sure you want to remove the request for <strong>{doc_to_remove_request?.label}</strong>?
+                                    The client will no longer see this as a required document.
+                                </DialogDescription>
+                            </DialogHeader>
+                            <DialogFooter>
+                                <Button
+                                    variant="ghost"
+                                    onClick={() => {
+                                        set_is_remove_request_modal_open(false);
+                                        set_doc_to_remove_request(null);
+                                    }}
+                                    disabled={is_removing_request}
+                                >
+                                    Cancel
+                                </Button>
+                                <Button
+                                    onClick={handle_remove_request}
+                                    disabled={is_removing_request}
+                                    className="bg-red-600 hover:bg-red-700 text-white"
+                                >
+                                    {is_removing_request ? (
+                                        <>
+                                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                            Removing...
+                                        </>
+                                    ) : (
+                                        "Remove Request"
+                                    )}
+                                </Button>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
+                    
+                    {/* Rejection Modal */}
+                    <Dialog open={is_reject_modal_open} onOpenChange={set_is_reject_modal_open}>
+                        <DialogContent className="sm:max-w-md bg-white border-2 border-red-100 rounded-3xl overflow-hidden p-0">
+                            <div className="bg-red-600 p-8 text-white text-center">
+                                <div className="bg-white/20 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-inner">
+                                    <XCircle className="h-8 w-8" />
+                                </div>
+                                <DialogTitle className="text-2xl font-black tracking-tight mb-2 uppercase">Reject Document?</DialogTitle>
+                                <DialogDescription className="text-red-50 font-medium">
+                                    Please explain why this document category is incomplete or incorrect.
+                                    The client will receive an email and in-app notification.
+                                </DialogDescription>
+                            </div>
+                            <div className="p-8 space-y-4">
+                                <div className="space-y-2">
+                                    <Label htmlFor="reject-reason" className="text-emerald-950 font-black uppercase tracking-widest text-[10px]">Reason for Rejection</Label>
+                                    <Textarea
+                                        id="reject-reason"
+                                        placeholder="e.g. Needs to be the full 6 months, or file is unreadable."
+                                        value={reject_reason}
+                                        onChange={(e) => set_reject_reason(e.target.value)}
+                                        className="min-h-[120px] border-2 border-gray-100 focus:border-red-500 rounded-2xl p-4 font-medium"
+                                    />
+                                </div>
+                                <div className="grid grid-cols-2 gap-4 pt-2">
+                                    <Button
+                                        variant="outline"
+                                        onClick={() => set_is_reject_modal_open(false)}
+                                        className="border-2 border-gray-100 hover:bg-gray-50 text-gray-500 font-bold uppercase tracking-widest text-[10px] h-12 rounded-2xl"
+                                    >
+                                        Cancel
+                                    </Button>
+                                    <Button
+                                        onClick={handle_reject_category}
+                                        disabled={is_rejecting || !reject_reason.trim()}
+                                        className="bg-red-600 hover:bg-red-700 text-white font-black uppercase tracking-widest text-[10px] h-12 rounded-2xl shadow-xl shadow-red-600/20"
+                                    >
+                                        {is_rejecting ? <Loader2 className="h-3 w-3 animate-spin mr-2" /> : null}
+                                        Confirm Rejection
+                                    </Button>
+                                </div>
+                            </div>
+                        </DialogContent>
+                    </Dialog>
+                </div>
+            );
+        }
+
+
+
+        // ============================================
+        // MAIN RENDER WITH STATE SWITCH
+        // ============================================
+        return (
+            <div>
+                {/* Page Header */}
+                <div className="mb-6">
+                    <h1 className="text-3xl font-bold tracking-tight text-gray-900">
+                        Client Details
+                    </h1>
+                    <p className="text-muted-foreground mt-2">
+                        View client profile and document submissions
+                    </p>
+                </div>
+
+                {/* State-Based Rendering */}
+                {(() => {
+                    switch (component_state) {
+                        case ComponentState.LOADING:
+                            return render_loading_state();
+                        case ComponentState.ERROR:
+                            return render_error_state();
+                        case ComponentState.ACCESS_DENIED:
+                            return render_access_denied_state();
+                        case ComponentState.SUCCESS:
+                            return render_success_state();
+                        default:
+                            return null;
+                    }
+                })()}
             </div>
         );
     }
-
-    // ============================================
-    // MAIN RENDER WITH STATE SWITCH
-    // ============================================
-    return (
-        <div>
-            {/* Page Header */}
-            <div className="mb-6">
-                <h1 className="text-3xl font-bold tracking-tight text-gray-900">
-                    Client Details
-                </h1>
-                <p className="text-muted-foreground mt-2">
-                    View client profile and document submissions
-                </p>
-            </div>
-
-            {/* State-Based Rendering */}
-            {(() => {
-                switch (component_state) {
-                    case ComponentState.LOADING:
-                        return render_loading_state();
-                    case ComponentState.ERROR:
-                        return render_error_state();
-                    case ComponentState.ACCESS_DENIED:
-                        return render_access_denied_state();
-                    case ComponentState.SUCCESS:
-                        return render_success_state();
-                    default:
-                        return null;
-                }
-            })()}
-        </div>
-    );
-}

@@ -12,7 +12,7 @@ import Confetti from 'react-confetti'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
 import VideoPlayer from '@/components/video-player'
-import PDFViewer from '@/components/pdf/pdf-viewer'
+import InlinePDFViewer from '@/components/pdf/inline-pdf-viewer'
 import CreditRepairCTA from '@/components/credit-repair-cta'
 
 interface Lesson {
@@ -345,8 +345,8 @@ export default function ModulePage() {
                 />
               )}
               {currentLesson.lesson_type === 'pdf' && (
-                <PDFViewer 
-                  pdfUrl={currentLesson.resource_url} 
+                <InlinePDFViewer 
+                  url={currentLesson.resource_url} 
                   title={currentLesson.title}
                 />
               )}

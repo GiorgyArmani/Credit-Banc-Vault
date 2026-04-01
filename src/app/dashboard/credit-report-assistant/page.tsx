@@ -5,7 +5,7 @@ import { useEffect, useRef, useState, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { FileDown, Trash2, Eye, Loader2 } from 'lucide-react';
 import Link from 'next/link';
-import PDFViewer from '@/components/pdf/pdf-viewer';
+import InlinePDFViewer from '@/components/pdf/inline-pdf-viewer';
 
 // --- Types ---
 type ReportRow = {
@@ -218,7 +218,7 @@ export default function CreditReportAssistantPage() {
               <p className="text-xs text-muted-foreground">Preview below. Use the toolbar to download or open in new tab.</p>
             </div>
           </div>
-          <PDFViewer title={title} pdfUrl={inlineViewUrl} />
+          <InlinePDFViewer title={title} url={inlineViewUrl} />
         </div>
       )}
 

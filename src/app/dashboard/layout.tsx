@@ -7,6 +7,7 @@ import { useProtectedRoute } from '@/hooks/use-protected-route'
 import { usePathname } from 'next/navigation'
 import OnboardingGate from '@/components/onboarding/onboarding-gate'
 
+import { NotificationBell } from '@/components/notifications/NotificationBell'
 import { Menu } from 'lucide-react'
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -50,18 +51,34 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
         {/* Margen dinámico solo md+ */}
         <div className={clsx('flex min-h-screen flex-col', collapsed ? 'md:ml-16' : 'md:ml-64')}>
-          {/* Topbar (solo mobile) */}
-          <header className="sticky top-0 z-30 bg-white border-b md:hidden">
-            <div className="h-14 px-3 flex items-center justify-between">
-              <button
-                onClick={() => setMobileOpen(true)}
-                aria-label="Open sidebar"
-                className="inline-flex h-10 w-10 items-center justify-center rounded hover:bg-gray-100"
-              >
-                <Menu className="h-6 w-6" />
-              </button>
-              <div className="text-sm font-medium text-gray-700">{currentTitle}</div>
-              <div className="w-10" />
+          {/* Topbar (Mobile & Desktop) */}
+          <header className="sticky top-0 z-30 bg-white border-b">
+            <div className="h-14 px-4 flex items-center justify-between">
+              {/* Mobile Menu Button */}
+              <div className="flex items-center gap-3 md:hidden">
+                <button
+                  onClick={() => setMobileOpen(true)}
+                  aria-label="Open sidebar"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded hover:bg-gray-100"
+                >
+                  <Menu className="h-5 w-5 text-gray-600" />
+                </button>
+                <div className="text-sm font-semibold text-gray-800">{currentTitle}</div>
+              </div>
+
+              {/* Desktop Search/Spacer */}
+              <div className="hidden md:block">
+                <h1 className="text-sm font-medium text-gray-400">CREDIT BANC VAULT / <span className="text-gray-900">{currentTitle.toUpperCase()}</span></h1>
+              </div>
+
+              {/* Action Icons */}
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2">
+                   <div className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full uppercase tracking-wider hidden sm:block">Client Portal</div>
+                   <div className="h-4 w-px bg-gray-200 hidden sm:block mx-1"></div>
+                   <NotificationBell />
+                </div>
+              </div>
             </div>
           </header>
 
