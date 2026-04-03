@@ -502,22 +502,70 @@ export async function POST(request: Request) {
         console.log(`✅ Contact will be assigned to advisor in GHL`);
       }
 
-      ghl_contact_id = await ghl_upsert_contact(ghl_contact_data);
-      console.log(`✅ GHL contact created: ${ghl_contact_id}`);
+      try {
+        ghl_contact_id = await ghl_upsert_contact(ghl_contact_data);
+        console.log(`✅ GHL contact created: ${ghl_contact_id}`);
+      } catch (ghl_error: any) {
+        // Detect "duplicated contacts" error from GHL
+        if (ghl_error.message.includes('duplicated contacts')) {
+          console.log('⚠️ GHL duplicate contact detected (likely phone number match). Extracting ID...');
+          
+          try {
+            // Extract metadata from the error message if possible
+            // Error format: "Error creating/updating GHL contact (400): {..."
+            const error_json_str = ghl_error.message.split('): ')[1];
+            const error_json = JSON.parse(error_json_str);
+            
+            if (error_json.meta?.contactId) {
+              ghl_contact_id = error_json.meta.contactId;
+              console.log(`✅ Successfully linked to existing GHL contact via error metadata: ${ghl_contact_id}`);
+              
+              // Now perform an UPDATE to ensure data is synced correctly
+              const ghl_update_data: any = {
+                firstName: body.client_name.split(' ')[0],
+                lastName: body.client_name.split(' ').slice(1).join(' ') || '',
+                email: body.client_email.toLowerCase(),
+                phone: body.client_phone || '',
+                companyName: body.company_name,
+                city: body.company_city || '',
+                state: body.company_state,
+                postalCode: body.company_zip_code,
+                country: 'US',
+                customFields: custom_fields
+              };
+              
+              if (advisor_ghl_user_id) {
+                ghl_update_data.assignedTo = advisor_ghl_user_id;
+              }
+              
+              await ghlUpdateContact(ghl_contact_id, ghl_update_data);
+              console.log(`✅ GHL contact updated with vault data after collision: ${ghl_contact_id}`);
+            } else {
+              throw ghl_error; // Re-throw if we can't find the ID
+            }
+          } catch (parse_err) {
+            console.error('❌ Failed to parse GHL error metadata:', parse_err);
+            throw ghl_error; // Re-throw original error
+          }
+        } else {
+          throw ghl_error; // Re-throw original error
+        }
+      }
     }
 
     // ========== STEP 5: SAVE TO CLIENT_DATA_VAULT ==========
-    // IMPORTANT CHANGE: Using .upsert with onConflict to handle cases where 
-    // the GHL contact is already linked to a different user, or the user already has a record.
+    // We try to save the record even if GHL sync had issues, 
+    // to ensure the client is visible in our system.
     console.log('💾 Saving data to client_data_vault...');
 
-    const vault_data = {
+    const vault_data: any = {
       // IDs and references
       user_id: user_id,
       advisor_name: body.advisor_name || 'Unknown',
       advisor_id: body.advisor_id || null,
-      ghl_contact_id: ghl_contact_id,
-      ghl_last_sync_at: new Date().toISOString(),
+      ghl_contact_id: ghl_contact_id || null, // Might be null if GHL failed
+      ghl_last_sync_at: ghl_contact_id ? new Date().toISOString() : null,
+      ghl_sync_error: !ghl_contact_id ? 'GHL sync failed during signup' : null,
 
       // Basic client information
       client_name: body.client_name,
@@ -590,7 +638,7 @@ export async function POST(request: Request) {
       .single();
 
     if (vault_error) {
-      if (vault_error.code === '23505' && vault_error.message.includes('ghl_contact_id')) {
+      if (vault_error.code === '23505' && vault_error.message.includes('ghl_contact_id') && vault_data.ghl_contact_id) {
         console.log('⚠️ Conflict detected on ghl_contact_id, re-routing upsert...');
         const { data: retry_entry, error: retry_error } = await supabase_admin
           .from('client_data_vault')

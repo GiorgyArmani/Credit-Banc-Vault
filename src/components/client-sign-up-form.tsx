@@ -276,14 +276,18 @@ export default function ClientSignupForm() {
 
           // Auto-assign advisor if they are logged in
           if (user.email) {
+            // Use case-insensitive search for email
             const { data: advisor_record } = await supabase
               .from("advisors")
-              .select("id")
-              .eq("email", user.email)
+              .select("id, first_name, last_name")
+              .ilike("email", user.email)
               .maybeSingle();
 
             if (advisor_record) {
               set_advisor_id(advisor_record.id);
+              console.log(`✅ Advisor auto-assigned: ${advisor_record.first_name} ${advisor_record.last_name}`);
+            } else {
+              console.log(`⚠️ User is an advisor but no record found in "advisors" table for email: ${user.email}`);
             }
           }
         }
