@@ -18,26 +18,33 @@ export default function OnboardingGate({ children }: OnboardingGateProps) {
   // Manage loader persistence and ease-out
   useEffect(() => {
     if (!loading) {
+      // If we need onboarding, don't wait for the artificial 1.5s delay
+      if (needsOnboarding) {
+        setShowLoader(false)
+        setAnimationFinished(true)
+        return
+      }
+
       const timer = setTimeout(() => {
         setShowLoader(false)
         const finishTimer = setTimeout(() => {
           setAnimationFinished(true)
-        }, 1200)
+        }, 800) // Reduced from 1200
         return () => clearTimeout(finishTimer)
-      }, 1500)
+      }, 800) // Reduced from 1500
       return () => clearTimeout(timer)
     } else {
       setShowLoader(true)
       setAnimationFinished(false)
     }
-  }, [loading])
+  }, [loading, needsOnboarding])
 
   useEffect(() => {
     if (loading) return
 
     // If onboarding is needed and we are NOT already on the onboarding page, redirect
     if (needsOnboarding && pathname !== '/onboarding') {
-      router.push('/onboarding')
+      router.replace('/onboarding') // Using replace for cleaner history
     }
   }, [needsOnboarding, loading, pathname, router])
 

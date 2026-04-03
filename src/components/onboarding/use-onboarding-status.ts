@@ -60,16 +60,6 @@ export function useOnboardingStatus() {
         return
       }
 
-      // 0. Check Auth Metadata first (Fast path)
-      const isMetadataComplete = user.user_metadata?.onboarding_complete === true
-      if (isMetadataComplete) {
-        setNeedsOnboarding(false)
-        setDataVaultCompleted(true)
-        setContractCompleted(true)
-        setLoading(false)
-        return
-      }
-
       // Check vault status
       let isVaultDone = false
       let isContractDone = false
@@ -79,6 +69,17 @@ export function useOnboardingStatus() {
       } else {
         isVaultDone = !!vaultData?.data_vault_submitted_at
         isContractDone = !!vaultData?.contract_completed
+      }
+
+      // 0. Check Auth Metadata and Contract Status (Fast path)
+      const isMetadataComplete = user.user_metadata?.onboarding_complete === true
+
+      if (isMetadataComplete && isContractDone) {
+        setNeedsOnboarding(false)
+        setDataVaultCompleted(isVaultDone)
+        setContractCompleted(true)
+        setLoading(false)
+        return
       }
 
       setDataVaultCompleted(isVaultDone)

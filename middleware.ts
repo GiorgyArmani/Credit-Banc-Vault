@@ -97,6 +97,21 @@ export async function middleware(request: NextRequest) {
       free: [], // Free users have access to basic /dashboard only
     };
 
+    // Client Onboarding Check
+    const isOnboardingComplete = user.user_metadata?.onboarding_complete === true;
+    const isClient = userRole === "free" || userRole === "premium";
+
+    const isPublicPath = publicPaths.some((p) =>
+      p === "/" ? path === "/" : path.startsWith(p)
+    );
+
+    // If client hasn't finished onboarding and is trying to access a protected page
+    // (but not the onboarding page itself or public paths)
+    if (isClient && !isOnboardingComplete && !path.startsWith("/onboarding") && !isPublicPath) {
+      console.log(`[Onboarding] User ${user.id} incomplete, redirecting to /onboarding`);
+      return redirectWithCookies("/onboarding");
+    }
+
     // Check if user is trying to access a role-specific route
     for (const [role, routes] of Object.entries(roleRoutes)) {
       for (const route of routes) {
@@ -109,8 +124,8 @@ export async function middleware(request: NextRequest) {
             const redirectMap: Record<string, string> = {
               advisor: "/advisor/dashboard",
               underwriting: "/underwriting/dashboard",
-              premium: "/dashboard",
-              free: "/dashboard",
+              premium: isOnboardingComplete ? "/dashboard" : "/onboarding",
+              free: isOnboardingComplete ? "/dashboard" : "/onboarding",
             };
 
             return redirectWithCookies(redirectMap[userRole] || "/dashboard");
@@ -124,11 +139,11 @@ export async function middleware(request: NextRequest) {
       const redirectMap: Record<string, string> = {
         advisor: "/advisor/dashboard",
         underwriting: "/underwriting/dashboard",
-        premium: "/dashboard", // Premium users stay on /dashboard
-        free: "/dashboard", // Free users stay on /dashboard
+        premium: isOnboardingComplete ? "/dashboard" : "/onboarding",
+        free: isOnboardingComplete ? "/dashboard" : "/onboarding",
       };
 
-      if (userRole === "advisor" || userRole === "underwriting") {
+      if (userRole === "advisor" || userRole === "underwriting" || !isOnboardingComplete) {
         return redirectWithCookies(redirectMap[userRole]);
       }
     }
@@ -138,8 +153,8 @@ export async function middleware(request: NextRequest) {
       const redirectMap: Record<string, string> = {
         advisor: "/advisor/dashboard",
         underwriting: "/underwriting/dashboard",
-        premium: "/dashboard",
-        free: "/dashboard",
+        premium: isOnboardingComplete ? "/dashboard" : "/onboarding",
+        free: isOnboardingComplete ? "/dashboard" : "/onboarding",
       };
       return redirectWithCookies(redirectMap[userRole]);
     }
