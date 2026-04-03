@@ -97,18 +97,37 @@ export async function middleware(request: NextRequest) {
       free: [], // Free users have access to basic /dashboard only
     };
 
-    // Client Onboarding Check
-    const isOnboardingComplete = user.user_metadata?.onboarding_complete === true;
+    // Client Onboarding & Contract Check
+    let isOnboardingComplete = user.user_metadata?.onboarding_complete === true;
     const isClient = userRole === "free" || userRole === "premium";
+
+    // Direct database check for contract status to avoid stale metadata
+    let isContractCompleted = false;
+    if (isClient) {
+      const { data: vaultData } = await supabase
+        .from("client_data_vault")
+        .select("contract_completed")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      
+      isContractCompleted = vaultData?.contract_completed === true;
+      
+      // If metadata says incomplete but DB says contract is done, 
+      // we might still be in the "video" step, so we respect metadata for those.
+      // But if DB says contract is NOT done, we FORCE onboarding regardless of metadata.
+      if (!isContractCompleted) {
+        isOnboardingComplete = false;
+      }
+    }
 
     const isPublicPath = publicPaths.some((p) =>
       p === "/" ? path === "/" : path.startsWith(p)
     );
 
-    // If client hasn't finished onboarding and is trying to access a protected page
+    // If client hasn't finished onboarding or signed contract, and is trying to access a protected page
     // (but not the onboarding page itself or public paths)
     if (isClient && !isOnboardingComplete && !path.startsWith("/onboarding") && !isPublicPath) {
-      console.log(`[Onboarding] User ${user.id} incomplete, redirecting to /onboarding`);
+      console.log(`[Onboarding] User ${user.id} incomplete (Contract: ${isContractCompleted}), redirecting to /onboarding`);
       return redirectWithCookies("/onboarding");
     }
 

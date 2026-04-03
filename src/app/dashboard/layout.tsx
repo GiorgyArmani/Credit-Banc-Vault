@@ -68,15 +68,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
               {/* Desktop Search/Spacer */}
               <div className="hidden md:block">
-                <h1 className="text-sm font-medium text-gray-400">CREDIT BANC VAULT / <span className="text-gray-900">{currentTitle.toUpperCase()}</span></h1>
+                {/* Desktop header title removed per request */}
               </div>
 
               {/* Action Icons */}
               <div className="flex items-center gap-4">
                 <div className="flex items-center gap-2">
-                   <div className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full uppercase tracking-wider hidden sm:block">Client Portal</div>
-                   <div className="h-4 w-px bg-gray-200 hidden sm:block mx-1"></div>
-                   <NotificationBell />
+                  <div className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full uppercase tracking-wider hidden sm:block">Client Portal</div>
+                  <div className="h-4 w-px bg-gray-200 hidden sm:block mx-1"></div>
+                  <NotificationBell />
                 </div>
               </div>
             </div>
