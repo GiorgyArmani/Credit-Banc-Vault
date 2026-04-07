@@ -125,8 +125,8 @@ export async function middleware(request: NextRequest) {
     );
 
     // If client hasn't finished onboarding or signed contract, and is trying to access a protected page
-    // (but not the onboarding page itself or public paths)
-    if (isClient && !isOnboardingComplete && !path.startsWith("/onboarding") && !isPublicPath) {
+    // (but not the onboarding page itself, the onboarding API, or public paths)
+    if (isClient && !isOnboardingComplete && !path.startsWith("/onboarding") && !path.startsWith("/api/onboarding") && !isPublicPath) {
       console.log(`[Onboarding] User ${user.id} incomplete (Contract: ${isContractCompleted}), redirecting to /onboarding`);
       return redirectWithCookies("/onboarding");
     }
