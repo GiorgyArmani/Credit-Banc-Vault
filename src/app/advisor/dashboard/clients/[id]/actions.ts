@@ -254,13 +254,27 @@ export async function updateClientProfile(clientId: string, data: any) {
         }
 
         const supabaseAdmin = createAdminClient();
+        const newEmail = data.client_email.trim().toLowerCase();
+
+        // 2b. Pre-flight: check if the new email is already taken by a DIFFERENT auth user
+        const { data: existingAuthUsers } = await supabaseAdmin.auth.admin.listUsers({
+            perPage: 1000,
+        });
+        const emailConflict = existingAuthUsers?.users?.find(
+            (u) => u.email?.toLowerCase() === newEmail && u.id !== client.user_id
+        );
+        if (emailConflict) {
+            throw new Error(
+                `The email "${newEmail}" is already registered to another account. Please use a different email address.`
+            );
+        }
 
         // 3. Update client_data_vault
         const { error: updateError } = await supabaseAdmin
             .from("client_data_vault")
             .update({
                 client_name: data.client_name,
-                client_email: data.client_email.toLowerCase(),
+                client_email: newEmail,
                 client_phone: data.client_phone,
                 company_name: data.company_name,
                 company_city: data.company_city,
@@ -288,7 +302,7 @@ export async function updateClientProfile(clientId: string, data: any) {
         // 4. Sync to Unified Tables (users, business_profiles)
         await syncUnifiedClientData(supabaseAdmin, {
             userId: client.user_id,
-            email: data.client_email,
+            email: newEmail,
             clientName: data.client_name,
             companyName: data.company_name,
             phone: data.client_phone,
@@ -300,32 +314,57 @@ export async function updateClientProfile(clientId: string, data: any) {
         // 4b. Sync email to Supabase Auth (so client can log in with new email)
         const { error: authUpdateError } = await supabaseAdmin.auth.admin.updateUserById(
             client.user_id,
-            { email: data.client_email.toLowerCase() }
+            { email: newEmail }
         );
 
         if (authUpdateError) {
-            // Non-fatal: vault and profile are already updated; log and continue
             console.error("[updateClientProfile] Auth email sync failed:", authUpdateError.message);
+            // Surface this as a real error — the email was saved in the vault but auth is out of sync
+            throw new Error(
+                `Profile data saved, but auth login email could not be updated: ${authUpdateError.message}. Please contact support.`
+            );
         } else {
-            console.log(`✅ Auth email updated to ${data.client_email.toLowerCase()} for user ${client.user_id}`);
+            console.log(`✅ Auth email updated to ${newEmail} for user ${client.user_id}`);
         }
 
-        // 5. GHL Sync: Update contact info
+        // 5. GHL Sync: Update contact info (skip email field if it would cause a duplicate conflict)
         if (client.ghl_contact_id) {
             try {
                 await ghlUpdateContact(client.ghl_contact_id, {
                     firstName: data.client_name.split(' ')[0],
                     lastName: data.client_name.split(' ').slice(1).join(' ') || '',
-                    email: data.client_email.toLowerCase(),
+                    email: newEmail,
                     phone: data.client_phone,
                     companyName: data.company_name,
                     city: data.company_city,
                     state: data.company_state,
                     postalCode: data.company_zip_code,
-                    // Optionally update more custom fields if needed
                 });
-            } catch (ghlError) {
-                console.error("GHL Sync Error (non-fatal):", ghlError);
+            } catch (ghlError: any) {
+                const isDuplicateEmailError =
+                    typeof ghlError?.message === "string" &&
+                    ghlError.message.includes("duplicated contacts");
+
+                if (isDuplicateEmailError) {
+                    // Retry without the email field — update everything else
+                    console.warn("[GHL] Email conflict on update — retrying without email field.");
+                    try {
+                        await ghlUpdateContact(client.ghl_contact_id, {
+                            firstName: data.client_name.split(' ')[0],
+                            lastName: data.client_name.split(' ').slice(1).join(' ') || '',
+                            phone: data.client_phone,
+                            companyName: data.company_name,
+                            city: data.company_city,
+                            state: data.company_state,
+                            postalCode: data.company_zip_code,
+                        });
+                        console.warn("[GHL] Contact updated without email (email conflict in GHL).");
+                    } catch (retryError) {
+                        console.error("GHL retry also failed (non-fatal):", retryError);
+                    }
+                } else {
+                    console.error("GHL Sync Error (non-fatal):", ghlError);
+                }
             }
         }
 

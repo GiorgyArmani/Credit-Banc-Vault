@@ -138,6 +138,13 @@ interface ClientProfile {
     data_vault_submitted_at: string | null;
     contract_completed: boolean;
     contract_completed_at: string | null;
+    company_zip_code?: string;
+    avg_annual_revenue?: number;
+    loan_purpose?: string;
+    proposed_loan_type?: string;
+    funding_eta?: string;
+    employees_count?: number;
+    is_home_based?: boolean | null;
 }
 
 /**
@@ -397,7 +404,14 @@ export default function AdvisorClientDetailsPage() {
           created_at,
           data_vault_submitted_at,
           contract_completed,
-          contract_completed_at
+          contract_completed_at,
+          company_zip_code,
+          avg_annual_revenue,
+          loan_purpose,
+          proposed_loan_type,
+          funding_eta,
+          employees_count,
+          is_home_based
         `)
                 .eq("id", client_id)
                 .maybeSingle();
