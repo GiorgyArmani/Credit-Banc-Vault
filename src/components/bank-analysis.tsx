@@ -688,10 +688,13 @@ export default function BankAnalysis() {
         tib_months: tibMonths || parseInt(questions.timeInBusiness) || 0,
         avg_revenue: avgRevenue,
         avg_daily_balance: avgDailyBalanceAcrossAccounts,
+        avg_monthly_deposits: avgMonthlyDepositsAcrossAccounts,   // ← NEW
         total_neg_days: totalNegDaysSum,
         num_open_positions: positions.filter(p => p.funderLender || p.balance).length,
         has_bankruptcy: questions.bankruptcy.toLowerCase().includes("yes") || hasBankruptcy,
         capital_requested: capitalRequested || parseMoney(questions.capitalRequested),
+        company_state: state,    // ← NEW — snapshot from client vault / override field
+        industry: industry,      // ← NEW — snapshot from client vault / override field
         accounts_data: accounts,
         positions_data: positions,
         questions_data: questions

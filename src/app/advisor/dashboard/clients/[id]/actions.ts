@@ -297,6 +297,19 @@ export async function updateClientProfile(clientId: string, data: any) {
             zipCode: data.company_zip_code
         });
 
+        // 4b. Sync email to Supabase Auth (so client can log in with new email)
+        const { error: authUpdateError } = await supabaseAdmin.auth.admin.updateUserById(
+            client.user_id,
+            { email: data.client_email.toLowerCase() }
+        );
+
+        if (authUpdateError) {
+            // Non-fatal: vault and profile are already updated; log and continue
+            console.error("[updateClientProfile] Auth email sync failed:", authUpdateError.message);
+        } else {
+            console.log(`✅ Auth email updated to ${data.client_email.toLowerCase()} for user ${client.user_id}`);
+        }
+
         // 5. GHL Sync: Update contact info
         if (client.ghl_contact_id) {
             try {

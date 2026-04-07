@@ -1,22 +1,6 @@
 "use client";
 
-/**
- * LenderMatch.tsx
- * ───────────────
- * Standalone lender-criteria matching component.
- * Use AFTER a bank analysis is complete by passing a DealSummary object.
- *
- * Usage:
- *   import LenderMatch from "@/components/LenderMatch";
- *   import type { DealSummary } from "@/components/BankAnalysis";
- *
- *   <LenderMatch deal={dealSummary} />
- *
- * All deal data (FICO, revenue, TIB, positions, etc.) flows in via props.
- * State and Industry can also be pre-populated from the deal or edited inline.
- */
-
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import type { DealSummary } from "./bank-analysis";
 import { createClient } from "@/lib/supabase/client";
 
@@ -56,6 +40,8 @@ interface MatchResult {
   warnings: string[];
 }
 
+type LenderDecision = "approved" | "rejected" | null;
+
 const fmt$ = (v: number) =>
   v === 0 ? "—" : "$" + v.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
@@ -93,42 +79,80 @@ const DEFAULT_DEAL: DealSummary = {
   ownershipDetails: [],
 };
 
+// ─── Lender visibility gate ───────────────────────────────────────────────────
+// A lender only appears in results when its guidelines overlap with what the
+// bank analysis actually produced. We count how many criteria the lender has
+// that the deal also has data for. Minimum 2 overlapping fields required.
+// This means incomplete lender records never surface as false positives.
+
+function countOverlap(lender: Lender, deal: DealSummary): number {
+  let n = 0;
+  if ((lender.min_fico ?? 0) > 0 && deal.fico > 0) n++;
+  if ((lender.time_in_business_months ?? 0) > 0 && deal.tibMonths > 0) n++;
+  if ((lender.avg_monthly_revenue ?? 0) > 0 && deal.avgRevenue > 0) n++;
+  if (lender.negative_days !== null && deal.totalNegDays >= 0) n++;
+  if ((lender.monthly_deposits ?? 0) > 0 && deal.avgMonthlyDeposits > 0) n++;
+  if (lender.number_of_positions !== null && deal.numOpenPositions >= 0) n++;
+  if ((lender.avg_daily_balance ?? 0) > 0 && deal.avgDailyBalance > 0) n++;
+  if (lender.min_funding !== null || lender.max_funding !== null) {
+    if (deal.capitalRequested > 0) n++;
+  }
+  return n;
+}
+
+function hasGuidelines(lender: Lender, deal: DealSummary): boolean {
+  return countOverlap(lender, deal) >= 2;
+}
+
 // ─── Matching Engine ──────────────────────────────────────────────────────────
+// Rules only fire when BOTH the lender guideline AND the deal value are present.
+// A missing lender value = lender doesn't restrict on that field = not a flag.
+// A missing deal value = we don't have the data to check = not a flag.
 
 function matchLender(lender: Lender, deal: DealSummary): MatchResult {
   const flags: string[] = [];
   const warnings: string[] = [];
 
-  if (lender.min_fico && lender.min_fico > 0 && deal.fico > 0 && deal.fico < lender.min_fico)
+  // FICO — only check if both sides have a value
+  if ((lender.min_fico ?? 0) > 0 && deal.fico > 0 && deal.fico < lender.min_fico!)
     flags.push(`FICO ${deal.fico} < min ${lender.min_fico}`);
 
-  if (lender.time_in_business_months && lender.time_in_business_months > 0 && deal.tibMonths > 0 && deal.tibMonths < lender.time_in_business_months)
+  // TIB — only check if both sides have a value
+  if ((lender.time_in_business_months ?? 0) > 0 && deal.tibMonths > 0 && deal.tibMonths < lender.time_in_business_months!)
     flags.push(`TIB ${deal.tibMonths}mo < min ${lender.time_in_business_months}mo`);
 
-  if (lender.avg_monthly_revenue && deal.avgRevenue > 0 && deal.avgRevenue < lender.avg_monthly_revenue)
-    flags.push(`Revenue ${fmt$(deal.avgRevenue)} < min ${fmt$(lender.avg_monthly_revenue)}`);
+  // Revenue — only check if both sides have a value
+  if ((lender.avg_monthly_revenue ?? 0) > 0 && deal.avgRevenue > 0 && deal.avgRevenue < lender.avg_monthly_revenue!)
+    flags.push(`Revenue ${fmt$(deal.avgRevenue)} < min ${fmt$(lender.avg_monthly_revenue!)}`);
 
+  // Negative days — only check if lender has a limit AND deal has neg day data
   if (lender.negative_days !== null && deal.totalNegDays > 0 && deal.totalNegDays > lender.negative_days)
     flags.push(`Neg days ${deal.totalNegDays} > max ${lender.negative_days}`);
 
-  if (lender.monthly_deposits && deal.avgMonthlyDeposits > 0 && deal.avgMonthlyDeposits < lender.monthly_deposits)
+  // Monthly deposits — only check if both sides have a value
+  if ((lender.monthly_deposits ?? 0) > 0 && deal.avgMonthlyDeposits > 0 && deal.avgMonthlyDeposits < lender.monthly_deposits!)
     flags.push(`Deposits ${deal.avgMonthlyDeposits} < min ${lender.monthly_deposits}`);
 
+  // Open positions — only check if lender has a limit AND deal has position data
   if (lender.number_of_positions !== null && deal.numOpenPositions > 0 && deal.numOpenPositions > lender.number_of_positions)
     flags.push(`${deal.numOpenPositions} positions > max ${lender.number_of_positions}`);
 
-  if (lender.avg_daily_balance && deal.avgDailyBalance > 0 && deal.avgDailyBalance < lender.avg_daily_balance)
-    flags.push(`Avg daily bal ${fmt$(deal.avgDailyBalance)} < min ${fmt$(lender.avg_daily_balance)}`);
+  // Avg daily balance — only check if both sides have a value
+  if ((lender.avg_daily_balance ?? 0) > 0 && deal.avgDailyBalance > 0 && deal.avgDailyBalance < lender.avg_daily_balance!)
+    flags.push(`Avg daily bal ${fmt$(deal.avgDailyBalance)} < min ${fmt$(lender.avg_daily_balance!)}`);
 
+  // Bankruptcy — only flag if lender explicitly says No AND deal has a bankruptcy
   if (lender.bankruptcies === "No" && deal.hasBankruptcy)
     flags.push("Lender does not accept bankruptcies");
 
+  // Restricted states — only check if both sides have data
   if (lender.restricted_states && deal.state) {
     const stateParts = lender.restricted_states.toUpperCase().split(/[,\s]+/).filter((s) => s.length === 2);
     if (stateParts.includes(deal.state.toUpperCase()))
       flags.push(`State ${deal.state.toUpperCase()} is restricted`);
   }
 
+  // Restricted industries — only check if both sides have data
   if (lender.restricted_industries && deal.industry) {
     const words = deal.industry.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
     const restricted = lender.restricted_industries.toLowerCase();
@@ -142,6 +166,7 @@ function matchLender(lender: Lender, deal: DealSummary): MatchResult {
     }
   }
 
+  // Funding range — only check if lender has limits AND deal has a request
   const minF = typeof lender.min_funding === "number" ? lender.min_funding : null;
   const maxF = typeof lender.max_funding === "number" ? lender.max_funding : null;
   if (deal.capitalRequested > 0) {
@@ -154,7 +179,7 @@ function matchLender(lender: Lender, deal: DealSummary): MatchResult {
   return { lender, passed: flags.length === 0, flags, warnings };
 }
 
-// ─── Props ────────────────────────────────────────────────────────────────────
+// ─── Props & Types ────────────────────────────────────────────────────────────
 
 export interface LenderMatchProps {
   dealSummary?: Partial<DealSummary>;
@@ -162,12 +187,12 @@ export interface LenderMatchProps {
   industry?: string;
 }
 
+// Picker dropdown + ownership display only.
+// State/industry/match criteria come from bank_analysis_results.
 interface ClientOption {
   id: string;
   client_name: string;
   company_name: string;
-  company_state: string;
-  industry: string;
   proposed_loan_type: string;
   loan_purpose: string;
   business_start_date: string;
@@ -187,11 +212,10 @@ interface ClientOption {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, state: propState = "", industry: propIndustry = "" }: LenderMatchProps) {
-  // Internal state for the "active" deal being matched
   const [deal, setDeal] = useState<DealSummary>({ ...DEFAULT_DEAL, ...propDeal });
   const [filterState, setFilterState] = useState(propState || propDeal.state || "");
   const [filterIndustry, setFilterIndustry] = useState(propIndustry || propDeal.industry || "");
-  
+
   const [clientList, setClientList] = useState<ClientOption[]>([]);
   const [selectedClientId, setSelectedClientId] = useState<string>("");
   const [isLoadingClient, setIsLoadingClient] = useState(false);
@@ -199,22 +223,25 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
   const [showPassedOnly, setShowPassedOnly] = useState(false);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
 
-  // Sync state with props when dealSummary changes
+  // Change 2: Approve / Reject decisions
+  const [decisions, setDecisions] = useState<Record<string, LenderDecision>>({});
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+
   useEffect(() => {
     if (Object.keys(propDeal).length > 0) {
-      setDeal(prev => ({ ...prev, ...propDeal }));
+      setDeal((prev) => ({ ...prev, ...propDeal }));
       if (propDeal.state) setFilterState(propDeal.state);
       if (propDeal.industry) setFilterIndustry(propDeal.industry);
     }
   }, [propDeal]);
 
-  // Fetch clients for the selector
   useEffect(() => {
     const supabase = createClient();
     supabase
       .from("client_data_vault")
       .select(`
-        id, client_name, company_name, company_state, industry, 
+        id, client_name, company_name,
         proposed_loan_type, loan_purpose, business_start_date, number_of_owners,
         owner_1_name, owner_1_ownership_pct,
         owner_2_name, owner_2_ownership_pct,
@@ -228,12 +255,28 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
       });
   }, []);
 
+  const loadDecisions = useCallback(async (clientId: string) => {
+    if (!clientId) return;
+    const supabase = createClient();
+    const { data } = await supabase
+      .from("client_lender_assignments")
+      .select("lender_name, specialty, decision")
+      .eq("client_id", clientId);
+    if (data) {
+      const map: Record<string, LenderDecision> = {};
+      data.forEach((row: any) => {
+        map[`${row.lender_name}-${row.specialty ?? ""}`] = row.decision;
+      });
+      setDecisions(map);
+    }
+  }, []);
+
+  // Change 2: Single query — bank_analysis_results is source of truth
   async function loadClientResults(clientId: string) {
     if (!clientId) return;
     setIsLoadingClient(true);
     const supabase = createClient();
-    
-    // Get analysis results
+
     const { data: analysis, error: aError } = await supabase
       .from("bank_analysis_results")
       .select("*")
@@ -241,7 +284,7 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
       .single();
 
     if (analysis && !aError) {
-      const client = clientList.find(c => c.id === clientId);
+      const client = clientList.find((c) => c.id === clientId);
       const newDeal: DealSummary = {
         fico: analysis.fico || 0,
         tibMonths: analysis.tib_months || 0,
@@ -251,14 +294,16 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
         numOpenPositions: analysis.num_open_positions || 0,
         avgMonthlyDeposits: Number(analysis.avg_monthly_deposits) || 0,
         hasBankruptcy: analysis.has_bankruptcy || false,
-        state: client?.company_state || "",
-        industry: client?.industry || "",
+        capitalRequested: Number(analysis.capital_requested) || 0,
+        state: analysis.company_state || "",
+        industry: analysis.industry || "",
         businessName: analysis.business_name || client?.company_name || "",
         ownerName: analysis.owner_name || client?.client_name || "",
-        capitalRequested: Number(analysis.capital_requested) || 0,
         proposedLoanType: client?.proposed_loan_type || "",
         loanPurpose: client?.loan_purpose || "",
-        businessStartDate: client?.business_start_date ? new Date(client.business_start_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : "",
+        businessStartDate: client?.business_start_date
+          ? new Date(client.business_start_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+          : "",
         numOwners: client?.number_of_owners || "",
         ownershipDetails: [
           { name: client?.owner_1_name || "", pct: Number(client?.owner_1_ownership_pct) || 0 },
@@ -266,15 +311,15 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
           { name: client?.owner_3_name || "", pct: Number(client?.owner_3_ownership_pct) || 0 },
           { name: client?.owner_4_name || "", pct: Number(client?.owner_4_ownership_pct) || 0 },
           { name: client?.owner_5_name || "", pct: Number(client?.owner_5_ownership_pct) || 0 },
-        ].filter(o => o.name && o.pct > 0),
+        ].filter((o) => o.name && o.pct > 0),
       };
-      
       setDeal(newDeal);
       setFilterState(newDeal.state || "");
       setFilterIndustry(newDeal.industry || "");
+      setDecisions({});
+      await loadDecisions(clientId);
     } else {
-      // Fallback or alert if no analysis found
-      console.log("No saved analysis found for this client");
+      console.warn(`No bank analysis found for client ${clientId}`);
     }
     setIsLoadingClient(false);
   }
@@ -282,21 +327,18 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
   const [lenderData, setLenderData] = useState<Lender[]>([]);
   const [loadingLenders, setLoadingLenders] = useState(true);
 
-  // Load lenders from Supabase
   useEffect(() => {
     async function fetchLenders() {
       setLoadingLenders(true);
       const supabase = createClient();
       const { data, error } = await supabase.from("lender_guidelines").select("*");
       if (!error && data) {
-        // Deduplicate by name + specialty
+        // Deduplicate only — no hasGuidelines filter here.
+        // Filtering happens in useMemo against the actual loaded deal.
         const uniqueMap = new Map<string, Lender>();
         (data as Lender[]).forEach((l) => {
           const key = `${l.lender_name}-${l.specialty || ""}`;
-          // If we see it again, only keep it if the current one has more data or just keep first
-          if (!uniqueMap.has(key)) {
-            uniqueMap.set(key, l);
-          }
+          if (!uniqueMap.has(key)) uniqueMap.set(key, l);
         });
         setLenderData(Array.from(uniqueMap.values()));
       }
@@ -307,12 +349,14 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
 
   const results = useMemo(() =>
     lenderData
+      // Only include lenders whose guidelines overlap with what this deal has data for
+      .filter((l) => hasGuidelines(l, deal))
       .map((l) => matchLender(l, deal))
       .sort((a, b) => {
         if (a.passed !== b.passed) return a.passed ? -1 : 1;
         return a.flags.length - b.flags.length;
       }),
-    [deal, filterState, filterIndustry, lenderData]
+    [deal, lenderData]
   );
 
   const passed = results.filter((r) => r.passed);
@@ -323,6 +367,69 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
     if (specialtyFilter !== "All" && (r.lender.specialty ?? "Unknown") !== specialtyFilter) return false;
     return true;
   });
+
+  const decisionKey = (lender: Lender) => `${lender.lender_name}-${lender.specialty ?? ""}`;
+
+  function setDecision(lender: Lender, next: LenderDecision) {
+    const key = decisionKey(lender);
+    setDecisions((prev) => ({ ...prev, [key]: prev[key] === next ? null : next }));
+    setSaveSuccess(false);
+  }
+
+  const approvedCount = Object.values(decisions).filter((d) => d === "approved").length;
+  const rejectedCount = Object.values(decisions).filter((d) => d === "rejected").length;
+
+  // Change 3: Save assignments + stamp loan_status_history
+  async function saveAssignments() {
+    if (!selectedClientId) return;
+    setIsSaving(true);
+    setSaveSuccess(false);
+    const supabase = createClient();
+
+    await supabase.from("client_lender_assignments").delete().eq("client_id", selectedClientId);
+
+    const rows = Object.entries(decisions)
+      .filter(([, d]) => d !== null)
+      .map(([key, decision]) => {
+        const dashIdx = key.indexOf("-");
+        const lenderName = key.slice(0, dashIdx);
+        const specialty = key.slice(dashIdx + 1) || null;
+        const matchedLender = lenderData.find(
+          (l) => l.lender_name === lenderName && (l.specialty ?? "") === (specialty ?? "")
+        );
+        return {
+          client_id: selectedClientId,
+          lender_name: lenderName,
+          specialty,
+          decision,
+          payment_type: matchedLender?.payment_type ?? null,
+          min_funding: matchedLender?.min_funding ?? null,
+          max_funding: matchedLender?.max_funding ?? null,
+          assigned_at: new Date().toISOString(),
+        };
+      });
+
+    if (rows.length > 0) {
+      await supabase.from("client_lender_assignments").insert(rows);
+    }
+
+    const approvedRows = rows.filter((r) => r.decision === "approved");
+    if (approvedRows.length > 0) {
+      const approvedNames = approvedRows
+        .map((r) => `${r.lender_name}${r.specialty ? ` (${r.specialty})` : ""}`)
+        .join(", ");
+      await supabase.from("loan_status_history").insert({
+        client_vault_id: selectedClientId,
+        status: "lender_matched",
+        changed_by_role: "underwriting",
+        note: `${approvedRows.length} lender${approvedRows.length > 1 ? "s" : ""} approved: ${approvedNames}`,
+      });
+    }
+
+    setIsSaving(false);
+    setSaveSuccess(true);
+    setTimeout(() => setSaveSuccess(false), 3000);
+  }
 
   const dataEntered = deal.fico || deal.tibMonths || deal.avgRevenue || filterState || filterIndustry;
 
@@ -365,6 +472,14 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
                 <span className="text-xs text-gray-500 uppercase tracking-wider">Disqualified</span>
                 <span className="text-lg font-mono font-bold text-red-400">{results.length - passed.length}</span>
               </div>
+              <div className="flex flex-col items-end">
+                <span className="text-xs text-gray-500 uppercase tracking-wider">Approved</span>
+                <span className="text-lg font-mono font-bold text-emerald-400">{approvedCount}</span>
+              </div>
+              <div className="flex flex-col items-end">
+                <span className="text-xs text-gray-500 uppercase tracking-wider">Rejected</span>
+                <span className="text-lg font-mono font-bold text-orange-400">{rejectedCount}</span>
+              </div>
             </div>
           )}
         </div>
@@ -373,23 +488,24 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
         <div className="flex flex-wrap gap-2">
           {[
             { label: "FICO", value: deal.fico && deal.fico > 0 ? String(deal.fico) : null },
-            { label: "TIB", value: deal.tibMonths && deal.tibMonths > 0 ? `${deal.tibMonths}mo ${deal.businessStartDate ? `(${deal.businessStartDate})` : ""}` : null },
+            { label: "TIB", value: deal.tibMonths && deal.tibMonths > 0 ? `${deal.tibMonths}mo${deal.businessStartDate ? ` (${deal.businessStartDate})` : ""}` : null },
             { label: "Avg Revenue", value: deal.avgRevenue && deal.avgRevenue > 0 ? fmt$(deal.avgRevenue) : null },
             { label: "Neg Days", value: deal.totalNegDays && deal.totalNegDays > 0 ? String(deal.totalNegDays) : null },
             { label: "Positions", value: deal.numOpenPositions && deal.numOpenPositions > 0 ? String(deal.numOpenPositions) : null },
-            { label: "Deposits", value: deal.avgMonthlyDeposits && deal.avgMonthlyDeposits > 0 ? String(deal.avgMonthlyDeposits) : null },
             { label: "Requested", value: deal.capitalRequested && deal.capitalRequested > 0 ? fmt$(deal.capitalRequested) : null },
             { label: "Type", value: deal.proposedLoanType || null },
             { label: "Purpose", value: deal.loanPurpose || null },
             { label: "Start Date", value: deal.businessStartDate || null },
             { label: "Owners", value: deal.numOwners || null },
             { label: "Bankruptcy", value: deal.hasBankruptcy ? "Yes" : null },
-          ].filter((p) => p.value !== null).map(({ label, value }) => (
-            <div key={label} className="flex items-center gap-1.5 bg-gray-900 border border-gray-700 rounded-lg px-2.5 py-1">
-              <span className="text-xs text-gray-500">{label}</span>
-              <span className="text-xs font-mono font-bold text-blue-400">{value}</span>
-            </div>
-          ))}
+          ]
+            .filter((p) => p.value !== null)
+            .map(({ label, value }) => (
+              <div key={label} className="flex items-center gap-1.5 bg-gray-900 border border-gray-700 rounded-lg px-2.5 py-1">
+                <span className="text-xs text-gray-500">{label}</span>
+                <span className="text-xs font-mono font-bold text-blue-400">{value}</span>
+              </div>
+            ))}
         </div>
 
         {/* Ownership Details */}
@@ -408,12 +524,12 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
           </div>
         )}
       </div>
-      
+
       {loadingLenders && (
         <div className="text-sm text-blue-400 font-mono animate-pulse">Loading lender guidelines...</div>
       )}
 
-      {/* Override inputs — state & industry */}
+      {/* Match Filters */}
       <div className="rounded-xl border border-gray-700 p-4" style={{ background: "#161b22" }}>
         <div className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3">Match Filters</div>
         <div className="grid grid-cols-2 gap-3">
@@ -422,7 +538,11 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
             <input
               type="text"
               value={filterState}
-              onChange={(e) => setFilterState(e.target.value.toUpperCase().slice(0, 2))}
+              onChange={(e) => {
+                const val = e.target.value.toUpperCase().slice(0, 2);
+                setFilterState(val);
+                setDeal((prev) => ({ ...prev, state: val }));
+              }}
               placeholder="FL"
               className="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5 text-sm font-mono text-gray-100 uppercase focus:outline-none focus:border-blue-500 transition-colors"
             />
@@ -432,7 +552,10 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
             <input
               type="text"
               value={filterIndustry}
-              onChange={(e) => setFilterIndustry(e.target.value)}
+              onChange={(e) => {
+                setFilterIndustry(e.target.value);
+                setDeal((prev) => ({ ...prev, industry: e.target.value }));
+              }}
               placeholder="e.g. Restaurant, Trucking..."
               className="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5 text-sm font-mono text-gray-100 focus:outline-none focus:border-blue-500 transition-colors"
             />
@@ -440,13 +563,13 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
         </div>
       </div>
 
-      {/* Match bar */}
+      {/* Eligibility bar */}
       {dataEntered && (
         <div className="rounded-xl border border-gray-700 p-4" style={{ background: "#161b22" }}>
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs text-gray-500 uppercase tracking-widest">Eligibility</span>
             <span className="text-xs font-mono text-gray-400">
-              {results.length > 0 ? Math.round((passed.length / results.length) * 100) : 0}% of lenders
+              {results.length > 0 ? Math.round((passed.length / results.length) * 100) : 0}% of lenders ({results.length} with guidelines)
             </span>
           </div>
           <div className="h-2 rounded-full bg-gray-800 overflow-hidden">
@@ -460,11 +583,32 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
 
       {!dataEntered && (
         <div className="rounded-lg border border-blue-800/40 bg-blue-900/10 px-4 py-3 text-xs text-blue-400 font-mono">
-          💡 Pass a <code>DealSummary</code> from a completed BankAnalysis to run matching. Enter State and Industry above to apply geographic/industry filters.
+          Select a client above to load their bank analysis and run lender matching.
         </div>
       )}
 
-      {/* Specialty tabs + filter toggle */}
+      {/* Save bar */}
+      {selectedClientId && (approvedCount > 0 || rejectedCount > 0) && (
+        <div className="rounded-xl border border-gray-700 p-3 flex items-center justify-between flex-wrap gap-3" style={{ background: "#161b22" }}>
+          <div className="text-xs text-gray-400 font-mono">
+            <span className="text-emerald-400 font-bold">{approvedCount} approved</span>
+            {" · "}
+            <span className="text-orange-400 font-bold">{rejectedCount} rejected</span>
+          </div>
+          <div className="flex items-center gap-3">
+            {saveSuccess && <span className="text-xs text-emerald-400 font-mono">✓ Saved successfully</span>}
+            <button
+              onClick={saveAssignments}
+              disabled={isSaving}
+              className="px-4 py-1.5 text-xs font-mono font-bold uppercase tracking-wider rounded border border-emerald-600 bg-emerald-900/30 text-emerald-300 hover:bg-emerald-900/60 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isSaving ? "Saving..." : "Save Assignments"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Specialty tabs */}
       <div className="flex items-center gap-2 flex-wrap">
         {specialties.map((s) => (
           <button
@@ -494,22 +638,28 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         {filtered.map((result, i) => {
           const key = `${result.lender.lender_name}-${result.lender.specialty}-${i}`;
+          const dKey = decisionKey(result.lender);
+          const decision = decisions[dKey] ?? null;
           const isExpanded = expandedKey === key;
           const specColor = SPECIALTY_COLORS[result.lender.specialty ?? ""] ?? "bg-gray-900/40 text-gray-400 border-gray-700/40";
           const minF = typeof result.lender.min_funding === "number" ? result.lender.min_funding : null;
           const maxF = typeof result.lender.max_funding === "number" ? result.lender.max_funding : null;
 
+          const cardBorder =
+            decision === "approved" ? "border-emerald-600/70" :
+              decision === "rejected" ? "border-orange-700/60" :
+                result.passed ? "border-green-800/40 hover:border-green-600/60" :
+                  "border-gray-800 hover:border-red-800/40";
+
+          const cardBg =
+            decision === "approved" ? "#0d2318" :
+              decision === "rejected" ? "#1f1108" :
+                result.passed ? "#161b22" : "#13191f";
+
           return (
-            <div
-              key={key}
-              className={`rounded-xl border transition-all ${result.passed
-                  ? "border-green-800/40 hover:border-green-600/60"
-                  : "border-gray-800 hover:border-red-800/40"
-                }`}
-              style={{ background: result.passed ? "#161b22" : "#13191f" }}
-            >
+            <div key={key} className={`rounded-xl border transition-all ${cardBorder}`} style={{ background: cardBg }}>
               <div
-                className="flex items-start gap-3 px-3 py-3 cursor-pointer"
+                className="flex items-start gap-3 px-3 pt-3 pb-2 cursor-pointer"
                 onClick={() => setExpandedKey(isExpanded ? null : key)}
               >
                 <div
@@ -529,6 +679,16 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
                         {minF ? `$${(minF / 1000).toFixed(0)}K` : ""}
                         {minF && maxF ? " – " : ""}
                         {maxF ? `$${(maxF / 1000).toFixed(0)}K` : ""}
+                      </span>
+                    )}
+                    {decision === "approved" && (
+                      <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-900/30 border border-emerald-700/50 rounded px-1.5 py-0.5">
+                        ✓ APPROVED
+                      </span>
+                    )}
+                    {decision === "rejected" && (
+                      <span className="text-xs font-mono font-bold text-orange-400 bg-orange-900/30 border border-orange-700/50 rounded px-1.5 py-0.5">
+                        ✕ REJECTED
                       </span>
                     )}
                   </div>
@@ -552,6 +712,28 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
                   ))}
                 </div>
                 <span className="text-gray-600 text-xs flex-shrink-0 mt-1">{isExpanded ? "▲" : "▼"}</span>
+              </div>
+
+              {/* Approve / Reject buttons */}
+              <div className="flex items-center gap-2 px-3 pb-3">
+                <button
+                  onClick={() => setDecision(result.lender, "approved")}
+                  className={`flex-1 py-1.5 text-xs font-mono font-bold uppercase tracking-wider rounded border transition-all ${decision === "approved"
+                      ? "bg-emerald-600 border-emerald-600 text-white"
+                      : "border-emerald-800/60 text-emerald-600 hover:bg-emerald-900/30 hover:text-emerald-400 hover:border-emerald-600"
+                    }`}
+                >
+                  ✓ Approve
+                </button>
+                <button
+                  onClick={() => setDecision(result.lender, "rejected")}
+                  className={`flex-1 py-1.5 text-xs font-mono font-bold uppercase tracking-wider rounded border transition-all ${decision === "rejected"
+                      ? "bg-orange-700 border-orange-700 text-white"
+                      : "border-orange-900/60 text-orange-700 hover:bg-orange-900/20 hover:text-orange-400 hover:border-orange-700"
+                    }`}
+                >
+                  ✕ Reject
+                </button>
               </div>
 
               {isExpanded && (
