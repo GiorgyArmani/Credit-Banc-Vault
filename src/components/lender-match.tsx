@@ -80,28 +80,39 @@ const DEFAULT_DEAL: DealSummary = {
 };
 
 // ─── Lender visibility gate ───────────────────────────────────────────────────
-// A lender only appears in results when its guidelines overlap with what the
-// bank analysis actually produced. We count how many criteria the lender has
-// that the deal also has data for. Minimum 2 overlapping fields required.
-// This means incomplete lender records never surface as false positives.
+// Only counts a field as "overlapping" when the lender has a real non-zero
+// guideline value AND the deal also has real data for that same field.
+// Lenders need at least 3 overlapping fields to appear in results.
 
 function countOverlap(lender: Lender, deal: DealSummary): number {
   let n = 0;
+  // Core three — must have a positive value on the lender side
   if ((lender.min_fico ?? 0) > 0 && deal.fico > 0) n++;
   if ((lender.time_in_business_months ?? 0) > 0 && deal.tibMonths > 0) n++;
   if ((lender.avg_monthly_revenue ?? 0) > 0 && deal.avgRevenue > 0) n++;
-  if (lender.negative_days !== null && deal.totalNegDays >= 0) n++;
+  // Secondary — lender must have a positive/real limit, not null or zero
+  if ((lender.negative_days ?? -1) >= 0 && deal.totalNegDays >= 0) n++;
   if ((lender.monthly_deposits ?? 0) > 0 && deal.avgMonthlyDeposits > 0) n++;
-  if (lender.number_of_positions !== null && deal.numOpenPositions >= 0) n++;
+  if ((lender.number_of_positions ?? -1) > 0 && deal.numOpenPositions >= 0) n++;
   if ((lender.avg_daily_balance ?? 0) > 0 && deal.avgDailyBalance > 0) n++;
-  if (lender.min_funding !== null || lender.max_funding !== null) {
+  if (
+    (typeof lender.min_funding === "number" && lender.min_funding > 0) ||
+    (typeof lender.max_funding === "number" && lender.max_funding > 0)
+  ) {
     if (deal.capitalRequested > 0) n++;
   }
   return n;
 }
 
 function hasGuidelines(lender: Lender, deal: DealSummary): boolean {
-  return countOverlap(lender, deal) >= 2;
+  // Require at least 3 overlapping fields, and FICO or TIB must be one of them
+  const hasFicoOverlap = (lender.min_fico ?? 0) > 0 && deal.fico > 0;
+  const hasTibOverlap = (lender.time_in_business_months ?? 0) > 0 && deal.tibMonths > 0;
+  const hasRevenueOverlap = (lender.avg_monthly_revenue ?? 0) > 0 && deal.avgRevenue > 0;
+  const coreOverlap = [hasFicoOverlap, hasTibOverlap, hasRevenueOverlap].filter(Boolean).length;
+
+  // Must have at least 2 core fields (FICO, TIB, Revenue) overlapping
+  return coreOverlap >= 2;
 }
 
 // ─── Matching Engine ──────────────────────────────────────────────────────────
