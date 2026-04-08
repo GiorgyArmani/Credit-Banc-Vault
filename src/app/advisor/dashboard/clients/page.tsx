@@ -45,6 +45,7 @@ interface ClientInfo {
     user_id: string;
     client_name: string;
     client_email: string;
+    client_phone: string;
     company_name: string;
     capital_requested: number;
     created_at: string;
@@ -150,7 +151,7 @@ export default function AdvisorClientsListPage() {
 
             const { data: clients_data, error: clients_error } = await supabase
                 .from("client_data_vault")
-                .select(`id, user_id, client_name, client_email, company_name, capital_requested, created_at`)
+                .select(`id, user_id, client_name, client_email, client_phone, company_name, capital_requested, created_at`)
                 .eq("advisor_id", advisor_data.id)
                 .order("created_at", { ascending: false });
 
@@ -353,6 +354,14 @@ export default function AdvisorClientsListPage() {
                             </div>
                             <span className="truncate">{client.client_email}</span>
                         </div>
+                        {client.client_phone && (
+                            <div className="flex items-center text-sm font-bold text-emerald-900/60">
+                                <div className="w-8 h-8 rounded-lg bg-emerald-50 flex items-center justify-center mr-3">
+                                    <Phone className="h-4 w-4 text-emerald-500" />
+                                </div>
+                                <span className="truncate">{client.client_phone}</span>
+                            </div>
+                        )}
                         <div className="flex items-center text-sm font-bold text-emerald-900/60">
                             <div className="w-8 h-8 rounded-lg bg-emerald-50 flex items-center justify-center mr-3">
                                 <Calendar className="h-4 w-4 text-emerald-500" />
