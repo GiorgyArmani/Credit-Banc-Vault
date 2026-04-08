@@ -333,16 +333,6 @@ export default function AdvisorClientsListPage() {
                                 {client.company_name}
                             </CardDescription>
                         </div>
-                        <div className="flex items-center gap-2">
-                            {client.pipeline_status && (
-                                <div className="scale-75 origin-right">
-                                    <LoanPipelineBadge currentStatus={client.pipeline_status} />
-                                </div>
-                            )}
-                            <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center group-hover:bg-emerald-500 group-hover:text-white transition-all duration-300">
-                                <ChevronRight className="h-5 w-5 transition-transform duration-300 group-hover:translate-x-0.5" />
-                            </div>
-                        </div>
                     </div>
                 </CardHeader>
 
@@ -352,14 +342,26 @@ export default function AdvisorClientsListPage() {
                             <div className="w-8 h-8 rounded-lg bg-emerald-50 flex items-center justify-center mr-3">
                                 <Mail className="h-4 w-4 text-emerald-500" />
                             </div>
-                            <span className="truncate">{client.client_email}</span>
+                            <a 
+                                href={`mailto:${client.client_email}`}
+                                onClick={(e) => e.stopPropagation()}
+                                className="truncate hover:text-emerald-500 transition-colors underline-offset-4 hover:underline decoration-emerald-500/30"
+                            >
+                                {client.client_email}
+                            </a>
                         </div>
                         {client.client_phone && (
                             <div className="flex items-center text-sm font-bold text-emerald-900/60">
                                 <div className="w-8 h-8 rounded-lg bg-emerald-50 flex items-center justify-center mr-3">
                                     <Phone className="h-4 w-4 text-emerald-500" />
                                 </div>
-                                <span className="truncate">{client.client_phone}</span>
+                                <a 
+                                    href={`tel:${client.client_phone}`}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="truncate hover:text-emerald-500 transition-colors underline-offset-4 hover:underline decoration-emerald-500/30"
+                                >
+                                    {client.client_phone}
+                                </a>
                             </div>
                         )}
                         <div className="flex items-center text-sm font-bold text-emerald-900/60">
@@ -411,6 +413,12 @@ export default function AdvisorClientsListPage() {
                             {completion_percentage}% complete
                         </p>
                     </div>
+
+                    {client.pipeline_status && (
+                        <div className="flex justify-center -mb-2">
+                            <LoanPipelineBadge currentStatus={client.pipeline_status} />
+                        </div>
+                    )}
 
                     <Button
                         variant="ghost"
