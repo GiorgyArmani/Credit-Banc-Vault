@@ -71,7 +71,10 @@ export async function POST(req: NextRequest) {
     console.log(`✅ Unified sync completed for user: ${userId}`);
 
     // 2) Upsert contacto en GHL
-    await upsertGHLContact({ firstName, lastName, email, tags });
+    // Always include 'vault-user' so GHL automations trigger correctly,
+    // regardless of what tags the caller provides.
+    const mergedTags = [...new Set(['vault-user', ...(tags || [])])];
+    await upsertGHLContact({ firstName, lastName, email, tags: mergedTags });
 
     return NextResponse.json({ ok: true });
   } catch (err: any) {
