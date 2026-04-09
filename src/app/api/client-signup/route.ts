@@ -509,17 +509,17 @@ export async function POST(request: Request) {
         // Detect "duplicated contacts" error from GHL
         if (ghl_error.message.includes('duplicated contacts')) {
           console.log('⚠️ GHL duplicate contact detected (likely phone number match). Extracting ID...');
-          
+
           try {
             // Extract metadata from the error message if possible
             // Error format: "Error creating/updating GHL contact (400): {..."
             const error_json_str = ghl_error.message.split('): ')[1];
             const error_json = JSON.parse(error_json_str);
-            
+
             if (error_json.meta?.contactId) {
               ghl_contact_id = error_json.meta.contactId;
               console.log(`✅ Successfully linked to existing GHL contact via error metadata: ${ghl_contact_id}`);
-              
+
               // Now perform an UPDATE to ensure data is synced correctly
               const ghl_update_data: any = {
                 firstName: body.client_name.split(' ')[0],
@@ -533,11 +533,11 @@ export async function POST(request: Request) {
                 country: 'US',
                 customFields: custom_fields
               };
-              
+
               if (advisor_ghl_user_id) {
                 ghl_update_data.assignedTo = advisor_ghl_user_id;
               }
-              
+
               await ghlUpdateContact(ghl_contact_id, ghl_update_data);
               console.log(`✅ GHL contact updated with vault data after collision: ${ghl_contact_id}`);
             } else {
@@ -765,6 +765,7 @@ export async function POST(request: Request) {
     // ========== STEP 6: APPLY GHL TAGS ==========
     // Base tags that are always applied to every client
     const base_tags = [
+      'vault-user',        // Identifies this contact as a Credit Banc Vault client (required for GHL automations)
       'portal_created',
       'vault_pre_approval',
     ];
