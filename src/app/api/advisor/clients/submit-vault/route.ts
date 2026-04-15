@@ -24,7 +24,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createClient as createAdminClient } from '@supabase/supabase-js';
 import { ghlAddTags } from '@/lib/ghl-api';
-import { send_underwriting_vault_ready_notification } from '@/lib/email';
+import { send_underwriting_vault_ready_notification, send_client_vault_submitted_notification } from '@/lib/email';
 
 const supabase_admin = createAdminClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -93,7 +93,7 @@ export async function POST(request: Request) {
         // Fetch client and verify ownership
         const { data: client, error: client_error } = await supabase_admin
             .from('client_data_vault')
-            .select('id, user_id, client_name, company_name, ghl_contact_id, advisor_id, data_vault_submitted_at, capital_requested')
+            .select('id, user_id, client_name, client_email, company_name, ghl_contact_id, advisor_id, data_vault_submitted_at, capital_requested')
             .eq('id', client_id)
             .maybeSingle();
 
@@ -207,6 +207,38 @@ export async function POST(request: Request) {
                 }
             } catch (notify_error) {
                 console.error('⚠️ Error notifying underwriting (non-fatal):', notify_error);
+            }
+
+            // ========================================================================
+            // STEP 7.5: NOTIFY CLIENT
+            // ========================================================================
+            try {
+                const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://vault.creditbanc.io';
+
+                // 7.5a In-app notification for client
+                if (client.user_id) {
+                    await supabase_admin.from('in_app_notifications').insert({
+                        user_id: client.user_id,
+                        client_id: client.id,
+                        title: "Application Submitted to Underwriting",
+                        message: `Great news! Your application for ${client.company_name} has been vetted and submitted for underwriting review.`
+                    });
+                    console.log(`✅ In-app notification sent to client: ${client.user_id}`);
+                }
+
+                // 7.5b Email notification for client
+                if (client.client_email) {
+                    await send_client_vault_submitted_notification({
+                        client_name: client.client_name,
+                        client_email: client.client_email,
+                        advisor_name: `${advisor_data.first_name} ${advisor_data.last_name}`,
+                        company_name: client.company_name,
+                        login_url: `${appUrl}/auth/login`
+                    });
+                    console.log(`✅ Email notification dispatched to client: ${client.client_email}`);
+                }
+            } catch (client_notify_error) {
+                console.error('⚠️ Error notifying client (non-fatal):', client_notify_error);
             }
             // ========================================
             // STEP 8: UPDATE PIPELINE STATUS

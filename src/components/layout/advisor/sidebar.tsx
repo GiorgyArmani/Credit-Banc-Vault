@@ -17,10 +17,12 @@ import {
   ChevronsRight,
   BookCheck,
   Users,
+  LayoutGrid,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import clsx from 'clsx'
 
 type SidebarProps = {
   mobileOpen?: boolean
@@ -54,6 +56,7 @@ export function Sidebar({
 
   const navItems = [
     { label: 'Dashboard', href: '/advisor/dashboard', icon: BookCheck },
+    { label: 'Pipeline', href: '/advisor/dashboard/pipeline', icon: LayoutGrid },
     { label: 'Clients', href: '/advisor/dashboard/clients', icon: Users },
   ]
 
@@ -73,116 +76,72 @@ export function Sidebar({
       <aside
         aria-label="Sidebar navigation"
         className={[
-          'fixed left-0 top-0 z-50 flex h-dvh md:h-screen w-72 flex-col bg-emerald-950 border-r border-white/5 shadow-2xl overflow-y-auto overflow-x-hidden',
-          'transition-all duration-300 ease-in-out',
+          'fixed left-0 top-0 z-50 flex h-dvh md:h-screen w-64 flex-col bg-emerald-950 dark:bg-slate-950 text-emerald-50 dark:text-emerald-400 border-r border-white/5 shadow-2xl transition-all duration-300 ease-in-out',
           mobileOpen ? 'translate-x-0' : '-translate-x-full',
           'md:translate-x-0',
-          desktopWidth,
+          collapsed ? 'md:w-20' : 'md:w-64',
         ].join(' ')}
       >
-        {/* Header */}
-        <div className="sticky top-0 bg-emerald-950/80 backdrop-blur-md z-20">
-          <div className="flex flex-col items-center justify-center px-4 py-8 border-b border-white/5 relative">
-            <div className={`transition-all duration-300 ${collapsed ? 'md:opacity-0 md:scale-90 md:h-0 md:overflow-hidden opacity-100 scale-100' : 'opacity-100 scale-100'}`}>
-              <img src="/vaultlogo.svg" alt="Logo" className="h-10 w-auto mb-2 brightness-0 invert" />
-              <p className="text-[10px] text-emerald-500/60 font-black uppercase tracking-[0.2em] mt-2 text-center text-nowrap">Business Document Hub</p>
+        {/* Branding */}
+        <div className="px-6 py-8 mb-4">
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 rounded-xl editorial-gradient flex items-center justify-center shadow-lg shadow-emerald-500/20">
+              <span className="material-symbols-outlined text-white" style={{ fontVariationSettings: "'FILL' 1" }}>account_balance</span>
             </div>
-
-            {/* Minimal logo for collapsed state */}
-            {collapsed && (
-              <div className="bg-emerald-500 w-10 h-10 rounded-2xl hidden md:flex items-center justify-center shadow-lg shadow-emerald-500/20">
-                <span className="text-white font-black text-xl">A</span>
+            {!collapsed && (
+              <div className="transition-all duration-300">
+                <h2 className="text-lg font-black text-white dark:text-emerald-500 font-headline leading-tight">Advisor Dashboard</h2>
+                <p className="text-[10px] uppercase tracking-widest opacity-60 font-manrope">Credit Banc</p>
               </div>
             )}
-
-            <button
-              onClick={onMobileClose}
-              className="md:hidden absolute right-4 top-1/2 -translate-y-1/2 inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-white/5 text-white hover:bg-white/10 transition-colors"
-              aria-label="Close sidebar"
-            >
-              <X className="h-5 w-5" />
-            </button>
           </div>
         </div>
 
         {/* Navigation */}
-        <nav className="px-4 py-6 space-y-2 flex-grow">
+        <nav className="flex-1 space-y-1 px-3">
           {navItems.map(({ href, label, icon: Icon }) => {
             const active = pathname === href
+            const iconName = label === 'Dashboard' ? 'dashboard' : label === 'Pipeline' ? 'account_tree' : 'group'
+
             return (
-              <Link href={href} key={href} onClick={onMobileClose} title={collapsed ? label : undefined} aria-label={collapsed ? label : undefined}>
-                <Button
-                  variant="ghost"
-                  className={[
-                    'w-full h-14 rounded-2xl transition-all duration-300 group relative overflow-hidden',
-                    collapsed ? 'md:justify-center md:px-0' : 'justify-start px-5',
-                    active
-                      ? 'bg-white text-emerald-950 font-black shadow-[0_0_30px_rgba(16,185,129,0.1)]'
-                      : 'text-emerald-100/60 hover:bg-white/5 hover:text-emerald-50 font-bold',
-                  ].join(' ')}
-                >
-                  {/* Active Indicator Glow */}
-                  {active && (
-                    <div className="absolute inset-0 bg-gradient-to-r from-emerald-500/10 to-transparent pointer-events-none" />
-                  )}
-
-                  <Icon className={[
-                    'h-5 w-5 shrink-0 transition-transform duration-300 group-hover:scale-110',
-                    collapsed ? 'md:mr-0' : 'mr-4',
-                    active ? 'text-emerald-500' : 'text-inherit'
-                  ].join(' ')} />
-
-                  <span className={[
-                    'transition-all duration-300 font-bold',
-                    collapsed ? 'md:hidden md:opacity-0 md:translate-x-2' : 'inline opacity-100 translate-x-0'
-                  ].join(' ')}>{label}</span>
-
-                  {/* Dot indicator for active in collapsed mode */}
-                  {active && collapsed && (
-                    <div className="absolute right-2 w-1 h-5 bg-emerald-500 rounded-full md:block hidden" />
-                  )}
-                </Button>
+              <Link href={href} key={href} onClick={onMobileClose} title={collapsed ? label : undefined}>
+                <div className={clsx(
+                  'flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 cursor-pointer active:scale-95 transform',
+                  active
+                    ? 'bg-gradient-to-br from-emerald-800 to-emerald-700 text-white shadow-lg shadow-emerald-950/40'
+                    : 'text-emerald-200/70 hover:text-white hover:bg-emerald-900/50'
+                )}>
+                  <span className="material-symbols-outlined">{iconName}</span>
+                  {!collapsed && <span className="font-manrope text-sm font-medium">{label}</span>}
+                </div>
               </Link>
             )
           })}
+
+          <div className="pt-4 px-3">
+            <Link href="/advisor/dashboard/clients/new">
+              <button className={clsx(
+                "w-full editorial-gradient text-white rounded-xl py-3 px-4 font-bold shadow-lg shadow-primary/20 flex items-center justify-center gap-2 active:scale-95 transition-transform",
+                collapsed ? "px-0" : ""
+              )}>
+                <span className="material-symbols-outlined text-lg">add</span>
+                {!collapsed && <span>New Funding</span>}
+              </button>
+            </Link>
+          </div>
         </nav>
 
         {/* Footer */}
-        <div className="mt-auto px-4 pb-6 pt-4 border-t border-white/5 bg-emerald-900/10 backdrop-blur-md">
-          {/* Identidad */}
-          <div className={`space-x-4 mb-6 items-center transition-all duration-300 flex ${collapsed ? 'md:flex-col md:space-x-0 md:gap-3' : ''}`}>
-            <div className="bg-emerald-500/20 rounded-[1.25rem] p-3 border border-emerald-500/20 flex-shrink-0">
-              <User className="h-6 w-6 text-emerald-400" />
-            </div>
-            <div className={`min-w-0 transition-all duration-300 ${collapsed ? 'md:hidden block' : 'block'}`}>
-              <p className="font-black text-white truncate text-sm mb-1">{userEmail?.split('@')[0] || 'Advisor'}</p>
-              <Badge className="bg-emerald-500/20 text-emerald-400 text-[10px] font-black uppercase tracking-widest border-emerald-500/30">Advisor</Badge>
-            </div>
-          </div>
+        <footer className="pt-6 border-t border-emerald-900/30 px-3 pb-8">
 
-          {/* Logout */}
-          <div className="flex items-center gap-2">
-            {!collapsed ? (
-              <Button
-                variant="outline"
-                onClick={handleSignOut}
-                className="w-full h-12 rounded-2xl border-white/10 text-emerald-100/60 font-black hover:bg-white/5 hover:text-white transition-all bg-transparent group"
-              >
-                <LogOut className="h-4 w-4 mr-3 transition-transform group-hover:-translate-x-1" />
-                <span className="uppercase tracking-widest text-[10px]">Sign Out</span>
-              </Button>
-            ) : (
-              <button
-                onClick={handleSignOut}
-                aria-label="Sign out"
-                title="Sign Out"
-                className="flex items-center justify-center w-full h-12 rounded-2xl border border-white/10 text-emerald-100/60 hover:bg-white/5 hover:text-white transition-all group"
-              >
-                <LogOut className="h-5 w-5 transition-transform group-hover:-translate-x-1" />
-              </button>
-            )}
+          <div
+            onClick={handleSignOut}
+            className="text-emerald-200/70 hover:text-white px-4 py-3 rounded-xl hover:bg-emerald-900/50 transition-all duration-200 cursor-pointer active:scale-95 transform flex items-center gap-3"
+          >
+            <span className="material-symbols-outlined">logout</span>
+            {!collapsed && <span className="font-manrope text-sm font-medium">Sign Out</span>}
           </div>
-        </div>
+        </footer>
       </aside>
 
       {/* Toggle Button (Desktop Only) */}

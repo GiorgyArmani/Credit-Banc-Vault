@@ -104,6 +104,17 @@ interface OpenPosition {
     payment_term: string | null;
 }
 
+interface LenderAssignment {
+    id: string;
+    lender_name: string;
+    specialty: string | null;
+    decision: 'approved' | 'rejected';
+    payment_type: string | null;
+    min_funding: number | null;
+    max_funding: number | null;
+    assigned_at: string;
+}
+
 interface UserDocument {
     id: string;
     name: string;
@@ -137,6 +148,8 @@ export default function UnderwritingClientDetailsPage() {
     const [open_positions, set_open_positions] = useState<OpenPosition[]>([]);
     const [required_docs, set_required_docs] = useState<{ code: string; label: string }[]>([]);
     const [error_message, set_error_message] = useState<string>("");
+    const [lender_assignments, set_lender_assignments] = useState<LenderAssignment[]>([]);
+    const [is_loading_assignments, set_is_loading_assignments] = useState(false);
 
     const [is_notify_modal_open, set_is_notify_modal_open] = useState(false);
     const [selected_missing_docs, set_selected_missing_docs] = useState<string[]>([]);
@@ -262,12 +275,32 @@ export default function UnderwritingClientDetailsPage() {
                 .eq("client_vault_id", client_id);
             set_approvals(new Set((categoryApprovals || []).map(a => a.doc_code)));
 
+            // 8. Fetch Lender Assignments
+            await fetch_lender_assignments();
+
             set_component_state(ComponentState.SUCCESS);
 
         } catch (err: any) {
             console.error("fetch_client_details error:", err);
             set_error_message(err.message || "An unexpected error occurred.");
             set_component_state(ComponentState.ERROR);
+        }
+    }
+
+    async function fetch_lender_assignments() {
+        set_is_loading_assignments(true);
+        try {
+            const { data, error } = await supabase
+                .from("client_lender_assignments")
+                .select("*")
+                .eq("client_id", client_id)
+                .order("assigned_at", { ascending: false });
+
+            if (data) set_lender_assignments(data);
+        } catch (err) {
+            console.error("fetch_lender_assignments error:", err);
+        } finally {
+            set_is_loading_assignments(false);
         }
     }
 
@@ -651,6 +684,91 @@ export default function UnderwritingClientDetailsPage() {
         );
     }
 
+    /**
+     * render_lender_assignments: UI component for the lender matching results
+     */
+    function render_lender_assignments() {
+        if (lender_assignments.length === 0) return null;
+
+        const approved = lender_assignments.filter(a => a.decision === 'approved');
+        const rejected = lender_assignments.filter(a => a.decision === 'rejected');
+
+        return (
+            <Card className="rounded-[2.5rem] border-slate-200 overflow-hidden shadow-sm">
+                <CardHeader className="pb-4 border-b border-slate-100 flex flex-row items-center justify-between bg-slate-50/30">
+                    <div className="flex items-center gap-3">
+                        <div className="bg-emerald-500/10 p-2 rounded-xl">
+                            <Star className="h-4 w-4 text-emerald-600" />
+                        </div>
+                        <div>
+                            <CardTitle className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">Lender Matching Results</CardTitle>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">
+                                {approved.length} Approved • {rejected.length} Rejected
+                            </p>
+                        </div>
+                    </div>
+                    <Button 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={() => router.push('/underwriting/lender-match')}
+                        className="h-8 rounded-xl text-[9px] font-black uppercase tracking-widest border-slate-200 hover:bg-slate-50"
+                    >
+                        <ExternalLink className="w-3 h-3 mr-1.5" />
+                        Match Tool
+                    </Button>
+                </CardHeader>
+                <CardContent className="p-0">
+                    <div className="divide-y divide-slate-100">
+                        {lender_assignments.map((assign) => (
+                            <div key={assign.id} className="p-4 flex items-center justify-between hover:bg-slate-50/50 transition-all group">
+                                <div className="flex items-center gap-4">
+                                    <div className={clsx(
+                                        "w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm shadow-sm",
+                                        assign.decision === 'approved' ? "bg-emerald-500 text-white" : "bg-orange-500 text-white"
+                                    )}>
+                                        {assign.decision === 'approved' ? '✓' : '✕'}
+                                    </div>
+                                    <div>
+                                        <div className="flex items-center gap-2">
+                                            <p className="font-black text-slate-900 group-hover:text-emerald-600 transition-colors uppercase tracking-tight">
+                                                {assign.lender_name}
+                                            </p>
+                                            {assign.specialty && (
+                                                <Badge variant="outline" className="text-[8px] font-black tracking-widest uppercase py-0 px-2 border-slate-200 text-slate-400">
+                                                    {assign.specialty}
+                                                </Badge>
+                                            )}
+                                        </div>
+                                        <div className="flex items-center gap-3 mt-1 text-[10px] text-slate-400 font-bold uppercase tracking-widest">
+                                            <span>{assign.payment_type || 'Custom Terms'}</span>
+                                            {assign.min_funding && (
+                                                <>
+                                                    <span className="opacity-30">•</span>
+                                                    <span>Min: ${(assign.min_funding / 1000).toFixed(0)}k</span>
+                                                </>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="text-right">
+                                    <Badge className={clsx(
+                                        "font-black text-[9px] uppercase tracking-widest px-3 py-1",
+                                        assign.decision === 'approved' ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-100" : "bg-orange-100 text-orange-700 hover:bg-orange-100"
+                                    )}>
+                                        {assign.decision}
+                                    </Badge>
+                                    <p className="text-[8px] font-bold text-slate-300 mt-1 uppercase tracking-tighter">
+                                        Assigned {format(new Date(assign.assigned_at), 'MMM d')}
+                                    </p>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </CardContent>
+            </Card>
+        );
+    }
+
     if (component_state === ComponentState.LOADING) {
         return (
             <div className="flex flex-col items-center justify-center py-20">
@@ -1028,6 +1146,9 @@ export default function UnderwritingClientDetailsPage() {
                                     </p>
                                 </CardContent>
                             </Card>
+
+                            {/* Lender Matching Results */}
+                            {render_lender_assignments()}
 
                             {/* Open Positions Table */}
                             <Card className="rounded-[2.5rem] border-slate-200 overflow-hidden">

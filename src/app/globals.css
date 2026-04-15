@@ -10,6 +10,18 @@ body {
   .text-balance {
     text-wrap: balance;
   }
+  
+  .editorial-gradient {
+    @apply bg-gradient-to-br from-emerald-600 via-emerald-500 to-emerald-400;
+  }
+
+  .tonal-layering {
+    @apply bg-white/40 backdrop-blur-md border border-white/20 shadow-xl;
+  }
+
+  .tonal-shift {
+    @apply bg-slate-100/50 dark:bg-slate-900/50 backdrop-blur-md;
+  }
 }
 
 @layer base {
@@ -97,7 +109,19 @@ body {
   }
 
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-body antialiased;
+  }
+
+  .font-headline {
+    font-family: 'Outfit', sans-serif;
+  }
+
+  .font-body {
+    font-family: 'Inter', sans-serif;
+  }
+
+  .font-manrope {
+    font-family: 'Manrope', sans-serif;
   }
 }
 

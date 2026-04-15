@@ -60,6 +60,19 @@ export interface AdvisorVaultSubmissionData {
 }
 
 /**
+ * Interface for advisor new document upload notification data
+ */
+export interface NewDocumentUploadedData {
+  advisor_name: string;
+  advisor_email: string;
+  client_name: string;
+  document_name: string;
+  document_category: string;
+  upload_date: string;
+  login_url: string;
+}
+
+/**
  * Interface for underwriting vault ready notification data
  */
 export interface UnderwritingVaultReadyData {
@@ -69,6 +82,17 @@ export interface UnderwritingVaultReadyData {
   advisor_name: string;
   capital_requested: number;
   client_profile_url: string;
+}
+
+/**
+ * Interface for client vault submitted notification data
+ */
+export interface ClientVaultSubmittedData {
+  client_name: string;
+  client_email: string;
+  advisor_name: string;
+  company_name: string;
+  login_url: string;
 }
 
 /**
@@ -875,6 +899,208 @@ export async function send_advisor_document_notification(data: AdvisorDocumentNo
     to: data.advisor_email,
     subject: `Action Required: New Documents Needed for ${data.client_name}`,
     html: html_content,
+  };
+
+  return await transporter.sendMail(mail_options);
+}
+
+/**
+ * Generates HTML for advisor new document notification
+ */
+export function generate_new_document_uploaded_email_html(data: NewDocumentUploadedData): string {
+  const { advisor_name, client_name, document_name, document_category, upload_date, login_url } = data;
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>New Document Uploaded: ${client_name}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f6f9fc;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse;">
+    <tr>
+      <td align="center" style="padding: 40px 0;">
+        <table role="presentation" style="width: 600px; max-width: 100%; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+          
+          <!-- Header Section -->
+          <tr>
+            <td style="background-color: #10b981; padding: 40px 20px; text-align: center;">
+              <img src="cid:cb_logo_white" alt="Credit Banc" style="height: 44px; width: auto; display: block; margin: 0 auto; margin-bottom: 24px;">
+              <h1 style="margin: 0; color: #ffffff; font-size: 18px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.15em; line-height: 1;">New Document Uploaded</h1>
+            </td>
+          </tr>
+
+          <!-- Message -->
+          <tr>
+            <td style="padding: 40px 40px 20px;">
+              <h2 style="margin: 0 0 16px; color: #1e293b; font-size: 20px; font-weight: 600;">Hi ${advisor_name},</h2>
+              <p style="margin: 0 0 16px; color: #475569; font-size: 16px; line-height: 1.6;">
+                Great news! Your client <strong>${client_name}</strong> has just uploaded a new document to their vault.
+              </p>
+              
+              <div style="background-color: #f0fdf4; border: 1px solid #dcfce7; border-radius: 12px; padding: 24px; margin-bottom: 24px;">
+                <p style="margin: 0 0 8px; color: #166534; font-size: 14px;"><strong>Document Name:</strong> ${document_name}</p>
+                <p style="margin: 0 0 8px; color: #166534; font-size: 14px;"><strong>Category:</strong> ${document_category}</p>
+                <p style="margin: 0; color: #166534; font-size: 14px;"><strong>Upload Date:</strong> ${upload_date}</p>
+              </div>
+
+              <p style="margin: 0 0 24px; color: #475569; font-size: 16px; line-height: 1.6;">
+                Please log in to your advisor portal to review the new documentation and keep the application moving forward.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Action Button -->
+          <tr>
+            <td style="padding: 0 40px 40px;" align="center">
+              <a href="${login_url}" style="display: inline-block; background-color: #10b981; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-size: 16px; font-weight: 600;">
+                Review in Portal
+              </a>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding: 40px; text-align: center; color: #94a3b8; font-size: 13px; line-height: 1.6; border-top: 1px solid #f1f5f9;">
+              <p style="margin: 0;">© ${new Date().getFullYear()} Credit Banc Vault. This is an automated notification.</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `;
+}
+
+/**
+ * Sends notification email to advisor about a new document upload
+ */
+export async function send_new_document_uploaded_notification(data: NewDocumentUploadedData) {
+  const transporter = create_smtp_transporter();
+
+  const from_email = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  const from_name = process.env.SMTP_FROM_NAME || 'Credit Banc Vault';
+
+  const html_content = generate_new_document_uploaded_email_html(data);
+
+  const mail_options = {
+    from: `${from_name} <${from_email}>`,
+    to: data.advisor_email,
+    subject: `New Document Uploaded: ${data.client_name}`,
+    html: html_content,
+    attachments: [
+      {
+        filename: 'CBLOGOWHITE.png',
+        path: path.join(process.cwd(), 'public', 'CBLOGOWHITE.png'),
+        cid: 'cb_logo_white'
+      }
+    ]
+  };
+
+  return await transporter.sendMail(mail_options);
+}
+
+/**
+ * Generates HTML for client vault submitted notification
+ */
+export function generate_client_vault_submitted_email_html(data: ClientVaultSubmittedData): string {
+  const { client_name, advisor_name, company_name, login_url } = data;
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Application Submitted: ${company_name}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f6f9fc;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse;">
+    <tr>
+      <td align="center" style="padding: 40px 0;">
+        <table role="presentation" style="width: 600px; max-width: 100%; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+          
+          <!-- Header Section -->
+          <tr>
+            <td style="background-color: #10b981; padding: 20px; text-align: center;">
+              <img src="cid:cb_logo_white" alt="Credit Banc" style="height: 48px; width: auto; display: block; margin: 0 auto;">
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #10b981; padding: 0 40px 40px; text-align: center;">
+              <h1 style="margin: 0; color: #ffffff; font-size: 28px; font-weight: 700; line-height: 1.2;">Good news! Your application is in review.</h1>
+            </td>
+          </tr>
+
+          <!-- Message -->
+          <tr>
+            <td style="padding: 40px 40px 20px;">
+              <h2 style="margin: 0 0 16px; color: #1e293b; font-size: 20px; font-weight: 600;">Hi ${client_name},</h2>
+              <p style="margin: 0 0 16px; color: #475569; font-size: 16px; line-height: 1.6;">
+                Great news! Your advisor <strong>${advisor_name}</strong> has reviewed and approved your documents. 
+              </p>
+              <p style="margin: 0 0 16px; color: #475569; font-size: 16px; line-height: 1.6;">
+                Your application for <strong>${company_name}</strong> has now been officially submitted to our underwriting department for final review.
+              </p>
+              <p style="margin: 0 0 24px; color: #475569; font-size: 16px; line-height: 1.6;">
+                We will notify you as soon as there is an update on your funding request. In the meantime, you can track the status of your application by logging into your portal.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Action Button -->
+          <tr>
+            <td style="padding: 0 40px 40px;" align="center">
+              <a href="${login_url}" style="display: inline-block; background-color: #10b981; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-size: 16px; font-weight: 600;">
+                Log In to Portal
+              </a>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding: 40px; text-align: center; color: #94a3b8; font-size: 13px; line-height: 1.6; border-top: 1px solid #f1f5f9;">
+              <p style="margin: 0;">© ${new Date().getFullYear()} Credit Banc Vault. This is an automated notification.</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `;
+}
+
+/**
+ * Sends notification email to client about their vault being submitted
+ */
+export async function send_client_vault_submitted_notification(data: ClientVaultSubmittedData) {
+  const transporter = create_smtp_transporter();
+
+  const from_email = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  const from_name = process.env.SMTP_FROM_NAME || 'Credit Banc Vault';
+
+  const html_content = generate_client_vault_submitted_email_html(data);
+
+  const mail_options = {
+    from: `${from_name} <${from_email}>`,
+    to: data.client_email,
+    subject: `Application Submitted to Underwriting - ${data.company_name}`,
+    html: html_content,
+    attachments: [
+      {
+        filename: 'CBLOGOWHITE.png',
+        path: path.join(process.cwd(), 'public', 'CBLOGOWHITE.png'),
+        cid: 'cb_logo_white'
+      }
+    ]
   };
 
   return await transporter.sendMail(mail_options);

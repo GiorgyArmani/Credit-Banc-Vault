@@ -9,6 +9,8 @@ import { usePathname } from 'next/navigation'
 import OnboardingGate from '@/components/onboarding/onboarding-gate'
 import { Menu } from 'lucide-react'
 import { NotificationBell } from '@/components/notifications/NotificationBell'
+import { createClient } from '@/lib/supabase/client'
+import { GlobalSearch } from '@/components/layout/advisor/global-search'
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   useProtectedRoute()
@@ -17,6 +19,43 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const isEmbed = pathname?.startsWith('/dashboard/embed/')
   const [mobileOpen, setMobileOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
+  const [profile, setProfile] = useState<{ name: string; avatarUrl: string | null } | null>(null)
+
+  useEffect(() => {
+    async function getProfile() {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const { data: advisorData } = await supabase
+          .from('advisors')
+          .select('first_name, last_name, profile_pic_url')
+          .eq('user_id', user.id)
+          .maybeSingle()
+
+        if (advisorData) {
+          setProfile({
+            name: `${advisorData.first_name} ${advisorData.last_name}`,
+            avatarUrl: advisorData.profile_pic_url
+          })
+        } else {
+          // fallback to user metadata if advisor record not found
+          const { data: userData } = await supabase
+            .from('users')
+            .select('first_name, last_name')
+            .eq('id', user.id)
+            .maybeSingle()
+
+          if (userData) {
+            setProfile({
+              name: `${userData.first_name} ${userData.last_name}`,
+              avatarUrl: null
+            })
+          }
+        }
+      }
+    }
+    getProfile()
+  }, [])
 
   useEffect(() => {
     setMobileOpen(false)
@@ -70,9 +109,33 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </header>
 
         {/* Topbar (Desktop) */}
-        <header className="hidden md:flex sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b h-16 items-center px-8 justify-end">
+        <header className="hidden md:flex sticky top-0 z-30 w-full px-8 py-3 h-16 bg-slate-50 dark:bg-slate-900 shadow-sm dark:shadow-none docked full-width no-border tonal-shift items-center justify-between">
+          <div className="flex items-center gap-8 flex-1">
+            <GlobalSearch />
+          </div>
           <div className="flex items-center gap-4">
-            <NotificationBell />
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors cursor-pointer">
+              <NotificationBell />
+            </div>
+
+            <div className="h-8 w-px bg-slate-200 mx-2"></div>
+            <div className="flex items-center gap-3">
+              {profile?.avatarUrl ? (
+                <img
+                  className="h-9 w-9 rounded-full object-cover border-2 border-primary-container"
+                  alt="Advisor"
+                  src={profile.avatarUrl}
+                />
+              ) : (
+                <div className="h-9 w-9 rounded-full bg-emerald-500 flex items-center justify-center text-white text-xs font-bold border-2 border-primary-container">
+                  {profile?.name ? profile.name.split(' ').map(n => n[0]).join('') : 'A'}
+                </div>
+              )}
+              <div className="hidden lg:block">
+                <p className="text-xs font-bold leading-none text-slate-900 dark:text-slate-100">{profile?.name || 'Loading...'}</p>
+                <p className="text-[10px] text-slate-500 uppercase tracking-tighter">Advisor</p>
+              </div>
+            </div>
           </div>
         </header>
 

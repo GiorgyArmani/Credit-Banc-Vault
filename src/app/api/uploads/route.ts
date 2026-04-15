@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient as createBrowserClient } from "@/lib/supabase/server";
 import { syncOutstandingDocuments } from "@/lib/outstanding-documents";
 import { SupabaseClient } from "@supabase/supabase-js";
+import { send_new_document_uploaded_notification } from "@/lib/email";
 
 /**
  * DOC_CODE_TO_GHL_FIELD_MAP: Maps internal doc_code values to GHL custom field IDs
@@ -382,10 +383,23 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    // 2. Get client_data_vault record for this user (Primary source for GHL info)
+    // 2. Get client_data_vault record for this user (Primary source for GHL info and Advisor info)
     const { data: vaultRecord, error: vaultError } = await admin
       .from("client_data_vault")
-      .select("id, ghl_contact_id, user_id")
+      .select(`
+        id, 
+        ghl_contact_id, 
+        user_id, 
+        client_name, 
+        company_name,
+        advisors (
+          id,
+          first_name,
+          last_name,
+          email,
+          user_id
+        )
+      `)
       .eq("user_id", doc.user_id)
       .maybeSingle();
 
@@ -393,14 +407,10 @@ export async function POST(req: Request) {
       console.error("Error fetching client_data_vault:", vaultError);
     }
 
-    const profileId = vaultRecord?.id; // Use vault ID as profile ID for events/logging if needed
+    const profileId = vaultRecord?.id;
 
     // 3. Create event record (audit trail)
     if (profileId) {
-      // Note: events table might still reference business_profiles(id). 
-      // If client_data_vault.id is not compatible with events.profile_id (FK), we might skip this or need to fetch business_profile too.
-      // However, for GHL sync, we prioritize vaultRecord.
-      // Let's try to fetch business_profile just for the event FK constraint if it exists.
       const { data: bp } = await admin.from("business_profiles").select("id").eq("user_id", doc.user_id).maybeSingle();
 
       if (bp) {
@@ -413,6 +423,57 @@ export async function POST(req: Request) {
       }
     }
 
+    // 4. Notify Advisor
+    if (vaultRecord && vaultRecord.advisors) {
+      const advisor: any = vaultRecord.advisors;
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://vault.creditbanc.io";
+
+      // A. Get Document Label
+      let docLabel = doc_code;
+      try {
+        const { data: reqDoc } = await admin
+          .from("required_documents")
+          .select("label")
+          .eq("code", doc_code)
+          .maybeSingle();
+        if (reqDoc?.label) docLabel = reqDoc.label;
+      } catch (e) {}
+
+      // B. In-app notification for advisor
+      if (advisor.user_id) {
+        try {
+          await admin.from("in_app_notifications").insert({
+            user_id: advisor.user_id,
+            client_id: vaultRecord.id,
+            title: "New Document Uploaded",
+            message: `${vaultRecord.client_name} uploaded: ${docLabel}`,
+          });
+        } catch (notifierr) {
+          console.error("Error creating in-app notification:", notifierr);
+        }
+      }
+
+      // C. Email notification for advisor
+      if (advisor.email) {
+        try {
+          await send_new_document_uploaded_notification({
+            advisor_name: `${advisor.first_name} ${advisor.last_name}`,
+            advisor_email: advisor.email,
+            client_name: vaultRecord.client_name,
+            document_name: doc.name,
+            document_category: docLabel,
+            upload_date: new Date().toLocaleDateString("en-US", {
+              month: "long",
+              day: "numeric",
+              year: "numeric",
+            }),
+            login_url: `${appUrl}/auth/login`,
+          });
+        } catch (emailError) {
+          console.error("Error sending document upload email:", emailError);
+        }
+      }
+    }
 
     // 5. GHL Integration - Upload file and update tags
     console.log(`Checking GHL Integration prerequisites: VaultRecord: ${!!vaultRecord}, GHL_TOKEN exists: ${!!process.env.GHL_TOKEN}`);

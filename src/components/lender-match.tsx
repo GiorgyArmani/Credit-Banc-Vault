@@ -50,12 +50,16 @@ const SPECIALTY_COLORS: Record<string, string> = {
   SBA: "bg-green-900/40 text-green-300 border-green-700/40",
   LOC: "bg-purple-900/40 text-purple-300 border-purple-700/40",
   Equipment: "bg-yellow-900/40 text-yellow-300 border-yellow-700/40",
+  Amortizing: "bg-blue-400/20 text-blue-400 border-blue-400/30",
   "Term Loan": "bg-orange-900/40 text-orange-300 border-orange-700/40",
   "Real Estate": "bg-cyan-900/40 text-cyan-300 border-cyan-700/40",
   Trucking: "bg-red-900/40 text-red-300 border-red-700/40",
   "Invoice Factoring": "bg-pink-900/40 text-pink-300 border-pink-700/40",
   Consolidation: "bg-indigo-900/40 text-indigo-300 border-indigo-700/40",
   "Reverse consolidation": "bg-teal-900/40 text-teal-300 border-teal-700/40",
+  "Contract Financing": "bg-amber-900/40 text-amber-300 border-amber-700/40",
+  Acquisition: "bg-violet-900/40 text-violet-300 border-violet-700/40",
+  General: "bg-slate-700/40 text-slate-300 border-slate-600/40",
 };
 
 const DEFAULT_DEAL: DealSummary = {
@@ -104,15 +108,8 @@ function countOverlap(lender: Lender, deal: DealSummary): number {
   return n;
 }
 
-function hasGuidelines(lender: Lender, deal: DealSummary): boolean {
-  // Require at least 3 overlapping fields, and FICO or TIB must be one of them
-  const hasFicoOverlap = (lender.min_fico ?? 0) > 0 && deal.fico > 0;
-  const hasTibOverlap = (lender.time_in_business_months ?? 0) > 0 && deal.tibMonths > 0;
-  const hasRevenueOverlap = (lender.avg_monthly_revenue ?? 0) > 0 && deal.avgRevenue > 0;
-  const coreOverlap = [hasFicoOverlap, hasTibOverlap, hasRevenueOverlap].filter(Boolean).length;
-
-  // Must have at least 2 core fields (FICO, TIB, Revenue) overlapping
-  return coreOverlap >= 2;
+function hasMinViableGuidelines(l: Lender): boolean {
+  return (l.min_fico ?? 0) > 0 && (l.time_in_business_months ?? 0) > 0 && (l.avg_monthly_revenue ?? 0) > 0;
 }
 
 // ─── Matching Engine ──────────────────────────────────────────────────────────
@@ -358,26 +355,42 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
     fetchLenders();
   }, []);
 
-  const results = useMemo(() =>
-    lenderData
-      // Only include lenders whose guidelines overlap with what this deal has data for
-      .filter((l) => hasGuidelines(l, deal))
-      .map((l) => matchLender(l, deal))
-      .sort((a, b) => {
-        if (a.passed !== b.passed) return a.passed ? -1 : 1;
-        return a.flags.length - b.flags.length;
-      }),
-    [deal, lenderData]
-  );
+  const { viableResults, incompleteResults } = useMemo(() => {
+    const viable: MatchResult[] = [];
+    const incomplete: MatchResult[] = [];
 
-  const passed = results.filter((r) => r.passed);
+    lenderData.forEach((l) => {
+      const res = matchLender(l, deal);
+      if (hasMinViableGuidelines(l)) {
+        viable.push(res);
+      } else {
+        incomplete.push(res);
+      }
+    });
+
+    viable.sort((a, b) => {
+      if (a.passed !== b.passed) return a.passed ? -1 : 1;
+      return a.flags.length - b.flags.length;
+    });
+
+    incomplete.sort((a, b) => a.lender.lender_name.localeCompare(b.lender.lender_name));
+
+    return { viableResults: viable, incompleteResults: incomplete };
+  }, [deal, lenderData]);
+
+  const passedCount = viableResults.filter((r) => r.passed).length;
+  const disqualifiedCount = viableResults.length - passedCount;
   const specialties = ["All", ...Array.from(new Set(lenderData.map((l) => l.specialty ?? "Unknown"))).sort()];
 
-  const filtered = results.filter((r) => {
-    if (showPassedOnly && !r.passed) return false;
-    if (specialtyFilter !== "All" && (r.lender.specialty ?? "Unknown") !== specialtyFilter) return false;
-    return true;
-  });
+  const applyFilters = (list: MatchResult[]) =>
+    list.filter((r) => {
+      if (showPassedOnly && !r.passed) return false;
+      if (specialtyFilter !== "All" && (r.lender.specialty ?? "Unknown") !== specialtyFilter) return false;
+      return true;
+    });
+
+  const filteredViable = applyFilters(viableResults);
+  const filteredIncomplete = applyFilters(incompleteResults);
 
   const decisionKey = (lender: Lender) => `${lender.lender_name}-${lender.specialty ?? ""}`;
 
@@ -477,11 +490,11 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
             <div className="flex items-center gap-4">
               <div className="flex flex-col items-end">
                 <span className="text-xs text-gray-500 uppercase tracking-wider">Eligible</span>
-                <span className="text-lg font-mono font-bold text-green-400">{passed.length}</span>
+                <span className="text-lg font-mono font-bold text-green-400">{passedCount}</span>
               </div>
               <div className="flex flex-col items-end">
                 <span className="text-xs text-gray-500 uppercase tracking-wider">Disqualified</span>
-                <span className="text-lg font-mono font-bold text-red-400">{results.length - passed.length}</span>
+                <span className="text-lg font-mono font-bold text-red-400">{disqualifiedCount}</span>
               </div>
               <div className="flex flex-col items-end">
                 <span className="text-xs text-gray-500 uppercase tracking-wider">Approved</span>
@@ -580,13 +593,13 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs text-gray-500 uppercase tracking-widest">Eligibility</span>
             <span className="text-xs font-mono text-gray-400">
-              {results.length > 0 ? Math.round((passed.length / results.length) * 100) : 0}% of lenders ({results.length} with guidelines)
+              {viableResults.length > 0 ? Math.round((passedCount / viableResults.length) * 100) : 0}% of viable lenders ({viableResults.length} with full guidelines)
             </span>
           </div>
           <div className="h-2 rounded-full bg-gray-800 overflow-hidden">
             <div
               className="h-full rounded-full bg-gradient-to-r from-green-500 to-blue-500 transition-all duration-500"
-              style={{ width: `${results.length > 0 ? (passed.length / results.length) * 100 : 0}%` }}
+              style={{ width: `${viableResults.length > 0 ? (passedCount / viableResults.length) * 100 : 0}%` }}
             />
           </div>
         </div>
@@ -642,169 +655,206 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
         >
           {showPassedOnly ? "✓ Eligible Only" : "Show All"}
         </button>
-        <span className="text-xs text-gray-600 font-mono ml-auto">{filtered.length} shown</span>
+        <span className="text-xs text-gray-600 font-mono ml-auto">
+          {filteredViable.length + filteredIncomplete.length} shown
+        </span>
       </div>
 
-      {/* Lender cards */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        {filtered.map((result, i) => {
-          const key = `${result.lender.lender_name}-${result.lender.specialty}-${i}`;
-          const dKey = decisionKey(result.lender);
-          const decision = decisions[dKey] ?? null;
-          const isExpanded = expandedKey === key;
-          const specColor = SPECIALTY_COLORS[result.lender.specialty ?? ""] ?? "bg-gray-900/40 text-gray-400 border-gray-700/40";
-          const minF = typeof result.lender.min_funding === "number" ? result.lender.min_funding : null;
-          const maxF = typeof result.lender.max_funding === "number" ? result.lender.max_funding : null;
-
-          const cardBorder =
-            decision === "approved" ? "border-emerald-600/70" :
-              decision === "rejected" ? "border-orange-700/60" :
-                result.passed ? "border-green-800/40 hover:border-green-600/60" :
-                  "border-gray-800 hover:border-red-800/40";
-
-          const cardBg =
-            decision === "approved" ? "#0d2318" :
-              decision === "rejected" ? "#1f1108" :
-                result.passed ? "#161b22" : "#13191f";
-
-          return (
-            <div key={key} className={`rounded-xl border transition-all ${cardBorder}`} style={{ background: cardBg }}>
-              <div
-                className="flex items-start gap-3 px-3 pt-3 pb-2 cursor-pointer"
-                onClick={() => setExpandedKey(isExpanded ? null : key)}
-              >
-                <div
-                  className={`mt-1 flex-shrink-0 w-2 h-2 rounded-full ${result.passed ? "bg-green-400" : "bg-red-500"}`}
-                  style={{ boxShadow: result.passed ? "0 0 6px #4ade80" : "0 0 6px #f87171" }}
-                />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm font-semibold text-gray-100 font-mono">{result.lender.lender_name}</span>
-                    {result.lender.specialty && (
-                      <span className={`text-xs font-mono border rounded px-1.5 py-0.5 ${specColor}`}>
-                        {result.lender.specialty}
-                      </span>
-                    )}
-                    {(minF || maxF) && (
-                      <span className="text-xs text-gray-500 font-mono">
-                        {minF ? `$${(minF / 1000).toFixed(0)}K` : ""}
-                        {minF && maxF ? " – " : ""}
-                        {maxF ? `$${(maxF / 1000).toFixed(0)}K` : ""}
-                      </span>
-                    )}
-                    {decision === "approved" && (
-                      <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-900/30 border border-emerald-700/50 rounded px-1.5 py-0.5">
-                        ✓ APPROVED
-                      </span>
-                    )}
-                    {decision === "rejected" && (
-                      <span className="text-xs font-mono font-bold text-orange-400 bg-orange-900/30 border border-orange-700/50 rounded px-1.5 py-0.5">
-                        ✕ REJECTED
-                      </span>
-                    )}
-                  </div>
-                  {result.passed && result.warnings.length === 0 && (
-                    <div className="text-xs text-green-400 mt-0.5">✓ Meets all entered criteria</div>
-                  )}
-                  {result.flags.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-1.5">
-                      {result.flags.slice(0, 2).map((f, fi) => (
-                        <span key={fi} className="text-xs bg-red-900/20 border border-red-800/40 text-red-400 rounded px-1.5 py-0.5 font-mono">
-                          {f}
-                        </span>
-                      ))}
-                      {result.flags.length > 2 && (
-                        <span className="text-xs text-gray-500 font-mono">+{result.flags.length - 2} more</span>
-                      )}
-                    </div>
-                  )}
-                  {result.warnings.map((w, wi) => (
-                    <div key={wi} className="text-xs text-orange-400 mt-0.5">⚠ {w}</div>
-                  ))}
-                </div>
-                <span className="text-gray-600 text-xs flex-shrink-0 mt-1">{isExpanded ? "▲" : "▼"}</span>
-              </div>
-
-              {/* Approve / Reject buttons */}
-              <div className="flex items-center gap-2 px-3 pb-3">
-                <button
-                  onClick={() => setDecision(result.lender, "approved")}
-                  className={`flex-1 py-1.5 text-xs font-mono font-bold uppercase tracking-wider rounded border transition-all ${decision === "approved"
-                      ? "bg-emerald-600 border-emerald-600 text-white"
-                      : "border-emerald-800/60 text-emerald-600 hover:bg-emerald-900/30 hover:text-emerald-400 hover:border-emerald-600"
-                    }`}
-                >
-                  ✓ Approve
-                </button>
-                <button
-                  onClick={() => setDecision(result.lender, "rejected")}
-                  className={`flex-1 py-1.5 text-xs font-mono font-bold uppercase tracking-wider rounded border transition-all ${decision === "rejected"
-                      ? "bg-orange-700 border-orange-700 text-white"
-                      : "border-orange-900/60 text-orange-700 hover:bg-orange-900/20 hover:text-orange-400 hover:border-orange-700"
-                    }`}
-                >
-                  ✕ Reject
-                </button>
-              </div>
-
-              {isExpanded && (
-                <div className="px-3 pb-3 border-t border-gray-800 pt-3 space-y-2">
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    {([
-                      ["Min FICO", result.lender.min_fico ?? "—"],
-                      ["Min TIB", result.lender.time_in_business_months ? `${result.lender.time_in_business_months}mo` : "—"],
-                      ["Min Revenue", result.lender.avg_monthly_revenue ? fmt$(result.lender.avg_monthly_revenue) : "—"],
-                      ["Max Neg Days", result.lender.negative_days ?? "—"],
-                      ["Max Positions", result.lender.number_of_positions ?? "—"],
-                      ["Payment Type", result.lender.payment_type ?? "—"],
-                      ["Bankruptcies OK", result.lender.bankruptcies ?? "—"],
-                      ["Restricted States", result.lender.restricted_states || "None"],
-                    ] as [string, string | number][]).map(([label, val]) => (
-                      <div key={label} className="flex justify-between gap-2 bg-gray-950 rounded px-2 py-1">
-                        <span className="text-gray-500">{label}</span>
-                        <span className="text-gray-200 font-mono text-right">{String(val)}</span>
-                      </div>
-                    ))}
-                  </div>
-                  {result.lender.preferred_industries && (
-                    <div className="bg-gray-950 rounded px-2 py-2">
-                      <div className="text-xs text-green-600 uppercase tracking-wider mb-1">Preferred Industries</div>
-                      <div className="text-xs text-gray-300 leading-relaxed">{result.lender.preferred_industries}</div>
-                    </div>
-                  )}
-                  {result.lender.restricted_industries && (
-                    <div className="bg-gray-950 rounded px-2 py-2">
-                      <div className="text-xs text-red-600 uppercase tracking-wider mb-1">Restricted Industries</div>
-                      <div className="text-xs text-gray-300 leading-relaxed">{result.lender.restricted_industries}</div>
-                    </div>
-                  )}
-                  {result.lender.restricted_industry_exceptions && (
-                    <div className="bg-gray-950 rounded px-2 py-2">
-                      <div className="text-xs text-orange-500 uppercase tracking-wider mb-1">Exceptions</div>
-                      <div className="text-xs text-gray-300 leading-relaxed">{result.lender.restricted_industry_exceptions}</div>
-                    </div>
-                  )}
-                  {result.lender.additional_info && (
-                    <div className="bg-gray-950 rounded px-2 py-2">
-                      <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">Additional Notes</div>
-                      <div className="text-xs text-gray-300 leading-relaxed">{result.lender.additional_info}</div>
-                    </div>
-                  )}
-                  {result.flags.length > 0 && (
-                    <div className="space-y-1">
-                      {result.flags.map((f, fi) => (
-                        <div key={fi} className="text-xs bg-red-900/20 border border-red-800/40 text-red-400 rounded px-2 py-1 font-mono">
-                          ✗ {f}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
+      {/* Matched Lenders Section */}
+      <div className="space-y-3">
+        <div className="flex items-center gap-3">
+          <div className="h-px flex-1 bg-gray-800" />
+          <span className="text-[10px] font-bold text-gray-500 uppercase tracking-[0.2em]">Matched Lenders ({filteredViable.length})</span>
+          <div className="h-px flex-1 bg-gray-800" />
+        </div>
+        
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          {filteredViable.length === 0 && (
+            <div className="lg:col-span-2 py-8 text-center border border-dashed border-gray-800 rounded-xl">
+              <span className="text-xs text-gray-600 font-mono uppercase">No matched lenders found</span>
             </div>
-          );
-        })}
+          )}
+          {filteredViable.map((result, i) => renderLenderCard(result, `viable-${i}`))}
+        </div>
+      </div>
+
+      {/* Incomplete Guidelines Section */}
+      <div className="space-y-3 pt-4">
+        <div className="flex items-center gap-3">
+          <div className="h-px flex-1 bg-gray-800" />
+          <span className="text-[10px] font-bold text-gray-500 uppercase tracking-[0.2em]">Incomplete Guidelines ({filteredIncomplete.length})</span>
+          <div className="h-px flex-1 bg-gray-800" />
+        </div>
+        
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          {filteredIncomplete.length === 0 && (
+            <div className="lg:col-span-2 py-8 text-center border border-dashed border-gray-800 rounded-xl">
+              <span className="text-xs text-gray-600 font-mono uppercase">No lenders with incomplete guidelines</span>
+            </div>
+          )}
+          {filteredIncomplete.map((result, i) => renderLenderCard(result, `incomplete-${i}`, true))}
+        </div>
       </div>
     </div>
   );
+
+  function renderLenderCard(result: MatchResult, key: string, isIncomplete = false) {
+    const dKey = decisionKey(result.lender);
+    const decision = decisions[dKey] ?? null;
+    const isExpanded = expandedKey === key;
+    const specColor = SPECIALTY_COLORS[result.lender.specialty ?? ""] ?? "bg-gray-900/40 text-gray-400 border-gray-700/40";
+    const minF = typeof result.lender.min_funding === "number" ? result.lender.min_funding : null;
+    const maxF = typeof result.lender.max_funding === "number" ? result.lender.max_funding : null;
+
+    const cardBorder =
+      decision === "approved" ? "border-emerald-600/70" :
+        decision === "rejected" ? "border-orange-700/60" :
+          result.passed && !isIncomplete ? "border-green-800/40 hover:border-green-600/60" :
+            "border-gray-800 hover:border-red-800/40";
+
+    const cardBg =
+      decision === "approved" ? "#0d2318" :
+        decision === "rejected" ? "#1f1108" :
+          result.passed && !isIncomplete ? "#161b22" : "#13191f";
+
+    return (
+      <div key={key} className={`rounded-xl border transition-all ${cardBorder} ${isIncomplete ? 'opacity-70' : ''}`} style={{ background: cardBg }}>
+        <div
+          className="flex items-start gap-3 px-3 pt-3 pb-2 cursor-pointer"
+          onClick={() => setExpandedKey(isExpanded ? null : key)}
+        >
+          <div
+            className={`mt-1 flex-shrink-0 w-2 h-2 rounded-full ${isIncomplete ? 'bg-gray-600' : (result.passed ? "bg-green-400" : "bg-red-500")}`}
+            style={{ boxShadow: !isIncomplete ? (result.passed ? "0 0 6px #4ade80" : "0 0 6px #f87171") : "none" }}
+          />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-semibold text-gray-100 font-mono">{result.lender.lender_name}</span>
+              {result.lender.specialty && (
+                <span className={`text-xs font-mono border rounded px-1.5 py-0.5 ${specColor}`}>
+                  {result.lender.specialty}
+                </span>
+              )}
+              {(minF || maxF) && (
+                <span className="text-xs text-gray-500 font-mono">
+                  {minF ? `$${(minF / 1000).toFixed(0)}K` : ""}
+                  {minF && maxF ? " – " : ""}
+                  {maxF ? `$${(maxF / 1000).toFixed(0)}K` : ""}
+                </span>
+              )}
+              {decision === "approved" && (
+                <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-900/30 border border-emerald-700/50 rounded px-1.5 py-0.5">
+                  ✓ APPROVED
+                </span>
+              )}
+              {decision === "rejected" && (
+                <span className="text-xs font-mono font-bold text-orange-400 bg-orange-900/30 border border-orange-700/50 rounded px-1.5 py-0.5">
+                  ✕ REJECTED
+                </span>
+              )}
+            </div>
+            {!isIncomplete && result.passed && result.warnings.length === 0 && (
+              <div className="text-xs text-green-400 mt-0.5">✓ Meets all entered criteria</div>
+            )}
+            {isIncomplete && (
+              <div className="text-[10px] text-gray-500 uppercase tracking-wider mt-0.5">Incomplete Guidelines</div>
+            )}
+            {result.flags.length > 0 && !isIncomplete && (
+              <div className="flex flex-wrap gap-1 mt-1.5">
+                {result.flags.slice(0, 2).map((f, fi) => (
+                  <span key={fi} className="text-xs bg-red-900/20 border border-red-800/40 text-red-400 rounded px-1.5 py-0.5 font-mono">
+                    {f}
+                  </span>
+                ))}
+                {result.flags.length > 2 && (
+                  <span className="text-xs text-gray-500 font-mono">+{result.flags.length - 2} more</span>
+                )}
+              </div>
+            )}
+            {result.warnings.map((w, wi) => (
+              <div key={wi} className="text-xs text-orange-400 mt-0.5">⚠ {w}</div>
+            ))}
+          </div>
+          <span className="text-gray-600 text-xs flex-shrink-0 mt-1">{isExpanded ? "▲" : "▼"}</span>
+        </div>
+
+        {/* Approve / Reject buttons */}
+        <div className="flex items-center gap-2 px-3 pb-3">
+          <button
+            onClick={() => setDecision(result.lender, "approved")}
+            className={`flex-1 py-1.5 text-xs font-mono font-bold uppercase tracking-wider rounded border transition-all ${decision === "approved"
+                ? "bg-emerald-600 border-emerald-600 text-white"
+                : "border-emerald-800/60 text-emerald-600 hover:bg-emerald-900/30 hover:text-emerald-400 hover:border-emerald-600"
+              }`}
+          >
+            ✓ Approve
+          </button>
+          <button
+            onClick={() => setDecision(result.lender, "rejected")}
+            className={`flex-1 py-1.5 text-xs font-mono font-bold uppercase tracking-wider rounded border transition-all ${decision === "rejected"
+                ? "bg-orange-700 border-orange-700 text-white"
+                : "border-orange-900/60 text-orange-700 hover:bg-orange-900/20 hover:text-orange-400 hover:border-orange-700"
+              }`}
+          >
+            ✕ Reject
+          </button>
+        </div>
+
+        {isExpanded && (
+          <div className="px-3 pb-3 border-t border-gray-800 pt-3 space-y-2">
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              {([
+                ["Min FICO", result.lender.min_fico ?? "—"],
+                ["Min TIB", result.lender.time_in_business_months ? `${result.lender.time_in_business_months}mo` : "—"],
+                ["Min Revenue", result.lender.avg_monthly_revenue ? fmt$(result.lender.avg_monthly_revenue) : "—"],
+                ["Max Neg Days", result.lender.negative_days ?? "—"],
+                ["Max Positions", result.lender.number_of_positions ?? "—"],
+                ["Payment Type", result.lender.payment_type ?? "—"],
+                ["Bankruptcies OK", result.lender.bankruptcies ?? "—"],
+                ["Restricted States", result.lender.restricted_states || "None"],
+              ] as [string, string | number][]).map(([label, val]) => (
+                <div key={label} className="flex justify-between gap-2 bg-gray-950 rounded px-2 py-1">
+                  <span className="text-gray-500">{label}</span>
+                  <span className={`font-mono text-right ${val === 0 || val === "—" ? 'text-red-500/70' : 'text-gray-200'}`}>{String(val)}</span>
+                </div>
+              ))}
+            </div>
+            {result.lender.preferred_industries && (
+              <div className="bg-gray-950 rounded px-2 py-2">
+                <div className="text-xs text-green-600 uppercase tracking-wider mb-1">Preferred Industries</div>
+                <div className="text-xs text-gray-300 leading-relaxed">{result.lender.preferred_industries}</div>
+              </div>
+            )}
+            {result.lender.restricted_industries && (
+              <div className="bg-gray-950 rounded px-2 py-2">
+                <div className="text-xs text-red-600 uppercase tracking-wider mb-1">Restricted Industries</div>
+                <div className="text-xs text-gray-300 leading-relaxed">{result.lender.restricted_industries}</div>
+              </div>
+            )}
+            {result.lender.restricted_industry_exceptions && (
+              <div className="bg-gray-950 rounded px-2 py-2">
+                <div className="text-xs text-orange-500 uppercase tracking-wider mb-1">Exceptions</div>
+                <div className="text-xs text-gray-300 leading-relaxed">{result.lender.restricted_industry_exceptions}</div>
+              </div>
+            )}
+            {result.lender.additional_info && (
+              <div className="bg-gray-950 rounded px-2 py-2">
+                <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">Additional Notes</div>
+                <div className="text-xs text-gray-300 leading-relaxed">{result.lender.additional_info}</div>
+              </div>
+            )}
+            {result.flags.length > 0 && !isIncomplete && (
+              <div className="space-y-1">
+                {result.flags.map((f, fi) => (
+                  <div key={fi} className="text-xs bg-red-900/20 border border-red-800/40 text-red-400 rounded px-2 py-1 font-mono">
+                    ✗ {f}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
 }

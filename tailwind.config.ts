@@ -64,6 +64,42 @@ const config = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        // Material 3 Surface Tokens
+        surface: {
+          DEFAULT: "#fdfdfd",
+          variant: "#e1e3de",
+          container: {
+            low: "#f7f9f2",
+            lowest: "#ffffff",
+            high: "#ebeee7",
+            highest: "#e1e3de",
+          }
+        },
+        "on-surface": {
+          DEFAULT: "#191c1a",
+          variant: "#414942",
+        },
+        "on-primary-fixed": {
+          variant: "#002114",
+        },
+        outline: {
+          DEFAULT: "#717971",
+          variant: "#c1c9be",
+        },
+        tertiary: {
+          fixed: {
+            DEFAULT: "#d9e3ff",
+            dim: "#adc6ff",
+            variant: "#3c475e",
+          }
+        },
+        error: {
+          DEFAULT: "#ba1a1a",
+          container: "#ffdad6",
+        },
+        "on-error": {
+          container: "#410002",
+        },
         // Simplified color palette
         emerald: {
           50: "#f0fdf7",
@@ -76,7 +112,13 @@ const config = {
           700: "#15803d",
           800: "#166534",
           900: "#14532d",
+          950: "#022c22", // Added 950 for sidebar
         },
+      },
+      fontFamily: {
+        headline: ["Outfit", "sans-serif"],
+        body: ["Inter", "sans-serif"],
+        manrope: ["Manrope", "sans-serif"],
       },
       borderRadius: {
         lg: "var(--radius)",

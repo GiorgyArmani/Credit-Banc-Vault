@@ -494,9 +494,25 @@ export async function deleteClientVault(clientId: string) {
             await supabaseAdmin.storage.from("user-documents").remove(paths);
         }
 
-        // 4. Delete client_data_vault record (cascade should handle others if set up, 
-        // otherwise we might need manual cleanup of user_documents, etc.)
-        // In many systems we prefer soft delete, but "CRUD" implies actual delete.
+        // 4. Perform thorough cleanup of related records manually to ensure no orphans
+        // Some of these might be cascaded, but explicit delete ensures a clean slate
+        // for re-onboarding with the same user_id/email.
+
+        // Delete from tables keyed by user_id
+        await supabaseAdmin.from("user_documents").delete().eq("user_id", client.user_id);
+        await supabaseAdmin.from("client_dynamic_documents").delete().eq("user_id", client.user_id);
+        await supabaseAdmin.from("submissions").delete().eq("user_id", client.user_id);
+        await supabaseAdmin.from("credit_reports").delete().eq("user_id", client.user_id);
+        await supabaseAdmin.from("in_app_notifications").delete().eq("user_id", client.user_id);
+
+        // Delete from tables keyed by client_vault_id (clientId)
+        await supabaseAdmin.from("client_open_positions").delete().eq("client_vault_id", clientId);
+        await supabaseAdmin.from("loan_status_history").delete().eq("client_vault_id", clientId);
+        await supabaseAdmin.from("bank_analysis_results").delete().eq("client_id", clientId);
+        await supabaseAdmin.from("document_category_approvals").delete().eq("client_vault_id", clientId);
+        await supabaseAdmin.from("client_internal_notes").delete().eq("client_id", clientId);
+
+        // 5. Delete client_data_vault record
         const { error: deleteError } = await supabaseAdmin
             .from("client_data_vault")
             .delete()

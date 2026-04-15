@@ -4,40 +4,21 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter, useParams } from "next/navigation";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
     ArrowLeft,
-    Download,
-    FileText,
-    Calendar,
-    Mail,
-    Phone,
-    Building2,
-    DollarSign,
     AlertCircle,
     Loader2,
-    MessageSquare,
-    MoreVertical,
-    CheckCircle2,
-    Eye,
-    Star,
     Plus,
-    RefreshCw,
-    Send,
-    Link,
     UploadCloud,
-    CheckCircle,
     ShieldCheck,
-    UserCog,
     Trash2,
     X,
     FileSignature,
-    ChevronDown,
-    ChevronUp,
     Pencil,
-    XCircle
+    XCircle,
+    Download,
 } from "lucide-react";
 import {
     Dialog,
@@ -47,13 +28,6 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import {
@@ -74,9 +48,16 @@ import { format } from "date-fns";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { EditProfileModal } from "./edit-profile-modal";
-import { LoanPipelineFull, PIPELINE_STEPS } from "@/components/loan-pipeline-status";
+import { PIPELINE_STEPS } from "@/components/loan-pipeline-status";
 import { getClientPipelineHistory, updateLoanStatus, type LoanStatus, type PipelineStatusEntry } from "@/app/actions/pipeline";
 import DocumentPreviewModal from "@/components/pdf/pdf-viewer";
+
+// ── New UI components ─────────────────────────────────────────────────────────
+import { ClientProfileHeader } from "./_components/client-profile-header";
+import { FundingPipelineCard } from "./_components/funding-pipeline-card";
+import { DocumentUploadStatus } from "./_components/document-upload-status";
+import { InternalCommunication } from "./_components/internal-communication";
+import { SubmitUnderwritingCTA } from "./_components/submit-underwriting-cta";
 
 /**
  * ============================================================================
@@ -1174,255 +1155,14 @@ export default function AdvisorClientDetailsPage() {
             );
         }
 
-        /**
-         * render-document-card: Renders individual document card with download
-         */
-        function render_document_card(doc: UserDocument) {
-            return (
-                <Card
-                    key={doc.id}
-                    className="hover:shadow-md transition-shadow"
-                >
-                    <CardContent className="pt-6">
-                        <div className="flex items-start justify-between">
-                            <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 mb-2">
-                                    <FileText className="h-5 w-5 text-gray-400 flex-shrink-0" />
-                                    <h4 className="font-medium text-gray-900 truncate">
-                                        {doc.custom_label || doc.name}
-                                    </h4>
-                                    {doc.is_favorite && (
-                                        <Star className="h-4 w-4 text-yellow-500 fill-yellow-500 flex-shrink-0" />
-                                    )}
-                                </div>
-
-                                <div className="space-y-1 text-sm text-gray-600">
-                                    <p className="truncate">{doc.name}</p>
-                                    <div className="flex items-center gap-3 text-xs">
-                                        <span>{format_file_size(doc.size)}</span>
-                                        <span>•</span>
-                                        <span>Uploaded {format_date(doc.upload_date)}</span>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="flex items-center gap-2 ml-4 flex-shrink-0">
-                                {/* NEW: Preview Button */}
-                                <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => set_preview_modal({ isOpen: true, doc })}
-                                    className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
-                                    title="Preview Document"
-                                >
-                                    <Eye className="h-4 w-4" />
-                                </Button>
-
-                                {/* NEW: Rename Button */}
-                                <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => set_renaming_file({ id: doc.id, label: doc.custom_label || doc.name })}
-                                    className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                                    title="Rename File"
-                                >
-                                    <Pencil className="h-4 w-4" />
-                                </Button>
-
-                                <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => download_document(doc)}
-                                    title="Download File"
-                                >
-                                    <Download className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => {
-                                        set_file_to_delete(doc);
-                                        set_is_delete_file_modal_open(true);
-                                    }}
-                                    className="text-red-500 hover:text-red-600 hover:bg-red-50"
-                                    title="Delete File"
-                                >
-                                    <Trash2 className="h-4 w-4" />
-                                </Button>
-                            </div>
-                        </div>
-                    </CardContent>
-                </Card>
-            );
-        }
 
         /**
-         * render_document_category: Renders a category section with its documents
-         */
-        function render_document_category(doc_type: { code: string; label: string }) {
-            const category_docs = get_documents_by_category(doc_type.code);
-            const has_docs = category_docs.length > 0;
-            const is_approved = approvals.has(doc_type.code);
-            const is_expanded = expanded_categories.has(doc_type.code);
-
-            // Define status theme
-            const status = is_approved ? 'approved' : has_docs ? 'uploaded' : 'pending';
-
-            const themes = {
-                approved: "bg-emerald-50 border-emerald-200",
-                uploaded: "bg-amber-50 border-amber-200",
-                pending: "bg-gray-50 border-gray-100"
-            };
-
-            return (
-                <div
-                    key={doc_type.code}
-                    id={`category-${doc_type.code}`}
-                    className={clsx(
-                        "border rounded-2xl transition-all duration-300 shadow-sm overflow-hidden",
-                        themes[status]
-                    )}
-                >
-                    {/* Category Header - Clickable to expand/collapse */}
-                    <div
-                        className="flex items-center justify-between p-5 cursor-pointer hover:bg-black/[0.02] active:scale-[0.99] transition-all"
-                        onClick={() => toggle_category_expansion(doc_type.code)}
-                    >
-                        <div className="flex items-center gap-4">
-                            <div className={clsx(
-                                "w-12 h-12 rounded-xl flex items-center justify-center shadow-sm transition-colors",
-                                status === 'approved' ? "bg-emerald-500 text-white" :
-                                    status === 'uploaded' ? "bg-amber-500 text-white" : "bg-white border border-gray-200 text-gray-400"
-                            )}>
-                                {status === 'approved' ? <ShieldCheck className="h-6 w-6" /> :
-                                    status === 'uploaded' ? <CheckCircle2 className="h-6 w-6" /> : <AlertCircle className="h-6 w-6" />}
-                            </div>
-                            <div>
-                                <h3 className="font-bold text-gray-900 leading-tight">{doc_type.label}</h3>
-                                <div className="flex items-center gap-2 mt-1">
-                                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        {status === 'approved' ? 'Advisor Approved' :
-                                            status === 'uploaded' ? 'Ready for Review' : 'Awaiting Upload'}
-                                    </p>
-                                    {has_docs && (
-                                        <>
-                                            <div className="w-1 h-1 rounded-full bg-gray-300" />
-                                            <p className="text-xs font-bold text-gray-700">
-                                                {category_docs.length} File{category_docs.length > 1 ? 's' : ''}
-                                            </p>
-                                        </>
-                                    )}
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="flex items-center gap-3">
-                            {/* Approval/Rejection Actions (Advisor Only) */}
-                            {status === 'uploaded' && (
-                                <div className="flex items-center gap-2">
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            set_category_to_approve(doc_type);
-                                            setIs_approving_modal_open(true);
-                                        }}
-                                        className="bg-emerald-600 text-white hover:bg-emerald-700 border-none rounded-xl h-9 px-4 font-black text-[10px] uppercase tracking-widest shadow-lg shadow-emerald-600/20"
-                                    >
-                                        <ShieldCheck className="h-3.5 w-3.5 mr-2" />
-                                        Approve
-                                    </Button>
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            set_reject_doc_type(doc_type);
-                                            set_is_reject_modal_open(true);
-                                        }}
-                                        className="bg-red-50 text-red-600 hover:bg-red-100 border-red-200 rounded-xl h-9 px-4 font-black text-[10px] uppercase tracking-widest"
-                                    >
-                                        <XCircle className="h-3.5 w-3.5 mr-2" />
-                                        Reject
-                                    </Button>
-                                </div>
-                            )}
-
-                            {/* Upload button for advisor */}
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    set_upload_doc_code(doc_type.code);
-                                    set_upload_doc_label(doc_type.label);
-                                    set_upload_files([]);
-                                    set_is_upload_modal_open(true);
-                                }}
-                                className="bg-white/80 border-gray-200 text-gray-700 hover:bg-white rounded-xl h-9 px-3 text-[10px] font-black uppercase tracking-widest"
-                            >
-                                <UploadCloud className="h-3.5 w-3.5 mr-1.5" />
-                                Upload
-                            </Button>
-
-                            <div className="w-px h-6 bg-gray-200 mx-1" />
-
-                            {is_expanded ? <ChevronUp className="h-5 w-5 text-gray-400" /> : <ChevronDown className="h-5 w-5 text-gray-400" />}
-
-                            {/* Remove Requested Document button (only if no files uploaded and it's a dynamic req) */}
-                            {!has_docs && (
-                                <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        set_doc_to_remove_request(doc_type);
-                                        set_is_remove_request_modal_open(true);
-                                    }}
-                                    className="h-8 w-8 p-0 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg"
-                                    title="Remove Request"
-                                >
-                                    <X className="h-4 w-4" />
-                                </Button>
-                            )}
-                        </div>
-                    </div>
-
-                    {/* Sub-header with Download All if expanded and multiple docs */}
-                    {is_expanded && has_docs && (
-                        <div className="px-5 pb-5 space-y-4">
-                            {category_docs.length > 1 && (
-                                <div className="flex justify-end">
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => download_all_documents(category_docs)}
-                                        className="border-blue-200 text-blue-600 hover:bg-blue-50 text-[10px] h-8 px-3 rounded-lg font-bold uppercase tracking-widest"
-                                    >
-                                        <Download className="h-3.5 w-3.5 mr-1.5" />
-                                        Download All Files
-                                    </Button>
-                                </div>
-                            )}
-                            <div className="space-y-3">
-                                {category_docs.map(doc => render_document_card(doc))}
-                            </div>
-                        </div>
-                    )}
-                </div>
-            );
-        }
-
-        /**
-         * render-success-state: Shows complete client details and documents
+         * render-success-state: Orchestrates the new component-based UI
          */
         function render_success_state() {
             if (!client_profile) return null;
 
-            // Calculate document completion statistics
             const total_required = required_docs.length;
-            // NEW: Counting only approved categories
             const completed_categories = required_docs.filter(
                 doc_type => approvals.has(doc_type.code)
             ).length;
@@ -1430,425 +1170,103 @@ export default function AdvisorClientDetailsPage() {
                 ? Math.round((completed_categories / total_required) * 100)
                 : 100;
 
-            // Get additional documents (not in required categories)
-            const additional_docs = documents.filter(
-                doc => !required_docs.some(type => type.code === doc.category)
-            );
-
             return (
                 <div className="space-y-6">
-                    {/* Back Button */}
+                    {/* Back button */}
                     <Button
                         variant="ghost"
                         onClick={() => router.push("/advisor/dashboard/clients")}
-                        className="mb-4"
+                        className="-ml-2 text-slate-500 hover:text-slate-900"
                     >
                         <ArrowLeft className="h-4 w-4 mr-2" />
                         Back to Clients
                     </Button>
 
-                    {/* NEW: Outstanding Actions Banner */}
+                    {/* Outstanding actions banner */}
                     {render_outstanding_banner(required_docs)}
 
-                    {/* Client Profile Header */}
-                    <Card>
-                        <CardHeader>
-                            <div className="flex items-start justify-between">
-                                <div>
-                                    <CardTitle className="text-2xl">{client_profile.client_name}</CardTitle>
-                                    <CardDescription className="mt-2 text-base">
-                                        {client_profile.company_name}
-                                    </CardDescription>
-                                </div>
+                    {/* ── Profile Header ────────────────────────────────── */}
+                    <ClientProfileHeader
+                        client_profile={client_profile}
+                        completion_percentage={completion_percentage}
+                        is_resending={is_resending}
+                        is_generating_magic_link={is_generating_magic_link}
+                        on_edit={() => set_is_edit_modal_open(true)}
+                        on_delete_vault={() => set_is_delete_vault_modal_open(true)}
+                        on_resend={handle_resend_credentials}
+                        on_copy_magic_link={handle_copy_magic_link}
+                        on_add_funding_app={() => set_is_manual_funding_modal_open(true)}
+                    />
 
-                                {/* Center-side actions: Edit Profile & Delete Vault */}
-                                <div className="flex-1 px-8 flex items-center gap-3">
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => set_is_edit_modal_open(true)}
-                                        className="border-blue-500 text-blue-600 hover:bg-blue-50"
-                                    >
-                                        <UserCog className="h-4 w-4 mr-2" />
-                                        Edit Profile
-                                    </Button>
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => set_is_delete_vault_modal_open(true)}
-                                        className="border-red-500 text-red-600 hover:bg-red-50"
-                                    >
-                                        <Trash2 className="h-4 w-4 mr-2" />
-                                        Delete Vault
-                                    </Button>
-                                </div>
+                    {/* ── Funding Pipeline ──────────────────────────────── */}
+                    <FundingPipelineCard
+                        current_pipeline_status={current_pipeline_status}
+                        pipeline_history={pipeline_history}
+                        on_status_change={(status) => handle_status_change(status, "Set by advisor")}
+                    />
 
-                                {/* Right-side actions: completion badge + resend button */}
-                                <div className="flex items-center gap-3 flex-shrink-0">
-                                    {/* Manual Funding Application Upload Button - Only if not completed */}
-                                    {!client_profile.contract_completed && (
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
-                                            onClick={() => set_is_manual_funding_modal_open(true)}
-                                            className="bg-emerald-50 border-emerald-500 text-emerald-600 hover:bg-emerald-100"
-                                        >
-                                            <FileSignature className="h-4 w-4 mr-2" />
-                                            Add Funding Application
-                                        </Button>
-                                    )}
-
-                                    {/* Credential Management Group */}
-                                    <div className="flex flex-col gap-2">
-                                        {/* Resend Login Credentials Button */}
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
-                                            onClick={handle_resend_credentials}
-                                            disabled={is_resending}
-                                            className="border-blue-500 text-blue-600 hover:bg-blue-50 disabled:opacity-60 w-full"
-                                        >
-                                            {is_resending ? (
-                                                <>
-                                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                                    Sending...
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <Send className="h-4 w-4 mr-2" />
-                                                    Resend Login Credentials
-                                                </>
-                                            )}
-                                        </Button>
-
-                                        {/* Copy Magic Link Button */}
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
-                                            onClick={handle_copy_magic_link}
-                                            disabled={is_generating_magic_link}
-                                            className="border-emerald-500 text-emerald-600 hover:bg-emerald-50 disabled:opacity-60 w-full"
-                                        >
-                                            {is_generating_magic_link ? (
-                                                <>
-                                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                                    Generating...
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <Link className="h-4 w-4 mr-2" />
-                                                    Copy Magic Link
-                                                </>
-                                            )}
-                                        </Button>
-                                    </div>
-
-                                    {/* Document Completion Badge */}
-                                    <Badge
-                                        variant="outline"
-                                        className={clsx(
-                                            "text-lg px-4 py-2 font-semibold border-2",
-                                            completion_percentage >= 100
-                                                ? "bg-emerald-100 text-emerald-800 border-emerald-300"
-                                                : completion_percentage >= 50
-                                                    ? "bg-yellow-100 text-yellow-800 border-yellow-300"
-                                                    : "bg-red-100 text-red-800 border-red-300"
-                                        )}
-                                    >
-                                        {completion_percentage}% Complete
-                                    </Badge>
-                                </div>
-                            </div>
-                        </CardHeader>
-
-                        <CardContent>
-                            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-                                {/* Contact Information */}
-                                <div className="space-y-3">
-                                    <h4 className="font-semibold text-gray-900 mb-3">Contact Information</h4>
-                                    <div className="flex items-center text-sm text-gray-600">
-                                        <Mail className="h-4 w-4 mr-2 text-gray-400" />
-                                        <span className="truncate">{client_profile.client_email}</span>
-                                    </div>
-                                    <div className="flex items-center text-sm text-gray-600">
-                                        <Phone className="h-4 w-4 mr-2 text-gray-400" />
-                                        <span>{client_profile.client_phone}</span>
-                                    </div>
-                                    <div className="flex items-center text-sm text-gray-600">
-                                        <Calendar className="h-4 w-4 mr-2 text-gray-400" />
-                                        <span>Created {format_date(client_profile.created_at)}</span>
-                                    </div>
-                                </div>
-
-                                {/* Business Information */}
-                                <div className="space-y-3">
-                                    <h4 className="font-semibold text-gray-900 mb-3">Business Information</h4>
-                                    <div className="flex items-center text-sm text-gray-600">
-                                        <Building2 className="h-4 w-4 mr-2 text-gray-400" />
-                                        <span>{client_profile.legal_entity_type}</span>
-                                    </div>
-                                    <div className="text-sm text-gray-600">
-                                        <span className="text-gray-500">Location:</span>{" "}
-                                        {client_profile.company_city}, {client_profile.company_state}
-                                    </div>
-                                    <div className="text-sm text-gray-600">
-                                        <span className="text-gray-500">Started:</span>{" "}
-                                        {format_date(client_profile.business_start_date)}
-                                    </div>
-                                </div>
-
-                                {/* Financial Information */}
-                                <div className="space-y-3">
-                                    <h4 className="font-semibold text-gray-900 mb-3">Financial Information</h4>
-                                    <div className="bg-emerald-50 rounded-lg p-3">
-                                        <p className="text-xs text-gray-600 mb-1">Capital Requested</p>
-                                        <p className="text-lg font-bold text-emerald-700">
-                                            {format_currency(client_profile.capital_requested)}
-                                        </p>
-                                    </div>
-                                    <div className="text-sm text-gray-600">
-                                        <span className="text-gray-500">Avg Monthly Revenue:</span>{" "}
-                                        {format_currency(client_profile.avg_monthly_deposits)}
-                                    </div>
-                                    <div className="text-sm text-gray-600">
-                                        <span className="text-gray-500">Credit Score:</span>{" "}
-                                        {client_profile.credit_score}
-                                    </div>
-                                </div>
-                            </div>
-                        </CardContent>
-                    </Card>
-
-                    {/* Funding Pipeline Visualization */}
-                    <Card className="border-emerald-100 bg-white">
-                        <CardHeader className="pb-2">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                    <RefreshCw className="h-5 w-5 text-emerald-600" />
-                                    <CardTitle className="text-lg">Funding Pipeline</CardTitle>
-                                </div>
-                                <div className="flex gap-2">
-                                    {/* Only show advance button for advisor-controlled stages */}
-                                    {(() => {
-                                        const currentIdx = PIPELINE_STEPS.findIndex((s: any) => s.status === current_pipeline_status);
-                                        // Advisor can advance from created -> onboarding -> docs_requested -> docs_received
-                                        const canAdvance = currentIdx >= 0 && currentIdx < 3; // up to docs_requested
-                                        const nextStep = canAdvance ? PIPELINE_STEPS[currentIdx + 1] : null;
-
-                                        if (!nextStep) return null;
-
-                                        return (
-                                            <Button
-                                                size="sm"
-                                                className="h-8 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-black uppercase tracking-widest text-[9px] shadow-lg shadow-emerald-500/20"
-                                                onClick={() => handle_status_change(nextStep.status as LoanStatus, `Advanced by advisor`)}
-                                            >
-                                                {`Mark ${nextStep.shortLabel} Completed`}
-                                            </Button>
-                                        );
-                                    })()}
-                                </div>
-                            </div>
-                            <CardDescription>
-                                Current progress of the client's funding application. Click any stage to move the pipeline (Underwriter/Advisor access).
-                            </CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                            <LoanPipelineFull
-                                currentStatus={current_pipeline_status}
-                                history={pipeline_history}
-                                onStatusChange={(status) => handle_status_change(status, `Directly set by advisor`)}
+                    {/* ── Docs + Communication 2-col grid ───────────────── */}
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        {/* Left: document accordion */}
+                        <div className="lg:col-span-2">
+                            <DocumentUploadStatus
+                                required_docs={required_docs}
+                                documents={documents}
+                                approvals={approvals}
+                                expanded_categories={expanded_categories}
+                                completion_percentage={completion_percentage}
+                                on_toggle_expand={toggle_category_expansion}
+                                on_request_docs={() => set_is_request_modal_open(true)}
+                                on_upload={(code, label) => {
+                                    set_upload_doc_code(code);
+                                    set_upload_doc_label(label);
+                                    set_upload_files([]);
+                                    set_is_upload_modal_open(true);
+                                }}
+                                on_approve={(doc) => {
+                                    set_category_to_approve(doc);
+                                    setIs_approving_modal_open(true);
+                                }}
+                                on_reject={(doc) => {
+                                    set_reject_doc_type(doc);
+                                    set_is_reject_modal_open(true);
+                                }}
+                                on_remove_request={(doc) => {
+                                    set_doc_to_remove_request(doc);
+                                    set_is_remove_request_modal_open(true);
+                                }}
+                                on_preview={(doc) => set_preview_modal({ isOpen: true, doc })}
+                                on_download={download_document}
+                                on_download_all={download_all_documents}
+                                on_delete_file={(doc) => {
+                                    set_file_to_delete(doc);
+                                    set_is_delete_file_modal_open(true);
+                                }}
+                                on_rename={(doc) => set_renaming_file({ id: doc.id, label: doc.custom_label || doc.name })}
                             />
-                        </CardContent>
-                    </Card>
+                        </div>
 
-                    {/* Internal Communication Section */}
-                    <Card className="border-amber-200 bg-amber-50/30">
-                        <CardHeader className="pb-3">
-                            <div className="flex items-center gap-2">
-                                <MessageSquare className="h-5 w-5 text-amber-600" />
-                                <CardTitle className="text-lg text-amber-900">Internal Communication</CardTitle>
-                            </div>
-                            <CardDescription className="text-amber-700/80">
-                                Shared notes between Advisor and Underwriting for this client.
-                            </CardDescription>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                            {/* Notes Feed */}
-                            <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
-                                {notes.length === 0 ? (
-                                    <div className="text-center py-8 bg-white/50 rounded-lg border border-dashed border-amber-200">
-                                        <p className="text-sm text-amber-600">No internal notes yet.</p>
-                                    </div>
-                                ) : (
-                                    notes.map((note) => (
-                                        <div key={note.id} className="bg-white p-3 rounded-lg border border-amber-100 shadow-sm">
-                                            <div className="flex justify-between items-start mb-1">
-                                                <span className="font-semibold text-sm text-gray-900 uppercase tracking-tight">
-                                                    {note.author_name} ({note.author_role})
-                                                </span>
-                                                <span className="text-[10px] text-gray-400">
-                                                    {format(new Date(note.created_at), "MMM d, h:mm a")}
-                                                </span>
-                                            </div>
-                                            <p className="text-sm text-gray-700 whitespace-pre-wrap">{note.content}</p>
-                                        </div>
-                                    ))
-                                )}
-                            </div>
+                        {/* Right: internal communication */}
+                        <div>
+                            <InternalCommunication
+                                notes={notes}
+                                new_note={new_standalone_note}
+                                is_adding={is_adding_note}
+                                on_note_change={set_new_standalone_note}
+                                on_add_note={handle_add_note}
+                            />
+                        </div>
+                    </div>
 
-                            {/* Add Note Input */}
-                            <div className="space-y-2 pt-2 border-t border-amber-100">
-                                <Textarea
-                                    placeholder="Add an internal note for underwriting..."
-                                    value={new_standalone_note}
-                                    onChange={(e) => set_new_standalone_note(e.target.value)}
-                                    className="bg-white border-amber-200 focus:ring-amber-500 min-h-[80px]"
-                                />
-                                <div className="flex justify-end">
-                                    <Button
-                                        onClick={handle_add_note}
-                                        disabled={is_adding_note || !new_standalone_note.trim()}
-                                        className="bg-amber-600 hover:bg-amber-700 text-white"
-                                        size="sm"
-                                    >
-                                        {is_adding_note ? "Adding..." : "Post Note"}
-                                    </Button>
-                                </div>
-                            </div>
-                        </CardContent>
-                    </Card>
-
-                    {/* Document Status Overview */}
-                    <Card>
-                        <CardHeader>
-                            <div className="flex items-center justify-between">
-                                <div>
-                                    <CardTitle>Document Upload Status</CardTitle>
-                                    <CardDescription>
-                                        {completed_categories} of {total_required} required document categories completed
-                                    </CardDescription>
-                                </div>
-
-                                {/* Request New Document Button */}
-                                <Button
-                                    onClick={() => set_is_request_modal_open(true)}
-                                    variant="outline"
-                                    className="border-emerald-600 text-emerald-600 hover:bg-emerald-50"
-                                >
-                                    <Plus className="h-4 w-4 mr-2" />
-                                    Request New Document
-                                </Button>
-                            </div>
-                        </CardHeader>
-                        <CardContent>
-                            {/* Progress Bar */}
-                            <div className="w-full bg-gray-200 rounded-full h-3 mb-6">
-                                <div
-                                    className={clsx(
-                                        "h-3 rounded-full transition-all",
-                                        completion_percentage >= 100 ? "bg-emerald-600" :
-                                            completion_percentage >= 50 ? "bg-yellow-500" :
-                                                "bg-red-500"
-                                    )}
-                                    style={{ width: `${Math.min(completion_percentage, 100)}%` }}
-                                />
-                            </div>
-
-                            {/* Required Documents */}
-                            <div className="space-y-4">
-                                <h4 className="font-semibold text-gray-900">Required Documents</h4>
-                                {required_docs.map(doc_type => render_document_category(doc_type))}
-                            </div>
-
-                            {/* Additional Documents */}
-                            {additional_docs.length > 0 && (
-                                <div className="space-y-4 mt-6">
-                                    <h4 className="font-semibold text-gray-900">Additional Documents</h4>
-                                    <div className="space-y-3">
-                                        {additional_docs.map(doc => render_document_card(doc))}
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* No Documents Message */}
-                            {documents.length === 0 && (
-                                <div className="text-center py-8 text-gray-600">
-                                    <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                                    <p>No documents uploaded yet</p>
-                                    <p className="text-sm text-gray-500 mt-2">
-                                        Client will receive instructions to upload required documents
-                                    </p>
-                                </div>
-                            )}
-                        </CardContent>
-                    </Card>
-
-                    {/* Submit to Underwriting Section */}
-                    <Card className={clsx(
-                        "border-2",
-                        submission_status === 'locked' && completion_percentage === 100
-                            ? "bg-emerald-50 border-emerald-300"
-                            : completion_percentage === 100
-                                ? "bg-blue-50 border-blue-200"
-                                : "bg-white border-slate-200 shadow-sm"
-                    )}>
-                        <CardContent className="pt-6">
-                            <div className="flex items-center justify-between">
-                                <div className="space-y-1">
-                                    <h3 className="font-semibold text-gray-900 text-lg flex items-center gap-2">
-                                        <ShieldCheck className={clsx(
-                                            "h-5 w-5",
-                                            submission_status === 'locked' && completion_percentage === 100 ? "text-emerald-600" : "text-slate-400"
-                                        )} />
-                                        Submit to Underwriting
-                                    </h3>
-                                    <p className="text-sm text-gray-600">
-                                        {submission_status === 'locked' && completion_percentage === 100
-                                            ? `Vault was submitted to underwriting${client_profile.data_vault_submitted_at ? ` on ${format_date(client_profile.data_vault_submitted_at)}` : ""}.`
-                                            : completion_percentage === 100
-                                                ? submission_status === 'submitted'
-                                                    ? "Client has submitted their vault. Please review and send to underwriting."
-                                                    : "All documents are ready! You can now submit this vault to the underwriting team."
-                                                : "Awaiting all required documents before submission to underwriting is available."
-                                        }
-                                    </p>
-                                </div>
-
-                                <div className="flex items-center gap-3">
-                                    {submission_status === 'locked' && completion_percentage === 100 ? (
-                                        <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300 border text-sm px-4 py-2">
-                                            <CheckCircle className="h-4 w-4 mr-2" />
-                                            Submitted
-                                        </Badge>
-                                    ) : (
-                                        <Button
-                                            onClick={() => set_is_submit_confirm_open(true)}
-                                            disabled={completion_percentage < 100 || is_submitting_vault}
-                                            className={clsx(
-                                                "min-w-[180px]",
-                                                completion_percentage === 100
-                                                    ? "bg-slate-800 hover:bg-slate-900 text-white shadow-lg"
-                                                    : "bg-gray-100 text-gray-400 border-gray-200"
-                                            )}
-                                        >
-                                            {is_submitting_vault ? (
-                                                <>
-                                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                                    Submitting...
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <ShieldCheck className="h-4 w-4 mr-2" />
-                                                    Submit to Underwriting
-                                                </>
-                                            )}
-                                        </Button>
-                                    )}
-                                </div>
-                            </div>
-                        </CardContent>
-                    </Card>
+                    {/* ── Submit to Underwriting CTA ────────────────────── */}
+                    <SubmitUnderwritingCTA
+                        client_name={client_profile.client_name}
+                        completion_percentage={completion_percentage}
+                        submission_status={submission_status}
+                        submitted_at={client_profile.data_vault_submitted_at}
+                        is_submitting={is_submitting_vault}
+                        on_submit={() => set_is_submit_confirm_open(true)}
+                    />
 
                     {/* Document Preview Modal */}
                     <DocumentPreviewModal
@@ -2423,17 +1841,6 @@ export default function AdvisorClientDetailsPage() {
         // ============================================
         return (
             <div>
-                {/* Page Header */}
-                <div className="mb-6">
-                    <h1 className="text-3xl font-bold tracking-tight text-gray-900">
-                        Client Details
-                    </h1>
-                    <p className="text-muted-foreground mt-2">
-                        View client profile and document submissions
-                    </p>
-                </div>
-
-                {/* State-Based Rendering */}
                 {(() => {
                     switch (component_state) {
                         case ComponentState.LOADING:

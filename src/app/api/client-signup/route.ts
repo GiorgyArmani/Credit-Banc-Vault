@@ -700,9 +700,17 @@ export async function POST(request: Request) {
 
 
     // Transitioning to a FULLY DYNAMIC vault.
-    // We insert "Standard" documents + any "Requested" documents via GHL tags.
+    
+    // For re-signups/re-onboarding: Clear existing dynamic document requirements 
+    // and reset submission status to ensure a clean slate.
+    await supabase_admin.from('client_dynamic_documents').delete().eq('user_id', user_id);
+    await supabase_admin.from('submissions').upsert({
+      user_id: user_id,
+      status: 'draft',
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'user_id' });
 
-    // Convert requested document labels to internal codes
+    // We insert "Standard" documents + any "Requested" documents via GHL tags.
     const LABEL_TO_CODE_MAP: Record<string, string> = {
       'Business Bank Statements': 'business_bank_statements',
       'Driver\'s License': 'drivers_license',

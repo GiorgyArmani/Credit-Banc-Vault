@@ -8,6 +8,8 @@ import { Toaster } from 'sonner'
 import { useProtectedRoute } from '@/hooks/use-protected-route'
 import { usePathname } from 'next/navigation'
 import { Menu } from 'lucide-react'
+import { NotificationBell } from '@/components/notifications/NotificationBell'
+import { GlobalSearch } from '@/components/layout/underwriting/global-search'
 
 export default function UnderwritingLayout({ children }: { children: React.ReactNode }) {
     useProtectedRoute()
@@ -47,7 +49,7 @@ export default function UnderwritingLayout({ children }: { children: React.React
 
             {/* Dynamic margin for sidebar */}
             <div className={clsx('flex min-h-screen flex-col', collapsed ? 'md:ml-20' : 'md:ml-72')}>
-                {/* Topbar (mobile only) */}
+                {/* Topbar (Mobile) */}
                 <header className="sticky top-0 z-30 bg-white border-b md:hidden">
                     <div className="h-14 px-3 flex items-center justify-between">
                         <button
@@ -58,7 +60,19 @@ export default function UnderwritingLayout({ children }: { children: React.React
                             <Menu className="h-6 w-6 text-slate-600" />
                         </button>
                         <div className="text-sm font-bold text-slate-900 uppercase tracking-widest">{currentTitle}</div>
-                        <div className="w-10" />
+                        <NotificationBell />
+                    </div>
+                </header>
+
+                {/* Topbar (Desktop) */}
+                <header className="hidden md:flex sticky top-0 z-30 w-full px-8 py-3 h-16 bg-slate-50 border-b border-slate-200 shadow-sm items-center justify-between transition-all">
+                    <div className="flex items-center gap-8 flex-1">
+                        <GlobalSearch />
+                    </div>
+                    <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full hover:bg-slate-200 transition-colors cursor-pointer">
+                            <NotificationBell />
+                        </div>
                     </div>
                 </header>
 

@@ -1,35 +1,30 @@
 // src/app/advisor/dashboard/clients/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-    Users,
-    Search,
-    FileText,
-    Calendar,
-    Mail,
-    Phone,
-    AlertCircle,
-    Loader2,
-    ChevronRight,
-    CheckCircle2,
-    Sparkles,
-    Building2,
-    DollarSign
-} from "lucide-react";
+import { Loader2, AlertCircle } from "lucide-react";
 import clsx from "clsx";
-import { getBulkLatestStatus, type LoanStatus } from "@/app/actions/pipeline";
+import { getBulkLatestStatus, updateLoanStatus, type LoanStatus } from "@/app/actions/pipeline";
+import { getBulkClientActivity } from "@/app/actions/advisor";
 import { LoanPipelineBadge } from "@/components/loan-pipeline-status";
+import { differenceInDays } from "date-fns";
+
+function format_currency(amount: number): string {
+    return new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: "USD",
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
+    }).format(amount);
+}
 
 /**
  * ============================================================================
- * ADVISOR CLIENTS LIST PAGE
+ * ADVISOR CLIENTS LIST PAGE - REVAMPED TWO-COLUMN LAYOUT
  * ============================================================================
  */
 
@@ -52,6 +47,8 @@ interface ClientInfo {
     document_count: number;
     total_required_docs: number;
     pipeline_status?: LoanStatus;
+    last_activity_at?: string;
+    inactivity_days?: number;
 }
 
 export default function AdvisorClientsListPage() {
@@ -62,28 +59,54 @@ export default function AdvisorClientsListPage() {
         ComponentState.LOADING
     );
     const [clients, set_clients] = useState<ClientInfo[]>([]);
-    const [filtered_clients, set_filtered_clients] = useState<ClientInfo[]>([]);
     const [search_query, set_search_query] = useState<string>("");
     const [error_message, set_error_message] = useState<string>("");
-    const [advisor_name, set_advisor_name] = useState<string>("");
+    const [active_tab, set_active_tab] = useState<"active" | "finalized">("active");
 
     useEffect(() => {
         fetch_advisor_clients();
+
+        // Listen for search updates from the global header
+        const handleSearch = () => {
+            const params = new URLSearchParams(window.location.search);
+            set_search_query(params.get('q') || "");
+        };
+        handleSearch(); // Initial sync
+        window.addEventListener('search_updated', handleSearch);
+        return () => window.removeEventListener('search_updated', handleSearch);
     }, []);
 
-    useEffect(() => {
-        if (search_query.trim() === "") {
-            set_filtered_clients(clients);
-        } else {
-            const query_lower = search_query.toLowerCase();
-            const filtered = clients.filter(client =>
-                client.client_name.toLowerCase().includes(query_lower) ||
-                client.client_email.toLowerCase().includes(query_lower) ||
-                client.company_name.toLowerCase().includes(query_lower)
-            );
-            set_filtered_clients(filtered);
-        }
+    const filtered_clients = useMemo(() => {
+        if (search_query.trim() === "") return clients;
+        const query_lower = search_query.toLowerCase();
+        return clients.filter(client =>
+            client.client_name.toLowerCase().includes(query_lower) ||
+            client.client_email.toLowerCase().includes(query_lower) ||
+            client.company_name.toLowerCase().includes(query_lower)
+        );
     }, [search_query, clients]);
+    
+    // Categorization logic based on new rules
+    const active_pending_clients = useMemo(() => 
+        filtered_clients.filter(c => 
+            ["created", "onboarding", "documents_requested", "documents_received", "lender_matched"].includes(c.pipeline_status || "created") &&
+            (c.inactivity_days || 0) < 14 &&
+            c.pipeline_status !== "under_review"
+        ), [filtered_clients]);
+
+    const under_review_clients = useMemo(() => 
+        filtered_clients.filter(c => c.pipeline_status === "under_review"), [filtered_clients]);
+
+    const inactive_clients = useMemo(() => 
+        filtered_clients.filter(c => 
+            !["funded", "declined", "under_review"].includes(c.pipeline_status || "") &&
+            (c.inactivity_days || 0) >= 14
+        ), [filtered_clients]);
+
+    const finalized_clients = useMemo(() => 
+        filtered_clients.filter(c => 
+            ["funded", "declined"].includes(c.pipeline_status || "")
+        ), [filtered_clients]);
 
     async function fetch_advisor_clients() {
         try {
@@ -98,50 +121,21 @@ export default function AdvisorClientsListPage() {
 
             const { data: user_data, error: user_error } = await supabase
                 .from("users")
-                .select("id, first_name, last_name, role, email")
+                .select("id, role, email")
                 .eq("id", user.id)
                 .maybeSingle();
 
-            if (user_error || !user_data) {
-                set_error_message("Could not verify advisor status.");
-                set_component_state(ComponentState.ERROR);
-                return;
-            }
-
-            if (user_data.role !== "advisor") {
+            if (user_error || !user_data || user_data.role !== "advisor") {
                 set_error_message("Access denied. You must be an advisor to view this page.");
                 set_component_state(ComponentState.ERROR);
                 return;
             }
 
-            const full_name = `${user_data.first_name} ${user_data.last_name}`;
-            set_advisor_name(full_name);
-
-            let advisor_query = supabase
+            const { data: advisor_data, error: advisor_error } = await supabase
                 .from("advisors")
-                .select("id, first_name, last_name, email")
+                .select("id")
                 .eq("user_id", user.id)
                 .maybeSingle();
-
-            let { data: advisor_data, error: advisor_error } = await advisor_query;
-
-            if (!advisor_data && !advisor_error) {
-                const email_query = await supabase
-                    .from("advisors")
-                    .select("id, first_name, last_name, email")
-                    .eq("email", user_data.email)
-                    .maybeSingle();
-
-                advisor_data = email_query.data;
-                advisor_error = email_query.error;
-
-                if (advisor_data) {
-                    await supabase
-                        .from("advisors")
-                        .update({ user_id: user.id })
-                        .eq("id", advisor_data.id);
-                }
-            }
 
             if (advisor_error || !advisor_data) {
                 set_error_message("Could not load advisor profile.");
@@ -166,34 +160,20 @@ export default function AdvisorClientsListPage() {
                 return;
             }
 
-            // 1. Fetch Core Requirements Count once
-            const { data: coreDocs } = await supabase
-                .from("required_documents")
-                .select("code")
-                .eq("is_core", true);
-
+            const { data: coreDocs } = await supabase.from("required_documents").select("code").eq("is_core", true);
             const coreCodes = coreDocs?.map(d => d.code) || [];
 
-            // 2. Map through clients to get individual counts
             const clients_with_doc_counts = await Promise.all(
                 clients_data.map(async (client) => {
-                    // Fetch Dynamic Requirements for this specific client
                     const { data: dynamicDocs } = await supabase
                         .from("client_dynamic_documents")
-                        .select(`
-                            required_documents (
-                                code
-                            )
-                        `)
+                        .select(`required_documents (code)`)
                         .eq("user_id", client.user_id)
                         .eq("is_active", true);
 
-                    const dynamicCodes = dynamicDocs?.map((d: any) => d.required_documents?.code).filter(Boolean) || [];
-
-                    // Combine into set of unique required codes
+                    const dynamicCodes = (dynamicDocs as any)?.map((d: any) => d.required_documents?.code).filter(Boolean) || [];
                     const allRequiredCodes = new Set([...coreCodes, ...dynamicCodes]);
 
-                    // Fetch Uploaded Documents for this specific client
                     const { data: uploadedDocs } = await supabase
                         .from("user_documents")
                         .select("category, doc_code")
@@ -204,7 +184,6 @@ export default function AdvisorClientsListPage() {
                         ...(uploadedDocs?.map(d => d.doc_code).filter(Boolean) || [])
                     ]);
 
-                    // Calculate satisfied requirements
                     const satisfied = Array.from(allRequiredCodes).filter(code => uploadedCodes.has(code)).length;
 
                     return {
@@ -215,17 +194,44 @@ export default function AdvisorClientsListPage() {
                 })
             ) as ClientInfo[];
 
-            // 3. Bulk-fetch pipeline statuses
             const vaultIds = clients_data.map(c => c.id);
             if (vaultIds.length > 0) {
+                // Fetch latest status
                 const pipelineMap = await getBulkLatestStatus(vaultIds);
-                clients_with_doc_counts.forEach(client => {
-                    client.pipeline_status = pipelineMap.get(client.id) ?? "created";
-                });
-            }
+                
+                // Fetch activity timestamps
+                const activityMap = await getBulkClientActivity(vaultIds);
 
-            set_clients(clients_with_doc_counts);
-            set_filtered_clients(clients_with_doc_counts);
+                const now = new Date();
+                const updated_clients = [...clients_with_doc_counts];
+
+                for (const client of updated_clients) {
+                    client.pipeline_status = pipelineMap.get(client.id) ?? "created";
+                    const lastActivity = activityMap.get(client.id) || client.created_at;
+                    client.last_activity_at = lastActivity;
+                    
+                    const activityDate = new Date(lastActivity);
+                    const daysInactive = differenceInDays(now, activityDate);
+                    client.inactivity_days = daysInactive;
+
+                    // AUTO-DECLINE LOGIC (> 30 days, not exempt)
+                    const isExempt = ["funded", "under_review"].includes(client.pipeline_status);
+                    if (daysInactive >= 30 && !isExempt && client.pipeline_status !== "declined") {
+                        console.log(`[Auto-Decline] Client ${client.client_name} (${client.id}) is ${daysInactive} days inactive. Moving to declined.`);
+                        await updateLoanStatus(
+                            client.id, 
+                            "declined", 
+                            `System: Auto-declined due to ${daysInactive} days of inactivity.`
+                        );
+                        client.pipeline_status = "declined";
+                    }
+                }
+
+                set_clients(updated_clients);
+            } else {
+                set_clients(clients_with_doc_counts);
+            }
+            
             set_component_state(ComponentState.SUCCESS);
 
         } catch (err: any) {
@@ -236,293 +242,343 @@ export default function AdvisorClientsListPage() {
 
     function format_date(iso_string: string): string {
         const date = new Date(iso_string);
-        return date.toLocaleDateString("en-US", {
-            month: "short",
-            day: "numeric",
-            year: "numeric"
-        });
+        return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
     }
 
-    function format_currency(amount: number): string {
-        return new Intl.NumberFormat("en-US", {
-            style: "currency",
-            currency: "USD",
-            minimumFractionDigits: 0,
-            maximumFractionDigits: 0,
-        }).format(amount);
-    }
-
-    function render_loading_state() {
+    if (component_state === ComponentState.LOADING) {
         return (
             <div className="flex flex-col items-center justify-center min-h-[400px]">
-                <div className="w-20 h-20 bg-emerald-50 rounded-[2.5rem] flex items-center justify-center mb-6 border border-emerald-100 shadow-inner">
-                    <Loader2 className="h-10 w-10 text-emerald-500 animate-spin" />
-                </div>
-                <p className="text-emerald-950/40 font-bold">Loading your clients...</p>
+                <span className="material-symbols-outlined text-5xl text-emerald-500 animate-spin mb-4">progress_activity</span>
+                <p className="text-slate-400 font-manrope font-bold">Assembling your portfolio...</p>
             </div>
         );
     }
 
-    function render_error_state() {
+    if (component_state === ComponentState.ERROR) {
         return (
             <div className="flex flex-col items-center justify-center min-h-[400px]">
-                <div className="bg-white border border-red-50 rounded-[2.5rem] p-10 text-center shadow-2xl">
-                    <div className="mx-auto w-16 h-16 bg-red-50 rounded-2xl flex items-center justify-center mb-6 border border-red-100">
-                        <AlertCircle className="h-8 w-8 text-red-500" />
-                    </div>
-                    <h3 className="text-2xl font-black text-emerald-950 uppercase tracking-tighter mb-2">
-                        Error Loading Clients
-                    </h3>
-                    <p className="text-emerald-950/40 font-bold mb-6 max-w-xs">{error_message}</p>
-                    <Button
-                        onClick={fetch_advisor_clients}
-                        className="h-12 px-8 bg-emerald-500 hover:bg-emerald-600 text-white font-black rounded-xl shadow-lg shadow-emerald-500/20"
-                    >
-                        Try Again
-                    </Button>
-                </div>
+                <span className="material-symbols-outlined text-5xl text-red-500 mb-4">error</span>
+                <h3 className="text-xl font-bold mb-2">Error Loading Clients</h3>
+                <p className="text-slate-400 mb-6">{error_message}</p>
+                <Button onClick={fetch_advisor_clients}>Try Again</Button>
             </div>
         );
     }
 
-    function render_no_clients_state() {
+    if (component_state === ComponentState.NO_CLIENTS) {
         return (
             <div className="flex flex-col items-center justify-center min-h-[400px]">
-                <div className="bg-white border border-emerald-50 rounded-[3rem] p-12 text-center shadow-2xl relative overflow-hidden">
-                    <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50 rounded-full blur-3xl -mr-16 -mt-16" />
-                    <div className="mx-auto w-20 h-20 bg-emerald-50 rounded-[2rem] flex items-center justify-center mb-6 border border-emerald-100 shadow-inner">
-                        <Users className="h-10 w-10 text-emerald-500" />
-                    </div>
-                    <h3 className="text-3xl font-black text-emerald-950 uppercase tracking-tighter mb-3">
-                        No Clients Yet
-                    </h3>
-                    <p className="text-emerald-950/40 font-bold mb-8 max-w-sm">
-                        You haven't created any client accounts yet. Start by creating your first client.
-                    </p>
-                    <Button
-                        onClick={() => router.push("/advisor/dashboard/clients/new")}
-                        className="h-14 px-10 bg-emerald-500 hover:bg-emerald-600 text-white font-black rounded-2xl shadow-xl shadow-emerald-500/20 transition-all active:scale-95"
-                    >
-                        <FileText className="h-5 w-5 mr-3" />
-                        Create First Client
-                    </Button>
-                </div>
+                <h3 className="text-2xl font-black mb-4 uppercase tracking-tighter">No Clients Found</h3>
+                <Button onClick={() => router.push("/advisor/dashboard/clients/new")}>Create Your First Client</Button>
             </div>
-        );
-    }
-
-    function render_client_card(client: ClientInfo) {
-        const completion_percentage = Math.round((client.document_count / client.total_required_docs) * 100);
-
-        return (
-            <Card
-                key={client.id}
-                className="group relative bg-white rounded-[2.5rem] border-emerald-50 shadow-sm hover:shadow-2xl transition-all duration-500 cursor-pointer overflow-hidden border"
-                onClick={() => router.push(`/advisor/dashboard/clients/${client.id}`)}
-            >
-                <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-50 rounded-full blur-3xl -mr-12 -mt-12 group-hover:bg-emerald-100 transition-colors" />
-
-                <CardHeader className="p-8 pb-4 relative z-10">
-                    <div className="flex items-start justify-between">
-                        <div className="space-y-1">
-                            <CardTitle className="text-xl font-black text-emerald-950 uppercase tracking-tighter group-hover:text-emerald-500 transition-colors">
-                                {client.client_name}
-                            </CardTitle>
-                            <CardDescription className="text-sm font-bold text-emerald-900/40 flex items-center gap-2">
-                                <Building2 className="w-3.5 h-3.5" />
-                                {client.company_name}
-                            </CardDescription>
-                        </div>
-                    </div>
-                </CardHeader>
-
-                <CardContent className="p-8 pt-4 space-y-6 relative z-10">
-                    <div className="space-y-3">
-                        <div className="flex items-center text-sm font-bold text-emerald-900/60">
-                            <div className="w-8 h-8 rounded-lg bg-emerald-50 flex items-center justify-center mr-3">
-                                <Mail className="h-4 w-4 text-emerald-500" />
-                            </div>
-                            <a 
-                                href={`mailto:${client.client_email}`}
-                                onClick={(e) => e.stopPropagation()}
-                                className="truncate hover:text-emerald-500 transition-colors underline-offset-4 hover:underline decoration-emerald-500/30"
-                            >
-                                {client.client_email}
-                            </a>
-                        </div>
-                        {client.client_phone && (
-                            <div className="flex items-center text-sm font-bold text-emerald-900/60">
-                                <div className="w-8 h-8 rounded-lg bg-emerald-50 flex items-center justify-center mr-3">
-                                    <Phone className="h-4 w-4 text-emerald-500" />
-                                </div>
-                                <a 
-                                    href={`tel:${client.client_phone}`}
-                                    onClick={(e) => e.stopPropagation()}
-                                    className="truncate hover:text-emerald-500 transition-colors underline-offset-4 hover:underline decoration-emerald-500/30"
-                                >
-                                    {client.client_phone}
-                                </a>
-                            </div>
-                        )}
-                        <div className="flex items-center text-sm font-bold text-emerald-900/60">
-                            <div className="w-8 h-8 rounded-lg bg-emerald-50 flex items-center justify-center mr-3">
-                                <Calendar className="h-4 w-4 text-emerald-500" />
-                            </div>
-                            <span>Created {format_date(client.created_at)}</span>
-                        </div>
-                    </div>
-
-                    <div className="bg-emerald-50/50 rounded-2xl p-5 border border-emerald-50 group-hover:bg-emerald-50 transition-colors">
-                        <p className="text-[10px] font-black uppercase tracking-widest text-emerald-900/30 mb-1">Capital Requested</p>
-                        <div className="flex items-center gap-2">
-                            <DollarSign className="w-5 h-5 text-emerald-500" />
-                            <p className="text-2xl font-black text-emerald-950">
-                                {format_currency(client.capital_requested)}
-                            </p>
-                        </div>
-                    </div>
-
-                    <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                            <span className="text-[10px] font-black uppercase tracking-[0.15em] text-emerald-900/40">
-                                Document Status
-                            </span>
-                            <span className={clsx(
-                                "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border",
-                                completion_percentage >= 100 ? "bg-emerald-100 text-emerald-600 border-emerald-200" :
-                                    completion_percentage >= 50 ? "bg-yellow-50 text-yellow-600 border-yellow-200" :
-                                        "bg-red-50 text-red-600 border-red-100"
-                            )}>
-                                {client.document_count}/{client.total_required_docs}
-                            </span>
-                        </div>
-
-                        <div className="w-full bg-emerald-50/50 rounded-full h-2.5 overflow-hidden border border-emerald-50">
-                            <div
-                                className={clsx(
-                                    "h-full rounded-full transition-all duration-1000",
-                                    completion_percentage >= 100 ? "bg-emerald-500" :
-                                        completion_percentage >= 50 ? "bg-yellow-500" :
-                                            "bg-red-500"
-                                )}
-                                style={{ width: `${Math.min(completion_percentage, 100)}%` }}
-                            />
-                        </div>
-
-                        <p className="text-[10px] font-black text-emerald-900/30 uppercase tracking-widest text-right">
-                            {completion_percentage}% complete
-                        </p>
-                    </div>
-
-                    {client.pipeline_status && (
-                        <div className="flex justify-center -mb-2">
-                            <LoanPipelineBadge currentStatus={client.pipeline_status} />
-                        </div>
-                    )}
-
-                    <Button
-                        variant="ghost"
-                        className="w-full h-12 rounded-xl group-hover:bg-emerald-500 group-hover:text-white font-black uppercase tracking-widest text-[10px] transition-all border border-emerald-100"
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            router.push(`/advisor/dashboard/clients/${client.id}`);
-                        }}
-                    >
-                        View Documents
-                    </Button>
-                </CardContent>
-            </Card>
         );
     }
 
     return (
-        <div className="min-h-screen bg-[#f0fdf7] relative overflow-hidden -m-4 md:-m-8 p-4 md:p-8">
-            {/* aurora-glow effect for consistency */}
-            <div className="absolute inset-0 bg-gradient-to-br from-emerald-100/30 via-white/80 to-white pointer-events-none" />
-            <div className="absolute top-0 right-0 w-[50%] h-[50%] bg-emerald-200/10 blur-[120px] rounded-full pointer-events-none animate-aurora" />
-            <div className="absolute bottom-0 left-0 w-[40%] h-[40%] bg-blue-100/5 blur-[120px] rounded-full pointer-events-none animate-aurora" style={{ animationDelay: '-3s' }} />
-
-            <div className="relative z-10 space-y-8 max-w-7xl mx-auto">
-                {/* Page Header */}
-                <div className="bg-white border border-emerald-50 rounded-[2.5rem] p-10 md:p-14 text-emerald-950 shadow-2xl overflow-hidden relative">
-                    <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50 rounded-full blur-3xl -mr-10 -mt-10" />
-                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-10">
-                        <div className="space-y-4">
-                            <div className="flex items-center gap-4">
-                                <Users className="w-10 h-10 text-emerald-500" />
-                                <h1 className="text-4xl md:text-5xl font-black uppercase tracking-tighter">Your Clients</h1>
-                            </div>
-                            <p className="text-emerald-900/60 text-xl font-bold max-w-2xl">
-                                {advisor_name && `Welcome back, ${advisor_name}! `}
-                                Manage and track your clients' document submissions in real-time.
-                            </p>
-                        </div>
-                        <Button
-                            onClick={() => router.push("/advisor/dashboard/clients/new")}
-                            className="h-16 px-10 bg-emerald-500 hover:bg-emerald-600 text-white font-black rounded-2xl shadow-xl shadow-emerald-500/20 transition-all active:scale-95 text-lg group"
-                        >
-                            <FileText className="mr-3 w-6 h-6 group-hover:rotate-12 transition-transform" />
-                            New Client
-                        </Button>
-                    </div>
+        <section className="p-0 md:p-8 space-y-8 animate-in fade-in duration-500 font-manrope">
+            {/* Header Section */}
+            <div className="flex justify-between items-end">
+                <div>
+                    <h1 className="font-headline text-3xl font-extrabold tracking-tight text-on-surface">Client Portfolio</h1>
+                    <p className="text-on-surface-variant font-medium mt-1">
+                        Managing {clients.length} accounts. 
+                        {inactive_clients.length > 0 && <span className="text-tertiary-fixed-dim ml-2 font-bold">{inactive_clients.length} inactive items at bottom.</span>}
+                    </p>
                 </div>
-
-                {/* Search Bar */}
-                {component_state === ComponentState.SUCCESS && (
-                    <div className="relative z-10 mt-[-2rem] px-10">
-                        <div className="bg-white/80 backdrop-blur-xl border border-emerald-50 rounded-2xl shadow-xl p-2 max-w-2xl mx-auto">
-                            <div className="relative">
-                                <Search className="absolute left-5 top-1/2 transform -translate-y-1/2 h-5 w-5 text-emerald-500/40" />
-                                <Input
-                                    type="text"
-                                    placeholder="Search by client name, email, or company..."
-                                    value={search_query}
-                                    onChange={(e) => set_search_query(e.target.value)}
-                                    className="h-14 pl-14 pr-6 rounded-xl border-none bg-transparent focus-visible:ring-emerald-500/20 font-bold text-emerald-950 placeholder:text-emerald-950/20 text-lg"
-                                />
-                            </div>
-                        </div>
+                <div className="flex items-center gap-4">
+                    {/* Tab Switcher */}
+                    <div className="bg-surface-container-low p-1 rounded-xl border border-outline-variant/30 flex shadow-inner">
+                        <button 
+                            onClick={() => set_active_tab("active")}
+                            className={clsx(
+                                "px-4 py-2 rounded-lg text-xs font-bold transition-all",
+                                active_tab === "active" ? "bg-white text-primary shadow-sm" : "text-outline hover:text-on-surface"
+                            )}
+                        >
+                            Active Pipeline
+                        </button>
+                        <button 
+                            onClick={() => set_active_tab("finalized")}
+                            className={clsx(
+                                "px-4 py-2 rounded-lg text-xs font-bold transition-all",
+                                active_tab === "finalized" ? "bg-white text-primary shadow-sm" : "text-outline hover:text-on-surface"
+                            )}
+                        >
+                            Finalized (Archive)
+                        </button>
                     </div>
-                )}
 
-                {/* Main Content Area */}
-                <div className="relative z-10 px-2 min-h-[400px]">
-                    {(() => {
-                        switch (component_state) {
-                            case ComponentState.LOADING:
-                                return render_loading_state();
-                            case ComponentState.ERROR:
-                                return render_error_state();
-                            case ComponentState.NO_CLIENTS:
-                                return render_no_clients_state();
-                            case ComponentState.SUCCESS:
-                                return (
-                                    <div className="space-y-8">
-                                        <div className="flex items-center justify-between px-2">
-                                            <p className="text-sm font-black uppercase tracking-[0.2em] text-emerald-900/30">
-                                                Results: {filtered_clients.length} of {clients.length} clients
-                                            </p>
-                                        </div>
-
-                                        {filtered_clients.length === 0 ? (
-                                            <div className="bg-white/50 backdrop-blur-sm border border-emerald-50 rounded-[2.5rem] py-20 text-center">
-                                                <Search className="h-16 w-16 text-emerald-200 mx-auto mb-6" />
-                                                <h3 className="text-2xl font-black text-emerald-950 uppercase tracking-tighter mb-2">No matches found</h3>
-                                                <p className="text-emerald-950/40 font-bold">Try adjusting your search terms</p>
-                                            </div>
-                                        ) : (
-                                            <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-3">
-                                                {filtered_clients.map(client => render_client_card(client))}
-                                            </div>
-                                        )}
-                                    </div>
-                                );
-                            default:
-                                return null;
-                        }
-                    })()}
+                    <Button 
+                        onClick={() => router.push("/advisor/dashboard/clients/new")}
+                        className="bg-primary text-white px-6 py-6 rounded-xl font-bold flex items-center gap-2 hover:opacity-90 active:scale-95 transition-all shadow-lg shadow-primary/20"
+                    >
+                        <span className="material-symbols-outlined">person_add</span>
+                        New Client
+                    </Button>
                 </div>
             </div>
-        </div>
+
+            {active_tab === "active" ? (
+                <div className="space-y-12">
+                    {/* Content Grid: Two Column Layout for Active Deals */}
+                    <div className="grid grid-cols-12 gap-8">
+                        
+                        {/* Left Column: Action Required */}
+                        <div className="col-span-12 lg:col-span-7 space-y-6">
+                            <div className="flex items-center justify-between">
+                                <h3 className="font-headline text-lg font-bold flex items-center gap-2 text-on-surface">
+                                    <span className="material-symbols-outlined text-tertiary-fixed-dim" style={{ fontVariationSettings: "'FILL' 1" }}>warning</span>
+                                    Pending & Action Required
+                                </h3>
+                                {active_pending_clients.length > 0 && (
+                                    <div className="h-6 w-6 rounded-full bg-error-container text-on-error-container flex items-center justify-center text-[10px] font-bold">
+                                        {active_pending_clients.length}
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="space-y-4">
+                                {active_pending_clients.length === 0 ? (
+                                    <div className="p-12 text-center bg-surface-container-low rounded-xl border border-dashed border-outline-variant">
+                                        <p className="text-outline text-sm font-medium">All clear! No pending actions.</p>
+                                    </div>
+                                ) : (
+                                    active_pending_clients.map(client => (
+                                        <div 
+                                            key={client.id}
+                                            onClick={() => router.push(`/advisor/dashboard/clients/${client.id}`)}
+                                            className="bg-surface-container-low p-6 rounded-xl border border-outline-variant/30 relative overflow-hidden group cursor-pointer hover:shadow-lg transition-all"
+                                        >
+                                            <div className="absolute top-0 right-0 h-full w-1 bg-tertiary-fixed-dim"></div>
+                                            <div className="flex justify-between items-start">
+                                                <div className="flex-1">
+                                                    <div className="flex items-center gap-2 mb-2">
+                                                        <span className="text-[10px] font-bold uppercase tracking-widest text-on-tertiary-fixed-variant bg-tertiary-fixed px-2 py-0.5 rounded">
+                                                            {client.document_count === client.total_required_docs ? "Ready for Review" : "Incomplete Docs"}
+                                                        </span>
+                                                        <div className="text-[10px] font-bold text-error uppercase tracking-tighter animate-pulse">Action Required</div>
+                                                    </div>
+                                                    
+                                                    <h4 className="font-bold text-on-surface">{client.client_name}</h4>
+                                                    <p className="text-xs text-on-surface-variant mt-1">{client.company_name}</p>
+
+                                                    <div className="mt-4 grid grid-cols-2 gap-4">
+                                                        <div className="space-y-2">
+                                                            <p className="text-[10px] font-black uppercase tracking-widest text-outline">Contact</p>
+                                                            <div className="space-y-1">
+                                                                <a href={`mailto:${client.client_email}`} onClick={(e) => e.stopPropagation()} className="text-[11px] font-bold text-on-surface hover:text-primary flex items-center gap-2 truncate">
+                                                                    <span className="material-symbols-outlined text-xs">mail</span>
+                                                                    {client.client_email}
+                                                                </a>
+                                                                <a href={`tel:${client.client_phone}`} onClick={(e) => e.stopPropagation()} className="text-[11px] font-bold text-on-surface hover:text-primary flex items-center gap-2">
+                                                                    <span className="material-symbols-outlined text-xs">phone</span>
+                                                                    {client.client_phone}
+                                                                </a>
+                                                            </div>
+                                                        </div>
+                                                        <div className="space-y-2">
+                                                            <p className="text-[10px] font-black uppercase tracking-widest text-outline">Requested</p>
+                                                            <p className="text-lg font-black text-on-surface">{format_currency(client.capital_requested)}</p>
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    {client.pipeline_status && (
+                                                        <div className="mt-4 pt-4 border-t border-outline-variant/30">
+                                                            <LoanPipelineBadge currentStatus={client.pipeline_status} className="scale-90 origin-left" />
+                                                        </div>
+                                                    )}
+
+                                                    <div className="mt-4 space-y-2">
+                                                        <div className="flex justify-between items-center">
+                                                            <span className="text-[10px] font-black uppercase tracking-widest text-outline">Documents</span>
+                                                            <span className="text-[10px] font-bold text-outline">
+                                                                {client.document_count}/{client.total_required_docs}
+                                                            </span>
+                                                        </div>
+                                                        <div className="w-full bg-surface-container-highest rounded-full h-1.5 overflow-hidden">
+                                                            <div 
+                                                                className="h-full bg-primary transition-all duration-1000"
+                                                                style={{ width: `${(client.document_count / (client.total_required_docs || 1)) * 100}%` }}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div className="ml-4 flex flex-col items-center">
+                                                    <span className="material-symbols-outlined text-tertiary-fixed-dim opacity-50 group-hover:opacity-100 transition-opacity">pending_actions</span>
+                                                    <span className="material-symbols-outlined text-outline group-hover:text-primary transition-all mt-auto">chevron_right</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Right Column: Under Review */}
+                        <div className="col-span-12 lg:col-span-5 space-y-6">
+                            <div className="flex items-center justify-between">
+                                <h3 className="font-headline text-lg font-bold flex items-center gap-2 text-on-primary-fixed-variant">
+                                    <span className="material-symbols-outlined text-primary" style={{ fontVariationSettings: "'FILL' 1" }}>supervised_user_circle</span>
+                                    In Underwriting (UW)
+                                </h3>
+                            </div>
+
+                            <div className="space-y-4">
+                                {under_review_clients.length === 0 ? (
+                                    <div className="p-12 text-center bg-surface-container-low rounded-xl border border-dashed border-outline-variant">
+                                        <p className="text-outline text-sm font-medium">No deals currently in UW review.</p>
+                                    </div>
+                                ) : (
+                                    under_review_clients.map(client => (
+                                        <div 
+                                            key={client.id}
+                                            onClick={() => router.push(`/advisor/dashboard/clients/${client.id}`)}
+                                            className="bg-surface-container-lowest p-6 rounded-xl shadow-sm border-l-4 border-primary group hover:shadow-md transition-all cursor-pointer"
+                                        >
+                                            <div className="flex justify-between items-start">
+                                                <div className="flex gap-4">
+                                                    <div className="h-10 w-10 rounded-lg bg-primary/5 flex items-center justify-center text-primary">
+                                                        <span className="material-symbols-outlined">analytics</span>
+                                                    </div>
+                                                    <div>
+                                                        <h4 className="font-bold text-on-surface group-hover:text-primary transition-colors">{client.client_name}</h4>
+                                                        <p className="text-xs text-on-surface-variant">{client.company_name}</p>
+                                                        
+                                                        <div className="mt-3 flex items-center gap-2">
+                                                            <div className="bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border border-emerald-100">
+                                                                Under Review
+                                                            </div>
+                                                            <div className="text-[11px] font-bold text-outline">
+                                                                {format_currency(client.capital_requested)}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <span className="material-symbols-outlined text-outline group-hover:text-primary transition-colors">chevron_right</span>
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Full Width Bottom: Inactive Deals */}
+                    <div className="pt-8 border-t border-outline-variant/30">
+                        <div className="bg-surface-container-low rounded-3xl p-8 border border-outline-variant/20 shadow-sm relative overflow-hidden">
+                            {/* Visual background element */}
+                            <div className="absolute -top-24 -right-24 w-64 h-64 bg-tertiary-fixed/5 rounded-full blur-3xl" />
+                            
+                            <div className="flex items-center justify-between mb-8 relative z-10">
+                                <div>
+                                    <h3 className="font-headline text-xl font-black flex items-center gap-3 text-on-surface">
+                                        <div className="w-10 h-10 rounded-2xl bg-tertiary-fixed flex items-center justify-center shadow-lg shadow-tertiary-fixed/20 text-on-tertiary-fixed">
+                                            <span className="material-symbols-outlined">timer_off</span>
+                                        </div>
+                                        Inactive Deals (To Take Action)
+                                    </h3>
+                                    <p className="text-on-surface-variant font-medium mt-1 text-sm">These deals haven't shown activity for over 14 days and may need a follow-up.</p>
+                                </div>
+                                {inactive_clients.length > 0 && (
+                                    <Badge className="bg-tertiary-fixed text-on-tertiary-fixed font-black uppercase tracking-widest px-4 py-1.5 rounded-full">
+                                        {inactive_clients.length} Items Pending
+                                    </Badge>
+                                )}
+                            </div>
+
+                            {inactive_clients.length === 0 ? (
+                                <div className="p-16 text-center bg-white/50 rounded-2xl border-2 border-dashed border-outline-variant/50">
+                                    <span className="material-symbols-outlined text-outline/30 text-5xl mb-4">check_circle</span>
+                                    <p className="text-outline font-bold">No inactive deals found. Everyone is moving!</p>
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                    {inactive_clients.map(client => (
+                                        <div 
+                                            key={client.id}
+                                            onClick={() => router.push(`/advisor/dashboard/clients/${client.id}`)}
+                                            className="bg-white p-6 rounded-2xl border border-outline-variant/50 hover:border-tertiary-fixed hover:shadow-xl hover:-translate-y-1 transition-all group cursor-pointer"
+                                        >
+                                            <div className="flex justify-between items-start mb-4">
+                                                <div className="h-10 w-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400 group-hover:bg-tertiary-fixed group-hover:text-on-tertiary-fixed transition-colors">
+                                                    <span className="material-symbols-outlined">person</span>
+                                                </div>
+                                                <div className="text-right">
+                                                    <div className="text-[10px] font-black uppercase tracking-widest text-outline mb-1">Last Active</div>
+                                                    <div className="text-xs font-bold text-tertiary-fixed-dim">{client.inactivity_days} days ago</div>
+                                                </div>
+                                            </div>
+
+                                            <h4 className="font-bold text-on-surface text-lg mb-1">{client.client_name}</h4>
+                                            <p className="text-sm text-on-surface-variant mb-6">{client.company_name}</p>
+
+                                            <div className="flex items-center justify-between pt-4 border-t border-slate-50">
+                                                <div className="flex items-center gap-1.5 text-xs font-bold text-outline">
+                                                    <span className="material-symbols-outlined text-sm">payments</span>
+                                                    {format_currency(client.capital_requested)}
+                                                </div>
+                                                <span className="material-symbols-outlined text-outline group-hover:text-primary transition-all">arrow_forward</span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {/* Alert for auto-decline */}
+                            <div className="mt-8 flex items-center gap-3 bg-amber-50 rounded-xl p-4 border border-amber-100">
+                                <span className="material-symbols-outlined text-amber-600 scale-75">info</span>
+                                <p className="text-[11px] font-bold text-amber-800 uppercase tracking-widest">
+                                    Reminder: Deals inactive for more than 30 days will be automatically archived as "Declined".
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            ) : (
+                /* Finalized / Archive View */
+                <div className="space-y-6 animate-in slide-in-from-bottom-4 duration-500">
+                    <div className="flex items-center justify-between">
+                        <h3 className="font-headline text-lg font-bold flex items-center gap-2 text-on-surface">
+                            <span className="material-symbols-outlined text-primary" style={{ fontVariationSettings: "'FILL' 1" }}>archive</span>
+                            Finalized & Archived Deals
+                        </h3>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {finalized_clients.length === 0 ? (
+                            <div className="col-span-full p-24 text-center bg-surface-container-low rounded-3xl border border-dashed border-outline-variant">
+                                <p className="text-outline font-bold">No resolved deals in the archive.</p>
+                            </div>
+                        ) : (
+                            finalized_clients.map(client => (
+                                <div 
+                                    key={client.id}
+                                    onClick={() => router.push(`/advisor/dashboard/clients/${client.id}`)}
+                                    className={clsx(
+                                        "p-6 rounded-2xl border transition-all cursor-pointer hover:shadow-lg",
+                                        client.pipeline_status === "funded" 
+                                            ? "bg-emerald-50/50 border-emerald-100 hover:border-emerald-500" 
+                                            : "bg-slate-50 border-slate-200 hover:border-slate-400"
+                                    )}
+                                >
+                                    <div className="flex justify-between items-start mb-4">
+                                        <div className={clsx(
+                                            "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest",
+                                            client.pipeline_status === "funded" ? "bg-emerald-600 text-white" : "bg-slate-200 text-slate-600"
+                                        )}>
+                                            {client.pipeline_status}
+                                        </div>
+                                        <span className="text-[10px] font-bold text-outline">{format_date(client.created_at)}</span>
+                                    </div>
+                                    <h4 className="font-bold text-on-surface mb-1">{client.client_name}</h4>
+                                    <p className="text-xs text-on-surface-variant mb-4">{client.company_name}</p>
+                                    <div className="text-lg font-black text-on-surface">{format_currency(client.capital_requested)}</div>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </div>
+            )}
+        </section>
     );
 }
