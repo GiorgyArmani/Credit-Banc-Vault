@@ -44,10 +44,9 @@ export async function POST(request: Request) {
             return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
         }
 
-        // ========================================================================
         // STEP 2: PARSE REQUEST BODY
         // ========================================================================
-        const { client_id } = await request.json();
+        const { client_id, credit_score } = await request.json();
 
         if (!client_id) {
             return NextResponse.json(
@@ -129,10 +128,14 @@ export async function POST(request: Request) {
         // STEP 5: SET data_vault_submitted_at
         // ========================================================================
         const submitted_at = new Date().toISOString();
+        const updateData: any = { data_vault_submitted_at: submitted_at };
+        if (credit_score) {
+            updateData.credit_score = String(credit_score);
+        }
 
         const { error: update_error } = await supabase_admin
             .from('client_data_vault')
-            .update({ data_vault_submitted_at: submitted_at })
+            .update(updateData)
             .eq('id', client.id);
 
         if (update_error) {

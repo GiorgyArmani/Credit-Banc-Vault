@@ -244,6 +244,7 @@ export default function AdvisorClientDetailsPage() {
     const [reject_doc_type, set_reject_doc_type] = useState<{ code: string; label: string } | null>(null);
     const [reject_reason, set_reject_reason] = useState("");
     const [is_rejecting, set_is_rejecting] = useState(false);
+    const [fico_score, set_fico_score] = useState<string>("");
 
     // Approval state
     const [is_approving_modal_open, setIs_approving_modal_open] = useState(false);
@@ -856,7 +857,10 @@ export default function AdvisorClientDetailsPage() {
                 const res = await fetch('/api/advisor/clients/submit-vault', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ client_id }),
+                    body: JSON.stringify({ 
+                        client_id,
+                        credit_score: fico_score 
+                    }),
                 });
                 const result = await res.json();
 
@@ -1458,6 +1462,28 @@ export default function AdvisorClientDetailsPage() {
                                     This will notify underwriting and mark the vault as submitted.
                                 </DialogDescription>
                             </DialogHeader>
+
+                            <div className="py-6 border-y border-slate-100 my-4">
+                                <Label htmlFor="fico_score" className="text-xs font-black uppercase tracking-widest text-slate-400 mb-3 block">
+                                    Client FICO Score
+                                </Label>
+                                <div className="relative group">
+                                    <Input
+                                        id="fico_score"
+                                        type="number"
+                                        placeholder="e.g. 720"
+                                        value={fico_score}
+                                        onChange={(e) => set_fico_score(e.target.value)}
+                                        className="h-14 bg-slate-50 border-2 border-slate-100 focus:border-emerald-500 focus:bg-white rounded-2xl text-xl font-black transition-all pl-12"
+                                    />
+                                    <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-emerald-500 transition-colors">
+                                        <ShieldCheck className="h-5 w-5" />
+                                    </div>
+                                </div>
+                                <p className="mt-3 text-[10px] font-bold text-slate-400 italic">
+                                    Please provide a plain number (e.g. 720). This will be shown to the underwriting team.
+                                </p>
+                            </div>
                             <DialogFooter>
                                 <Button
                                     variant="ghost"
@@ -1468,7 +1494,7 @@ export default function AdvisorClientDetailsPage() {
                                 </Button>
                                 <Button
                                     onClick={handle_submit_vault}
-                                    disabled={is_submitting_vault}
+                                    disabled={is_submitting_vault || !fico_score}
                                     className="bg-slate-800 hover:bg-slate-900 text-white"
                                 >
                                     {is_submitting_vault ? (

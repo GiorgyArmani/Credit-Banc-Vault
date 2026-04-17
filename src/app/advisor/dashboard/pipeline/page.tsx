@@ -42,31 +42,51 @@ export default function AdvisorPipelinePage() {
 
   const fetchDeals = async () => {
     try {
-      setLoading(true);
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      setLoading(true)
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
 
-      const { data: advisor } = await supabase
-        .from("advisors")
-        .select("id")
-        .eq("user_id", user.id)
-        .maybeSingle();
+      // Get user role to determine scope
+      const { data: userData } = await supabase
+        .from('users')
+        .select('role')
+        .eq('id', user.id)
+        .maybeSingle()
 
-      if (!advisor) return;
+      const isAdmin = userData?.role === 'admin'
 
-      const { data: clients, error } = await supabase
-        .from("client_data_vault")
-        .select(`id, user_id, client_name, client_email, client_phone, company_name, capital_requested`)
-        .eq("advisor_id", advisor.id);
+      let clientsQuery = supabase
+        .from('client_data_vault')
+        .select('id, user_id, client_name, client_email, client_phone, company_name, capital_requested')
 
-      if (error) throw error;
+      if (!isAdmin) {
+        // Advisors only see their own clients
+        const { data: advisor } = await supabase
+          .from('advisors')
+          .select('id')
+          .eq('user_id', user.id)
+          .maybeSingle()
+
+        if (!advisor) return
+        clientsQuery = clientsQuery.eq('advisor_id', advisor.id)
+      }
+
+      const { data: clients, error } = await clientsQuery
+
+      if (error) throw error
+      if (!clients || clients.length === 0) {
+        setDeals([])
+        return
+      }
 
       // Fetch statuses and doc counts
       const vaultIds = clients.map(c => c.id);
-      const [statusMap, { data: coreDocs }] = await Promise.all([
+      const [statusMap, { data: coreDocs }, { data: sub_data }] = await Promise.all([
         getBulkLatestStatus(vaultIds),
-        supabase.from("required_documents").select("code").eq("is_core", true)
+        supabase.from("required_documents").select("code").eq("is_core", true),
+        supabase.from("submissions").select("user_id, status").in("user_id", clients.map(c => c.user_id))
       ]);
+      const submissionMap = new Map(sub_data?.map(s => [s.user_id, s.status]) || []);
 
       const coreCodes = coreDocs?.map(d => d.code) || [];
 
@@ -92,10 +112,17 @@ export default function AdvisorPipelinePage() {
         ]);
 
         const satisfied = Array.from(allRequiredCodes).filter(code => uploadedCodes.has(code)).length;
+        const subStatus = submissionMap.get(client.user_id);
+        let status = statusMap.get(client.id) || "created";
+        
+        // Fallback for missing pipeline status on submitted items
+        if (status === "created" && (subStatus === "submitted" || subStatus === "locked")) {
+          status = "under_review";
+        }
 
         return {
           ...client,
-          pipeline_status: statusMap.get(client.id) || "created",
+          pipeline_status: status as LoanStatus,
           document_count: satisfied,
           total_required_docs: allRequiredCodes.size,
         };
@@ -153,50 +180,51 @@ export default function AdvisorPipelinePage() {
   }
 
   return (
-    <div className="space-y-6 h-full flex flex-col">
+    <div className="space-y-4 md:space-y-6 h-full flex flex-col">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 px-2">
         <div>
-          <h1 className="text-3xl font-black text-slate-900 dark:text-slate-100 font-headline tracking-tight">Funding Pipeline</h1>
-          <p className="text-slate-500 text-sm mt-1">Managing {deals.length} active deals across the underwriting lifecycle.</p>
+          <h1 className="text-xl md:text-3xl font-black text-slate-900 dark:text-slate-100 font-headline tracking-tight">Funding Pipeline</h1>
+          <p className="text-slate-500 text-[10px] md:text-sm mt-0.5 md:mt-1">Managing {deals.length} active deals across the underwriting lifecycle.</p>
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="relative">
+          <div className="relative flex-1 md:flex-none">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
             <Input 
               placeholder="Search deals..." 
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9 w-64 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 rounded-xl"
+              className="pl-9 w-full md:w-64 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 rounded-xl text-sm h-9 md:h-10"
             />
           </div>
-          <Button variant="outline" className="rounded-xl gap-2 border-slate-200 dark:border-slate-800">
-            <Filter className="h-4 w-4" /> Filter
+          <Button variant="outline" size="sm" className="rounded-xl gap-2 border-slate-200 dark:border-slate-800 h-9 md:h-10">
+            <Filter className="h-4 w-4" /> <span className="hidden md:inline">Filter</span>
           </Button>
         </div>
       </div>
 
-      <div className="flex-1 pb-6">
-        <div className="grid grid-cols-1 md:grid-cols-4 xl:grid-cols-8 gap-4 md:gap-2 w-full px-2">
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        <div className="flex flex-col md:flex-row items-start gap-3 pb-6 px-2 md:px-4 md:overflow-x-auto h-full">
           {STAGE_MAP.map((stage) => (
-            <KanbanColumn
-              key={stage.status}
-              title={stage.label}
-              stage={stage.status}
-              colorClass={stage.color}
-              count={filteredDeals.filter(d => d.pipeline_status === stage.status).length}
-              onDrop={handleDrop}
-            >
-              {filteredDeals
-                .filter(d => d.pipeline_status === stage.status)
-                .map(deal => (
-                  <PipelineDealCard
-                    key={deal.id}
-                    deal={deal}
-                    onDragStart={handleDragStart}
-                  />
-                ))}
-            </KanbanColumn>
+            <div key={stage.status} className="w-full md:flex-1 md:min-w-[200px] xl:min-w-[150px] flex-shrink-0 md:flex-shrink">
+              <KanbanColumn
+                title={stage.label}
+                stage={stage.status}
+                colorClass={stage.color}
+                count={filteredDeals.filter(d => d.pipeline_status === stage.status).length}
+                onDrop={handleDrop}
+              >
+                {filteredDeals
+                  .filter(d => d.pipeline_status === stage.status)
+                  .map(deal => (
+                    <PipelineDealCard
+                      key={deal.id}
+                      deal={deal}
+                      onDragStart={handleDragStart}
+                    />
+                  ))}
+              </KanbanColumn>
+            </div>
           ))}
         </div>
       </div>

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { ghlAddTags } from "@/lib/ghl-api";
 import { send_advisor_vault_submission_notification } from "@/lib/email";
+import { updateLoanStatus } from "@/app/actions/pipeline";
 
 export const dynamic = 'force-dynamic';
 
@@ -77,7 +78,15 @@ export async function POST() {
             console.error("Error creating submission record:", submissionError);
         }
 
-        // 5. Notify Advisor
+        // 5. Update Pipeline Status to Under Review
+        try {
+            await updateLoanStatus(clientData.id, 'under_review', 'Vault submitted by client');
+            console.log(`✅ Pipeline status updated to "under_review" for client: ${clientData.id}`);
+        } catch (pipeline_error) {
+            console.error("⚠️ Error updating pipeline status (non-fatal):", pipeline_error);
+        }
+
+        // 6. Notify Advisor
         if (clientData.advisor_id && clientData.advisors) {
             const advisor: any = clientData.advisors;
             const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://vault.creditbanc.io";

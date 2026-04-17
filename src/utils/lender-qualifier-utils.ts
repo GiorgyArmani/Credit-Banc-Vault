@@ -10,6 +10,12 @@ import type {
  * Maps the credit_score enum to a minimum FICO score
  */
 export function creditScoreToNumeric(credit_score: string): number {
+  // If it's a numeric string (e.g., "680"), parse it directly
+  const numericValue = parseInt(credit_score, 10);
+  if (!isNaN(numericValue) && /^\d+$/.test(credit_score.trim())) {
+    return numericValue;
+  }
+
   const score_map: Record<string, number> = {
     '700+': 700,
     '650-700': 650,

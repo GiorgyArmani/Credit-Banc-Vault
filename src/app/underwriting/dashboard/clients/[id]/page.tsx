@@ -51,6 +51,9 @@ import { format } from "date-fns";
 import { LoanFundedDialog } from "@/components/loan-funded-dialog";
 import { getClientPipelineHistory, updateLoanStatus, type LoanStatus, type PipelineStatusEntry } from "@/app/actions/pipeline";
 import { LoanPipelineFull, PIPELINE_STEPS } from "@/components/loan-pipeline-status";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { renameClientFile } from "../../actions";
 
 enum ComponentState {
     LOADING = "LOADING",
@@ -176,6 +179,10 @@ export default function UnderwritingClientDetailsPage() {
     const [pipeline_history, set_pipeline_history] = useState<PipelineStatusEntry[]>([]);
     const [is_advancing_status, set_is_advancing_status] = useState(false);
 
+    // Renaming state
+    const [renaming_file, set_renaming_file] = useState<{ id: string; label: string } | null>(null);
+    const [is_renaming_loading, setIs_renaming_loading] = useState(false);
+
     useEffect(() => {
         if (client_id) fetch_client_details();
     }, [client_id]);
@@ -267,6 +274,9 @@ export default function UnderwritingClientDetailsPage() {
             // 6. Fetch pipeline history
             const history = await getClientPipelineHistory(client_id);
             set_pipeline_history(history);
+            if (history.length > 0) {
+                set_current_pipeline_status(history[history.length - 1].status);
+            }
 
             // 7. Fetch approvals for this client
             const { data: categoryApprovals } = await supabase
@@ -524,6 +534,32 @@ export default function UnderwritingClientDetailsPage() {
     }
 
     /**
+     * handle_rename: Updates a document's custom label
+     */
+    async function handle_rename() {
+        if (!renaming_file || !renaming_file.label.trim()) return;
+
+        setIs_renaming_loading(true);
+        try {
+            const res = await renameClientFile(renaming_file.id, renaming_file.label);
+            if (res.success) {
+                toast.success("Document renamed successfully.");
+                // Update local state
+                set_documents(prev => prev.map(d => 
+                    d.id === renaming_file.id ? { ...d, custom_label: renaming_file.label } : d
+                ));
+                set_renaming_file(null);
+            } else {
+                toast.error(res.error || "Failed to rename document.");
+            }
+        } catch (err: any) {
+            toast.error("An unexpected error occurred.");
+        } finally {
+            setIs_renaming_loading(false);
+        }
+    }
+
+    /**
      * render_document_card: Renders individual document card with download/preview for underwriting
      */
     function render_document_card(doc: UserDocument) {
@@ -583,6 +619,15 @@ export default function UnderwritingClientDetailsPage() {
                                 title="Download File"
                             >
                                 <Download className="h-4 w-4" />
+                            </Button>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => set_renaming_file({ id: doc.id, label: doc.custom_label || doc.name })}
+                                className="h-8 w-8 p-0 text-slate-400 hover:text-slate-900"
+                                title="Rename Document"
+                            >
+                                <Pencil className="h-3.5 w-3.5" />
                             </Button>
                         </div>
                     </div>
@@ -1239,6 +1284,56 @@ export default function UnderwritingClientDetailsPage() {
                 storagePath={preview_modal.doc?.storage_path || ""}
                 fileType={preview_modal.doc?.type}
             />
+
+            {/* Rename Document Dialog */}
+            <Dialog open={!!renaming_file} onOpenChange={(open) => !open && set_renaming_file(null)}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Rename Document</DialogTitle>
+                        <DialogDescription>
+                            Enter a new display name for this document. This will be visible to the advisor and client as well.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="grid gap-4 py-4">
+                        <div className="grid gap-2">
+                            <Label htmlFor="new-name">Display Name</Label>
+                            <Input
+                                id="new-name"
+                                value={renaming_file?.label || ""}
+                                onChange={(e) => set_renaming_file(prev => prev ? { ...prev, label: e.target.value } : null)}
+                                placeholder="e.g. 12 Months Bank Statements"
+                                autoFocus
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') handle_rename();
+                                }}
+                            />
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button
+                            variant="ghost"
+                            onClick={() => set_renaming_file(null)}
+                            disabled={is_renaming_loading}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            onClick={handle_rename}
+                            disabled={!renaming_file?.label.trim() || is_renaming_loading}
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                        >
+                            {is_renaming_loading ? (
+                                <>
+                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                    Renaming...
+                                </>
+                            ) : (
+                                "Save Changes"
+                            )}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

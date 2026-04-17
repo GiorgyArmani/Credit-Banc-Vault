@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import {
   ChevronRight,
@@ -112,6 +112,7 @@ type OpenPosition = {
 
 export default function ClientSignupForm() {
   const router = useRouter();
+  const pathname = usePathname();
   const supabase = createClient();
   const [step, set_step] = useState(1);
   const [submitting, set_submitting] = useState(false);
@@ -605,7 +606,7 @@ export default function ClientSignupForm() {
                 Create Another
               </Button>
               <Button
-                onClick={() => router.push('/advisor/dashboard/clients')}
+                onClick={() => router.push(pathname.startsWith('/admin') ? '/admin/advisor/clients' : '/advisor/dashboard/clients')}
                 variant="outline"
                 className="flex-1 h-14 border-2 border-emerald-100 text-emerald-950 font-black rounded-2xl hover:bg-emerald-50 transition-all active:scale-95"
               >

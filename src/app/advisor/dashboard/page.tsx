@@ -2,7 +2,7 @@
 import AdvisorNewClientPage from "./clients/new/page";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import {
   Card,
   CardContent,
@@ -109,6 +109,7 @@ export default function AdvisorDashboard() {
   const [recentActivity, setRecentActivity] = useState<ActivityItem[]>([]);
 
   const router = useRouter();
+  const pathname = usePathname();
   const supabase = createClient();
 
   /**
@@ -134,8 +135,8 @@ export default function AdvisorDashboard() {
 
         if (profileError) throw profileError;
 
-        // Check if user has advisor role
-        if (profile.role !== "advisor") {
+        // Check if user has advisor or admin role
+        if (profile.role !== "advisor" && profile.role !== "admin") {
           router.push("/dashboard"); // Redirect to regular dashboard
           return;
         }
@@ -269,17 +270,17 @@ export default function AdvisorDashboard() {
         const clientIds = clientsData.map(c => c.user_id);
         const { data: recentDocs } = await supabase
           .from("user_documents")
-          .select("id, file_name, created_at, user_id")
+          .select("id, name, upload_date, user_id")
           .in("user_id", clientIds)
-          .order("created_at", { ascending: false })
+          .order("upload_date", { ascending: false })
           .limit(5);
 
         if (recentDocs) {
           setRecentActivity(recentDocs.map(d => ({
             id: d.id,
             client_name: clientMap.get(d.user_id) || 'Unknown Client',
-            file_name: d.file_name || 'Document',
-            created_at: d.created_at
+            file_name: d.name || 'Document',
+            created_at: d.upload_date
           })));
         }
       }
@@ -406,7 +407,7 @@ export default function AdvisorDashboard() {
               <Button
                 className="h-auto flex-col items-start p-6 bg-emerald-50/50 border-emerald-100 hover:bg-emerald-500 hover:text-white transition-all duration-500 rounded-[2rem] border-2 shadow-none group/btn"
                 variant="outline"
-                onClick={() => router.push("/advisor/dashboard/clients/new")}
+                onClick={() => router.push(pathname.startsWith("/admin") ? "/admin/advisor/clients/new" : "/advisor/dashboard/clients/new")}
               >
                 <div className="p-3 bg-white rounded-2xl mb-4 group-hover/btn:bg-white/20 transition-colors">
                   <FileText className="h-6 w-6 text-emerald-500 group-hover/btn:text-white" />
@@ -418,7 +419,7 @@ export default function AdvisorDashboard() {
               <Button
                 className="h-auto flex-col items-start p-6 bg-emerald-50/50 border-emerald-100 hover:bg-emerald-500 hover:text-white transition-all duration-500 rounded-[2rem] border-2 shadow-none group/btn"
                 variant="outline"
-                onClick={() => router.push("/advisor/dashboard/clients")}
+                onClick={() => router.push(pathname.startsWith("/admin") ? "/admin/advisor/clients" : "/advisor/dashboard/clients")}
               >
                 <div className="p-3 bg-white rounded-2xl mb-4 group-hover/btn:bg-white/20 transition-colors">
                   <Users className="h-6 w-6 text-emerald-500 group-hover/btn:text-white" />

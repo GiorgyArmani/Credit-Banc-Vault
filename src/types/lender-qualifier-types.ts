@@ -21,7 +21,7 @@ export interface ClientProfile {
   business_start_date: string; // ISO date string
   is_home_based: boolean;
   employees_count: number;
-  credit_score: '700+' | '650-700' | '600-650' | '550-600' | 'Below 550';
+  credit_score: string; // Supports numeric scores (e.g., "680") and legacy ranges
   exact_credit_score?: number; // For more precise calculation
   industry?: string; // For restricted industry checks
   has_existing_loans: boolean;

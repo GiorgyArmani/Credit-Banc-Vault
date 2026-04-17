@@ -240,3 +240,40 @@ export async function markDocumentAsViewed(documentId: string) {
 
     return { success: true };
 }
+
+/**
+ * renameClientFile
+ * 
+ * Allows an underwriter to update the display name (custom_label) of a file.
+ */
+export async function renameClientFile(documentId: string, newLabel: string) {
+    try {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error("Unauthorized");
+
+        // Verify user is an underwriter
+        const { data: userData } = await supabase
+            .from("users")
+            .select("role")
+            .eq("id", user.id)
+            .single();
+
+        if (userData?.role !== "underwriting") {
+            throw new Error("Access denied: Underwriters only");
+        }
+
+        const supabaseAdmin = createAdminClient();
+        const { error } = await supabaseAdmin
+            .from("user_documents")
+            .update({ custom_label: newLabel })
+            .eq("id", documentId);
+
+        if (error) throw error;
+
+        return { success: true };
+    } catch (error: any) {
+        console.error("Exception in renameClientFile (UW):", error);
+        return { success: false, error: error.message || "An unexpected error occurred" };
+    }
+}

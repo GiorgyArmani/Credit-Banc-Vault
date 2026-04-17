@@ -81,17 +81,48 @@ export default function DocumentPreviewModal({
                     </div>
                     <div className="flex items-center gap-2">
                         {signedUrl && (
-                            <Button
-                                size="sm"
-                                variant="outline"
-                                className="bg-white/5 border-white/10 text-white hover:bg-white/10 h-9 px-4 rounded-xl font-bold text-[10px] uppercase tracking-widest"
-                                asChild
-                            >
-                                <a href={signedUrl} target="_blank" rel="noopener noreferrer">
-                                    <ExternalLink className="h-3.5 w-3.5 mr-2" />
-                                    Open Original
-                                </a>
-                            </Button>
+                            <div className="flex items-center gap-2">
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="bg-emerald-600 border-emerald-500 text-white hover:bg-emerald-700 h-9 px-4 rounded-xl font-bold text-[10px] uppercase tracking-widest hidden sm:flex"
+                                    onClick={async () => {
+                                        try {
+                                            const sanitizedPath = storagePath.replace(/^\//, '')
+                                            const { data, error } = await supabase.storage
+                                                .from('user-documents')
+                                                .download(sanitizedPath)
+                                            
+                                            if (error) throw error
+                                            
+                                            const url = window.URL.createObjectURL(data)
+                                            const link = document.createElement('a')
+                                            link.href = url
+                                            link.setAttribute('download', docName)
+                                            document.body.appendChild(link)
+                                            link.click()
+                                            link.remove()
+                                            window.URL.revokeObjectURL(url)
+                                        } catch (err) {
+                                            console.error('Download failed:', err)
+                                        }
+                                    }}
+                                >
+                                    <Download className="h-3.5 w-3.5 mr-2" />
+                                    Download
+                                </Button>
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="bg-white/5 border-white/10 text-white hover:bg-white/10 h-9 px-4 rounded-xl font-bold text-[10px] uppercase tracking-widest"
+                                    asChild
+                                >
+                                    <a href={signedUrl} target="_blank" rel="noopener noreferrer">
+                                        <ExternalLink className="h-3.5 w-3.5 mr-2" />
+                                        Open Original
+                                    </a>
+                                </Button>
+                            </div>
                         )}
                         <Button
                             variant="ghost"

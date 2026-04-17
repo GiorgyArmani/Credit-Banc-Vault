@@ -140,7 +140,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </header>
 
         <main className="flex-1">
-          <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <div className={clsx(
+            "w-full mx-auto px-4 sm:px-6 lg:px-8 py-6",
+            pathname === '/advisor/dashboard/pipeline' ? "max-w-[1800px]" : "max-w-7xl"
+          )}>
             <OnboardingGate>{children}</OnboardingGate>
           </div>
         </main>

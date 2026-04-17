@@ -3,7 +3,7 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Loader2, AlertCircle } from "lucide-react";
@@ -47,6 +47,7 @@ interface ClientInfo {
     document_count: number;
     total_required_docs: number;
     pipeline_status?: LoanStatus;
+    submission_status?: string;
     last_activity_at?: string;
     inactivity_days?: number;
 }
@@ -54,6 +55,7 @@ interface ClientInfo {
 export default function AdvisorClientsListPage() {
     const supabase = createClient();
     const router = useRouter();
+    const pathname = usePathname();
 
     const [component_state, set_component_state] = useState<ComponentState>(
         ComponentState.LOADING
@@ -91,11 +93,16 @@ export default function AdvisorClientsListPage() {
         filtered_clients.filter(c => 
             ["created", "onboarding", "documents_requested", "documents_received", "lender_matched"].includes(c.pipeline_status || "created") &&
             (c.inactivity_days || 0) < 14 &&
-            c.pipeline_status !== "under_review"
+            c.pipeline_status !== "under_review" &&
+            c.submission_status !== "locked" &&
+            c.submission_status !== "submitted"
         ), [filtered_clients]);
 
     const under_review_clients = useMemo(() => 
-        filtered_clients.filter(c => c.pipeline_status === "under_review"), [filtered_clients]);
+        filtered_clients.filter(c => 
+            c.pipeline_status === "under_review" || 
+            ["locked", "submitted"].includes(c.submission_status || "")
+        ), [filtered_clients]);
 
     const inactive_clients = useMemo(() => 
         filtered_clients.filter(c => 
@@ -125,29 +132,40 @@ export default function AdvisorClientsListPage() {
                 .eq("id", user.id)
                 .maybeSingle();
 
-            if (user_error || !user_data || user_data.role !== "advisor") {
-                set_error_message("Access denied. You must be an advisor to view this page.");
+            if (user_error || !user_data || (user_data.role !== "advisor" && user_data.role !== "admin")) {
+                set_error_message("Access denied. You must be an advisor or admin to view this page.");
                 set_component_state(ComponentState.ERROR);
                 return;
             }
 
-            const { data: advisor_data, error: advisor_error } = await supabase
-                .from("advisors")
-                .select("id")
-                .eq("user_id", user.id)
-                .maybeSingle();
+            // Admins see all clients; advisors only see their own
+            let advisorId: string | null = null
 
-            if (advisor_error || !advisor_data) {
-                set_error_message("Could not load advisor profile.");
-                set_component_state(ComponentState.ERROR);
-                return;
+            if (user_data.role !== 'admin') {
+                const { data: advisor_data, error: advisor_error } = await supabase
+                    .from('advisors')
+                    .select('id')
+                    .eq('user_id', user.id)
+                    .maybeSingle()
+
+                if (advisor_error || !advisor_data) {
+                    set_error_message('Could not load advisor profile.')
+                    set_component_state(ComponentState.ERROR)
+                    return
+                }
+                advisorId = advisor_data.id
             }
 
-            const { data: clients_data, error: clients_error } = await supabase
-                .from("client_data_vault")
-                .select(`id, user_id, client_name, client_email, client_phone, company_name, capital_requested, created_at`)
-                .eq("advisor_id", advisor_data.id)
-                .order("created_at", { ascending: false });
+            let clientsQuery = supabase
+                .from('client_data_vault')
+                .select('id, user_id, client_name, client_email, client_phone, company_name, capital_requested, created_at')
+                .order('created_at', { ascending: false })
+
+            if (advisorId) {
+                clientsQuery = clientsQuery.eq('advisor_id', advisorId)
+            }
+
+            const { data: clients_data, error: clients_error } = await clientsQuery
 
             if (clients_error) {
                 set_error_message("Error loading your clients.");
@@ -199,6 +217,13 @@ export default function AdvisorClientsListPage() {
                 // Fetch latest status
                 const pipelineMap = await getBulkLatestStatus(vaultIds);
                 
+                // Fetch submission statuses
+                const { data: sub_data } = await supabase
+                    .from("submissions")
+                    .select("user_id, status")
+                    .in("user_id", clients_with_doc_counts.map(c => c.user_id));
+                const submissionMap = new Map(sub_data?.map(s => [s.user_id, s.status]) || []);
+
                 // Fetch activity timestamps
                 const activityMap = await getBulkClientActivity(vaultIds);
 
@@ -207,6 +232,7 @@ export default function AdvisorClientsListPage() {
 
                 for (const client of updated_clients) {
                     client.pipeline_status = pipelineMap.get(client.id) ?? "created";
+                    client.submission_status = submissionMap.get(client.user_id);
                     const lastActivity = activityMap.get(client.id) || client.created_at;
                     client.last_activity_at = lastActivity;
                     
@@ -269,7 +295,7 @@ export default function AdvisorClientsListPage() {
         return (
             <div className="flex flex-col items-center justify-center min-h-[400px]">
                 <h3 className="text-2xl font-black mb-4 uppercase tracking-tighter">No Clients Found</h3>
-                <Button onClick={() => router.push("/advisor/dashboard/clients/new")}>Create Your First Client</Button>
+                <Button onClick={() => router.push(pathname.startsWith("/admin") ? "/admin/advisor/clients/new" : "/advisor/dashboard/clients/new")}>Create Your First Client</Button>
             </div>
         );
     }
@@ -309,7 +335,7 @@ export default function AdvisorClientsListPage() {
                     </div>
 
                     <Button 
-                        onClick={() => router.push("/advisor/dashboard/clients/new")}
+                        onClick={() => router.push(pathname.startsWith("/admin") ? "/admin/advisor/clients/new" : "/advisor/dashboard/clients/new")}
                         className="bg-primary text-white px-6 py-6 rounded-xl font-bold flex items-center gap-2 hover:opacity-90 active:scale-95 transition-all shadow-lg shadow-primary/20"
                     >
                         <span className="material-symbols-outlined">person_add</span>
@@ -346,7 +372,7 @@ export default function AdvisorClientsListPage() {
                                     active_pending_clients.map(client => (
                                         <div 
                                             key={client.id}
-                                            onClick={() => router.push(`/advisor/dashboard/clients/${client.id}`)}
+                                            onClick={() => router.push((pathname.startsWith("/admin") ? "/admin/advisor/clients/" : "/advisor/dashboard/clients/") + client.id)}
                                             className="bg-surface-container-low p-6 rounded-xl border border-outline-variant/30 relative overflow-hidden group cursor-pointer hover:shadow-lg transition-all"
                                         >
                                             <div className="absolute top-0 right-0 h-full w-1 bg-tertiary-fixed-dim"></div>
@@ -432,7 +458,7 @@ export default function AdvisorClientsListPage() {
                                     under_review_clients.map(client => (
                                         <div 
                                             key={client.id}
-                                            onClick={() => router.push(`/advisor/dashboard/clients/${client.id}`)}
+                                            onClick={() => router.push((pathname.startsWith("/admin") ? "/admin/advisor/clients/" : "/advisor/dashboard/clients/") + client.id)}
                                             className="bg-surface-container-lowest p-6 rounded-xl shadow-sm border-l-4 border-primary group hover:shadow-md transition-all cursor-pointer"
                                         >
                                             <div className="flex justify-between items-start">
@@ -496,7 +522,7 @@ export default function AdvisorClientsListPage() {
                                     {inactive_clients.map(client => (
                                         <div 
                                             key={client.id}
-                                            onClick={() => router.push(`/advisor/dashboard/clients/${client.id}`)}
+                                            onClick={() => router.push((pathname.startsWith("/admin") ? "/admin/advisor/clients/" : "/advisor/dashboard/clients/") + client.id)}
                                             className="bg-white p-6 rounded-2xl border border-outline-variant/50 hover:border-tertiary-fixed hover:shadow-xl hover:-translate-y-1 transition-all group cursor-pointer"
                                         >
                                             <div className="flex justify-between items-start mb-4">
@@ -553,7 +579,7 @@ export default function AdvisorClientsListPage() {
                             finalized_clients.map(client => (
                                 <div 
                                     key={client.id}
-                                    onClick={() => router.push(`/advisor/dashboard/clients/${client.id}`)}
+                                    onClick={() => router.push((pathname.startsWith("/admin") ? "/admin/advisor/clients/" : "/advisor/dashboard/clients/") + client.id)}
                                     className={clsx(
                                         "p-6 rounded-2xl border transition-all cursor-pointer hover:shadow-lg",
                                         client.pipeline_status === "funded" 

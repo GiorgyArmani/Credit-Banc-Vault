@@ -394,7 +394,7 @@ export function EditProfileModal({ isOpen, onClose, onSuccess, clientData }: Edi
                             </div>
                         </div>
 
-                        {/* 4. Credit Score (Radial) */}
+                        {/* 4. Credit Score (Numeric) */}
                         <div className="space-y-4">
                             <h3 className="text-xs font-black uppercase tracking-[0.2em] text-emerald-900/30 flex items-center gap-2">
                                 <CreditCard className="w-3 h-3" />
@@ -406,28 +406,11 @@ export function EditProfileModal({ isOpen, onClose, onSuccess, clientData }: Edi
                                 render={({ field }) => (
                                     <FormItem className="space-y-3">
                                         <FormControl>
-                                            <RadioGroup
-                                                onValueChange={field.onChange}
-                                                defaultValue={field.value}
-                                                className="grid grid-cols-2 sm:grid-cols-3 gap-3"
-                                            >
-                                                {CREDIT_SCORE_OPTIONS.map((option) => (
-                                                    <FormItem key={option.value}>
-                                                        <FormControl>
-                                                            <RadioGroupItem value={option.value} className="sr-only" />
-                                                        </FormControl>
-                                                        <FormLabel
-                                                            className={`flex items-center justify-center p-3 rounded-xl border-2 cursor-pointer transition-all font-black text-xs uppercase tracking-tighter text-center h-full
-                                                            ${field.value === option.value
-                                                                    ? "bg-emerald-500 border-emerald-500 text-white shadow-lg shadow-emerald-500/20"
-                                                                    : "bg-emerald-50/30 border-emerald-100 text-emerald-950 hover:bg-emerald-50"
-                                                                }`}
-                                                        >
-                                                            {option.label}
-                                                        </FormLabel>
-                                                    </FormItem>
-                                                ))}
-                                            </RadioGroup>
+                                            <Input 
+                                                {...field} 
+                                                placeholder="Enter FICO Score (e.g. 680)" 
+                                                className="h-12 rounded-xl border-emerald-100 bg-emerald-50/30 focus:bg-white font-bold" 
+                                            />
                                         </FormControl>
                                         <FormMessage />
                                     </FormItem>

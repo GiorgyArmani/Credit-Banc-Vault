@@ -768,14 +768,25 @@ export async function renameClientFile(clientId: string, documentId: string, new
 
         if (!client) throw new Error("Client not found");
 
-        const { data: advisorData } = await supabase
-            .from("advisors")
-            .select("id")
-            .eq("user_id", advisorUser.id)
+        // Verify advisor ownership OR check if user is an underwriter
+        const { data: userData } = await supabase
+            .from("users")
+            .select("role")
+            .eq("id", advisorUser.id)
             .single();
 
-        if (!advisorData || client.advisor_id !== advisorData.id) {
-            throw new Error("Access denied");
+        const isUnderwriter = userData?.role === "underwriting";
+
+        if (!isUnderwriter) {
+            const { data: advisorData } = await supabase
+                .from("advisors")
+                .select("id")
+                .eq("user_id", advisorUser.id)
+                .single();
+
+            if (!advisorData || client.advisor_id !== advisorData.id) {
+                throw new Error("Access denied");
+            }
         }
 
         const supabaseAdmin = createAdminClient();

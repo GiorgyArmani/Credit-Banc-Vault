@@ -249,7 +249,7 @@ function AccountBlock({
         <div className="hidden lg:flex items-center gap-6">
           <StatCell label="Avg Deposits" value={avgDeposits > 0 ? formatMoney(avgDeposits) : "—"} />
           <StatCell label="Avg Daily Bal" value={avgBalance > 0 ? formatMoney(avgBalance) : "—"} />
-          <StatCell label="Avg Neg Days" value={avgNegDays.toFixed(1)} />
+          <StatCell label="Avg Neg Days" value={Math.ceil(avgNegDays).toString()} />
           <StatCell label="Months Filled" value={`${filledMonths.length}/12`} />
         </div>
         {canRemove && (
@@ -309,7 +309,7 @@ function AccountBlock({
                   <td className="px-3 py-1 text-center bg-[#1c2128] font-mono font-semibold text-[#58a6ff]">
                     {row.isMoney
                       ? avg > 0 ? formatMoney(avg) : "—"
-                      : avg.toFixed(1)}
+                      : row.key === "negativeDays" ? Math.ceil(avg).toString() : avg.toFixed(1)}
                   </td>
                 </tr>
               );
@@ -744,13 +744,7 @@ export default function BankAnalysis() {
                 <span className="text-sm font-mono font-bold text-[#388bfd] ml-1">{formatMoney(avgDailyBalanceAcrossAccounts)}</span>
               </div>
             </div>
-            <button
-              onClick={saveAnalysis}
-              disabled={isSaving || !selectedClientId}
-              className="flex items-center justify-center gap-2 px-4 py-1.5 font-bold text-white bg-[#238636] hover:bg-[#2ea043] border border-[#2ea043]/50 rounded text-[10px] uppercase tracking-wider transition-all disabled:opacity-40"
-            >
-              {isSaving ? "Saving..." : "Save Analysis"}
-            </button>
+            {/* Moved Save Analysis to the bottom */}
           </div>
         </div>
       </div>
@@ -907,7 +901,7 @@ export default function BankAnalysis() {
                   <div className="p-3 rounded-lg bg-[#0d1117] border border-[#30363d] hover:border-[#f85149]/30 transition-colors">
                     <span className="text-[9px] text-[#8b949e] uppercase tracking-widest block mb-1">Avg Negative Days</span>
                     <span className={`text-xl font-mono font-bold ${avgNegDaysAcrossAccounts > 0 ? "text-[#f85149]" : "text-[#8b949e]"}`}>
-                      {avgNegDaysAcrossAccounts.toFixed(1)}
+                      {Math.ceil(avgNegDaysAcrossAccounts).toString()}
                     </span>
                   </div>
                 </div>
@@ -987,6 +981,27 @@ export default function BankAnalysis() {
           <OpenPositions positions={positions} avgRevenue={avgRevenue} onChange={setPositions} />
         )}
 
+
+        {/* Final Actions */}
+        <div className="mt-12 flex justify-end">
+          <button
+            onClick={saveAnalysis}
+            disabled={isSaving || !selectedClientId}
+            className="flex items-center justify-center gap-3 px-10 py-4 font-bold text-white bg-[#238636] hover:bg-[#2ea043] border border-[#2ea043]/50 rounded-2xl text-xs uppercase tracking-[0.2em] shadow-2xl shadow-[#238636]/20 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-40 disabled:hover:scale-100 group"
+          >
+            {isSaving ? (
+              <>
+                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                <span>Saving Analysis...</span>
+              </>
+            ) : (
+              <>
+                <span>Save Analysis</span>
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 transition-transform group-hover:translate-x-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></svg>
+              </>
+            )}
+          </button>
+        </div>
 
       </div>
     </div>

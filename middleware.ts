@@ -90,6 +90,7 @@ export async function middleware(request: NextRequest) {
     const userRole = userData?.role || "free";
 
     // Role-based route protection
+    // admin is intentionally absent — they bypass all role-specific guards
     const roleRoutes: Record<string, string[]> = {
       advisor: ["/advisor"],
       underwriting: ["/underwriting"],
@@ -100,6 +101,7 @@ export async function middleware(request: NextRequest) {
     // Client Onboarding & Contract Check
     let isOnboardingComplete = user.user_metadata?.onboarding_complete === true;
     const isClient = userRole === "free" || userRole === "premium";
+    const isAdmin = userRole === "admin";
 
     // Direct database check for contract status to avoid stale metadata
     let isContractCompleted = false;
@@ -126,28 +128,33 @@ export async function middleware(request: NextRequest) {
 
     // If client hasn't finished onboarding or signed contract, and is trying to access a protected page
     // (but not the onboarding page itself, the onboarding API, or public paths)
-    if (isClient && !isOnboardingComplete && !path.startsWith("/onboarding") && !path.startsWith("/api/onboarding") && !isPublicPath) {
+    // Admins are never subject to the onboarding gate
+    if (isClient && !isAdmin && !isOnboardingComplete && !path.startsWith("/onboarding") && !path.startsWith("/api/onboarding") && !isPublicPath) {
       console.log(`[Onboarding] User ${user.id} incomplete (Contract: ${isContractCompleted}), redirecting to /onboarding`);
       return redirectWithCookies("/onboarding");
     }
 
     // Check if user is trying to access a role-specific route
-    for (const [role, routes] of Object.entries(roleRoutes)) {
-      for (const route of routes) {
-        if (path.startsWith(route)) {
-          // If the path is role-protected and user doesn't have THAT role
-          if (userRole !== role) {
-            console.warn(`[RBAC] Access denied for user ${user.id} with role ${userRole} attempting to access ${path}`);
+    // Admins bypass all role-specific guards — they can access /advisor/* and /underwriting/* freely
+    if (!isAdmin) {
+      for (const [role, routes] of Object.entries(roleRoutes)) {
+        for (const route of routes) {
+          if (path.startsWith(route)) {
+            // If the path is role-protected and user doesn't have THAT role
+            if (userRole !== role) {
+              console.warn(`[RBAC] Access denied for user ${user.id} with role ${userRole} attempting to access ${path}`);
 
-            // Redirect to their appropriate dashboard
-            const redirectMap: Record<string, string> = {
-              advisor: "/advisor/dashboard",
-              underwriting: "/underwriting/dashboard",
-              premium: isOnboardingComplete ? "/dashboard" : "/onboarding",
-              free: isOnboardingComplete ? "/dashboard" : "/onboarding",
-            };
+              // Redirect to their appropriate dashboard
+              const redirectMap: Record<string, string> = {
+                advisor: "/advisor/dashboard",
+                underwriting: "/underwriting/dashboard",
+                admin: "/admin/dashboard",
+                premium: isOnboardingComplete ? "/dashboard" : "/onboarding",
+                free: isOnboardingComplete ? "/dashboard" : "/onboarding",
+              };
 
-            return redirectWithCookies(redirectMap[userRole] || "/dashboard");
+              return redirectWithCookies(redirectMap[userRole] || "/dashboard");
+            }
           }
         }
       }
@@ -158,11 +165,12 @@ export async function middleware(request: NextRequest) {
       const redirectMap: Record<string, string> = {
         advisor: "/advisor/dashboard",
         underwriting: "/underwriting/dashboard",
+        admin: "/admin/dashboard",
         premium: isOnboardingComplete ? "/dashboard" : "/onboarding",
         free: isOnboardingComplete ? "/dashboard" : "/onboarding",
       };
 
-      if (userRole === "advisor" || userRole === "underwriting" || !isOnboardingComplete) {
+      if (userRole === "advisor" || userRole === "underwriting" || userRole === "admin" || !isOnboardingComplete) {
         return redirectWithCookies(redirectMap[userRole]);
       }
     }
@@ -172,10 +180,11 @@ export async function middleware(request: NextRequest) {
       const redirectMap: Record<string, string> = {
         advisor: "/advisor/dashboard",
         underwriting: "/underwriting/dashboard",
+        admin: "/admin/dashboard",
         premium: isOnboardingComplete ? "/dashboard" : "/onboarding",
         free: isOnboardingComplete ? "/dashboard" : "/onboarding",
       };
-      return redirectWithCookies(redirectMap[userRole]);
+      return redirectWithCookies(redirectMap[userRole] || "/dashboard");
     }
   }
 

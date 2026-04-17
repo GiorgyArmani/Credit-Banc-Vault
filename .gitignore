@@ -45,6 +45,10 @@ next-env.d.ts
 private-data
 
 
-*.sql
 
+# Exclude all admin portal pieces until ready
+**/admin/*
+src/app/admin/
+src/components/layout/admin/
 scripts
+*.sql

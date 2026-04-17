@@ -51,8 +51,8 @@ export function useOnboardingStatus() {
       setClientName(vaultData?.client_name || null)
       setVaultId(vaultData?.id || null)
 
-      // If user is an advisor, skip onboarding entirely
-      if (userData?.role === "advisor" || userData?.role === "underwriting") {
+      // If user is an advisor, underwriter, or admin, skip onboarding entirely
+      if (userData?.role === "advisor" || userData?.role === "underwriting" || userData?.role === "admin") {
         setNeedsOnboarding(false)
         setDataVaultCompleted(true)
         setContractCompleted(true)
