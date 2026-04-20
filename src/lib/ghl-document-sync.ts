@@ -7,99 +7,99 @@ const BASE = "https://services.leadconnectorhq.com";
  */
 const DOC_CODE_TO_GHL_FIELD_MAP: Record<string, { fieldId: string; fieldKey: string }> = {
     business_bank_statements: {
-        fieldId: process.env.GHL_CF_BANK_STATEMENTS || "gdpBhJJ5RKtLYbWlFXhI",
+        fieldId: process.env.GHL_CF_BANK_STATEMENTS!,
         fieldKey: "contact.data_vault_files_bank_statements",
     },
     drivers_license: {
-        fieldId: process.env.GHL_CF_DRIVERS_LICENSE || "XMXkevs2VI8IOLIeEGhp",
+        fieldId: process.env.GHL_CF_DRIVERS_LICENSE!,
         fieldKey: "contact.data_vault_files_drivers_license",
     },
     voided_check: {
-        fieldId: process.env.GHL_CF_VOIDED_CHECK || "QXOn6kwwOAkJk7YtD8ls",
+        fieldId: process.env.GHL_CF_VOIDED_CHECK!,
         fieldKey: "contact.data_vault_files_voided_check",
     },
     balance_sheets: {
-        fieldId: process.env.GHL_CF_BALANCE_SHEETS || "XawiUQdnYleZz5eqHfuH",
+        fieldId: process.env.GHL_CF_BALANCE_SHEETS!,
         fieldKey: "contact.data_vault_files_balance_sheets",
     },
     tax_returns: {
-        fieldId: process.env.GHL_CF_TAX_RETURNS || "7eGo8ubBbbP5e3T2gsbv",
+        fieldId: process.env.GHL_CF_TAX_RETURNS!,
         fieldKey: "contact.data_vault_files_tax_returns",
     },
     profit_loss: {
-        fieldId: process.env.GHL_CF_CREDIT_PROFIT_LOSS || "W9Q4eJJ2uPoW7RAW2kZB",
+        fieldId: process.env.GHL_CF_CREDIT_PROFIT_LOSS!,
         fieldKey: "contact.data_vault_files_profit__loss",
     },
     funding_application: {
-        fieldId: process.env.GHL_CF_FUNDING_APPLICATION || "iSvQIeBgIsbtHTPYmHiv",
+        fieldId: process.env.GHL_CF_FUNDING_APPLICATION!,
         fieldKey: "contact.data_vault_files_funding_application",
     },
     ar_report: {
-        fieldId: process.env.GHL_CF_AR_REPORT || "10ciAtMopHUBGL40iXbu",
+        fieldId: process.env.GHL_CF_AR_REPORT!,
         fieldKey: "contact.data_vault_files_ar_report",
     },
     debt_schedule: {
-        fieldId: process.env.GHL_CF_DEBT_SCHEDULE || "xY2NMYDxjp5ZzMo1SRCj",
+        fieldId: process.env.GHL_CF_DEBT_SCHEDULE!,
         fieldKey: "contact.data_vault_files_debt_schedule",
     },
     pfs: {
-        fieldId: process.env.GHL_CF_PFS || "5EMH8vr1RTnvF9ehzBtM",
+        fieldId: process.env.GHL_CF_PFS!,
         fieldKey: "contact.data_vault_pfs",
     },
     asset_equipment_list: {
-        fieldId: process.env.GHL_CF_ASSET_EQUIPMENT_LIST || "eAAAUWVkTsec0nicpqnr",
+        fieldId: process.env.GHL_CF_ASSET_EQUIPMENT_LIST!,
         fieldKey: "contact.data_vault_asset__equipment_list",
     },
     "8821_4506": {
-        fieldId: process.env.GHL_CF_8821_4506 || "zduVkOHJAxMnh94hIDgS",
+        fieldId: process.env.GHL_CF_8821_4506!,
         fieldKey: "contact.data_vault_8821__4506",
     },
     ein_ss4_letter: {
-        fieldId: process.env.GHL_CF_EIN_SS4_LETTER || "NOxQLvYlCzFXc9CO8Spn",
+        fieldId: process.env.GHL_CF_EIN_SS4_LETTER!,
         fieldKey: "contact.data_vault_ein__ss4_letter",
     },
     w9: {
-        fieldId: process.env.GHL_CF_W9 || "flt5gHfpthvvC2U7evWD",
+        fieldId: process.env.GHL_CF_W9!,
         fieldKey: "contact.data_vault_w9",
     },
     articles_of_incorporation: {
-        fieldId: process.env.GHL_CF_ARTICLES_OF_INCORPORATION || "bebHZhDSfmmTKht5YJtK",
+        fieldId: process.env.GHL_CF_ARTICLES_OF_INCORPORATION!,
         fieldKey: "contact.data_vault_articles_of_incorporation",
     },
     operating_agreement_bylaws: {
-        fieldId: process.env.GHL_CF_OPERATING_AGREEMENT_BYLAWS || "VSB2PJKDYNTOCC2RLOk9",
+        fieldId: process.env.GHL_CF_OPERATING_AGREEMENT_BYLAWS!,
         fieldKey: "contact.data_vault_operating_agreement__bylaws",
     },
     lease_agreement: {
-        fieldId: process.env.GHL_CF_LEASE_AGREEMENT || "9yfjmDHm0IHatEGAwPjp",
+        fieldId: process.env.GHL_CF_LEASE_AGREEMENT!,
         fieldKey: "contact.data_vault_lease_agreement",
     },
     mortgage_statement: {
-        fieldId: process.env.GHL_CF_MORTGAGE_STATEMENT || "qdN57NE4yqLZPxV4Qs54",
+        fieldId: process.env.GHL_CF_MORTGAGE_STATEMENT!,
         fieldKey: "contact.data_vault_mortgage_statement",
     },
     credit_card_statements: {
-        fieldId: process.env.GHL_CF_CREDIT_CARD_STATEMENTS || "xws781Qaq928WrjajFFj",
+        fieldId: process.env.GHL_CF_CREDIT_CARD_STATEMENTS!,
         fieldKey: "contact.data_vault_credit_card_statements",
     },
     loan_agreements: {
-        fieldId: process.env.GHL_CF_LOAN_AGREEMENTS || "5Ujw7Kj3GbUhO0InRm1O",
+        fieldId: process.env.GHL_CF_LOAN_AGREEMENTS!,
         fieldKey: "contact.data_vault_loan_agreements",
     },
     payoff_letters: {
-        fieldId: process.env.GHL_CF_PAYOFF_LETTERS || "w0EdmjnW2eHNUuh2baZf",
+        fieldId: process.env.GHL_CF_PAYOFF_LETTERS!,
         fieldKey: "contact.data_vault_payoff_letters",
     },
     insurance_documents: {
-        fieldId: process.env.GHL_CF_INSURANCE_DOCUMENTS || "q1VtGSoxBdLT6nRC4RlB",
+        fieldId: process.env.GHL_CF_INSURANCE_DOCUMENTS!,
         fieldKey: "contact.data_vault_insurance_documents_gl_wc_auto_bop",
     },
     equipment_invoice: {
-        fieldId: process.env.GHL_CF_EQUIPMENT_INVOICE || "c9qknvRkZEO8PxOrb46T",
+        fieldId: process.env.GHL_CF_EQUIPMENT_INVOICE!,
         fieldKey: "contact.data_vault_equipment_invoice",
     },
     misc_files: {
-        fieldId: process.env.GHL_CF_MISC_FILES || "ZMU3gUg4gD7Lhspt5K80",
+        fieldId: process.env.GHL_CF_MISC_FILES!,
         fieldKey: "contact.data_vault_misc_files",
     },
 };

@@ -700,7 +700,7 @@ export async function POST(request: Request) {
 
 
     // Transitioning to a FULLY DYNAMIC vault.
-    
+
     // For re-signups/re-onboarding: Clear existing dynamic document requirements 
     // and reset submission status to ensure a clean slate.
     await supabase_admin.from('client_dynamic_documents').delete().eq('user_id', user_id);

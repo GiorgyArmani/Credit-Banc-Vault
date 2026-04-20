@@ -2,7 +2,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 
 // Map for GHL Custom Field ID
-const GHL_CF_OUTSTANDING_DOCUMENTS = process.env.GHL_CF_OUTSTANDING_DOCUMENTS || "YydQFzZd5IJO0NCbsz9D";
+const GHL_CF_OUTSTANDING_DOCUMENTS = process.env.GHL_CF_OUTSTANDING_DOCUMENTS;
 
 export async function calculateOutstandingDocuments(userId: string): Promise<string[]> {
     const supabase = createAdminClient();

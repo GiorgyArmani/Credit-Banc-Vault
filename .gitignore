@@ -61,4 +61,4 @@ src/app/dashboard/_credit-report-assistant/
 src/app/dashboard/_chat/
 src/components/_ai-chat-interface.tsx
 src/components/_chat-message.tsx
-src/components/_chat-message-display.tsx
+src/components/_chat-message-display.tsx
