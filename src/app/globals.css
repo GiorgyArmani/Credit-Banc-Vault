@@ -151,3 +151,30 @@ body {
 [id^="wistia_"] [class*="backdrop"] {
   z-index: 9998 !important;
 }
+
+/* Premium Scrollbar for dashboard columns */
+.premium-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.premium-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.premium-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 10px;
+  transition: all 0.3s ease;
+}
+
+.premium-scrollbar:hover::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.dark .premium-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.dark .premium-scrollbar:hover::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+}

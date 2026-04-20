@@ -100,8 +100,9 @@ export default function AdvisorClientsListPage() {
 
     const under_review_clients = useMemo(() => 
         filtered_clients.filter(c => 
-            c.pipeline_status === "under_review" || 
-            ["locked", "submitted"].includes(c.submission_status || "")
+            !["funded", "declined"].includes(c.pipeline_status || "") &&
+            (c.pipeline_status === "under_review" || 
+            ["locked", "submitted"].includes(c.submission_status || ""))
         ), [filtered_clients]);
 
     const inactive_clients = useMemo(() => 
@@ -363,80 +364,82 @@ export default function AdvisorClientsListPage() {
                                 )}
                             </div>
 
-                            <div className="space-y-4">
-                                {active_pending_clients.length === 0 ? (
-                                    <div className="p-12 text-center bg-surface-container-low rounded-xl border border-dashed border-outline-variant">
-                                        <p className="text-outline text-sm font-medium">All clear! No pending actions.</p>
-                                    </div>
-                                ) : (
-                                    active_pending_clients.map(client => (
-                                        <div 
-                                            key={client.id}
-                                            onClick={() => router.push((pathname.startsWith("/admin") ? "/admin/advisor/clients/" : "/advisor/dashboard/clients/") + client.id)}
-                                            className="bg-surface-container-low p-6 rounded-xl border border-outline-variant/30 relative overflow-hidden group cursor-pointer hover:shadow-lg transition-all"
-                                        >
-                                            <div className="absolute top-0 right-0 h-full w-1 bg-tertiary-fixed-dim"></div>
-                                            <div className="flex justify-between items-start">
-                                                <div className="flex-1">
-                                                    <div className="flex items-center gap-2 mb-2">
-                                                        <span className="text-[10px] font-bold uppercase tracking-widest text-on-tertiary-fixed-variant bg-tertiary-fixed px-2 py-0.5 rounded">
-                                                            {client.document_count === client.total_required_docs ? "Ready for Review" : "Incomplete Docs"}
-                                                        </span>
-                                                        <div className="text-[10px] font-bold text-error uppercase tracking-tighter animate-pulse">Action Required</div>
-                                                    </div>
-                                                    
-                                                    <h4 className="font-bold text-on-surface">{client.client_name}</h4>
-                                                    <p className="text-xs text-on-surface-variant mt-1">{client.company_name}</p>
+                            <div className="max-h-[70vh] overflow-y-auto premium-scrollbar pr-4 -mr-4">
+                                <div className="space-y-4 pr-4">
+                                    {active_pending_clients.length === 0 ? (
+                                        <div className="p-12 text-center bg-surface-container-low rounded-xl border border-dashed border-outline-variant">
+                                            <p className="text-outline text-sm font-medium">All clear! No pending actions.</p>
+                                        </div>
+                                    ) : (
+                                        active_pending_clients.map(client => (
+                                            <div 
+                                                key={client.id}
+                                                onClick={() => router.push((pathname.startsWith("/admin") ? "/admin/advisor/clients/" : "/advisor/dashboard/clients/") + client.id)}
+                                                className="bg-surface-container-low p-6 rounded-xl border border-outline-variant/30 relative overflow-hidden group cursor-pointer hover:shadow-lg transition-all"
+                                            >
+                                                <div className="absolute top-0 right-0 h-full w-1 bg-tertiary-fixed-dim"></div>
+                                                <div className="flex justify-between items-start">
+                                                    <div className="flex-1">
+                                                        <div className="flex items-center gap-2 mb-2">
+                                                            <span className="text-[10px] font-bold uppercase tracking-widest text-on-tertiary-fixed-variant bg-tertiary-fixed px-2 py-0.5 rounded">
+                                                                {client.document_count === client.total_required_docs ? "Ready for Review" : "Incomplete Docs"}
+                                                            </span>
+                                                            <div className="text-[10px] font-bold text-error uppercase tracking-tighter animate-pulse">Action Required</div>
+                                                        </div>
+                                                        
+                                                        <h4 className="font-bold text-on-surface">{client.client_name}</h4>
+                                                        <p className="text-xs text-on-surface-variant mt-1">{client.company_name}</p>
 
-                                                    <div className="mt-4 grid grid-cols-2 gap-4">
-                                                        <div className="space-y-2">
-                                                            <p className="text-[10px] font-black uppercase tracking-widest text-outline">Contact</p>
-                                                            <div className="space-y-1">
-                                                                <a href={`mailto:${client.client_email}`} onClick={(e) => e.stopPropagation()} className="text-[11px] font-bold text-on-surface hover:text-primary flex items-center gap-2 truncate">
-                                                                    <span className="material-symbols-outlined text-xs">mail</span>
-                                                                    {client.client_email}
-                                                                </a>
-                                                                <a href={`tel:${client.client_phone}`} onClick={(e) => e.stopPropagation()} className="text-[11px] font-bold text-on-surface hover:text-primary flex items-center gap-2">
-                                                                    <span className="material-symbols-outlined text-xs">phone</span>
-                                                                    {client.client_phone}
-                                                                </a>
+                                                        <div className="mt-4 grid grid-cols-2 gap-4">
+                                                            <div className="space-y-2">
+                                                                <p className="text-[10px] font-black uppercase tracking-widest text-outline">Contact</p>
+                                                                <div className="space-y-1">
+                                                                    <a href={`mailto:${client.client_email}`} onClick={(e) => e.stopPropagation()} className="text-[11px] font-bold text-on-surface hover:text-primary flex items-center gap-2 truncate">
+                                                                        <span className="material-symbols-outlined text-xs">mail</span>
+                                                                        {client.client_email}
+                                                                    </a>
+                                                                    <a href={`tel:${client.client_phone}`} onClick={(e) => e.stopPropagation()} className="text-[11px] font-bold text-on-surface hover:text-primary flex items-center gap-2">
+                                                                        <span className="material-symbols-outlined text-xs">phone</span>
+                                                                        {client.client_phone}
+                                                                    </a>
+                                                                </div>
+                                                            </div>
+                                                            <div className="space-y-2">
+                                                                <p className="text-[10px] font-black uppercase tracking-widest text-outline">Requested</p>
+                                                                <p className="text-lg font-black text-on-surface">{format_currency(client.capital_requested)}</p>
                                                             </div>
                                                         </div>
-                                                        <div className="space-y-2">
-                                                            <p className="text-[10px] font-black uppercase tracking-widest text-outline">Requested</p>
-                                                            <p className="text-lg font-black text-on-surface">{format_currency(client.capital_requested)}</p>
-                                                        </div>
-                                                    </div>
-                                                    
-                                                    {client.pipeline_status && (
-                                                        <div className="mt-4 pt-4 border-t border-outline-variant/30">
-                                                            <LoanPipelineBadge currentStatus={client.pipeline_status} className="scale-90 origin-left" />
-                                                        </div>
-                                                    )}
+                                                        
+                                                        {client.pipeline_status && (
+                                                            <div className="mt-4 pt-4 border-t border-outline-variant/30">
+                                                                <LoanPipelineBadge currentStatus={client.pipeline_status} className="scale-90 origin-left" />
+                                                            </div>
+                                                        )}
 
-                                                    <div className="mt-4 space-y-2">
-                                                        <div className="flex justify-between items-center">
-                                                            <span className="text-[10px] font-black uppercase tracking-widest text-outline">Documents</span>
-                                                            <span className="text-[10px] font-bold text-outline">
-                                                                {client.document_count}/{client.total_required_docs}
-                                                            </span>
-                                                        </div>
-                                                        <div className="w-full bg-surface-container-highest rounded-full h-1.5 overflow-hidden">
-                                                            <div 
-                                                                className="h-full bg-primary transition-all duration-1000"
-                                                                style={{ width: `${(client.document_count / (client.total_required_docs || 1)) * 100}%` }}
-                                                            />
+                                                        <div className="mt-4 space-y-2">
+                                                            <div className="flex justify-between items-center">
+                                                                <span className="text-[10px] font-black uppercase tracking-widest text-outline">Documents</span>
+                                                                <span className="text-[10px] font-bold text-outline">
+                                                                    {client.document_count}/{client.total_required_docs}
+                                                                </span>
+                                                            </div>
+                                                            <div className="w-full bg-surface-container-highest rounded-full h-1.5 overflow-hidden">
+                                                                <div 
+                                                                    className="h-full bg-primary transition-all duration-1000"
+                                                                    style={{ width: `${(client.document_count / (client.total_required_docs || 1)) * 100}%` }}
+                                                                />
+                                                            </div>
                                                         </div>
                                                     </div>
-                                                </div>
-                                                <div className="ml-4 flex flex-col items-center">
-                                                    <span className="material-symbols-outlined text-tertiary-fixed-dim opacity-50 group-hover:opacity-100 transition-opacity">pending_actions</span>
-                                                    <span className="material-symbols-outlined text-outline group-hover:text-primary transition-all mt-auto">chevron_right</span>
+                                                    <div className="ml-4 flex flex-col items-center">
+                                                        <span className="material-symbols-outlined text-tertiary-fixed-dim opacity-50 group-hover:opacity-100 transition-opacity">pending_actions</span>
+                                                        <span className="material-symbols-outlined text-outline group-hover:text-primary transition-all mt-auto">chevron_right</span>
+                                                    </div>
                                                 </div>
                                             </div>
-                                        </div>
-                                    ))
-                                )}
+                                        ))
+                                    )}
+                                </div>
                             </div>
                         </div>
 
@@ -449,42 +452,44 @@ export default function AdvisorClientsListPage() {
                                 </h3>
                             </div>
 
-                            <div className="space-y-4">
-                                {under_review_clients.length === 0 ? (
-                                    <div className="p-12 text-center bg-surface-container-low rounded-xl border border-dashed border-outline-variant">
-                                        <p className="text-outline text-sm font-medium">No deals currently in UW review.</p>
-                                    </div>
-                                ) : (
-                                    under_review_clients.map(client => (
-                                        <div 
-                                            key={client.id}
-                                            onClick={() => router.push((pathname.startsWith("/admin") ? "/admin/advisor/clients/" : "/advisor/dashboard/clients/") + client.id)}
-                                            className="bg-surface-container-lowest p-6 rounded-xl shadow-sm border-l-4 border-primary group hover:shadow-md transition-all cursor-pointer"
-                                        >
-                                            <div className="flex justify-between items-start">
-                                                <div className="flex gap-4">
-                                                    <div className="h-10 w-10 rounded-lg bg-primary/5 flex items-center justify-center text-primary">
-                                                        <span className="material-symbols-outlined">analytics</span>
-                                                    </div>
-                                                    <div>
-                                                        <h4 className="font-bold text-on-surface group-hover:text-primary transition-colors">{client.client_name}</h4>
-                                                        <p className="text-xs text-on-surface-variant">{client.company_name}</p>
-                                                        
-                                                        <div className="mt-3 flex items-center gap-2">
-                                                            <div className="bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border border-emerald-100">
-                                                                Under Review
-                                                            </div>
-                                                            <div className="text-[11px] font-bold text-outline">
-                                                                {format_currency(client.capital_requested)}
+                            <div className="max-h-[70vh] overflow-y-auto premium-scrollbar pr-4 -mr-4">
+                                <div className="space-y-4 pr-4">
+                                    {under_review_clients.length === 0 ? (
+                                        <div className="p-12 text-center bg-surface-container-low rounded-xl border border-dashed border-outline-variant">
+                                            <p className="text-outline text-sm font-medium">No deals currently in UW review.</p>
+                                        </div>
+                                    ) : (
+                                        under_review_clients.map(client => (
+                                            <div 
+                                                key={client.id}
+                                                onClick={() => router.push((pathname.startsWith("/admin") ? "/admin/advisor/clients/" : "/advisor/dashboard/clients/") + client.id)}
+                                                className="bg-surface-container-lowest p-6 rounded-xl shadow-sm border-l-4 border-primary group hover:shadow-md transition-all cursor-pointer"
+                                            >
+                                                <div className="flex justify-between items-start">
+                                                    <div className="flex gap-4">
+                                                        <div className="h-10 w-10 rounded-lg bg-primary/5 flex items-center justify-center text-primary">
+                                                            <span className="material-symbols-outlined">analytics</span>
+                                                        </div>
+                                                        <div>
+                                                            <h4 className="font-bold text-on-surface group-hover:text-primary transition-colors">{client.client_name}</h4>
+                                                            <p className="text-xs text-on-surface-variant">{client.company_name}</p>
+                                                            
+                                                            <div className="mt-3 flex items-center gap-2">
+                                                                <div className="bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border border-emerald-100">
+                                                                    Under Review
+                                                                </div>
+                                                                <div className="text-[11px] font-bold text-outline">
+                                                                    {format_currency(client.capital_requested)}
+                                                                </div>
                                                             </div>
                                                         </div>
                                                     </div>
+                                                    <span className="material-symbols-outlined text-outline group-hover:text-primary transition-colors">chevron_right</span>
                                                 </div>
-                                                <span className="material-symbols-outlined text-outline group-hover:text-primary transition-colors">chevron_right</span>
                                             </div>
-                                        </div>
-                                    ))
-                                )}
+                                        ))
+                                    )}
+                                </div>
                             </div>
                         </div>
                     </div>
