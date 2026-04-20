@@ -52,3 +52,13 @@ src/app/admin/
 src/components/layout/admin/
 scripts
 *.sql
+
+# Deactivated AI Features
+src/lib/_openai.ts
+src/app/api/_generate-report/
+src/app/api/_chat/
+src/app/dashboard/_credit-report-assistant/
+src/app/dashboard/_chat/
+src/components/_ai-chat-interface.tsx
+src/components/_chat-message.tsx
+src/components/_chat-message-display.tsx

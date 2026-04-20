@@ -33,8 +33,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       '/dashboard/business-vault': 'Business Vault',
     }
     // normaliza al primer segmento importante, ej: /dashboard/credit-report-assistant/123
-    const key = Object.keys(map).find(k => pathname?.startsWith(k))
-    return key ? map[key] : 'Dashboard'
+    // const key = Object.keys(map).find(k => pathname?.startsWith(k))
+    // return key ? map[key] : 'Dashboard'
+    return 'Dashboard'
   }, [pathname])
 
   if (isEmbed) return <>{children}</>

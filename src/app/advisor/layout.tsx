@@ -70,7 +70,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const currentTitle = useMemo(() => {
     const map: Record<string, string> = {
       '/advisor/dashboard': 'Advisor Dashboard',
-      '/dashboard/credit-report-assistant': 'Credit Report Assistant',
+      // '/dashboard/credit-report-assistant': 'Credit Report Assistant',
       '/dashboard/book-consultation': 'Book Consultation',
       '/dashboard/business-vault': 'Business Vault',
       '/dashboard/business-profile': 'Business Profile',
@@ -78,6 +78,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     // normaliza al primer segmento importante, ej: /dashboard/credit-report-assistant/123
     const key = Object.keys(map).find(k => pathname?.startsWith(k))
     return key ? map[key] : 'Dashboard'
+    // return 'Dashboard'
   }, [pathname])
 
   if (isEmbed) return <>{children}</>

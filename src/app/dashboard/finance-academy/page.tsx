@@ -241,9 +241,9 @@ export default function CourseDashboard() {
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Link href="/dashboard/chat">
+              {/* <Link href="/dashboard/chat">
                 <Button variant="outline" className="w-full h-16">💬 AI Business Coach</Button>
-              </Link>
+              </Link> */}
               {/* <Link href="/dashboard/assessment">
                 <Button variant="outline" className="w-full h-16">📋 Action Assessments</Button>
               </Link> */}
