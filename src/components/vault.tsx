@@ -348,6 +348,7 @@ function DocumentCard({
                   </div>
                   <div className="flex items-center gap-1">
                     <Button variant="ghost" size="sm" onClick={() => onPreview(doc)} className="h-7 px-2 text-[10px]">View</Button>
+                    <Button variant="ghost" size="sm" onClick={() => onEdit(doc)} className="h-7 px-2 text-[10px]">Rename</Button>
                     <Button variant="ghost" size="sm" onClick={() => onDownload(doc)} className="h-7 px-2 text-[10px]">Download</Button>
                     <Button variant="ghost" size="sm" onClick={() => onDelete(doc)} className="h-7 px-2 text-[10px] text-rose-500">Delete</Button>
                   </div>
@@ -388,6 +389,8 @@ export default function Vault({
     isOpen: false,
     doc: null
   });
+  const [renaming_file, set_renaming_file] = useState<{ id: string; label: string } | null>(null);
+  const [is_renaming_loading, setIs_renaming_loading] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -459,6 +462,29 @@ export default function Vault({
     }
     a.download = downloadName;
     a.click();
+  };
+
+  const handleRenameSubmit = async (newLabel: string) => {
+    if (!renaming_file || !newLabel.trim()) return;
+    setIs_renaming_loading(true);
+    try {
+      const { error } = await supabase
+        .from('user_documents')
+        .update({ custom_label: newLabel.trim() })
+        .eq('id', renaming_file.id);
+
+      if (error) throw error;
+
+      toast({ title: 'Success', description: 'File renamed successfully' });
+      setDocuments(prev => prev.map(d =>
+        d.id === renaming_file.id ? { ...d, custom_label: newLabel.trim() } : d
+      ));
+      set_renaming_file(null);
+    } catch (err: any) {
+      toast({ title: 'Rename error', description: err.message, variant: 'destructive' });
+    } finally {
+      setIs_renaming_loading(false);
+    }
   };
 
   const checklist = useMemo(() => {
@@ -570,7 +596,7 @@ export default function Vault({
                   clientName={clientName}
                   onUploadComplete={() => fetchDocuments(userId || "", true)}
                   onDelete={handleDelete}
-                  onEdit={() => {}}
+                  onEdit={d => set_renaming_file({ id: d.id, label: d.custom_label || d.name })}
                   onToggleFavorite={() => {}}
                   onDownload={handleDownload}
                   onPreview={d => set_preview_modal({ isOpen: true, doc: d })}
@@ -600,7 +626,7 @@ export default function Vault({
                   clientName={clientName}
                   onUploadComplete={() => fetchDocuments(userId || "", true)}
                   onDelete={handleDelete}
-                  onEdit={() => {}}
+                  onEdit={d => set_renaming_file({ id: d.id, label: d.custom_label || d.name })}
                   onToggleFavorite={() => {}}
                   onDownload={handleDownload}
                   onPreview={d => set_preview_modal({ isOpen: true, doc: d })}
@@ -620,6 +646,30 @@ export default function Vault({
         storagePath={preview_modal.doc?.storage_path || ""}
         fileType={preview_modal.doc?.type}
       />
+
+      <Dialog open={!!renaming_file} onOpenChange={(open) => !open && set_renaming_file(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Rename File</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <Input
+              value={renaming_file?.label || ''}
+              onChange={(e) => set_renaming_file(prev => prev ? { ...prev, label: e.target.value } : null)}
+              placeholder="Enter new file name..."
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleRenameSubmit(renaming_file?.label || '');
+              }}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => set_renaming_file(null)} disabled={is_renaming_loading}>Cancel</Button>
+            <Button onClick={() => handleRenameSubmit(renaming_file?.label || '')} disabled={is_renaming_loading || !renaming_file?.label.trim()} className="bg-emerald-600 text-white">
+              {is_renaming_loading ? "Saving..." : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
