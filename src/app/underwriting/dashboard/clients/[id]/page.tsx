@@ -323,7 +323,18 @@ export default function UnderwritingClientDetailsPage() {
 
             const url = URL.createObjectURL(data);
             const a = document.createElement("a");
-            a.href = url; a.download = doc.name;
+            a.href = url;
+            let downloadName = doc.name;
+            if (doc.custom_label) {
+                const extIndex = doc.name.lastIndexOf('.');
+                const extension = extIndex !== -1 ? doc.name.substring(extIndex) : '';
+                if (extension && !doc.custom_label.toLowerCase().endsWith(extension.toLowerCase())) {
+                    downloadName = doc.custom_label + extension;
+                } else {
+                    downloadName = doc.custom_label;
+                }
+            }
+            a.download = downloadName;
             document.body.appendChild(a); a.click();
             document.body.removeChild(a); URL.revokeObjectURL(url);
 
