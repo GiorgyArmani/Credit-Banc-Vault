@@ -203,6 +203,16 @@ export async function requestDocuments(clientId: string, documentIds: string[]) 
                     console.error("GHL Sync Error (non-fatal):", ghlError);
                 }
             }
+
+            if (process.env.GHL_TOKEN) {
+                const { syncOutstandingDocuments } = await import("@/lib/outstanding-documents");
+                try {
+                    await syncOutstandingDocuments(client.user_id, client.ghl_contact_id, process.env.GHL_TOKEN);
+                    console.log(`✅ Synced outstanding docs after requesting new documents`);
+                } catch (syncError) {
+                    console.error("❌ Error syncing outstanding documents:", syncError);
+                }
+            }
         }
 
         // 6. Revalidate the client detail page
