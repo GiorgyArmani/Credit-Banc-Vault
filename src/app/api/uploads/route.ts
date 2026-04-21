@@ -495,6 +495,13 @@ export async function POST(req: Request) {
           } else {
             console.warn(`⚠️ GHL Sync failed or skipped for ${doc_code}:`, syncResult.error);
           }
+          
+          try {
+            await syncOutstandingDocuments(doc.user_id, vaultRecord.ghl_contact_id, process.env.GHL_TOKEN);
+            console.log(`✅ Synced outstanding docs after upload`);
+          } catch (syncOutstError) {
+            console.error("❌ Error syncing outstanding documents:", syncOutstError);
+          }
         } catch (syncError) {
           console.error("❌ Error importing/calling ghlSyncDocument:", syncError);
         }

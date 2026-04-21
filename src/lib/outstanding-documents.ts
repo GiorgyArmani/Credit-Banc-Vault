@@ -32,7 +32,7 @@ export async function calculateOutstandingDocuments(userId: string): Promise<str
     // 3. Fetch Uploaded Documents for user
     const { data: uploadedDocs, error: uploadError } = await supabase
         .from("user_documents")
-        .select("category, doc_code")
+        .select("category, doc_code, status")
         .eq("user_id", userId);
 
     if (uploadError) throw new Error(`Error fetching user documents: ${uploadError.message}`);
@@ -51,9 +51,10 @@ export async function calculateOutstandingDocuments(userId: string): Promise<str
 
     // 5. Filter out uploaded ones
     // Check both category and doc_code for compatibility
+    const validUploads = uploadedDocs?.filter(d => d.status !== 'rejected') || [];
     const uploadedCodes = new Set([
-        ...(uploadedDocs?.map((d) => d.category).filter(Boolean) || []),
-        ...(uploadedDocs?.map((d) => d.doc_code).filter(Boolean) || [])
+        ...validUploads.map((d) => d.category).filter(Boolean),
+        ...validUploads.map((d) => d.doc_code).filter(Boolean)
     ]);
 
     const missingLabels: string[] = [];

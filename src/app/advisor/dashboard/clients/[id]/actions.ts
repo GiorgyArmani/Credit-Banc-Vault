@@ -395,7 +395,7 @@ export async function deleteClientFile(clientId: string, documentId: string) {
         // 2. Verify advisor ownership
         const { data: client, error: clientError } = await supabase
             .from("client_data_vault")
-            .select("id, advisor_id")
+            .select("id, advisor_id, user_id, ghl_contact_id")
             .eq("id", clientId)
             .single();
 
@@ -438,6 +438,11 @@ export async function deleteClientFile(clientId: string, documentId: string) {
             .eq("id", documentId);
 
         if (dbError) throw new Error(`Failed to delete document record: ${dbError.message}`);
+
+        if (client.ghl_contact_id && process.env.GHL_TOKEN) {
+            const { syncOutstandingDocuments } = await import("@/lib/outstanding-documents");
+            await syncOutstandingDocuments(client.user_id, client.ghl_contact_id, process.env.GHL_TOKEN);
+        }
 
         // 6. Revalidate
         revalidatePath(`/advisor/dashboard/clients/${clientId}`);
@@ -609,7 +614,7 @@ export async function approveDocumentCategory(clientId: string, docCode: string)
 
         const { data: client } = await supabase
             .from("client_data_vault")
-            .select("id, advisor_id, user_id")
+            .select("id, advisor_id, user_id, ghl_contact_id")
             .eq("id", clientId)
             .single();
 
@@ -648,6 +653,11 @@ export async function approveDocumentCategory(clientId: string, docCode: string)
             .eq("doc_code", docCode)
             .eq("status", "rejected");
 
+        if (client.ghl_contact_id && process.env.GHL_TOKEN) {
+            const { syncOutstandingDocuments } = await import("@/lib/outstanding-documents");
+            await syncOutstandingDocuments(client.user_id, client.ghl_contact_id, process.env.GHL_TOKEN);
+        }
+
         revalidatePath(`/advisor/dashboard/clients/${clientId}`);
         return { success: true };
     } catch (error: any) {
@@ -671,7 +681,7 @@ export async function rejectDocumentCategory(clientId: string, docCode: string, 
         // 1. Verify advisor ownership
         const { data: client } = await supabase
             .from("client_data_vault")
-            .select("id, advisor_id, client_email, client_name, user_id")
+            .select("id, advisor_id, client_email, client_name, user_id, ghl_contact_id")
             .eq("id", clientId)
             .single();
 
@@ -739,6 +749,11 @@ export async function rejectDocumentCategory(clientId: string, docCode: string, 
             });
         } catch (emailErr) {
             console.error("Failed to send rejection email:", emailErr);
+        }
+
+        if (client.ghl_contact_id && process.env.GHL_TOKEN) {
+            const { syncOutstandingDocuments } = await import("@/lib/outstanding-documents");
+            await syncOutstandingDocuments(client.user_id, client.ghl_contact_id, process.env.GHL_TOKEN);
         }
 
         revalidatePath(`/advisor/dashboard/clients/${clientId}`);

@@ -277,11 +277,11 @@ export default function ClientSignupForm() {
 
           // Auto-assign advisor if they are logged in
           if (user.email) {
-            // Use case-insensitive search for email
+            // Find advisor by user_id for more reliable mapping than email
             const { data: advisor_record } = await supabase
               .from("advisors")
               .select("id, first_name, last_name")
-              .ilike("email", user.email)
+              .eq("user_id", user.id)
               .maybeSingle();
 
             if (advisor_record) {
