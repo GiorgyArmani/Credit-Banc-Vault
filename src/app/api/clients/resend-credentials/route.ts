@@ -110,8 +110,18 @@ export async function POST(request: Request) {
             );
         }
 
-        // Security: only the advisor who owns this client can resend credentials
-        if (client_data.advisor_id !== advisor_data.id) {
+        // Security: owner OR follower can resend credentials
+        let has_access = client_data.advisor_id === advisor_data.id;
+        if (!has_access) {
+            const { data: follower_row } = await supabase_admin
+                .from('client_followers')
+                .select('id')
+                .eq('client_vault_id', client_data.id)
+                .eq('advisor_id', advisor_data.id)
+                .maybeSingle();
+            has_access = !!follower_row;
+        }
+        if (!has_access) {
             return NextResponse.json(
                 { success: false, error: 'You do not have permission to manage this client' },
                 { status: 403 }

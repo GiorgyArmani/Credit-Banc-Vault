@@ -105,7 +105,17 @@ export async function POST(request: Request) {
             return NextResponse.json({ success: false, error: 'Client not found' }, { status: 404 });
         }
 
-        if (client.advisor_id !== advisor_data.id) {
+        let has_access = client.advisor_id === advisor_data.id;
+        if (!has_access) {
+            const { data: follower_row } = await supabase_admin
+                .from('client_followers')
+                .select('id')
+                .eq('client_vault_id', client.id)
+                .eq('advisor_id', advisor_data.id)
+                .maybeSingle();
+            has_access = !!follower_row;
+        }
+        if (!has_access) {
             return NextResponse.json(
                 { success: false, error: 'You do not have permission to upload for this client' },
                 { status: 403 }
