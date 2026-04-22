@@ -58,6 +58,7 @@ import { FundingPipelineCard } from "./_components/funding-pipeline-card";
 import { DocumentUploadStatus } from "./_components/document-upload-status";
 import { InternalCommunication } from "./_components/internal-communication";
 import { SubmitUnderwritingCTA } from "./_components/submit-underwriting-cta";
+import { ClientFollowersCard } from "./_components/client-followers-card";
 
 /**
  * ============================================================================
@@ -172,6 +173,10 @@ export default function AdvisorClientDetailsPage() {
 
     // client-profile-state: Stores client profile information
     const [client_profile, set_client_profile] = useState<ClientProfile | null>(null);
+
+    // is-owner-state: Whether current advisor owns this client (vs. being a follower).
+    // Drives the "Manage Followers" permission (owner + admin can manage; followers cannot).
+    const [is_owner, set_is_owner] = useState(false);
 
     // documents-state: Stores all client documents
     const [documents, set_documents] = useState<UserDocument[]>([]);
@@ -413,19 +418,37 @@ export default function AdvisorClientDetailsPage() {
             }
 
             // ============================================
-            // STEP 4: VERIFY ADVISOR OWNERSHIP
-            // Security check: Only the advisor who created this client can view
-            // Compare advisor_id in client record with advisor profile ID
+            // STEP 4: VERIFY ACCESS (owner OR follower)
             // ============================================
-            if (client_data.advisor_id !== advisor_data.id) {
-                console.error("❌ Access denied: Advisor does not own this client");
-                console.error(`   Client advisor_id: ${client_data.advisor_id}`);
-                console.error(`   Current advisor_id: ${advisor_data.id}`);
+            const owns_client = client_data.advisor_id === advisor_data.id;
+            let is_follower = false;
+            if (!owns_client) {
+                const { data: follower_row, error: follower_err } = await supabase
+                    .from("client_followers")
+                    .select("id")
+                    .eq("client_vault_id", client_data.id)
+                    .eq("advisor_id", advisor_data.id)
+                    .maybeSingle();
+                is_follower = !!follower_row;
+                if (follower_err) {
+                    console.error("client_followers read error:", follower_err);
+                }
+                console.log("Follower check:", {
+                    client_vault_id: client_data.id,
+                    advisor_id: advisor_data.id,
+                    is_follower,
+                    follower_row,
+                });
+            }
+
+            if (!owns_client && !is_follower) {
+                console.error("❌ Access denied: advisor is neither owner nor follower");
                 set_error_message("You do not have permission to view this client.");
                 set_component_state(ComponentState.ACCESS_DENIED);
                 return;
             }
 
+            set_is_owner(owns_client);
             console.log("✅ Client profile loaded:", client_data.client_name);
             set_client_profile(client_data as ClientProfile);
             // Reflect any existing submission state
@@ -1217,6 +1240,12 @@ export default function AdvisorClientDetailsPage() {
                         current_pipeline_status={current_pipeline_status}
                         pipeline_history={pipeline_history}
                         on_status_change={(status) => handle_status_change(status, "Set by advisor")}
+                    />
+
+                    {/* ── Followers ─────────────────────────────────────── */}
+                    <ClientFollowersCard
+                        clientId={client_profile.id}
+                        canManage={is_owner}
                     />
 
                     {/* ── Docs + Communication 2-col grid ───────────────── */}

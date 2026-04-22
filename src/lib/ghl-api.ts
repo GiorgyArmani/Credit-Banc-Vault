@@ -100,6 +100,26 @@ export async function ghlRemoveTags(contactId: string, tags: string[]) {
   return handle(res);
 }
 
+export async function ghlAddContactFollowers(contactId: string, followers: string[]) {
+  if (!followers?.length) return;
+  const res = await fetch(`${BASE}/contacts/${contactId}/followers`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ followers }),
+  });
+  return handle(res);
+}
+
+export async function ghlRemoveContactFollowers(contactId: string, followers: string[]) {
+  if (!followers?.length) return;
+  const res = await fetch(`${BASE}/contacts/${contactId}/followers`, {
+    method: "DELETE",
+    headers: authHeaders(),
+    body: JSON.stringify({ followers }),
+  });
+  return handle(res);
+}
+
 /**
  * Search for existing contacts in GHL by email, phone, or name
  * This is used to find contacts that were added in bulk before vault account creation

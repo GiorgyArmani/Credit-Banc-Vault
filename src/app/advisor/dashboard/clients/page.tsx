@@ -139,8 +139,8 @@ export default function AdvisorClientsListPage() {
                 return;
             }
 
-            // Admins see all clients; advisors only see their own
-            let advisorId: string | null = null
+            // Admins see all clients; advisors see owned + followed
+            let accessibleIds: string[] | null = null // null means "no filter" (admin)
 
             if (user_data.role !== 'admin') {
                 const { data: advisor_data, error: advisor_error } = await supabase
@@ -154,7 +154,18 @@ export default function AdvisorClientsListPage() {
                     set_component_state(ComponentState.ERROR)
                     return
                 }
-                advisorId = advisor_data.id
+
+                const advisorId = advisor_data.id
+
+                const [{ data: owned }, { data: followed }] = await Promise.all([
+                    supabase.from('client_data_vault').select('id').eq('advisor_id', advisorId),
+                    supabase.from('client_followers').select('client_vault_id').eq('advisor_id', advisorId),
+                ])
+
+                const idSet = new Set<string>()
+                owned?.forEach(r => idSet.add(r.id))
+                followed?.forEach((r: any) => idSet.add(r.client_vault_id))
+                accessibleIds = Array.from(idSet)
             }
 
             let clientsQuery = supabase
@@ -162,8 +173,12 @@ export default function AdvisorClientsListPage() {
                 .select('id, user_id, client_name, client_email, client_phone, company_name, capital_requested, created_at')
                 .order('created_at', { ascending: false })
 
-            if (advisorId) {
-                clientsQuery = clientsQuery.eq('advisor_id', advisorId)
+            if (accessibleIds !== null) {
+                if (accessibleIds.length === 0) {
+                    set_component_state(ComponentState.NO_CLIENTS)
+                    return
+                }
+                clientsQuery = clientsQuery.in('id', accessibleIds)
             }
 
             const { data: clients_data, error: clients_error } = await clientsQuery

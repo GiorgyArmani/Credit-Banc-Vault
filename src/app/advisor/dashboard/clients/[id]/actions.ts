@@ -9,6 +9,26 @@ import { updateLoanStatus } from "@/app/actions/pipeline";
 import { ghlSyncDocument } from "@/lib/ghl-document-sync";
 
 /**
+ * Owner OR follower check. Admin flow isn't covered here (advisor-persona actions).
+ * Returns true if advisorId owns or follows the given client.
+ */
+async function hasClientAccess(
+    supabase: any,
+    advisorId: string,
+    clientVaultId: string,
+    ownerAdvisorId: string | null
+): Promise<boolean> {
+    if (ownerAdvisorId && ownerAdvisorId === advisorId) return true;
+    const { data: follower } = await supabase
+        .from("client_followers")
+        .select("id")
+        .eq("client_vault_id", clientVaultId)
+        .eq("advisor_id", advisorId)
+        .maybeSingle();
+    return !!follower;
+}
+
+/**
  * addManualFundingApplication
  * 
  * Allows an advisor to manually upload a signed funding application (contract)
@@ -259,8 +279,8 @@ export async function updateClientProfile(clientId: string, data: any) {
             .eq("user_id", advisorUser.id)
             .single();
 
-        if (!advisorData || client.advisor_id !== advisorData.id) {
-            throw new Error("Access denied: You do not own this client");
+        if (!advisorData || !(await hasClientAccess(supabase, advisorData.id, clientId, client.advisor_id))) {
+            throw new Error("Access denied: You do not have access to this client");
         }
 
         const supabaseAdmin = createAdminClient();
@@ -417,8 +437,8 @@ export async function deleteClientFile(clientId: string, documentId: string) {
             .eq("user_id", advisorUser.id)
             .single();
 
-        if (!advisorData || client.advisor_id !== advisorData.id) {
-            throw new Error("Access denied: You do not own this client");
+        if (!advisorData || !(await hasClientAccess(supabase, advisorData.id, clientId, client.advisor_id))) {
+            throw new Error("Access denied: You do not have access to this client");
         }
 
         // 3. Get document storage path
@@ -492,8 +512,8 @@ export async function deleteClientVault(clientId: string) {
             .eq("user_id", advisorUser.id)
             .single();
 
-        if (!advisorData || client.advisor_id !== advisorData.id) {
-            throw new Error("Access denied: You do not own this client");
+        if (!advisorData || !(await hasClientAccess(supabase, advisorData.id, clientId, client.advisor_id))) {
+            throw new Error("Access denied: You do not have access to this client");
         }
 
         const supabaseAdmin = createAdminClient();
@@ -573,8 +593,8 @@ export async function removeRequestedDocument(clientId: string, documentCode: st
             .eq("user_id", advisorUser.id)
             .single();
 
-        if (!advisorData || client.advisor_id !== advisorData.id) {
-            throw new Error("Access denied: You do not own this client");
+        if (!advisorData || !(await hasClientAccess(supabase, advisorData.id, clientId, client.advisor_id))) {
+            throw new Error("Access denied: You do not have access to this client");
         }
 
         // 3. Get document ID from code
@@ -636,7 +656,7 @@ export async function approveDocumentCategory(clientId: string, docCode: string)
             .eq("user_id", advisorUser.id)
             .single();
 
-        if (!advisorData || client.advisor_id !== advisorData.id) {
+        if (!advisorData || !(await hasClientAccess(supabase, advisorData.id, clientId, client.advisor_id))) {
             throw new Error("Access denied");
         }
 
@@ -703,7 +723,7 @@ export async function rejectDocumentCategory(clientId: string, docCode: string, 
             .eq("user_id", advisorUser.id)
             .single();
 
-        if (!advisorData || client.advisor_id !== advisorData.id) {
+        if (!advisorData || !(await hasClientAccess(supabase, advisorData.id, clientId, client.advisor_id))) {
             throw new Error("Access denied");
         }
 
@@ -809,7 +829,7 @@ export async function renameClientFile(clientId: string, documentId: string, new
                 .eq("user_id", advisorUser.id)
                 .single();
 
-            if (!advisorData || client.advisor_id !== advisorData.id) {
+            if (!advisorData || !(await hasClientAccess(supabase, advisorData.id, client.id, client.advisor_id))) {
                 throw new Error("Access denied");
             }
         }
@@ -859,8 +879,8 @@ export async function generateMagicLink(clientId: string) {
             .eq("user_id", advisorUser.id)
             .single();
 
-        if (!advisorData || client.advisor_id !== advisorData.id) {
-            throw new Error("Access denied: You do not own this client");
+        if (!advisorData || !(await hasClientAccess(supabase, advisorData.id, clientId, client.advisor_id))) {
+            throw new Error("Access denied: You do not have access to this client");
         }
 
         // 3. Generate Magic Link via Admin Client

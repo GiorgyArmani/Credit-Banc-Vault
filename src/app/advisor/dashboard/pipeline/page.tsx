@@ -60,7 +60,7 @@ export default function AdvisorPipelinePage() {
         .select('id, user_id, client_name, client_email, client_phone, company_name, capital_requested')
 
       if (!isAdmin) {
-        // Advisors only see their own clients
+        // Advisors see owned + followed clients
         const { data: advisor } = await supabase
           .from('advisors')
           .select('id')
@@ -68,7 +68,22 @@ export default function AdvisorPipelinePage() {
           .maybeSingle()
 
         if (!advisor) return
-        clientsQuery = clientsQuery.eq('advisor_id', advisor.id)
+
+        const [{ data: owned }, { data: followed }] = await Promise.all([
+          supabase.from('client_data_vault').select('id').eq('advisor_id', advisor.id),
+          supabase.from('client_followers').select('client_vault_id').eq('advisor_id', advisor.id),
+        ])
+
+        const idSet = new Set<string>()
+        owned?.forEach(r => idSet.add(r.id))
+        followed?.forEach((r: any) => idSet.add(r.client_vault_id))
+
+        if (idSet.size === 0) {
+          setDeals([])
+          return
+        }
+
+        clientsQuery = clientsQuery.in('id', Array.from(idSet))
       }
 
       const { data: clients, error } = await clientsQuery

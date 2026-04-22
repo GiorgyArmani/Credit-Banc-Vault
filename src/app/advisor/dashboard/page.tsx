@@ -188,52 +188,80 @@ export default function AdvisorDashboard() {
    */
   async function loadStats(advisorId: string) {
     try {
+      // Build the set of client vaults this advisor can see: owned + followed.
+      const [{ data: owned }, { data: followed }] = await Promise.all([
+        supabase.from("client_data_vault").select("id, user_id").eq("advisor_id", advisorId),
+        supabase.from("client_followers").select("client_vault_id").eq("advisor_id", advisorId),
+      ]);
+
+      const vaultIdSet = new Set<string>();
+      const ownerUserIds = new Set<string>();
+      owned?.forEach(r => { vaultIdSet.add(r.id); ownerUserIds.add(r.user_id); });
+      followed?.forEach((r: any) => vaultIdSet.add(r.client_vault_id));
+
+      // Resolve user_ids for followed vaults
+      let allClientUserIds = Array.from(ownerUserIds);
+      if (followed && followed.length > 0) {
+        const followedIds = followed.map((r: any) => r.client_vault_id);
+        const { data: followedVaults } = await supabase
+          .from("client_data_vault")
+          .select("user_id")
+          .in("id", followedIds);
+        followedVaults?.forEach((v: any) => allClientUserIds.push(v.user_id));
+      }
+
+      const accessibleVaultIds = Array.from(vaultIdSet);
+      const hasAny = accessibleVaultIds.length > 0;
+
       // 1. Total Clients
-      const { count: totalClients } = await supabase
-        .from("client_data_vault")
-        .select("*", { count: "exact", head: true })
-        .eq("advisor_id", advisorId);
+      const totalClients = accessibleVaultIds.length;
 
       // 2. Pending Applications ('submitted' and 'documents_requested')
-      const { count: pendingApplications } = await supabase
-        .from("submissions")
-        .select("*", { count: "exact", head: true })
-        .eq("advisor_id", advisorId)
-        .in("status", ["submitted", "documents_requested"]);
+      const { count: pendingApplications } = hasAny
+        ? await supabase
+            .from("submissions")
+            .select("*", { count: "exact", head: true })
+            .in("user_id", allClientUserIds)
+            .in("status", ["submitted", "documents_requested"])
+        : { count: 0 };
 
       // 3. Approved ('locked')
-      const { count: approvedApplications } = await supabase
-        .from("submissions")
-        .select("*", { count: "exact", head: true })
-        .eq("advisor_id", advisorId)
-        .eq("status", "locked");
+      const { count: approvedApplications } = hasAny
+        ? await supabase
+            .from("submissions")
+            .select("*", { count: "exact", head: true })
+            .in("user_id", allClientUserIds)
+            .eq("status", "locked")
+        : { count: 0 };
 
       const allCompleted = approvedApplications || 0;
       const totalSubs = (pendingApplications || 0) + allCompleted;
       const successRate = totalSubs > 0 ? Math.round((allCompleted / totalSubs) * 100) : 0;
 
       setStats({
-        totalClients: totalClients || 0,
+        totalClients,
         pendingApplications: pendingApplications || 0,
         approvedApplications: allCompleted,
         successRate
       });
 
       // Fetch recent applications
-      const { data: recentSubsData } = await supabase
-        .from("submissions")
-        .select(`
-          id,
-          status,
-          submitted_at,
-          client_data_vault (
-            client_name,
-            company_name
-          )
-        `)
-        .eq("advisor_id", advisorId)
-        .order("submitted_at", { ascending: false })
-        .limit(5);
+      const { data: recentSubsData } = hasAny
+        ? await supabase
+            .from("submissions")
+            .select(`
+              id,
+              status,
+              submitted_at,
+              client_data_vault (
+                client_name,
+                company_name
+              )
+            `)
+            .in("user_id", allClientUserIds)
+            .order("submitted_at", { ascending: false })
+            .limit(5)
+        : { data: null as any };
 
       if (recentSubsData) {
         const apps = recentSubsData.map((s: any) => ({
@@ -257,17 +285,19 @@ export default function AdvisorDashboard() {
         setRecentApps(apps);
       }
 
-      // Fetch recent activity
-      const { data: clientsData } = await supabase
-        .from("client_data_vault")
-        .select("user_id, client_name")
-        .eq("advisor_id", advisorId);
+      // Fetch recent activity — for accessible clients (owned + followed)
+      const { data: clientsData } = hasAny
+        ? await supabase
+            .from("client_data_vault")
+            .select("user_id, client_name")
+            .in("id", accessibleVaultIds)
+        : { data: null as any };
 
       if (clientsData && clientsData.length > 0) {
         const clientMap = new Map();
-        clientsData.forEach(c => clientMap.set(c.user_id, c.client_name));
+        clientsData.forEach((c: any) => clientMap.set(c.user_id, c.client_name));
 
-        const clientIds = clientsData.map(c => c.user_id);
+        const clientIds = clientsData.map((c: any) => c.user_id);
         const { data: recentDocs } = await supabase
           .from("user_documents")
           .select("id, name, upload_date, user_id")
