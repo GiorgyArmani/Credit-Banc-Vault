@@ -21,7 +21,7 @@ export function GlobalSearch() {
     const [activeIndex, setActiveIndex] = useState(-1);
     const containerRef = useRef<HTMLDivElement>(null);
 
-    // Initial fetch of clients for the current advisor
+    // Initial fetch of clients for the current advisor (owned + followed)
     useEffect(() => {
         async function fetchClients() {
             const { data: { user } } = await supabase.auth.getUser();
@@ -35,10 +35,21 @@ export function GlobalSearch() {
 
             if (!advisorData) return;
 
+            const { data: followed } = await supabase
+                .from('client_followers')
+                .select('client_vault_id')
+                .eq('advisor_id', advisorData.id);
+
+            const followedIds = (followed ?? []).map((r: any) => r.client_vault_id);
+
+            const filterExpr = followedIds.length > 0
+                ? `advisor_id.eq.${advisorData.id},id.in.(${followedIds.join(',')})`
+                : `advisor_id.eq.${advisorData.id}`;
+
             const { data } = await supabase
                 .from('client_data_vault')
                 .select('id, client_name, company_name')
-                .eq('advisor_id', advisorData.id);
+                .or(filterExpr);
 
             if (data) setClients(data as SearchResult[]);
         }
