@@ -140,6 +140,10 @@ export default function AdvisorPipelinePage() {
     fetchDeals();
   }, []);
 
+  useEffect(() => {
+    import("drag-drop-touch");
+  }, []);
+
   const filteredDeals = useMemo(() => {
     const query = searchQuery.toLowerCase();
     return deals.filter(deal => 
