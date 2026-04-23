@@ -251,6 +251,126 @@ export async function requestDocuments(clientId: string, documentIds: string[]) 
  * Allows an advisor to update a client's profile information.
  * Syncs changes to public.users, business_profiles, and GoHighLevel.
  */
+/**
+ * updateClientSignupNotes
+ *
+ * Inline-save for the two signup note fields on client_data_vault:
+ * loan_purpose and additional_notes. Separate from updateClientProfile so
+ * the new Client Notes card can persist just these fields without having to
+ * resubmit the entire profile form.
+ */
+export async function updateClientSignupNotes(
+    clientId: string,
+    data: { loan_purpose?: string; additional_notes?: string }
+) {
+    try {
+        const supabase = await createClient();
+
+        const { data: { user: advisorUser } } = await supabase.auth.getUser();
+        if (!advisorUser) throw new Error("Unauthorized");
+
+        const { data: client, error: clientError } = await supabase
+            .from("client_data_vault")
+            .select("advisor_id")
+            .eq("id", clientId)
+            .single();
+        if (clientError || !client) throw new Error("Client not found");
+
+        const { data: advisorData } = await supabase
+            .from("advisors")
+            .select("id")
+            .eq("user_id", advisorUser.id)
+            .single();
+
+        if (!advisorData || !(await hasClientAccess(supabase, advisorData.id, clientId, client.advisor_id))) {
+            throw new Error("Access denied: You do not have access to this client");
+        }
+
+        const patch: Record<string, any> = { updated_at: new Date().toISOString() };
+        if (typeof data.loan_purpose === "string") patch.loan_purpose = data.loan_purpose;
+        if (typeof data.additional_notes === "string") patch.additional_notes = data.additional_notes;
+
+        const supabaseAdmin = createAdminClient();
+        const { error: updateError } = await supabaseAdmin
+            .from("client_data_vault")
+            .update(patch)
+            .eq("id", clientId);
+
+        if (updateError) throw new Error(`Failed to update notes: ${updateError.message}`);
+
+        revalidatePath(`/advisor/dashboard/clients/${clientId}`);
+
+        return { success: true };
+    } catch (error: any) {
+        console.error("Exception in updateClientSignupNotes:", error);
+        return { success: false, error: error.message || "An unexpected error occurred" };
+    }
+}
+
+/**
+ * setReferralPartner
+ *
+ * Persists the selected referral partner (a.k.a. affiliate) on the client
+ * vault and syncs the same string to the GHL contact custom field
+ * AFFILIATE_ASSIGNED so GHL automations keyed on that field fire.
+ *
+ * Pass `null` to clear the assignment.
+ */
+export async function setReferralPartner(clientId: string, partnerName: string | null) {
+    try {
+        const supabase = await createClient();
+
+        const { data: { user: advisorUser } } = await supabase.auth.getUser();
+        if (!advisorUser) throw new Error("Unauthorized");
+
+        const { data: client, error: clientError } = await supabase
+            .from("client_data_vault")
+            .select("advisor_id, ghl_contact_id")
+            .eq("id", clientId)
+            .single();
+        if (clientError || !client) throw new Error("Client not found");
+
+        const { data: advisorData } = await supabase
+            .from("advisors")
+            .select("id")
+            .eq("user_id", advisorUser.id)
+            .single();
+
+        if (!advisorData || !(await hasClientAccess(supabase, advisorData.id, clientId, client.advisor_id))) {
+            throw new Error("Access denied: You do not have access to this client");
+        }
+
+        const supabaseAdmin = createAdminClient();
+        const { error: updateError } = await supabaseAdmin
+            .from("client_data_vault")
+            .update({
+                referral_partner: partnerName,
+                updated_at: new Date().toISOString(),
+            })
+            .eq("id", clientId);
+
+        if (updateError) throw new Error(`Failed to update referral partner: ${updateError.message}`);
+
+        // Sync to GHL — non-fatal if this fails; vault is source of truth.
+        const affiliateFieldId = process.env.AFFILIATE_ASSIGNED;
+        if (client.ghl_contact_id && affiliateFieldId) {
+            try {
+                await ghlUpdateContact(client.ghl_contact_id, {
+                    customFields: [{ id: affiliateFieldId, value: partnerName ?? "" }],
+                });
+            } catch (ghlError) {
+                console.error("[setReferralPartner] GHL sync failed (non-fatal):", ghlError);
+            }
+        }
+
+        revalidatePath(`/advisor/dashboard/clients/${clientId}`);
+        return { success: true };
+    } catch (error: any) {
+        console.error("Exception in setReferralPartner:", error);
+        return { success: false, error: error.message || "An unexpected error occurred" };
+    }
+}
+
 export async function updateClientProfile(clientId: string, data: any) {
     try {
         const supabase = await createClient();

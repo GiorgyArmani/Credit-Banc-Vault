@@ -288,7 +288,22 @@ export default function ClientSignupForm() {
               set_advisor_id(advisor_record.id);
               console.log(`✅ Advisor auto-assigned: ${advisor_record.first_name} ${advisor_record.last_name}`);
             } else {
-              console.log(`⚠️ User is an advisor but no record found in "advisors" table for email: ${user.email}`);
+              // Fallback: try matching by email — common when an advisor row
+              // was created (e.g., via bulk import) before `user_id` was linked.
+              // The server resolves this authoritatively, but we also try here
+              // so the UI shows the correct advisor immediately.
+              const { data: advisor_by_email } = await supabase
+                .from("advisors")
+                .select("id, first_name, last_name")
+                .ilike("email", user.email)
+                .maybeSingle();
+
+              if (advisor_by_email) {
+                set_advisor_id(advisor_by_email.id);
+                console.log(`✅ Advisor matched by email: ${advisor_by_email.first_name} ${advisor_by_email.last_name}`);
+              } else {
+                console.warn(`⚠️ User is an advisor but no record found in "advisors" table for email: ${user.email} — the server will try to resolve by session at submit time.`);
+              }
             }
           }
         }
@@ -642,7 +657,7 @@ export default function ClientSignupForm() {
                 { num: 6, label: "Final", icon: Clock },
               ].map((s, idx) => (
                 <div key={s.num} className="flex items-center shrink-0">
-                  <div 
+                  <div
                     className="flex flex-col items-center cursor-pointer group"
                     onClick={() => set_step(s.num)}
                   >
@@ -785,14 +800,14 @@ export default function ClientSignupForm() {
                     </div>
 
                     <div>
-                      <Label htmlFor="company_zip_code" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">ZIP Code *</Label>
+                      <Label htmlFor="company_zip_code" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">ZIP Code</Label>
                       <Input
                         id="company_zip_code"
                         value={company_zip_code}
                         onChange={(e) => set_company_zip_code(e.target.value)}
                         className="mt-2"
                         placeholder="90210"
-                        required
+
                       />
                     </div>
 
@@ -907,15 +922,13 @@ export default function ClientSignupForm() {
                               key={type}
                               type="button"
                               onClick={() => toggle_loan_type(type)}
-                              className={`flex items-center gap-2 px-4 py-3 rounded-2xl border text-sm font-black transition-all duration-200 ${
-                                selected
-                                  ? "bg-emerald-500 border-emerald-500 text-white shadow-lg shadow-emerald-500/20"
-                                  : "bg-white border-emerald-100 text-emerald-950 hover:border-emerald-300"
-                              }`}
+                              className={`flex items-center gap-2 px-4 py-3 rounded-2xl border text-sm font-black transition-all duration-200 ${selected
+                                ? "bg-emerald-500 border-emerald-500 text-white shadow-lg shadow-emerald-500/20"
+                                : "bg-white border-emerald-100 text-emerald-950 hover:border-emerald-300"
+                                }`}
                             >
-                              <span className={`w-4 h-4 rounded-md border-2 flex items-center justify-center shrink-0 transition-colors ${
-                                selected ? "bg-white border-white" : "border-emerald-200"
-                              }`}>
+                              <span className={`w-4 h-4 rounded-md border-2 flex items-center justify-center shrink-0 transition-colors ${selected ? "bg-white border-white" : "border-emerald-200"
+                                }`}>
                                 {selected && (
                                   <svg className="w-2.5 h-2.5 text-emerald-500" viewBox="0 0 10 8" fill="none">
                                     <path d="M1 4l3 3 5-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />

@@ -39,9 +39,12 @@ import {
     approveDocumentCategory,
     rejectDocumentCategory,
     renameClientFile,
-    generateMagicLink
+    generateMagicLink,
+    updateClientSignupNotes,
+    setReferralPartner
 } from "./actions";
 import { fetchInternalNotes, addInternalNote } from "@/app/actions/internal-notes";
+import { fetchFileNotes, addFileNote } from "@/app/actions/client-file-notes";
 import { toast } from "sonner";
 import clsx from "clsx";
 import { format } from "date-fns";
@@ -59,6 +62,7 @@ import { DocumentUploadStatus } from "./_components/document-upload-status";
 import { InternalCommunication } from "./_components/internal-communication";
 import { SubmitUnderwritingCTA } from "./_components/submit-underwriting-cta";
 import { ClientFollowersCard } from "./_components/client-followers-card";
+import { ClientNotesCard, type FileNote } from "./_components/client-notes-card";
 
 /**
  * ============================================================================
@@ -123,10 +127,12 @@ interface ClientProfile {
     company_zip_code?: string;
     avg_annual_revenue?: number;
     loan_purpose?: string;
+    additional_notes?: string;
     proposed_loan_type?: string;
     funding_eta?: string;
     employees_count?: number;
     is_home_based?: boolean | null;
+    referral_partner?: string | null;
 }
 
 /**
@@ -196,6 +202,8 @@ export default function AdvisorClientDetailsPage() {
     // resend-credentials-state: Tracks loading state for credential resend
     const [is_resending, set_is_resending] = useState(false);
     const [is_generating_magic_link, set_is_generating_magic_link] = useState(false);
+    const [is_sending_password_reset, set_is_sending_password_reset] = useState(false);
+    const [is_saving_referral_partner, set_is_saving_referral_partner] = useState(false);
 
     // upload-for-client-state: Controls for advisor document upload modal
     const [is_upload_modal_open, set_is_upload_modal_open] = useState(false);
@@ -222,6 +230,11 @@ export default function AdvisorClientDetailsPage() {
     const [notes, set_notes] = useState<InternalNote[]>([]);
     const [new_standalone_note, set_new_standalone_note] = useState("");
     const [is_adding_note, set_is_adding_note] = useState(false);
+
+    // Client File Notes state (separate timeline under the Client Notes card)
+    const [file_notes, set_file_notes] = useState<FileNote[]>([]);
+    const [new_file_note, set_new_file_note] = useState("");
+    const [is_adding_file_note, set_is_adding_file_note] = useState(false);
 
     // Edit Profile state
     const [is_edit_modal_open, set_is_edit_modal_open] = useState(false);
@@ -395,10 +408,12 @@ export default function AdvisorClientDetailsPage() {
           company_zip_code,
           avg_annual_revenue,
           loan_purpose,
+          additional_notes,
           proposed_loan_type,
           funding_eta,
           employees_count,
-          is_home_based
+          is_home_based,
+          referral_partner
         `)
                 .eq("id", client_id)
                 .maybeSingle();
@@ -539,6 +554,14 @@ export default function AdvisorClientDetailsPage() {
             const notes_res = await fetchInternalNotes(client_id);
             if (notes_res.success) {
                 set_notes(notes_res.notes || []);
+            }
+
+            // ============================================
+            // STEP 8b: FETCH CLIENT FILE NOTES
+            // ============================================
+            const file_notes_res = await fetchFileNotes(client_id);
+            if (file_notes_res.success) {
+                set_file_notes((file_notes_res.notes as FileNote[]) || []);
             }
 
             // ============================================
@@ -941,6 +964,52 @@ export default function AdvisorClientDetailsPage() {
             }
         }
 
+        async function handle_referral_partner_change(partner: string | null) {
+            set_is_saving_referral_partner(true);
+            try {
+                const result = await setReferralPartner(client_id, partner);
+                if (result.success) {
+                    set_client_profile((prev) => (prev ? { ...prev, referral_partner: partner } : prev));
+                    toast.success(partner ? `Referral partner set to ${partner}` : "Referral partner cleared");
+                } else {
+                    toast.error(result.error || "Failed to update referral partner");
+                }
+            } catch (err: any) {
+                console.error("❌ Referral partner error:", err);
+                toast.error("An unexpected error occurred");
+            } finally {
+                set_is_saving_referral_partner(false);
+            }
+        }
+
+        /**
+         * handle_send_password_reset: Triggers the GHL workflow that delivers
+         * a password-reset link to the client (via custom field RESET_PW_LINK).
+         */
+        async function handle_send_password_reset() {
+            set_is_sending_password_reset(true);
+            try {
+                const response = await fetch('/api/clients/send-password-reset', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ client_id }),
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    toast.success('Password reset link sent to the client.');
+                } else {
+                    toast.error(result.error || 'Failed to send reset link');
+                }
+            } catch (err: any) {
+                console.error('❌ Send reset link error:', err);
+                toast.error('An unexpected error occurred');
+            } finally {
+                set_is_sending_password_reset(false);
+            }
+        }
+
         /**
          * handle_reject_category: Processes a document category rejection
          */
@@ -1061,6 +1130,48 @@ export default function AdvisorClientDetailsPage() {
                 toast.error("An unexpected error occurred");
             } finally {
                 set_is_adding_note(false);
+            }
+        }
+
+        async function handle_add_file_note() {
+            if (!new_file_note.trim()) return;
+
+            set_is_adding_file_note(true);
+            try {
+                const result = await addFileNote(client_id, new_file_note);
+                if (result.success) {
+                    toast.success("File note added");
+                    set_new_file_note("");
+                    const res = await fetchFileNotes(client_id);
+                    if (res.success && res.notes) set_file_notes(res.notes as FileNote[]);
+                } else {
+                    toast.error(result.error || "Failed to add file note");
+                }
+            } catch (err: any) {
+                console.error("❌ Add file note error:", err);
+                toast.error("An unexpected error occurred");
+            } finally {
+                set_is_adding_file_note(false);
+            }
+        }
+
+        async function handle_save_signup_notes(patch: {
+            loan_purpose?: string;
+            additional_notes?: string;
+        }): Promise<boolean> {
+            try {
+                const result = await updateClientSignupNotes(client_id, patch);
+                if (result.success) {
+                    set_client_profile((prev) => (prev ? { ...prev, ...patch } : prev));
+                    toast.success("Notes updated");
+                    return true;
+                }
+                toast.error(result.error || "Failed to update notes");
+                return false;
+            } catch (err: any) {
+                console.error("❌ Save signup notes error:", err);
+                toast.error("An unexpected error occurred");
+                return false;
             }
         }
 
@@ -1228,11 +1339,27 @@ export default function AdvisorClientDetailsPage() {
                         completion_percentage={completion_percentage}
                         is_resending={is_resending}
                         is_generating_magic_link={is_generating_magic_link}
+                        is_sending_password_reset={is_sending_password_reset}
+                        is_saving_referral_partner={is_saving_referral_partner}
                         on_edit={() => set_is_edit_modal_open(true)}
                         on_delete_vault={() => set_is_delete_vault_modal_open(true)}
                         on_resend={handle_resend_credentials}
                         on_copy_magic_link={handle_copy_magic_link}
                         on_add_funding_app={() => set_is_manual_funding_modal_open(true)}
+                        on_send_password_reset={handle_send_password_reset}
+                        on_referral_partner_change={handle_referral_partner_change}
+                    />
+
+                    {/* ── Client Notes (signup context + file notes) ────── */}
+                    <ClientNotesCard
+                        loan_purpose={client_profile.loan_purpose || ""}
+                        additional_notes={client_profile.additional_notes || ""}
+                        file_notes={file_notes}
+                        new_file_note={new_file_note}
+                        is_adding_file_note={is_adding_file_note}
+                        on_new_file_note_change={set_new_file_note}
+                        on_add_file_note={handle_add_file_note}
+                        on_save_signup_notes={handle_save_signup_notes}
                     />
 
                     {/* ── Funding Pipeline ──────────────────────────────── */}

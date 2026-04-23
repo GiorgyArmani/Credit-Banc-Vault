@@ -1,7 +1,11 @@
 "use client";
 
-import { Loader2, Link, Send, Trash2, UserCog, FileSignature } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Loader2, Link, Send, Trash2, UserCog, FileSignature, KeyRound, Check, ChevronsUpDown, Users2 } from "lucide-react";
 import clsx from "clsx";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { REFERRAL_PARTNERS } from "@/data/referral-partners";
 
 interface ClientProfile {
     id: string;
@@ -21,6 +25,7 @@ interface ClientProfile {
     data_vault_submitted_at: string | null;
     contract_completed: boolean;
     contract_completed_at: string | null;
+    referral_partner?: string | null;
 }
 
 interface ClientProfileHeaderProps {
@@ -28,11 +33,15 @@ interface ClientProfileHeaderProps {
     completion_percentage: number;
     is_resending: boolean;
     is_generating_magic_link: boolean;
+    is_sending_password_reset: boolean;
+    is_saving_referral_partner: boolean;
     on_edit: () => void;
     on_delete_vault: () => void;
     on_resend: () => void;
     on_copy_magic_link: () => void;
     on_add_funding_app: () => void;
+    on_send_password_reset: () => void;
+    on_referral_partner_change: (partner: string | null) => void;
 }
 
 function format_currency(amount: number): string {
@@ -80,11 +89,15 @@ export function ClientProfileHeader({
     completion_percentage,
     is_resending,
     is_generating_magic_link,
+    is_sending_password_reset,
+    is_saving_referral_partner,
     on_edit,
     on_delete_vault,
     on_resend,
     on_copy_magic_link,
     on_add_funding_app,
+    on_send_password_reset,
+    on_referral_partner_change,
 }: ClientProfileHeaderProps) {
     const initials = get_initials(client_profile.client_name);
     const credit = parse_credit_score(client_profile.credit_score);
@@ -164,10 +177,23 @@ export function ClientProfileHeader({
                             )}
                             {is_resending ? "Sending…" : "Resend Login"}
                         </button>
+                        <button
+                            onClick={on_send_password_reset}
+                            disabled={is_sending_password_reset}
+                            title="Send the client a link to set a new password they remember"
+                            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl transition-colors disabled:opacity-60"
+                        >
+                            {is_sending_password_reset ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                                <KeyRound className="h-4 w-4" />
+                            )}
+                            {is_sending_password_reset ? "Sending…" : "Send Reset Link"}
+                        </button>
                         {!client_profile.contract_completed ? (
                             <button
                                 onClick={on_add_funding_app}
-                                className="flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-sm font-semibold rounded-xl transition-colors"
+                                className="col-span-2 flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-sm font-semibold rounded-xl transition-colors"
                             >
                                 <FileSignature className="h-4 w-4" />
                                 Add Funding App
@@ -175,7 +201,7 @@ export function ClientProfileHeader({
                         ) : (
                             <button
                                 onClick={on_delete_vault}
-                                className="flex items-center justify-center gap-2 px-4 py-2.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-100 text-sm font-semibold rounded-xl transition-colors"
+                                className="col-span-2 flex items-center justify-center gap-2 px-4 py-2.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-100 text-sm font-semibold rounded-xl transition-colors"
                             >
                                 <Trash2 className="h-4 w-4" />
                                 Delete Vault
@@ -191,6 +217,15 @@ export function ClientProfileHeader({
                             </button>
                         )}
                     </div>
+                </div>
+
+                {/* Referral partner picker */}
+                <div className="mt-6 pt-6 border-t border-slate-100">
+                    <ReferralPartnerPicker
+                        value={client_profile.referral_partner ?? null}
+                        is_saving={is_saving_referral_partner}
+                        on_change={on_referral_partner_change}
+                    />
                 </div>
 
                 {/* Divider + 4-column info strip */}
@@ -276,5 +311,100 @@ export function ClientProfileHeader({
                 </div>
             </div>
         </section>
+    );
+}
+
+interface ReferralPartnerPickerProps {
+    value: string | null;
+    is_saving: boolean;
+    on_change: (partner: string | null) => void;
+}
+
+function ReferralPartnerPicker({ value, is_saving, on_change }: ReferralPartnerPickerProps) {
+    const [open, set_open] = useState(false);
+    const options = useMemo(() => REFERRAL_PARTNERS, []);
+
+    const handle_select = (name: string) => {
+        set_open(false);
+        // Toggle off if re-selecting the current value
+        if (name === value) {
+            on_change(null);
+        } else {
+            on_change(name);
+        }
+    };
+
+    return (
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-emerald-100 flex items-center justify-center">
+                    <Users2 className="h-4 w-4 text-emerald-700" />
+                </div>
+                <div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                        Referral Partner
+                    </p>
+                    <p className="text-[11px] text-slate-400">
+                        Synced to GHL when changed
+                    </p>
+                </div>
+            </div>
+            <Popover open={open} onOpenChange={set_open}>
+                <PopoverTrigger asChild>
+                    <button
+                        type="button"
+                        disabled={is_saving}
+                        className="flex items-center justify-between gap-2 w-full md:w-[320px] px-3.5 py-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-sm font-semibold text-slate-800 rounded-xl transition-colors disabled:opacity-60"
+                    >
+                        <span className={clsx("truncate", !value && "text-slate-400 font-medium")}>
+                            {value || "Select a referral partner…"}
+                        </span>
+                        {is_saving ? (
+                            <Loader2 className="h-4 w-4 animate-spin text-slate-400 flex-shrink-0" />
+                        ) : (
+                            <ChevronsUpDown className="h-4 w-4 text-slate-400 flex-shrink-0" />
+                        )}
+                    </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[320px] p-0" align="end">
+                    <Command>
+                        <CommandInput placeholder="Search partners…" />
+                        <CommandList>
+                            <CommandEmpty>No partners found.</CommandEmpty>
+                            <CommandGroup>
+                                {value && (
+                                    <CommandItem
+                                        value="__clear__"
+                                        onSelect={() => {
+                                            set_open(false);
+                                            on_change(null);
+                                        }}
+                                        className="text-red-600"
+                                    >
+                                        <Trash2 className="mr-2 h-4 w-4" />
+                                        Clear referral partner
+                                    </CommandItem>
+                                )}
+                                {options.map((name) => (
+                                    <CommandItem
+                                        key={name}
+                                        value={name}
+                                        onSelect={() => handle_select(name)}
+                                    >
+                                        <Check
+                                            className={clsx(
+                                                "mr-2 h-4 w-4",
+                                                value === name ? "opacity-100 text-emerald-600" : "opacity-0"
+                                            )}
+                                        />
+                                        {name}
+                                    </CommandItem>
+                                ))}
+                            </CommandGroup>
+                        </CommandList>
+                    </Command>
+                </PopoverContent>
+            </Popover>
+        </div>
     );
 }
