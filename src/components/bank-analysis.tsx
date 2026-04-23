@@ -3,6 +3,9 @@
 import { useState, useEffect } from "react";
 import LenderMatch from "./lender-match";
 import { createClient } from "@/lib/supabase/client";
+import BankAnalysisPDF, { type BankAnalysisPDFData } from "./pdf/bank-analysis-pdf";
+import { LOAN_TYPES } from "@/data/loan-types";
+import { toast } from "sonner";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -23,10 +26,11 @@ interface AccountData {
 
 interface OpenPosition {
   funderLender: string;
-  frequency: string;
+  loanType: string;     // "MCA", "Term Loan", "LOC", "Factor", etc. — from signup
+  frequency: string;    // Payment type: Daily / Weekly / Monthly
   numDebits: string;
-  amount: string;
-  balance: string;
+  amount: string;       // Payment amount per debit
+  balance: string;      // Current outstanding balance
   remitPct: string;
   term: string;
 }
@@ -89,6 +93,7 @@ const emptyAccount = (): AccountData => ({
 
 const emptyPosition = (): OpenPosition => ({
   funderLender: "",
+  loanType: "",
   frequency: "",
   numDebits: "",
   amount: "",
@@ -99,23 +104,135 @@ const emptyPosition = (): OpenPosition => ({
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const parseMoney = (v: string) => parseFloat(v.replace(/[$,]/g, "")) || 0;
-const formatMoney = (v: number) =>
-  v === 0 ? "—" : "$" + v.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+// Parse a user-entered money string. Returns a finite number (can be negative)
+// or NaN when the input is empty / unparseable. Supports:
+//   "$1,234"   → 1234
+//   "-$500"    → -500
+//   "($500)"   → -500   (accounting-style negatives — common when pasting
+//                         from bank statements / Excel)
+const parseMoney = (v: string): number => {
+  const raw = (v ?? "").trim();
+  if (!raw) return NaN;
+  // Accounting format: parentheses denote a negative value.
+  const paren = /^\(\s*(.+?)\s*\)$/.exec(raw);
+  const body = paren ? "-" + paren[1] : raw;
+  const stripped = body.replace(/[\s$,]/g, "");
+  if (stripped === "" || stripped === "-") return NaN;
+  const n = parseFloat(stripped);
+  return Number.isFinite(n) ? n : NaN;
+};
+
+const formatMoney = (v: number) => {
+  if (!Number.isFinite(v) || v === 0) return "—";
+  const abs = Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  return v < 0 ? `-$${abs}` : `$${abs}`;
+};
 const formatPct = (v: number) => (isNaN(v) || !isFinite(v) ? "—" : (v * 100).toFixed(1) + "%");
 
+// Average of entered values. Excludes empty/unparseable entries but INCLUDES
+// negatives and zeros so overdrawn balances pull averages the right direction.
+// Returns NaN when no entries are present so callers can show "—".
 function avgOfFilled(vals: string[]) {
-  const nums = vals.map(parseMoney).filter((n) => n > 0);
-  return nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
+  const nums = vals.map(parseMoney).filter((n) => Number.isFinite(n));
+  return nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : NaN;
 }
 
+// Sum of entered values. Same semantics as avgOfFilled — negatives are counted
+// as negatives, empties are ignored. Returns 0 for an all-empty set because
+// sum-of-nothing is 0, not "unknown".
 function sumOfFilled(vals: string[]) {
-  return vals.map(parseMoney).filter((n) => n > 0).reduce((a, b) => a + b, 0);
+  return vals
+    .map(parseMoney)
+    .filter((n) => Number.isFinite(n))
+    .reduce((a, b) => a + b, 0);
 }
 
 function avgOfIntegers(vals: string[]) {
   const nums = vals.map(v => parseInt(v)).filter(n => !isNaN(n));
   return nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
+}
+
+// ─── Remit derivation (single source of truth) ────────────────────────────────
+// In real MCAs, "Remit %" is almost never on the contract — it's derived from
+// the fixed ACH payment × frequency, then compared to avg monthly revenue.
+// These multipliers annualize the observed debit cadence.
+// Canonical payment frequencies — drives the dropdown in the Positions table
+// and maps 1:1 onto freqMultiplier below. Any string passed through
+// freqMultiplier outside this list is still supported for legacy data.
+const PAYMENT_FREQUENCIES: readonly string[] = ["Daily", "Weekly", "Bi-Weekly", "Monthly"];
+
+function freqMultiplier(frequency: string): number {
+  const f = (frequency || "").toLowerCase().trim();
+  if (!f) return NaN;
+  if (f.startsWith("daily") || f === "day") return 21.67;   // ~260 business days / 12
+  if (f.startsWith("bi-week") || f.startsWith("biweek") || f === "every 2 weeks") return 2.167;
+  if (f.startsWith("week") || f === "wk") return 4.333;     // 52 / 12
+  if (f.startsWith("month") || f === "mo") return 1;
+  return NaN;
+}
+
+// Position-level metrics derived from raw inputs + avg revenue.
+// Priority: payment × freq (true cash burn) → stated remit% fallback.
+export interface PositionMetrics {
+  monthlyRemit: number;         // dollars/month actually leaving the account
+  impliedRemitPct: number;      // monthlyRemit / avgRevenue
+  statedRemitPct: number;       // what the user typed (NaN if blank)
+  isRemitDerived: boolean;      // true when user didn't enter a % and we derived one
+  isPaymentDriven: boolean;     // true when monthly remit came from payment × freq
+  paybackMonths: number;
+  dataQualityFlag: "ok" | "high" | "impossible"; // >30% = high, >100% = impossible
+}
+
+function computePositionMetrics(
+  p: { amount: string; balance: string; remitPct: string; frequency: string },
+  avgRevenue: number,
+  parse: (v: string) => number,
+): PositionMetrics {
+  const payment = parse(p.amount);
+  const balance = parse(p.balance);
+  const mult = freqMultiplier(p.frequency);
+  const statedPct = parseFloat(p.remitPct) / 100;
+
+  // Prefer the payment-driven burn — works for MCA fixed-ACH, Term Loans, LOCs,
+  // and anything else on a fixed schedule. Falls back to revenue × stated% only
+  // when we don't have both payment and frequency (legacy % holdback model).
+  let monthlyRemit = NaN;
+  let isPaymentDriven = false;
+  if (Number.isFinite(payment) && Number.isFinite(mult)) {
+    monthlyRemit = payment * mult;
+    isPaymentDriven = true;
+  } else if (Number.isFinite(statedPct) && avgRevenue > 0) {
+    monthlyRemit = avgRevenue * statedPct;
+  }
+
+  const impliedRemitPct =
+    Number.isFinite(monthlyRemit) && avgRevenue > 0 ? monthlyRemit / avgRevenue : NaN;
+
+  const isRemitDerived = !Number.isFinite(statedPct) && Number.isFinite(impliedRemitPct);
+
+  const paybackMonths =
+    Number.isFinite(monthlyRemit) && monthlyRemit > 0 && Number.isFinite(balance)
+      ? balance / monthlyRemit
+      : NaN;
+
+  // 35% is the hardest-stretch ceiling across our lender database — any
+  // position above that can't be placed with ANY existing lender. Below 35%
+  // is still within at least one lender's max; above is the red zone.
+  let dataQualityFlag: PositionMetrics["dataQualityFlag"] = "ok";
+  if (Number.isFinite(impliedRemitPct)) {
+    if (impliedRemitPct > 1) dataQualityFlag = "impossible";
+    else if (impliedRemitPct > 0.35) dataQualityFlag = "high";
+  }
+
+  return {
+    monthlyRemit,
+    impliedRemitPct,
+    statedRemitPct: statedPct,
+    isRemitDerived,
+    isPaymentDriven,
+    paybackMonths,
+    dataQualityFlag,
+  };
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -216,7 +333,10 @@ function AccountBlock({
   };
 
   const activeMonths = activeMonthIndices.map(mi => account.months[mi]);
-  const filledMonths = activeMonths.filter((m) => parseMoney(m.totalDeposits) > 0);
+  // A month counts as "filled" if any numeric value was entered for deposits —
+  // including zero or a negative (which indicates overdrawn activity). The old
+  // `> 0` check silently hid months with legit negative or zero deposits.
+  const filledMonths = activeMonths.filter((m) => Number.isFinite(parseMoney(m.totalDeposits)));
   const avgDeposits = avgOfFilled(activeMonths.map((m) => m.totalDeposits));
   const avgBalance = avgOfFilled(activeMonths.map((m) => m.avgDailyBalance));
   const avgNegDays = avgOfIntegers(activeMonths.map((m) => m.negativeDays));
@@ -247,8 +367,10 @@ function AccountBlock({
         <div className="flex-1" />
         {/* Summary stats */}
         <div className="hidden lg:flex items-center gap-6">
-          <StatCell label="Avg Deposits" value={avgDeposits > 0 ? formatMoney(avgDeposits) : "—"} />
-          <StatCell label="Avg Daily Bal" value={avgBalance > 0 ? formatMoney(avgBalance) : "—"} />
+          <StatCell label="Avg Deposits" value={formatMoney(avgDeposits)} />
+          <StatCell label="Avg Daily Bal" value={formatMoney(avgBalance)} />
+          {/* formatMoney renders NaN/0 as "—" and negatives as "-$…" — overdrawn
+              balances must be visible, not silently hidden. */}
           <StatCell label="Avg Neg Days" value={Math.ceil(avgNegDays).toString()} />
           <StatCell label="Months Filled" value={`${filledMonths.length}/12`} />
         </div>
@@ -308,7 +430,8 @@ function AccountBlock({
                   })}
                   <td className="px-3 py-1 text-center bg-[#1c2128] font-mono font-semibold text-[#58a6ff]">
                     {row.isMoney
-                      ? avg > 0 ? formatMoney(avg) : "—"
+                      ? formatMoney(avg)
+                      : !Number.isFinite(avg) ? "—"
                       : row.key === "negativeDays" ? Math.ceil(avg).toString() : avg.toFixed(1)}
                   </td>
                 </tr>
@@ -349,10 +472,12 @@ function OpenPositions({
   avgRevenue: number;
   onChange: (p: OpenPosition[]) => void;
 }) {
+  // Auto-derive monthly remit per position using the canonical formula:
+  // payment × frequency multiplier (with a fallback to avgRevenue × stated%
+  // when payment/frequency aren't both entered). See computePositionMetrics.
   const totalRemit = positions.reduce((sum, p) => {
-    const bal = parseMoney(p.balance);
-    const pct = parseFloat(p.remitPct) / 100 || 0;
-    return sum + bal * pct;
+    const m = computePositionMetrics(p, avgRevenue, parseMoney);
+    return sum + (Number.isFinite(m.monthlyRemit) ? m.monthlyRemit : 0);
   }, 0);
 
   const availableRemit = avgRevenue * 0.2 - totalRemit;
@@ -382,7 +507,7 @@ function OpenPositions({
         <table className="w-full text-xs">
           <thead>
             <tr className="border-b border-[#30363d]">
-              {["Funder / Lender", "Frequency", "# Debits", "Amount", "Balance", "Term", "Remit %", "Actions"].map((h) => (
+              {["Funder / Lender", "Loan Type", "Payment Type", "Amount", "Balance", "Term", "Remit % (derived)", "Monthly Remit", "Actions"].map((h) => (
                 <th key={h} className="text-left px-3 py-2 text-[#8b949e] font-medium whitespace-nowrap">
                   {h}
                 </th>
@@ -390,16 +515,55 @@ function OpenPositions({
             </tr>
           </thead>
           <tbody>
-            {positions.map((pos, i) => (
+            {positions.map((pos, i) => {
+              const metrics = computePositionMetrics(pos, avgRevenue, parseMoney);
+              const derivedPctLabel = Number.isFinite(metrics.impliedRemitPct)
+                ? `${(metrics.impliedRemitPct * 100).toFixed(1)}%`
+                : null;
+              const qualityColor =
+                metrics.dataQualityFlag === "impossible"
+                  ? "text-[#f85149]"
+                  : metrics.dataQualityFlag === "high"
+                    ? "text-[#f0883e]"
+                    : "text-[#3fb950]";
+              return (
               <tr key={i} className="border-b border-[#21262d] hover:bg-[#1f2937]/20">
                 <td className="px-2 py-1.5">
                   <TextInput value={pos.funderLender} onChange={(v) => updatePosition(i, "funderLender", v)} placeholder="Funder name..." />
                 </td>
                 <td className="px-2 py-1.5">
-                  <TextInput value={pos.frequency} onChange={(v) => updatePosition(i, "frequency", v)} placeholder="Daily / Weekly" />
+                  <select
+                    value={pos.loanType}
+                    onChange={(e) => updatePosition(i, "loanType", e.target.value)}
+                    className="w-full bg-transparent border-none outline-none text-xs text-[#e6edf3] font-mono focus:ring-0 cursor-pointer"
+                  >
+                    <option value="" className="bg-[#161b22]">—</option>
+                    {pos.loanType && !LOAN_TYPES.includes(pos.loanType) && (
+                      <option key={pos.loanType} value={pos.loanType} className="bg-[#161b22]">
+                        {pos.loanType} (legacy)
+                      </option>
+                    )}
+                    {LOAN_TYPES.map((t) => (
+                      <option key={t} value={t} className="bg-[#161b22]">{t}</option>
+                    ))}
+                  </select>
                 </td>
                 <td className="px-2 py-1.5">
-                  <CurrencyInput value={pos.numDebits} onChange={(v) => updatePosition(i, "numDebits", v)} placeholder="0" />
+                  <select
+                    value={pos.frequency}
+                    onChange={(e) => updatePosition(i, "frequency", e.target.value)}
+                    className="w-full bg-transparent border-none outline-none text-xs text-[#e6edf3] font-mono focus:ring-0 cursor-pointer"
+                  >
+                    <option value="" className="bg-[#161b22]">—</option>
+                    {pos.frequency && !PAYMENT_FREQUENCIES.includes(pos.frequency) && (
+                      <option key={pos.frequency} value={pos.frequency} className="bg-[#161b22]">
+                        {pos.frequency} (legacy)
+                      </option>
+                    )}
+                    {PAYMENT_FREQUENCIES.map((f) => (
+                      <option key={f} value={f} className="bg-[#161b22]">{f}</option>
+                    ))}
+                  </select>
                 </td>
                 <td className="px-2 py-1.5">
                   <CurrencyInput value={pos.amount} onChange={(v) => updatePosition(i, "amount", v)} placeholder="$0" />
@@ -411,9 +575,23 @@ function OpenPositions({
                   <TextInput value={pos.term} onChange={(v) => updatePosition(i, "term", v)} placeholder="Term..." />
                 </td>
                 <td className="px-2 py-1.5 w-24">
-                  <div className="relative">
-                    <CurrencyInput value={pos.remitPct} onChange={(v) => updatePosition(i, "remitPct", v)} placeholder="0" className="pr-6" />
-                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[#8b949e] text-xs">%</span>
+                  <div className={`text-sm font-mono font-semibold ${derivedPctLabel ? qualityColor : "text-[#484f58]"}`}>
+                    {derivedPctLabel ?? "—"}
+                  </div>
+                  {metrics.dataQualityFlag === "high" && (
+                    <div className="text-[9px] font-mono text-[#f0883e] mt-0.5 opacity-80">review</div>
+                  )}
+                  {metrics.dataQualityFlag === "impossible" && (
+                    <div className="text-[9px] font-mono text-[#f85149] mt-0.5 opacity-80">review inputs</div>
+                  )}
+                </td>
+                <td className="px-2 py-1.5 w-28">
+                  <div className={`text-sm font-mono font-semibold ${
+                    metrics.dataQualityFlag === "impossible" ? "text-[#f85149]" :
+                    metrics.dataQualityFlag === "high" ? "text-[#f0883e]" :
+                    Number.isFinite(metrics.monthlyRemit) ? "text-[#e6edf3]" : "text-[#484f58]"
+                  }`}>
+                    {Number.isFinite(metrics.monthlyRemit) ? formatMoney(metrics.monthlyRemit) : "—"}
                   </div>
                 </td>
                 <td className="px-2 py-1.5">
@@ -425,7 +603,8 @@ function OpenPositions({
                   </button>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -472,6 +651,7 @@ export default function BankAnalysis() {
   const [loadedClientName, setLoadedClientName] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
 
   const [businessName, setBusinessName] = useState("");
   const [ownerName, setOwnerName] = useState("");
@@ -616,7 +796,12 @@ export default function BankAnalysis() {
         const saved = savedPositions.find(sp => sp.funderLender === p.lender_name);
         return {
           funderLender: p.lender_name,
-          frequency: saved?.frequency || p.loan_type || "",
+          // Loan product type (MCA / Term Loan / LOC / etc.) — comes from the
+          // client signup and lives on client_open_positions.loan_type.
+          loanType: saved?.loanType || p.loan_type || "",
+          // Payment cadence (Daily / Weekly / Monthly) — underwriter-only field,
+          // stored in positions_data on bank_analysis_results.
+          frequency: saved?.frequency || "",
           numDebits: saved?.numDebits || "0",
           amount: p.payment_amount?.toString() || "",
           balance: p.current_balance?.toString() || "",
@@ -670,15 +855,21 @@ export default function BankAnalysis() {
   // ─── Save to Database ───────────────────────────────────────────────────────
   const saveAnalysis = async () => {
     if (!selectedClientId) {
-      alert("Please select a client first.");
+      toast.error("Please select a client first.");
       return;
     }
     setIsSaving(true);
+    // Inline loading toast — replaced by success/error below on resolve.
+    const savingToastId = toast.loading("Saving bank analysis…");
 
     try {
       // Find client date to compute TIB months
       const client = clientList.find(c => c.id === selectedClientId);
       const tibMonths = client ? computeTIBMonths(client.business_start_date) : 0;
+
+      // Coerce NaN (empty analysis) to 0 before sending to Postgres — NaN
+      // is not valid for numeric columns.
+      const safe = (n: number) => (Number.isFinite(n) ? n : 0);
 
       const { error } = await supabase.from('bank_analysis_results').upsert({
         client_id: selectedClientId,
@@ -686,9 +877,9 @@ export default function BankAnalysis() {
         owner_name: ownerName,
         fico: parseInt(questions.ficoScore) || 0,
         tib_months: tibMonths || parseInt(questions.timeInBusiness) || 0,
-        avg_revenue: avgRevenue,
-        avg_daily_balance: avgDailyBalanceAcrossAccounts,
-        avg_monthly_deposits: avgMonthlyDepositsAcrossAccounts,   // ← NEW
+        avg_revenue: safe(avgRevenue),
+        avg_daily_balance: safe(avgDailyBalanceAcrossAccounts),
+        avg_monthly_deposits: safe(avgMonthlyDepositsAcrossAccounts),
         total_neg_days: totalNegDaysSum,
         num_open_positions: positions.filter(p => p.funderLender || p.balance).length,
         has_bankruptcy: questions.bankruptcy.toLowerCase().includes("yes") || hasBankruptcy,
@@ -703,12 +894,138 @@ export default function BankAnalysis() {
       if (error) {
         throw error;
       }
-      alert('Analysis saved successfully!');
+      toast.success("Analysis saved", {
+        id: savingToastId,
+        description: `${businessName || "Client"} · ${positions.filter(p => p.funderLender || p.balance).length} positions, ${accounts.length} account${accounts.length === 1 ? "" : "s"}`,
+      });
     } catch (err: any) {
       console.error("Save error:", err);
-      alert('Error saving analysis: ' + err.message);
+      toast.error("Failed to save analysis", {
+        id: savingToastId,
+        description: err?.message ?? "Unknown error — check console for details.",
+      });
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  // ─── Export to PDF ─────────────────────────────────────────────────────────
+  const exportToPDF = async () => {
+    setIsExporting(true);
+    try {
+      // Dynamic import keeps @react-pdf/renderer's heavy client bundle out of
+      // the initial page load — we only pay for it when someone clicks Export.
+      const { pdf } = await import("@react-pdf/renderer");
+
+      const selectedClient = clientList.find((c) => c.id === selectedClientId);
+      const tibMonths = selectedClient ? computeTIBMonths(selectedClient.business_start_date) : 0;
+
+      // Fetch the assigned team — lead advisor + followers — so the PDF shows
+      // who's working this file. Non-fatal if any of these queries fail; the
+      // Team card just gets omitted.
+      let advisorName: string | undefined;
+      let followerNames: string[] = [];
+      if (selectedClientId) {
+        try {
+          const { data: vaultRow } = await supabase
+            .from("client_data_vault")
+            .select("advisor_id, advisor_name")
+            .eq("id", selectedClientId)
+            .maybeSingle();
+
+          if (vaultRow?.advisor_id) {
+            const { data: advisorRow } = await supabase
+              .from("advisors")
+              .select("first_name, last_name")
+              .eq("id", vaultRow.advisor_id)
+              .maybeSingle();
+            if (advisorRow) {
+              advisorName = `${advisorRow.first_name ?? ""} ${advisorRow.last_name ?? ""}`.trim();
+            }
+          }
+          if (!advisorName && vaultRow?.advisor_name && vaultRow.advisor_name !== "Unknown") {
+            advisorName = vaultRow.advisor_name;
+          }
+
+          const { data: followerRows } = await supabase
+            .from("client_followers")
+            .select("advisor_id, advisors:advisor_id(first_name, last_name)")
+            .eq("client_vault_id", selectedClientId);
+
+          followerNames = (followerRows ?? [])
+            .map((r: any) => {
+              const a = Array.isArray(r.advisors) ? r.advisors[0] : r.advisors;
+              if (!a) return "";
+              return `${a.first_name ?? ""} ${a.last_name ?? ""}`.trim();
+            })
+            .filter((n: string) => n.length > 0);
+        } catch (err) {
+          console.error("Team lookup failed (non-fatal):", err);
+        }
+      }
+
+      const pdfData: BankAnalysisPDFData = {
+        businessName: businessName || "—",
+        ownerName: ownerName || "",
+        ownerName2,
+        referredBy,
+        phone,
+        phone2,
+        state,
+        industry,
+        avgRevenue: Number.isFinite(avgRevenue) ? avgRevenue : 0,
+        avgDailyBalance: Number.isFinite(avgDailyBalanceAcrossAccounts)
+          ? avgDailyBalanceAcrossAccounts
+          : 0,
+        avgMonthlyDeposits: Number.isFinite(avgMonthlyDepositsAcrossAccounts)
+          ? avgMonthlyDepositsAcrossAccounts
+          : 0,
+        totalNegDays: totalNegDaysSum,
+        avgNegDays: Number.isFinite(avgNegDaysAcrossAccounts) ? avgNegDaysAcrossAccounts : 0,
+        numOpenPositions: positions.filter(p => p.funderLender || p.balance).length,
+        capitalRequested: capitalRequested || parseMoney(questions.capitalRequested) || 0,
+        fico: parseInt(questions.ficoScore) || 0,
+        tibMonths: tibMonths || parseInt(questions.timeInBusiness) || 0,
+        businessStartDate: selectedClient?.business_start_date || undefined,
+        hasBankruptcy: questions.bankruptcy.toLowerCase().includes("yes") || hasBankruptcy,
+        monthRange,
+        activeMonths: activeMonthIndices.map((mi) => MONTHS[mi].slice(0, 3)),
+        activeMonthIndices,
+        accounts,
+        positions,
+        questions: { ...questions } as Record<string, string>,
+        advisorName,
+        followers: followerNames,
+        generatedAt: new Date().toLocaleDateString("en-US", {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+        }),
+      };
+
+      const blob = await pdf(<BankAnalysisPDF data={pdfData} />).toBlob();
+
+      // Trigger browser download
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const safeName = (businessName || "bank-analysis")
+        .replace(/[^a-z0-9\-_]+/gi, "_")
+        .slice(0, 60);
+      const stamp = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `${safeName}_bank-analysis_${stamp}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success("PDF exported", { description: a.download });
+    } catch (err: any) {
+      console.error("PDF export error:", err);
+      toast.error("Failed to export PDF", {
+        description: err?.message ?? "Unknown error — check console for details.",
+      });
+    } finally {
+      setIsExporting(false);
     }
   };
 
@@ -983,7 +1300,25 @@ export default function BankAnalysis() {
 
 
         {/* Final Actions */}
-        <div className="mt-12 flex justify-end">
+        <div className="mt-12 flex justify-end gap-3">
+          <button
+            onClick={exportToPDF}
+            disabled={isExporting}
+            className="flex items-center justify-center gap-3 px-8 py-4 font-bold text-[#e6edf3] bg-[#30363d] hover:bg-[#484f58] border border-[#6e7681]/40 rounded-2xl text-xs uppercase tracking-[0.2em] shadow-2xl shadow-black/20 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-40 disabled:hover:scale-100 group"
+          >
+            {isExporting ? (
+              <>
+                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                <span>Building PDF...</span>
+              </>
+            ) : (
+              <>
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" x2="12" y1="15" y2="3" /></svg>
+                <span>Export PDF</span>
+              </>
+            )}
+          </button>
+
           <button
             onClick={saveAnalysis}
             disabled={isSaving || !selectedClientId}

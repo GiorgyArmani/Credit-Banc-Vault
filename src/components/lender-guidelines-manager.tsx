@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
+import { LOAN_TYPES } from "@/data/loan-types";
 
 interface Lender {
   id: string;
@@ -44,9 +45,8 @@ interface EditingGroup {
   activeSpecialty: string;
 }
 
-const AVAILABLE_SPECIALTIES = [
-  "MCA", "SBA", "LOC", "Equipment", "Amortizing", "Term Loan", "Real Estate", "Trucking", "Invoice Factoring", "Consolidation", "Reverse consolidation", "Contract Financing", "Acquisition", "General"
-];
+// Shared with bank-analysis.tsx via src/data/loan-types.ts — keep both in sync.
+const AVAILABLE_SPECIALTIES = LOAN_TYPES;
 
 const INITIAL_LENDER_FIELDS: Omit<Lender, "id" | "lender_name" | "specialty"> = {
   min_fico: 0,
