@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { KanbanColumn } from "./_components/kanban-column";
 import { PipelineDealCard } from "./_components/pipeline-card";
 import { getBulkLatestStatus, updateLoanStatus, type LoanStatus } from "@/app/actions/pipeline";
+import { getBulkClientActivity } from "@/app/actions/advisor";
 import { toast } from "sonner";
 import { Loader2, Filter, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -21,6 +22,8 @@ interface Deal {
   pipeline_status: LoanStatus;
   document_count: number;
   total_required_docs: number;
+  created_at: string;
+  last_activity_at?: string;
 }
 
 const STAGE_MAP: { label: string; status: LoanStatus; color: string }[] = [
@@ -57,7 +60,7 @@ export default function AdvisorPipelinePage() {
 
       let clientsQuery = supabase
         .from('client_data_vault')
-        .select('id, user_id, client_name, client_email, client_phone, company_name, capital_requested')
+        .select('id, user_id, client_name, client_email, client_phone, company_name, capital_requested, created_at')
 
       if (!isAdmin) {
         // Advisors see owned + followed clients
@@ -96,10 +99,11 @@ export default function AdvisorPipelinePage() {
 
       // Fetch statuses and doc counts
       const vaultIds = clients.map(c => c.id);
-      const [statusMap, { data: coreDocs }, { data: sub_data }] = await Promise.all([
+      const [statusMap, { data: coreDocs }, { data: sub_data }, activityMap] = await Promise.all([
         getBulkLatestStatus(vaultIds),
         supabase.from("required_documents").select("code").eq("is_core", true),
-        supabase.from("submissions").select("user_id, status").in("user_id", clients.map(c => c.user_id))
+        supabase.from("submissions").select("user_id, status").in("user_id", clients.map(c => c.user_id)),
+        getBulkClientActivity(vaultIds),
       ]);
       const submissionMap = new Map(sub_data?.map(s => [s.user_id, s.status]) || []);
 
@@ -140,6 +144,7 @@ export default function AdvisorPipelinePage() {
           pipeline_status: status as LoanStatus,
           document_count: satisfied,
           total_required_docs: allRequiredCodes.size,
+          last_activity_at: activityMap.get(client.id),
         };
       }));
 

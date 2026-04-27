@@ -3,6 +3,7 @@
 import { Building2, DollarSign, Mail, Phone, ChevronRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
+import { ActivityAgeBadge } from "@/components/advisor/activity-age-badge";
 
 interface PipelineCardProps {
   deal: {
@@ -14,6 +15,8 @@ interface PipelineCardProps {
     client_phone: string;
     document_count: number;
     total_required_docs: number;
+    created_at: string;
+    last_activity_at?: string;
   };
   onDragStart: (e: React.DragEvent, id: string) => void;
 }
@@ -55,12 +58,15 @@ export function PipelineDealCard({ deal, onDragStart }: PipelineCardProps) {
             <DollarSign className="h-3 md:h-3.5 w-3 md:w-3.5 text-emerald-500" />
           </div>
           <p className="text-xs md:text-sm font-black text-slate-900 dark:text-slate-100">
-            {new Intl.NumberFormat("en-US", { 
-              style: "currency", 
-              currency: "USD", 
-              maximumFractionDigits: 0 
+            {new Intl.NumberFormat("en-US", {
+              style: "currency",
+              currency: "USD",
+              maximumFractionDigits: 0
             }).format(deal.capital_requested)}
           </p>
+        </div>
+        <div className="pt-0.5">
+          <ActivityAgeBadge created_at={deal.created_at} last_activity_at={deal.last_activity_at} variant="compact" />
         </div>
       </div>
 

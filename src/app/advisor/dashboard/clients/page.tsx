@@ -11,6 +11,7 @@ import clsx from "clsx";
 import { getBulkLatestStatus, updateLoanStatus, type LoanStatus } from "@/app/actions/pipeline";
 import { getBulkClientActivity } from "@/app/actions/advisor";
 import { LoanPipelineBadge } from "@/components/loan-pipeline-status";
+import { ActivityAgeBadge } from "@/components/advisor/activity-age-badge";
 import { differenceInDays } from "date-fns";
 
 function format_currency(amount: number): string {
@@ -88,26 +89,29 @@ export default function AdvisorClientsListPage() {
         );
     }, [search_query, clients]);
     
-    // Categorization logic based on new rules
-    const active_pending_clients = useMemo(() => 
-        filtered_clients.filter(c => 
-            ["created", "onboarding", "documents_requested", "documents_received", "lender_matched"].includes(c.pipeline_status || "created") &&
+    // Categorization logic.
+    // Pending = early doc-collection stages still owned by the advisor.
+    // Under Review = deal has left the advisor's queue (UW or with a lender).
+    // Inactive = anything that hasn't moved in 14+ days, except deals already with UW/lender.
+    const active_pending_clients = useMemo(() =>
+        filtered_clients.filter(c =>
+            ["created", "onboarding", "documents_requested", "documents_received"].includes(c.pipeline_status || "created") &&
             (c.inactivity_days || 0) < 14 &&
             c.pipeline_status !== "under_review" &&
             c.submission_status !== "locked" &&
             c.submission_status !== "submitted"
         ), [filtered_clients]);
 
-    const under_review_clients = useMemo(() => 
-        filtered_clients.filter(c => 
+    const under_review_clients = useMemo(() =>
+        filtered_clients.filter(c =>
             !["funded", "declined"].includes(c.pipeline_status || "") &&
-            (c.pipeline_status === "under_review" || 
+            (["under_review", "lender_matched"].includes(c.pipeline_status || "") ||
             ["locked", "submitted"].includes(c.submission_status || ""))
         ), [filtered_clients]);
 
-    const inactive_clients = useMemo(() => 
-        filtered_clients.filter(c => 
-            !["funded", "declined", "under_review"].includes(c.pipeline_status || "") &&
+    const inactive_clients = useMemo(() =>
+        filtered_clients.filter(c =>
+            !["funded", "declined", "under_review", "lender_matched"].includes(c.pipeline_status || "") &&
             (c.inactivity_days || 0) >= 14
         ), [filtered_clients]);
 
@@ -395,13 +399,14 @@ export default function AdvisorClientsListPage() {
                                                 <div className="absolute top-0 right-0 h-full w-1 bg-tertiary-fixed-dim"></div>
                                                 <div className="flex justify-between items-start">
                                                     <div className="flex-1">
-                                                        <div className="flex items-center gap-2 mb-2">
+                                                        <div className="flex items-center gap-2 mb-2 flex-wrap">
                                                             <span className="text-[10px] font-bold uppercase tracking-widest text-on-tertiary-fixed-variant bg-tertiary-fixed px-2 py-0.5 rounded">
                                                                 {client.document_count === client.total_required_docs ? "Ready for Review" : "Incomplete Docs"}
                                                             </span>
                                                             <div className="text-[10px] font-bold text-error uppercase tracking-tighter animate-pulse">Action Required</div>
+                                                            <ActivityAgeBadge created_at={client.created_at} last_activity_at={client.last_activity_at} />
                                                         </div>
-                                                        
+
                                                         <h4 className="font-bold text-on-surface">{client.client_name}</h4>
                                                         <p className="text-xs text-on-surface-variant mt-1">{client.company_name}</p>
 
@@ -489,13 +494,18 @@ export default function AdvisorClientsListPage() {
                                                             <h4 className="font-bold text-on-surface group-hover:text-primary transition-colors">{client.client_name}</h4>
                                                             <p className="text-xs text-on-surface-variant">{client.company_name}</p>
                                                             
-                                                            <div className="mt-3 flex items-center gap-2">
-                                                                <div className="bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border border-emerald-100">
-                                                                    Under Review
-                                                                </div>
+                                                            <div className="mt-3 flex items-center gap-2 flex-wrap">
+                                                                {client.pipeline_status ? (
+                                                                    <LoanPipelineBadge currentStatus={client.pipeline_status} className="scale-90 origin-left" />
+                                                                ) : (
+                                                                    <div className="bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border border-emerald-100">
+                                                                        Under Review
+                                                                    </div>
+                                                                )}
                                                                 <div className="text-[11px] font-bold text-outline">
                                                                     {format_currency(client.capital_requested)}
                                                                 </div>
+                                                                <ActivityAgeBadge created_at={client.created_at} last_activity_at={client.last_activity_at} />
                                                             </div>
                                                         </div>
                                                     </div>
@@ -549,10 +559,7 @@ export default function AdvisorClientsListPage() {
                                                 <div className="h-10 w-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400 group-hover:bg-tertiary-fixed group-hover:text-on-tertiary-fixed transition-colors">
                                                     <span className="material-symbols-outlined">person</span>
                                                 </div>
-                                                <div className="text-right">
-                                                    <div className="text-[10px] font-black uppercase tracking-widest text-outline mb-1">Last Active</div>
-                                                    <div className="text-xs font-bold text-tertiary-fixed-dim">{client.inactivity_days} days ago</div>
-                                                </div>
+                                                <ActivityAgeBadge created_at={client.created_at} last_activity_at={client.last_activity_at} />
                                             </div>
 
                                             <h4 className="font-bold text-on-surface text-lg mb-1">{client.client_name}</h4>
