@@ -152,6 +152,10 @@ function avgOfIntegers(vals: string[]) {
   return nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
 }
 
+function sumOfIntegers(vals: string[]) {
+  return vals.map(v => parseInt(v)).filter(n => !isNaN(n)).reduce((a, b) => a + b, 0);
+}
+
 // ─── Remit derivation (single source of truth) ────────────────────────────────
 // In real MCAs, "Remit %" is almost never on the contract — it's derived from
 // the fixed ACH payment × frequency, then compared to avg monthly revenue.
@@ -339,7 +343,7 @@ function AccountBlock({
   const filledMonths = activeMonths.filter((m) => Number.isFinite(parseMoney(m.totalDeposits)));
   const avgDeposits = avgOfFilled(activeMonths.map((m) => m.totalDeposits));
   const avgBalance = avgOfFilled(activeMonths.map((m) => m.avgDailyBalance));
-  const avgNegDays = avgOfIntegers(activeMonths.map((m) => m.negativeDays));
+  const sumNegDays = sumOfIntegers(activeMonths.map((m) => m.negativeDays));
 
   const ROWS: { key: keyof MonthlyData; label: string; isMoney: boolean }[] = [
     { key: "totalDeposits", label: "Total Deposits", isMoney: true },
@@ -371,7 +375,7 @@ function AccountBlock({
           <StatCell label="Avg Daily Bal" value={formatMoney(avgBalance)} />
           {/* formatMoney renders NaN/0 as "—" and negatives as "-$…" — overdrawn
               balances must be visible, not silently hidden. */}
-          <StatCell label="Avg Neg Days" value={Math.ceil(avgNegDays).toString()} />
+          <StatCell label="Total Neg Days" value={sumNegDays.toString()} />
           <StatCell label="Months Filled" value={`${filledMonths.length}/12`} />
         </div>
         {canRemove && (
@@ -405,7 +409,11 @@ function AccountBlock({
           <tbody>
             {ROWS.map((row, ri) => {
               const vals = activeMonthIndices.map((mi) => account.months[mi][row.key]);
-              const avg = row.isMoney ? avgOfFilled(vals) : avgOfIntegers(vals);
+              const avg = row.isMoney
+                ? avgOfFilled(vals)
+                : row.key === "negativeDays"
+                  ? sumOfIntegers(vals)
+                  : avgOfIntegers(vals);
 
               return (
                 <tr
@@ -432,7 +440,7 @@ function AccountBlock({
                     {row.isMoney
                       ? formatMoney(avg)
                       : !Number.isFinite(avg) ? "—"
-                      : row.key === "negativeDays" ? Math.ceil(avg).toString() : avg.toFixed(1)}
+                      : row.key === "negativeDays" ? avg.toString() : avg.toFixed(1)}
                   </td>
                 </tr>
               );
@@ -1216,9 +1224,9 @@ export default function BankAnalysis() {
                     <span className="text-xl font-mono font-bold text-[#d29922]">{avgMonthlyDepositsAcrossAccounts.toFixed(1)}</span>
                   </div>
                   <div className="p-3 rounded-lg bg-[#0d1117] border border-[#30363d] hover:border-[#f85149]/30 transition-colors">
-                    <span className="text-[9px] text-[#8b949e] uppercase tracking-widest block mb-1">Avg Negative Days</span>
-                    <span className={`text-xl font-mono font-bold ${avgNegDaysAcrossAccounts > 0 ? "text-[#f85149]" : "text-[#8b949e]"}`}>
-                      {Math.ceil(avgNegDaysAcrossAccounts).toString()}
+                    <span className="text-[9px] text-[#8b949e] uppercase tracking-widest block mb-1">Total Negative Days</span>
+                    <span className={`text-xl font-mono font-bold ${totalNegDaysSum > 0 ? "text-[#f85149]" : "text-[#8b949e]"}`}>
+                      {totalNegDaysSum.toString()}
                     </span>
                   </div>
                 </div>

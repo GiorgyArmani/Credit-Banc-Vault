@@ -141,6 +141,11 @@ const DOC_CODE_TO_GHL_FIELD_MAP: Record<string, { fieldId: string; fieldKey: str
     fieldId: process.env.GHL_CF_MISC_FILES || "ZMU3gUg4gD7Lhspt5K80",
     fieldKey: "contact.data_vault_misc_files",
   },
+  // MyScoreIQ Credit Report
+  myscoreiq: {
+    fieldId: process.env.GHL_CF_MYSCOREIQ || "Q6okQxXoqgxswNVWf2DY",
+    fieldKey: "contact.data_vault_myscoreiq_credit_report",
+  },
 };
 
 /**

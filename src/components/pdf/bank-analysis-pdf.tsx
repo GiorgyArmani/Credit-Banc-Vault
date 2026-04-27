@@ -437,7 +437,10 @@ export default function BankAnalysisPDF({ data }: { data: BankAnalysisPDFData })
                     {/* Integer rows */}
                     {INTEGER_ROWS.map((row) => {
                         const vals = activeData.map((md) => md[row.key]);
-                        const avg = avgOfIntegers(vals);
+                        const isSum = row.key === "negativeDays";
+                        const total = isSum
+                            ? vals.map(v => parseInt(v)).filter(n => !isNaN(n)).reduce((a, b) => a + b, 0)
+                            : avgOfIntegers(vals);
                         return (
                             <View key={row.key} style={styles.tr}>
                                 <Text style={[styles.td, styles.tdLabel, { width: labelColWidth }]}>{row.label}</Text>
@@ -447,11 +450,11 @@ export default function BankAnalysisPDF({ data }: { data: BankAnalysisPDFData })
                                     </Text>
                                 ))}
                                 <Text style={[styles.td, styles.tdTotal, { width: totalColWidth, textAlign: "right" }]}>
-                                    {!Number.isFinite(avg)
+                                    {!Number.isFinite(total)
                                         ? "—"
-                                        : row.key === "negativeDays"
-                                            ? Math.ceil(avg).toString()
-                                            : avg.toFixed(1)}
+                                        : isSum
+                                            ? total.toString()
+                                            : total.toFixed(1)}
                                 </Text>
                             </View>
                         );

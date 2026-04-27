@@ -156,7 +156,7 @@ export async function requestDocuments(clientId: string, documentIds: string[]) 
         // 2. Verify advisor ownership and get client user_id + ghl_contact_id
         const { data: client, error: clientError } = await supabase
             .from("client_data_vault")
-            .select("user_id, ghl_contact_id")
+            .select("user_id, ghl_contact_id, client_email, client_name, advisor_id")
             .eq("id", clientId)
             .single();
 
@@ -235,7 +235,37 @@ export async function requestDocuments(clientId: string, documentIds: string[]) 
             }
         }
 
-        // 6. Revalidate the client detail page
+        // 7. MyScoreIQ side-effect: when the advisor requests a MyScoreIQ Report we
+        //    also email the client the offer-coded signup link with instructions to
+        //    share the report with Credit Banc. Non-fatal — request stands either way.
+        if (docDefs.some(d => d.code === "myscoreiq") && client.client_email) {
+            try {
+                const { send_myscoreiq_setup_email } = await import("@/lib/email");
+                let advisor_name: string | null = null;
+                let advisor_email: string | null = null;
+                if (client.advisor_id) {
+                    const { data: advisorRow } = await supabaseAdmin
+                        .from("advisors")
+                        .select("first_name, last_name, email")
+                        .eq("id", client.advisor_id)
+                        .maybeSingle();
+                    if (advisorRow) {
+                        advisor_name = `${advisorRow.first_name ?? ""} ${advisorRow.last_name ?? ""}`.trim() || null;
+                        advisor_email = advisorRow.email ?? null;
+                    }
+                }
+                await send_myscoreiq_setup_email({
+                    client_email: client.client_email,
+                    client_name: (client.client_name || "").split(" ")[0] || "there",
+                    advisor_name,
+                    advisor_email,
+                });
+            } catch (emailError) {
+                console.error("MyScoreIQ setup email failed (non-fatal):", emailError);
+            }
+        }
+
+        // 8. Revalidate the client detail page
         revalidatePath(`/advisor/dashboard/clients/${clientId}`);
 
         return { success: true };

@@ -5,11 +5,18 @@ import { revalidatePath } from "next/cache";
 import {
     ghlAddContactFollowers,
     ghlRemoveContactFollowers,
+    ghlAddTags,
+    ghlRemoveTags,
 } from "@/lib/ghl-api";
 import {
     assertCanAccessClient,
     assertCanManageFollowers,
 } from "@/lib/client-access";
+
+function assignTagFor(firstName: string | null | undefined): string | null {
+    const name = (firstName ?? "").trim().toLowerCase();
+    return name ? `assign to ${name}` : null;
+}
 
 export interface FollowerRow {
     advisor_id: string;
@@ -183,6 +190,15 @@ export async function addClientFollower(
             warning = `Follower saved. ${follower.first_name} ${follower.last_name} has no GHL user id, so GHL was not updated.`;
         }
 
+        const tag = assignTagFor(follower.first_name);
+        if (client.ghl_contact_id && tag) {
+            try {
+                await ghlAddTags(client.ghl_contact_id, [tag]);
+            } catch (tagError: any) {
+                console.error("GHL addTag error (non-fatal):", tagError);
+            }
+        }
+
         revalidatePath(`/advisor/dashboard/clients/${clientId}`);
         revalidatePath(`/advisor/dashboard/clients`);
         revalidatePath(`/advisor/dashboard/pipeline`);
@@ -213,7 +229,7 @@ export async function removeClientFollower(
 
         const { data: follower } = await supabase
             .from("advisors")
-            .select("ghl_user_id")
+            .select("ghl_user_id, first_name")
             .eq("id", followerAdvisorId)
             .maybeSingle();
 
@@ -234,6 +250,15 @@ export async function removeClientFollower(
             } catch (ghlError: any) {
                 console.error("GHL removeFollower error (non-fatal):", ghlError);
                 warning = `Follower removed, but GHL sync failed: ${ghlError?.message ?? "unknown error"}`;
+            }
+        }
+
+        const tag = assignTagFor(follower?.first_name);
+        if (client?.ghl_contact_id && tag) {
+            try {
+                await ghlRemoveTags(client.ghl_contact_id, [tag]);
+            } catch (tagError: any) {
+                console.error("GHL removeTag error (non-fatal):", tagError);
             }
         }
 

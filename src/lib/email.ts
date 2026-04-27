@@ -1621,13 +1621,459 @@ export async function send_document_rejection_email(data: DocumentRejectionEmail
   };
 
   console.log(`📧 Sending document rejection email to ${data.client_email} for ${data.doc_label}`);
-  
+
   try {
     const info = await transporter.sendMail(mail_options);
     console.log(`✅ Rejection email sent: ${info.messageId}`);
     return info;
   } catch (error) {
     console.error(`❌ Failed to send rejection email to ${data.client_email}:`, error);
+    throw error;
+  }
+}
+
+// ─── Outstanding Documents Reminder ────────────────────────────────────────────
+
+export interface OutstandingDocsReminderData {
+  client_email: string;
+  client_name: string;
+  business_name?: string | null;
+  missing_docs: string[];
+  advisor_name?: string | null;
+  advisor_email?: string | null;
+  advisor_phone?: string | null;
+  login_url: string;
+  reminder_count: number;
+}
+
+// Credit Banc brand assets.
+// The hero banner is inlined via nodemailer attachments (cid:vault_reminder_header) —
+// matches the pattern in send_client_welcome_email and avoids gmail blocking remote images.
+const CB_LOGO_URL = "https://storage.googleapis.com/msgsndr/a1rhIidWtsQzq0jXDNwM/media/0ec47074-3efb-43e4-8dda-c1fe7b805768.png";
+const CB_HERO_BANNER_CID = "vault_reminder_header";
+const CB_DOCS_ICON_URL = "https://storage.googleapis.com/msgsndr/a1rhIidWtsQzq0jXDNwM/media/716e272b-8fec-4449-abae-4e6445fd17a9.png";
+
+export function generate_outstanding_docs_reminder_html(data: OutstandingDocsReminderData): string {
+  const {
+    client_name,
+    missing_docs,
+    advisor_name,
+    advisor_email,
+    login_url,
+  } = data;
+
+  const year = new Date().getFullYear();
+  const docs_html = missing_docs.map(d => escape_html(d)).join("<br> ");
+  const advisor_line = advisor_name
+    ? `<p><span style="font-size: 16px">${escape_html(advisor_name)}</span>${advisor_email ? `<br><span style="font-size: 16px">${escape_html(advisor_email)}</span>` : ""}</p>`
+    : "";
+
+  return `<!DOCTYPE html>
+<html lang="en" dir="auto" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+  <title></title>
+  <!--[if !mso]><!-->
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <!--<![endif]-->
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style type="text/css">
+    #outlook a { padding:0; }
+    body { margin:0;padding:0;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%; }
+    table, td { border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt; }
+    img { border:0;height:auto;line-height:100%; outline:none;text-decoration:none;-ms-interpolation-mode:bicubic; }
+    p { display:block;margin:13px 0; }
+  </style>
+  <!--[if mso]>
+  <noscript><xml><o:OfficeDocumentSettings><o:AllowPNG/><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript>
+  <![endif]-->
+  <!--[if lte mso 11]>
+  <style type="text/css">.mj-outlook-group-fix { width:100% !important; }</style>
+  <![endif]-->
+  <!--[if !mso]><!-->
+  <link href="https://fonts.googleapis.com/css?family=Ubuntu:300,400,500,700" rel="stylesheet" type="text/css">
+  <!--<![endif]-->
+  <style type="text/css">
+    @media only screen and (min-width:480px) {
+      .mj-column-per-100 { width:100% !important; max-width: 100%; }
+      .mj-column-per-25 { width:25% !important; max-width: 25%; }
+      .mj-column-per-75 { width:75% !important; max-width: 75%; }
+    }
+    @media only screen and (max-width:480px) {
+      table.mj-full-width-mobile { width: 100% !important; }
+      td.mj-full-width-mobile { width: auto !important; }
+    }
+  </style>
+</head>
+<body style="word-spacing:normal;">
+  <div class="email-content" style="background-color:#EAF0F6;">
+
+    <!-- ─── Green header with logo ─── -->
+    <div style="background:#55cf9e;background-color:#55cf9e;margin:0px auto;max-width:600px;">
+      <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="background:#55cf9e;width:100%;">
+        <tr>
+          <td style="padding:10px 20px;text-align:center;">
+            <img height="51" width="240" src="${CB_LOGO_URL}" alt="Credit Banc" style="border:0;display:inline-block;height:51px;width:240px;">
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- ─── Hero banner ─── -->
+    <div style="background:#ffffff;background-color:#ffffff;margin:0px auto;max-width:600px;">
+      <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="background:#ffffff;width:100%;">
+        <tr>
+          <td style="padding:0;">
+            <img src="cid:${CB_HERO_BANNER_CID}" alt="" width="600" style="border:0;display:block;width:100%;max-width:600px;height:auto;">
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- ─── Greeting ─── -->
+    <div style="background:#f2f2f2;background-color:#f2f2f2;margin:0px auto;max-width:600px;">
+      <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="background:#f2f2f2;width:100%;">
+        <tr>
+          <td style="padding:30px 20px 10px 20px;font-family:arial, helvetica, sans-serif;font-size:16px;line-height:1.25;color:#000000;">
+            <p><span style="font-size: 16px">Hi ${escape_html(client_name)},</span></p>
+            <p><span style="font-size: 16px">Your application is in good shape. We just need the remaining documents before it can move to underwriting.</span></p>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- ─── "Here's what we're missing" with icon ─── -->
+    <div style="background:#FFFFFF;background-color:#FFFFFF;margin:0px auto;max-width:600px;">
+      <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="background:#FFFFFF;width:100%;">
+        <tr>
+          <td style="padding:20px 20px 0 20px;">
+            <!--[if mso | IE]><table role="presentation" border="0" cellpadding="0" cellspacing="0"><tr><td style="vertical-align:top;width:140px;"><![endif]-->
+            <div class="mj-column-per-25 mj-outlook-group-fix" style="display:inline-block;vertical-align:top;width:25%;">
+              <table border="0" cellpadding="0" cellspacing="0" role="presentation" width="100%">
+                <tr>
+                  <td align="center" style="padding:10px 20px;">
+                    <img height="100" width="100" src="${CB_DOCS_ICON_URL}" alt="" style="border:0;display:block;height:100px;width:100px;">
+                  </td>
+                </tr>
+              </table>
+            </div>
+            <!--[if mso | IE]></td><td style="vertical-align:top;width:420px;"><![endif]-->
+            <div class="mj-column-per-75 mj-outlook-group-fix" style="display:inline-block;vertical-align:top;width:75%;">
+              <table border="0" cellpadding="0" cellspacing="0" role="presentation" width="100%">
+                <tr>
+                  <td align="left" style="padding:0 24px;font-family:arial, helvetica, sans-serif;color:#000000;">
+                    <h2 style="margin:0;text-align:left;font-size:24px;font-family:arial, helvetica, sans-serif;color:#000000;">Here's what we're missing:</h2>
+                  </td>
+                </tr>
+              </table>
+            </div>
+            <!--[if mso | IE]></td></tr></table><![endif]-->
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- ─── Missing docs list ─── -->
+    <div style="background:#FFFFFF;background-color:#FFFFFF;margin:0px auto;max-width:600px;">
+      <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="background:#FFFFFF;width:100%;">
+        <tr>
+          <td align="left" style="padding:10px 24px 0 24px;font-family:arial, helvetica, sans-serif;font-size:16px;line-height:1.25;color:#000000;">
+            <p style="line-height: 1.25;"><span style="font-size: 16px">${docs_html}</span></p>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- ─── CTA Button ─── -->
+    <div style="background:#FFFFFF;background-color:#FFFFFF;margin:0px auto;max-width:600px;">
+      <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="background:#FFFFFF;width:100%;">
+        <tr>
+          <td align="center" style="padding:10px 20px 20px 20px;">
+            <table border="0" cellpadding="0" cellspacing="0" role="presentation" style="border-collapse:separate;line-height:100%;">
+              <tr>
+                <td align="center" bgcolor="#000000" role="presentation" style="border-radius:25px;background:#000000;" valign="middle">
+                  <a href="${login_url}" target="_blank" style="display:inline-block;background:#000000;color:#FFFFFF;font-family:arial, helvetica, sans-serif;font-size:14px;font-weight:bold;line-height:1.25;text-decoration:none;padding:10px 25px;border-radius:25px;">Take Me to My Account</a>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- ─── Closing / advisor block ─── -->
+    <div style="background:#f2f2f2;background-color:#f2f2f2;margin:0px auto;max-width:600px;">
+      <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="background:#f2f2f2;width:100%;">
+        <tr>
+          <td align="left" style="padding:10px 20px;font-family:arial, helvetica, sans-serif;font-size:16px;line-height:1.25;color:#000000;">
+            <p><span style="font-size: 16px">If you have any questions, trouble uploading documents, or accessing your Vault, please reach out to your advisor:</span></p>
+            ${advisor_line}
+            <p><span style="font-size: 16px"><em>Remember.. the faster these come in, the faster decisions get made!</em></span></p>
+            <p style="text-align:left;"><span style="font-size: 20px">The Credit Banc Team</span></p>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- ─── Black footer (copyright) ─── -->
+    <div style="background:#000000;background-color:#000000;margin:0px auto;max-width:600px;">
+      <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="background:#000000;width:100%;">
+        <tr>
+          <td align="center" style="padding:20px 20px 10px 20px;font-family:Ubuntu, Helvetica, Arial, sans-serif;font-size:14px;line-height:1.5;color:#ffffff;">
+            <em>Copyright © ${year}&nbsp; Credit Banc Podcast, All rights reserved.</em>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- ─── Black footer logo ─── -->
+    <div style="background:#000000;background-color:#000000;margin:0px auto;max-width:600px;">
+      <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="background:#000000;width:100%;">
+        <tr>
+          <td align="center" style="padding:10px 10px 20px 10px;">
+            <img height="auto" width="180" src="${CB_LOGO_URL}" alt="Credit Banc" style="border:0;display:inline-block;width:180px;height:auto;">
+          </td>
+        </tr>
+      </table>
+    </div>
+
+  </div>
+</body>
+</html>`;
+}
+
+function escape_html(value: string): string {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+export function generate_outstanding_docs_reminder_text(data: OutstandingDocsReminderData): string {
+  const { client_name, business_name, missing_docs, advisor_name, advisor_email, advisor_phone, login_url } = data;
+  const subject_target = business_name ? business_name : "your application";
+  return `
+Hi ${client_name},
+
+We're still waiting on a few items to keep ${subject_target} moving forward.
+
+Outstanding Documents:
+${missing_docs.map(d => `- ${d}`).join("\n")}
+
+Upload them here: ${login_url}
+
+${advisor_name ? `Your Advisor: ${advisor_name}${advisor_email ? `\nEmail: ${advisor_email}` : ""}${advisor_phone ? `\nPhone: ${advisor_phone}` : ""}` : ""}
+
+© ${new Date().getFullYear()} Credit Banc Vault.
+  `.trim();
+}
+
+export async function send_outstanding_docs_reminder_email(data: OutstandingDocsReminderData) {
+  const transporter = create_smtp_transporter();
+  const from_email = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  const from_name = process.env.SMTP_FROM_NAME || "Credit Banc Vault";
+
+  const subject_target = data.business_name || "your application";
+  const subject = `Action needed: ${data.missing_docs.length} document${data.missing_docs.length === 1 ? "" : "s"} outstanding for ${subject_target}`;
+
+  const mail_options = {
+    from: `${from_name} <${from_email}>`,
+    to: data.client_email,
+    subject,
+    html: generate_outstanding_docs_reminder_html(data),
+    text: generate_outstanding_docs_reminder_text(data),
+    attachments: [
+      {
+        filename: "vault-reminder-header.png",
+        path: path.join(process.cwd(), "public", "vault reminder header.png"),
+        cid: CB_HERO_BANNER_CID,
+      },
+    ],
+  };
+
+  try {
+    const info = await transporter.sendMail(mail_options);
+    console.log(`✅ Reminder email sent to ${data.client_email}: ${info.messageId}`);
+    return info;
+  } catch (error) {
+    console.error(`❌ Failed to send reminder email to ${data.client_email}:`, error);
+    throw error;
+  }
+}
+
+// ─── MyScoreIQ Setup Email ─────────────────────────────────────────────────────
+
+const MYSCOREIQ_SIGNUP_URL = "https://www.myscoreiq.com/business-credit-max.aspx?offercode=432139I0";
+
+export interface MyScoreIQSetupEmailData {
+  client_email: string;
+  client_name: string;
+  advisor_name?: string | null;
+  advisor_email?: string | null;
+}
+
+export function generate_myscoreiq_setup_email_html(data: MyScoreIQSetupEmailData): string {
+  const { client_name, advisor_name, advisor_email } = data;
+  const year = new Date().getFullYear();
+  const advisor_line = advisor_name
+    ? `<p><span style="font-size: 16px">${escape_html(advisor_name)}</span>${advisor_email ? `<br><span style="font-size: 16px">${escape_html(advisor_email)}</span>` : ""}</p>`
+    : "";
+
+  return `<!DOCTYPE html>
+<html lang="en" dir="auto" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+  <title></title>
+  <!--[if !mso]><!-->
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <!--<![endif]-->
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style type="text/css">
+    body { margin:0;padding:0;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%; }
+    table, td { border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt; }
+    img { border:0;height:auto;line-height:100%;outline:none;text-decoration:none;-ms-interpolation-mode:bicubic; }
+    p { display:block;margin:13px 0; }
+  </style>
+  <!--[if !mso]><!-->
+  <link href="https://fonts.googleapis.com/css?family=Ubuntu:300,400,500,700" rel="stylesheet" type="text/css">
+  <!--<![endif]-->
+</head>
+<body style="word-spacing:normal;">
+  <div style="background-color:#EAF0F6;">
+
+    <!-- Green header with logo -->
+    <div style="background:#55cf9e;margin:0px auto;max-width:600px;">
+      <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="background:#55cf9e;width:100%;">
+        <tr>
+          <td style="padding:10px 20px;text-align:center;">
+            <img height="51" width="240" src="${CB_LOGO_URL}" alt="Credit Banc" style="border:0;display:inline-block;height:51px;width:240px;">
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- Greeting + body -->
+    <div style="background:#f2f2f2;margin:0px auto;max-width:600px;">
+      <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="background:#f2f2f2;width:100%;">
+        <tr>
+          <td style="padding:30px 20px 10px 20px;font-family:arial, helvetica, sans-serif;font-size:16px;line-height:1.5;color:#000000;">
+            <p><span style="font-size: 16px">Hello ${escape_html(client_name)},</span></p>
+            <p><span style="font-size: 16px">Here's the link for you to create and share your credit reports with us:</span></p>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- CTA -->
+    <div style="background:#FFFFFF;margin:0px auto;max-width:600px;">
+      <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="background:#FFFFFF;width:100%;">
+        <tr>
+          <td align="center" style="padding:24px 20px;">
+            <table border="0" cellpadding="0" cellspacing="0" role="presentation" style="border-collapse:separate;line-height:100%;">
+              <tr>
+                <td align="center" bgcolor="#000000" role="presentation" style="border-radius:25px;background:#000000;" valign="middle">
+                  <a href="${MYSCOREIQ_SIGNUP_URL}" target="_blank" style="display:inline-block;background:#000000;color:#FFFFFF;font-family:arial, helvetica, sans-serif;font-size:14px;font-weight:bold;line-height:1.25;text-decoration:none;padding:10px 25px;border-radius:25px;">Set Up MyScoreIQ</a>
+                </td>
+              </tr>
+            </table>
+            <p style="margin:14px 0 0;font-family:arial, helvetica, sans-serif;font-size:12px;color:#666666;word-break:break-all;">
+              Or paste this link in your browser:<br>
+              <a href="${MYSCOREIQ_SIGNUP_URL}" style="color:#666666;text-decoration:underline;">${MYSCOREIQ_SIGNUP_URL}</a>
+            </p>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- Important note -->
+    <div style="background:#FFFFFF;margin:0px auto;max-width:600px;">
+      <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="background:#FFFFFF;width:100%;">
+        <tr>
+          <td align="left" style="padding:0 24px 20px 24px;font-family:arial, helvetica, sans-serif;font-size:16px;line-height:1.5;color:#000000;">
+            <p><strong>Important:</strong> Please don't forget to check the box allowing you to share the report with <strong>"Credit Banc"</strong>. This way we'll receive the report as soon as you complete the process.</p>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- Closing / advisor block -->
+    <div style="background:#f2f2f2;margin:0px auto;max-width:600px;">
+      <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="background:#f2f2f2;width:100%;">
+        <tr>
+          <td align="left" style="padding:10px 20px;font-family:arial, helvetica, sans-serif;font-size:16px;line-height:1.25;color:#000000;">
+            <p><span style="font-size: 16px">If you have any questions, please reach out to your advisor:</span></p>
+            ${advisor_line}
+            <p style="text-align:left;"><span style="font-size: 20px">The Credit Banc Team</span></p>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- Black footer copyright -->
+    <div style="background:#000000;margin:0px auto;max-width:600px;">
+      <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="background:#000000;width:100%;">
+        <tr>
+          <td align="center" style="padding:20px 20px 10px 20px;font-family:Ubuntu, Helvetica, Arial, sans-serif;font-size:14px;line-height:1.5;color:#ffffff;">
+            <em>Copyright © ${year}&nbsp; Credit Banc Podcast, All rights reserved.</em>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- Black footer logo -->
+    <div style="background:#000000;margin:0px auto;max-width:600px;">
+      <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="background:#000000;width:100%;">
+        <tr>
+          <td align="center" style="padding:10px 10px 20px 10px;">
+            <img height="auto" width="180" src="${CB_LOGO_URL}" alt="Credit Banc" style="border:0;display:inline-block;width:180px;height:auto;">
+          </td>
+        </tr>
+      </table>
+    </div>
+
+  </div>
+</body>
+</html>`;
+}
+
+export function generate_myscoreiq_setup_email_text(data: MyScoreIQSetupEmailData): string {
+  const { client_name, advisor_name, advisor_email } = data;
+  return `
+Hello ${client_name},
+
+Here's the link for you to create and share your credit reports:
+${MYSCOREIQ_SIGNUP_URL}
+
+IMPORTANT: Please don't forget to check the box allowing you to share the report with "Credit Banc". This way we'll receive the report as soon as you complete the process.
+
+${advisor_name ? `Your Advisor: ${advisor_name}${advisor_email ? `\nEmail: ${advisor_email}` : ""}` : ""}
+
+The Credit Banc Team
+© ${new Date().getFullYear()} Credit Banc.
+  `.trim();
+}
+
+export async function send_myscoreiq_setup_email(data: MyScoreIQSetupEmailData) {
+  const transporter = create_smtp_transporter();
+  const from_email = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  const from_name = process.env.SMTP_FROM_NAME || "Credit Banc";
+
+  const mail_options = {
+    from: `${from_name} <${from_email}>`,
+    to: data.client_email,
+    subject: "Set up your MyScoreIQ credit report",
+    html: generate_myscoreiq_setup_email_html(data),
+    text: generate_myscoreiq_setup_email_text(data),
+  };
+
+  try {
+    const info = await transporter.sendMail(mail_options);
+    console.log(`✅ MyScoreIQ setup email sent to ${data.client_email}: ${info.messageId}`);
+    return info;
+  } catch (error) {
+    console.error(`❌ Failed to send MyScoreIQ setup email to ${data.client_email}:`, error);
     throw error;
   }
 }
