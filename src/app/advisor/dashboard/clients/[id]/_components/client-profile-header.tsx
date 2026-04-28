@@ -109,8 +109,8 @@ export function ClientProfileHeader({
         completion_percentage >= 100
             ? "bg-emerald-100 text-emerald-800"
             : completion_percentage >= 50
-            ? "bg-amber-100 text-amber-800"
-            : "bg-red-100 text-red-800";
+                ? "bg-amber-100 text-amber-800"
+                : "bg-red-100 text-red-800";
 
     return (
         <section className="bg-white rounded-2xl shadow-sm border border-slate-100 mb-8 relative overflow-hidden">
@@ -344,9 +344,7 @@ function ReferralPartnerPicker({ value, is_saving, on_change }: ReferralPartnerP
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
                         Referral Partner
                     </p>
-                    <p className="text-[11px] text-slate-400">
-                        Synced to GHL when changed
-                    </p>
+
                 </div>
             </div>
             <Popover open={open} onOpenChange={set_open}>

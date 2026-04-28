@@ -1,13 +1,12 @@
 import { differenceInDays } from "date-fns";
 
-// Color thresholds match the existing inactive-list bucket:
-//   inactivity_days >= 14 already moves a client into the "Inactive Deals"
-//   section (clients/page.tsx:111). Anything past 30 auto-declines.
+// Aggressive thresholds — funding work is time-sensitive, so any deal that
+// hasn't moved in 5+ days needs immediate attention.
 function age_classes(days: number): { wrapper: string; dot: string; label: string } {
-    if (days >= 30) return { wrapper: "bg-red-50 border-red-200 text-red-700", dot: "bg-red-500", label: "Stale" };
-    if (days >= 14) return { wrapper: "bg-orange-50 border-orange-200 text-orange-700", dot: "bg-orange-500", label: "Inactive" };
-    if (days >= 7)  return { wrapper: "bg-amber-50 border-amber-200 text-amber-700", dot: "bg-amber-500", label: "Cooling" };
-    if (days >= 3)  return { wrapper: "bg-sky-50 border-sky-200 text-sky-700", dot: "bg-sky-500", label: "Recent" };
+    if (days >= 14) return { wrapper: "bg-red-50 border-red-200 text-red-700", dot: "bg-red-500", label: "Stale" };
+    if (days >= 10) return { wrapper: "bg-red-50 border-red-200 text-red-600", dot: "bg-red-400", label: "Urgent" };
+    if (days >= 5)  return { wrapper: "bg-orange-50 border-orange-200 text-orange-700", dot: "bg-orange-500", label: "Alert" };
+    if (days >= 3)  return { wrapper: "bg-amber-50 border-amber-200 text-amber-700", dot: "bg-amber-500", label: "Watch" };
     return { wrapper: "bg-emerald-50 border-emerald-200 text-emerald-700", dot: "bg-emerald-500", label: "Fresh" };
 }
 

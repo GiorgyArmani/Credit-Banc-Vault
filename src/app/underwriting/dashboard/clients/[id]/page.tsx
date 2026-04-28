@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { useRouter, useParams } from "next/navigation";
+import { useRouter, useParams, usePathname } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,8 @@ import {
     Plus,
     ChevronDown,
     ChevronUp,
+    ChevronLeft,
+    ChevronRight,
     Eye,
     Star,
     Trash2,
@@ -50,7 +52,10 @@ import clsx from "clsx";
 import { format } from "date-fns";
 import { LoanFundedDialog } from "@/components/loan-funded-dialog";
 import { getClientPipelineHistory, updateLoanStatus, type LoanStatus, type PipelineStatusEntry } from "@/app/actions/pipeline";
-import { LoanPipelineFull, PIPELINE_STEPS } from "@/components/loan-pipeline-status";
+import { LoanPipelineFull, LoanPipelineBadge, PIPELINE_STEPS } from "@/components/loan-pipeline-status";
+import { getBulkClientActivity } from "@/app/actions/advisor";
+import { ActivityAgeBadge } from "@/components/advisor/activity-age-badge";
+import { differenceInDays } from "date-fns";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { renameClientFile } from "../../actions";
@@ -143,7 +148,14 @@ export default function UnderwritingClientDetailsPage() {
     const supabase = createClient();
     const router = useRouter();
     const params = useParams();
+    const pathname = usePathname();
     const client_id = params.id as string;
+
+    // Detect whether we're under /admin/uw/... or /underwriting/... so prev/next
+    // and the Back button stay within the same namespace.
+    const is_admin_uw_route = pathname?.startsWith("/admin/uw") ?? false;
+    const queue_path = is_admin_uw_route ? "/admin/uw/dashboard" : "/underwriting/dashboard";
+    const client_base_path = is_admin_uw_route ? "/admin/uw/dashboard/clients" : "/underwriting/dashboard/clients";
 
     const [component_state, set_component_state] = useState<ComponentState>(ComponentState.LOADING);
     const [client_profile, set_client_profile] = useState<ClientProfile | null>(null);
@@ -183,9 +195,42 @@ export default function UnderwritingClientDetailsPage() {
     const [renaming_file, set_renaming_file] = useState<{ id: string; label: string } | null>(null);
     const [is_renaming_loading, setIs_renaming_loading] = useState(false);
 
+    // navigable-clients-state: Ordered list of client IDs for prev/next navigation in the UW header.
+    const [navigable_client_ids, set_navigable_client_ids] = useState<string[]>([]);
+
+    // Most recent meaningful interaction (status change, doc upload, internal note).
+    const [last_activity_at, set_last_activity_at] = useState<string | null>(null);
+
     useEffect(() => {
         if (client_id) fetch_client_details();
     }, [client_id]);
+
+    useEffect(() => {
+        async function fetch_navigable_clients() {
+            const { data } = await supabase
+                .from("client_data_vault")
+                .select("id")
+                .order("created_at", { ascending: false });
+            if (data) set_navigable_client_ids(data.map(r => r.id));
+        }
+        fetch_navigable_clients();
+    }, []);
+
+    useEffect(() => {
+        if (!client_id) return;
+        let cancelled = false;
+        getBulkClientActivity([client_id]).then((map) => {
+            if (cancelled) return;
+            set_last_activity_at(map.get(client_id) ?? null);
+        });
+        return () => { cancelled = true; };
+    }, [client_id]);
+
+    const current_nav_index = navigable_client_ids.indexOf(client_id);
+    const prev_client_id = current_nav_index > 0 ? navigable_client_ids[current_nav_index - 1] : null;
+    const next_client_id = current_nav_index >= 0 && current_nav_index < navigable_client_ids.length - 1
+        ? navigable_client_ids[current_nav_index + 1]
+        : null;
 
     async function fetch_client_details() {
         try {
@@ -857,10 +902,40 @@ export default function UnderwritingClientDetailsPage() {
         <div className="space-y-8">
             {/* Header / Actions */}
             <div className="flex items-center justify-between">
-                <Button variant="ghost" onClick={() => router.push("/underwriting/dashboard")} className="text-slate-400 font-bold hover:text-slate-900 transition-colors">
-                    <ArrowLeft className="w-4 h-4 mr-2" />
-                    Back to Queue
-                </Button>
+                <div className="inline-flex items-center bg-white rounded-2xl border border-slate-200 shadow-sm p-1.5 gap-1">
+                    <button
+                        onClick={() => prev_client_id && router.push(`${client_base_path}/${prev_client_id}`)}
+                        disabled={!prev_client_id}
+                        title="Previous client"
+                        className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 hover:text-slate-900 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                    >
+                        <ChevronLeft className="w-4 h-4" />
+                        Prev
+                    </button>
+                    <div className="w-px h-5 bg-slate-200" />
+                    <button
+                        onClick={() => router.push(queue_path)}
+                        className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50 hover:text-slate-900 transition-colors"
+                    >
+                        <ArrowLeft className="w-4 h-4" />
+                        Back to Queue
+                        {current_nav_index >= 0 && navigable_client_ids.length > 0 && (
+                            <span className="text-[10px] font-black tracking-wide bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-md">
+                                {current_nav_index + 1} / {navigable_client_ids.length}
+                            </span>
+                        )}
+                    </button>
+                    <div className="w-px h-5 bg-slate-200" />
+                    <button
+                        onClick={() => next_client_id && router.push(`${client_base_path}/${next_client_id}`)}
+                        disabled={!next_client_id}
+                        title="Next client"
+                        className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 hover:text-slate-900 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                    >
+                        Next
+                        <ChevronRight className="w-4 h-4" />
+                    </button>
+                </div>
 
                 <Dialog open={is_notify_modal_open} onOpenChange={set_is_notify_modal_open}>
                     <DialogTrigger asChild>
@@ -947,12 +1022,43 @@ export default function UnderwritingClientDetailsPage() {
                     </DialogContent>
                 </Dialog>
 
-                <LoanFundedDialog 
-                    clientId={client_id} 
-                    clientName={client_profile.client_name} 
+                <LoanFundedDialog
+                    clientId={client_id}
+                    clientName={client_profile.client_name}
                     onSuccess={fetch_client_details}
                 />
             </div>
+
+            {/* Status row — pipeline + activity at a glance */}
+            {(() => {
+                const last_upload = documents.length > 0
+                    ? documents.reduce((a, b) => new Date(a.upload_date) > new Date(b.upload_date) ? a : b).upload_date
+                    : null;
+                const upload_baseline = last_upload ?? client_profile.created_at;
+                const days_since_last_upload = differenceInDays(new Date(), new Date(upload_baseline));
+                const has_missing_docs = completion_pct < 100;
+                const show_upload_alert = days_since_last_upload >= 5 && has_missing_docs;
+                return (
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <LoanPipelineBadge currentStatus={current_pipeline_status} />
+                        <ActivityAgeBadge
+                            created_at={client_profile.created_at}
+                            last_activity_at={last_activity_at}
+                        />
+                        {show_upload_alert && (
+                            <span
+                                className="inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-red-700"
+                                title={last_upload
+                                    ? `Last upload was ${days_since_last_upload} day${days_since_last_upload === 1 ? "" : "s"} ago`
+                                    : `No client uploads since vault was created ${days_since_last_upload} day${days_since_last_upload === 1 ? "" : "s"} ago`}
+                            >
+                                <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
+                                {last_upload ? `No uploads · ${days_since_last_upload}d` : `No uploads yet · ${days_since_last_upload}d`}
+                            </span>
+                        )}
+                    </div>
+                );
+            })()}
 
             {/* Outstanding Documents Banner */}
             {render_outstanding_banner(required_docs)}

@@ -62,3 +62,6 @@ src/app/dashboard/_chat/
 src/components/_ai-chat-interface.tsx
 src/components/_chat-message.tsx
 src/components/_chat-message-display.tsx
+
+
+multi-business-refactor-plan.md
