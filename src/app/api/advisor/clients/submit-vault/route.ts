@@ -239,12 +239,25 @@ export async function POST(request: Request) {
                     console.log(`✅ In-app notification sent to client: ${client.user_id}`);
                 }
 
-                // 7.5b Email notification for client
+                // 7.5b Email notification for client (CC primary advisor + followers)
                 if (client.client_email) {
+                    const { getFollowerEmailsForClient } = await import('@/lib/followers');
+                    const { data: primary_advisor_row } = client.advisor_id
+                        ? await supabase_admin
+                            .from('advisors')
+                            .select('email')
+                            .eq('id', client.advisor_id)
+                            .maybeSingle()
+                        : { data: null as { email: string | null } | null };
+                    const follower_emails = await getFollowerEmailsForClient(supabase_admin, client.id);
+                    const cc_emails = [primary_advisor_row?.email, ...follower_emails]
+                        .filter((e): e is string => typeof e === 'string' && e.includes('@'));
+
                     await send_client_vault_submitted_notification({
                         client_name: client.client_name,
                         client_email: client.client_email,
                         advisor_name: `${advisor_data.first_name} ${advisor_data.last_name}`,
+                        advisor_cc_emails: cc_emails,
                         company_name: client.company_name,
                         login_url: `${appUrl}/auth/login`
                     });

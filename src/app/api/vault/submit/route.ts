@@ -101,12 +101,16 @@ export async function POST() {
                 });
             }
 
-            // B. Email notification for advisor
+            // B. Email notification for advisor (CC followers)
             if (advisor.email) {
                 try {
+                    const { getFollowerEmailsForClient } = await import("@/lib/followers");
+                    const follower_emails = await getFollowerEmailsForClient(supabase, clientData.id);
+
                     await send_advisor_vault_submission_notification({
                         advisor_name: `${advisor.first_name} ${advisor.last_name}`,
                         advisor_email: advisor.email,
+                        advisor_cc_emails: follower_emails,
                         client_name: clientData.client_name,
                         company_name: clientData.company_name,
                         submission_date: new Date().toLocaleDateString("en-US", {

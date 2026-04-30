@@ -5,7 +5,7 @@ import { createClient as createServerSupabaseClient } from '@/lib/supabase/serve
 import { send_client_welcome_email } from '@/lib/email';
 import { syncOutstandingDocuments } from '@/lib/outstanding-documents';
 import { syncUnifiedClientData, generateSecurePassword } from '@/lib/user-management';
-import { ghlSearchContacts, ghlUpdateContact } from '@/lib/ghl-api';
+import { ghlSearchContacts, ghlUpdateContact, ghlAddContactFollowers, ghlAddTags } from '@/lib/ghl-api';
 
 /**
  * Supabase admin client with elevated privileges
@@ -859,10 +859,82 @@ export async function POST(request: Request) {
     await ghl_add_tags(ghl_contact_id, tags_to_apply);
     console.log(`✅ Tags applied successfully to GHL contact: ${ghl_contact_id}`);
 
+    // ========== STEP 6.4: SAVE FOLLOWERS (additional advisors that should get all client emails) ==========
+    // Excludes the primary advisor and de-dupes the requested ids.
+    const requested_follower_ids: string[] = Array.isArray(body.follower_advisor_ids)
+      ? Array.from(new Set(
+          body.follower_advisor_ids.filter(
+            (id: any) => typeof id === 'string' && id && id !== body.advisor_id,
+          ),
+        ))
+      : [];
+
+    let follower_emails: string[] = [];
+    if (requested_follower_ids.length > 0) {
+      try {
+        const { data: follower_rows, error: follower_lookup_err } = await supabase_admin
+          .from('advisors')
+          .select('id, email, ghl_user_id, first_name')
+          .in('id', requested_follower_ids);
+
+        if (follower_lookup_err) {
+          console.error('⚠️ Error looking up follower advisors:', follower_lookup_err);
+        }
+
+        const valid_followers = (follower_rows || []).filter(f => !!f.id);
+        follower_emails = valid_followers
+          .map(f => f.email)
+          .filter((e): e is string => typeof e === 'string' && e.includes('@'));
+
+        if (valid_followers.length > 0) {
+          const { error: insert_err } = await supabase_admin
+            .from('client_followers')
+            .insert(valid_followers.map(f => ({
+              client_vault_id: vault_id,
+              advisor_id: f.id,
+              assigned_by: body.advisor_id || null,
+            })));
+
+          if (insert_err) {
+            console.error('⚠️ Error inserting client_followers:', insert_err);
+          } else {
+            console.log(`✅ Saved ${valid_followers.length} follower(s) for vault ${vault_id}`);
+          }
+        }
+
+        // Best-effort GHL sync: assign followers + tag the contact, mirroring follower-actions.ts
+        if (ghl_contact_id && valid_followers.length > 0) {
+          const ghl_user_ids = valid_followers
+            .map(f => f.ghl_user_id)
+            .filter((u): u is string => !!u);
+          if (ghl_user_ids.length > 0) {
+            try {
+              await ghlAddContactFollowers(ghl_contact_id, ghl_user_ids);
+            } catch (ghl_follower_err) {
+              console.error('⚠️ GHL addContactFollowers failed (non-fatal):', ghl_follower_err);
+            }
+          }
+          const assign_tags = valid_followers
+            .map(f => (f.first_name || '').trim().toLowerCase())
+            .filter(Boolean)
+            .map(name => `assign to ${name}`);
+          if (assign_tags.length > 0) {
+            try {
+              await ghlAddTags(ghl_contact_id, assign_tags);
+            } catch (ghl_tag_err) {
+              console.error('⚠️ GHL addTags for followers failed (non-fatal):', ghl_tag_err);
+            }
+          }
+        }
+      } catch (follower_err: any) {
+        console.error('⚠️ Error processing followers (non-fatal):', follower_err);
+      }
+    }
+
     // ========== STEP 6.5: SEND WELCOME EMAIL ==========
     try {
       // Reuse advisor data already fetched above
-      // CC the advisor so they know credentials were sent to their client
+      // CC the advisor + every follower so they all see the credentials
       await send_client_welcome_email({
         client_name: body.client_name,
         client_email: body.client_email.toLowerCase(),
@@ -871,6 +943,7 @@ export async function POST(request: Request) {
         advisor_email: advisor_email || 'support@creditbanc.io',
         advisor_phone: advisor_phone || undefined,
         advisor_cc_email: advisor_email || undefined,
+        advisor_cc_emails: follower_emails,
         requested_documents: body.documents_requested || [],
         login_url: `${process.env.NEXT_PUBLIC_APP_URL}/auth/login`,
       });

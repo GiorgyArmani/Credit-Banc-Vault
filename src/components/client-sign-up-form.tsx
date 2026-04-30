@@ -29,6 +29,7 @@ import {
   Trash2
 } from "lucide-react";
 import { addManualFundingApplication } from "@/app/advisor/dashboard/clients/[id]/actions";
+import { FollowersPicker } from "@/components/followers-picker";
 
 
 // Estados de EE.UU.
@@ -99,6 +100,7 @@ type Advisor = {
   email: string;
   phone: string | null;
   profile_pic_url: string | null;
+  ghl_user_id: string | null;
 };
 
 type OpenPosition = {
@@ -243,6 +245,19 @@ export default function ClientSignupForm() {
   const [additional_notes, set_additional_notes] = useState("");
   const [advisor_id, set_advisor_id] = useState("");
 
+  // Follower advisors: additional advisors that should receive every email the primary advisor receives.
+  const [follower_advisor_ids, set_follower_advisor_ids] = useState<string[]>([]);
+  const toggle_follower = (id: string) => {
+    set_follower_advisor_ids(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id],
+    );
+  };
+  // Keep the primary advisor out of the follower list whenever it changes
+  useEffect(() => {
+    if (!advisor_id) return;
+    set_follower_advisor_ids(prev => prev.filter(id => id !== advisor_id));
+  }, [advisor_id]);
+
   // ===== Documents Requested =====
   // Tracks which documents are requested from the client
   // Each selected document will generate a "requested_{doc}" tag in GHL
@@ -318,7 +333,7 @@ export default function ClientSignupForm() {
       try {
         const { data, error } = await supabase
           .from("advisors")
-          .select("id, first_name, last_name, email, phone, profile_pic_url")
+          .select("id, first_name, last_name, email, phone, profile_pic_url, ghl_user_id")
           .eq("is_active", true)
           .order("first_name", { ascending: true });
         if (error) throw error;
@@ -509,6 +524,9 @@ export default function ClientSignupForm() {
         // Advisor
         advisor_name,
         advisor_id,
+
+        // Followers — advisors that should be CC'd on every client email
+        follower_advisor_ids: follower_advisor_ids.filter(id => id && id !== advisor_id),
 
         // ===== Documents Requested =====
         // List of documents that need to be collected from the client
@@ -1840,6 +1858,19 @@ export default function ClientSignupForm() {
                           })()}
                         </div>
                       )}
+                    </div>
+                  )}
+
+                  {/* Followers — additional advisors who should receive every email this client gets */}
+                  {is_advisor_context && !loading_advisors && (
+                    <div className="mt-8 pt-8 border-t border-emerald-50">
+                      <FollowersPicker
+                        advisors={advisors}
+                        selectedIds={follower_advisor_ids}
+                        excludeIds={advisor_id ? [advisor_id] : []}
+                        onAdd={(id) => toggle_follower(id)}
+                        onRemove={(id) => toggle_follower(id)}
+                      />
                     </div>
                   )}
 

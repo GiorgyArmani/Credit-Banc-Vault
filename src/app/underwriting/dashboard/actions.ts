@@ -84,10 +84,14 @@ export async function notifyAdvisor(clientId: string, requestedDocs: string[], c
             // Non-fatal, but good to know
         }
 
-        // 5. Send notification email
+        // 5. Send notification email (CC followers)
+        const { getFollowerEmailsForClient } = await import("@/lib/followers");
+        const follower_emails = await getFollowerEmailsForClient(supabaseAdmin, clientId);
+
         await send_advisor_document_notification({
             advisor_name: `${advisor.first_name} ${advisor.last_name}`,
             advisor_email: advisor.email,
+            advisor_cc_emails: follower_emails,
             client_name: client.client_name,
             requested_documents: requestedDocs,
             login_url: `${process.env.NEXT_PUBLIC_APP_URL || 'https://vault.creditbanc.io'}/auth/login`
@@ -196,13 +200,17 @@ export async function fundLoanAction(clientId: string, data: {
             content: noteContent
         });
 
-        // 5. Send Email to Advisor
+        // 5. Send Email to Advisor (CC followers)
         try {
             const advisor = client.advisors as any;
             if (advisor && advisor.email) {
+                const { getFollowerEmailsForClient } = await import("@/lib/followers");
+                const follower_emails = await getFollowerEmailsForClient(supabaseAdmin, clientId);
+
                 await send_loan_funded_notification({
                     advisor_name: `${advisor.first_name} ${advisor.last_name}`,
                     advisor_email: advisor.email,
+                    advisor_cc_emails: follower_emails,
                     client_name: client.client_name,
                     total_amount: data.totalAmountFunded,
                     lender: data.lenderFunded,

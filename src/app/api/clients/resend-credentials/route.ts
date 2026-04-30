@@ -167,9 +167,12 @@ export async function POST(request: Request) {
             .filter(Boolean);
 
         // ========================================================================
-        // STEP 6: RESEND WELCOME EMAIL (WITH ADVISOR CC)
+        // STEP 6: RESEND WELCOME EMAIL (WITH ADVISOR + FOLLOWERS CC)
         // ========================================================================
         const advisor_full_name = `${advisor_data.first_name} ${advisor_data.last_name}`.trim();
+
+        const { getFollowerEmailsForClient } = await import('@/lib/followers');
+        const follower_emails = await getFollowerEmailsForClient(supabase_admin, client_data.id);
 
         await send_client_welcome_email({
             client_name: client_data.client_name,
@@ -179,6 +182,7 @@ export async function POST(request: Request) {
             advisor_email: advisor_data.email || 'support@creditbanc.io',
             advisor_phone: advisor_data.phone || undefined,
             advisor_cc_email: advisor_data.email || undefined, // CC the advisor
+            advisor_cc_emails: follower_emails,
             requested_documents,
             login_url: `${process.env.NEXT_PUBLIC_APP_URL}/auth/login`,
         });

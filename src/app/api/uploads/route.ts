@@ -458,12 +458,16 @@ export async function POST(req: Request) {
         }
       }
 
-      // C. Email notification for advisor
+      // C. Email notification for advisor (CC followers)
       if (advisor.email) {
         try {
+          const { getFollowerEmailsForClient } = await import("@/lib/followers");
+          const follower_emails = await getFollowerEmailsForClient(admin, vaultRecord.id);
+
           await send_new_document_uploaded_notification({
             advisor_name: `${advisor.first_name} ${advisor.last_name}`,
             advisor_email: advisor.email,
+            advisor_cc_emails: follower_emails,
             client_name: vaultRecord.client_name,
             document_name: doc.name,
             document_category: docLabel,

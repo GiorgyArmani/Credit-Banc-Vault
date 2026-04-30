@@ -254,11 +254,17 @@ export async function requestDocuments(clientId: string, documentIds: string[]) 
                         advisor_email = advisorRow.email ?? null;
                     }
                 }
+                const { getFollowerEmailsForClient } = await import("@/lib/followers");
+                const follower_emails = await getFollowerEmailsForClient(supabaseAdmin, clientId);
+                const cc_emails = [advisor_email, ...follower_emails]
+                    .filter((e): e is string => typeof e === "string" && e.includes("@"));
+
                 await send_myscoreiq_setup_email({
                     client_email: client.client_email,
                     client_name: (client.client_name || "").split(" ")[0] || "there",
                     advisor_name,
                     advisor_email,
+                    advisor_cc_emails: cc_emails,
                 });
             } catch (emailError) {
                 console.error("MyScoreIQ setup email failed (non-fatal):", emailError);
@@ -869,7 +875,7 @@ export async function rejectDocumentCategory(clientId: string, docCode: string, 
 
         const { data: advisorData } = await supabase
             .from("advisors")
-            .select("id, first_name, last_name")
+            .select("id, first_name, last_name, email")
             .eq("user_id", advisorUser.id)
             .single();
 
@@ -916,15 +922,21 @@ export async function rejectDocumentCategory(clientId: string, docCode: string, 
                 message: `Your advisor has requested a replacement for ${docLabel}. Reason: ${reason}`
             });
 
-        // 5. Send Email Notification
+        // 5. Send Email Notification (CC primary advisor + followers)
         try {
             const { send_document_rejection_email } = await import("@/lib/email");
+            const { getFollowerEmailsForClient } = await import("@/lib/followers");
+            const follower_emails = await getFollowerEmailsForClient(supabaseAdmin, clientId);
+            const cc_emails = [advisorData.email, ...follower_emails]
+                .filter((e): e is string => typeof e === "string" && e.includes("@"));
+
             await send_document_rejection_email({
                 client_name: client.client_name,
                 client_email: client.client_email,
                 doc_label: docLabel,
                 rejection_reason: reason,
                 advisor_name: `${advisorData.first_name} ${advisorData.last_name}`,
+                advisor_cc_emails: cc_emails,
                 login_url: `${process.env.NEXT_PUBLIC_SITE_URL || 'https://vault.creditbanc.io'}/auth/login`
             });
         } catch (emailErr) {

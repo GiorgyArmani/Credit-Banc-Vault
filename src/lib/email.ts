@@ -13,6 +13,7 @@ interface ClientWelcomeEmailData {
   advisor_email: string;
   advisor_phone?: string;
   advisor_cc_email?: string; // Optional: CC the advisor on the client welcome email
+  advisor_cc_emails?: string[]; // Optional: CC follower advisors so they stay in the loop
   requested_documents: string[];
   login_url: string;
 }
@@ -42,6 +43,7 @@ export interface UnderwritingWelcomeEmailData {
 export interface AdvisorDocumentNotificationData {
   advisor_name: string;
   advisor_email: string;
+  advisor_cc_emails?: string[]; // CC follower advisors
   client_name: string;
   requested_documents: string[];
   login_url: string;
@@ -53,6 +55,7 @@ export interface AdvisorDocumentNotificationData {
 export interface AdvisorVaultSubmissionData {
   advisor_name: string;
   advisor_email: string;
+  advisor_cc_emails?: string[]; // CC follower advisors
   client_name: string;
   company_name: string;
   submission_date: string;
@@ -65,6 +68,7 @@ export interface AdvisorVaultSubmissionData {
 export interface NewDocumentUploadedData {
   advisor_name: string;
   advisor_email: string;
+  advisor_cc_emails?: string[]; // CC follower advisors
   client_name: string;
   document_name: string;
   document_category: string;
@@ -91,6 +95,7 @@ export interface ClientVaultSubmittedData {
   client_name: string;
   client_email: string;
   advisor_name: string;
+  advisor_cc_emails?: string[]; // CC primary advisor + follower advisors
   company_name: string;
   login_url: string;
 }
@@ -109,6 +114,25 @@ function create_smtp_transporter() {
       pass: process.env.SMTP_PASS,
     },
   });
+}
+
+/**
+ * Builds a deduped CC list from any combination of single emails and arrays.
+ * Filters out falsy entries and anything that is not a plausible address.
+ */
+function build_cc_list(...inputs: (string | string[] | null | undefined)[]): string[] {
+  const flat: string[] = [];
+  for (const input of inputs) {
+    if (!input) continue;
+    if (Array.isArray(input)) {
+      for (const entry of input) {
+        if (typeof entry === 'string' && entry.includes('@')) flat.push(entry);
+      }
+    } else if (typeof input === 'string' && input.includes('@')) {
+      flat.push(input);
+    }
+  }
+  return Array.from(new Set(flat.map(e => e.trim().toLowerCase()))).filter(Boolean);
 }
 
 /**
@@ -377,9 +401,10 @@ export async function send_client_welcome_email(data: ClientWelcomeEmailData) {
     ]
   };
 
-  // CC the advisor on the welcome email if requested
-  if (data.advisor_cc_email) {
-    mail_options.cc = data.advisor_cc_email;
+  // CC the primary advisor and any follower advisors so they all see the credentials
+  const cc_list = build_cc_list(data.advisor_cc_email, data.advisor_cc_emails);
+  if (cc_list.length > 0) {
+    mail_options.cc = cc_list;
   }
 
   const result = await transporter.sendMail(mail_options);
@@ -894,12 +919,15 @@ export async function send_advisor_document_notification(data: AdvisorDocumentNo
 
   const html_content = generate_advisor_document_notification_html(data);
 
-  const mail_options = {
+  const mail_options: any = {
     from: `${from_name} <${from_email}>`,
     to: data.advisor_email,
     subject: `Action Required: New Documents Needed for ${data.client_name}`,
     html: html_content,
   };
+
+  const cc_list = build_cc_list(data.advisor_cc_emails);
+  if (cc_list.length > 0) mail_options.cc = cc_list;
 
   return await transporter.sendMail(mail_options);
 }
@@ -988,7 +1016,7 @@ export async function send_new_document_uploaded_notification(data: NewDocumentU
 
   const html_content = generate_new_document_uploaded_email_html(data);
 
-  const mail_options = {
+  const mail_options: any = {
     from: `${from_name} <${from_email}>`,
     to: data.advisor_email,
     subject: `New Document Uploaded: ${data.client_name}`,
@@ -1001,6 +1029,9 @@ export async function send_new_document_uploaded_notification(data: NewDocumentU
       }
     ]
   };
+
+  const cc_list = build_cc_list(data.advisor_cc_emails);
+  if (cc_list.length > 0) mail_options.cc = cc_list;
 
   return await transporter.sendMail(mail_options);
 }
@@ -1089,7 +1120,7 @@ export async function send_client_vault_submitted_notification(data: ClientVault
 
   const html_content = generate_client_vault_submitted_email_html(data);
 
-  const mail_options = {
+  const mail_options: any = {
     from: `${from_name} <${from_email}>`,
     to: data.client_email,
     subject: `Application Submitted to Underwriting - ${data.company_name}`,
@@ -1102,6 +1133,9 @@ export async function send_client_vault_submitted_notification(data: ClientVault
       }
     ]
   };
+
+  const cc_list = build_cc_list(data.advisor_cc_emails);
+  if (cc_list.length > 0) mail_options.cc = cc_list;
 
   return await transporter.sendMail(mail_options);
 }
@@ -1296,12 +1330,15 @@ export async function send_advisor_vault_submission_notification(data: AdvisorVa
 
   const html_content = generate_advisor_vault_submission_html(data);
 
-  const mail_options = {
+  const mail_options: any = {
     from: `${from_name} <${from_email}>`,
     to: data.advisor_email,
     subject: `New Vault Submission: ${data.client_name}`,
     html: html_content,
   };
+
+  const cc_list = build_cc_list(data.advisor_cc_emails);
+  if (cc_list.length > 0) mail_options.cc = cc_list;
 
   return await transporter.sendMail(mail_options);
 }
@@ -1419,6 +1456,7 @@ export async function send_underwriting_vault_ready_notification(data: Underwrit
 export interface LoanFundedNotificationData {
   advisor_name: string;
   advisor_email: string;
+  advisor_cc_emails?: string[]; // CC follower advisors
   client_name: string;
   total_amount: string;
   lender: string;
@@ -1503,12 +1541,15 @@ export async function send_loan_funded_notification(data: LoanFundedNotification
 
   const html_content = generate_loan_funded_notification_html(data);
 
-  const mail_options = {
+  const mail_options: any = {
     from: `${from_name} <${from_email}>`,
     to: data.advisor_email,
     subject: `🎉 Loan Funded for ${data.client_name}!`,
     html: html_content,
   };
+
+  const cc_list = build_cc_list(data.advisor_cc_emails);
+  if (cc_list.length > 0) mail_options.cc = cc_list;
 
   return await transporter.sendMail(mail_options);
 }
@@ -1528,6 +1569,7 @@ export interface DocumentRejectionEmailData {
   doc_label: string;
   rejection_reason: string;
   advisor_name: string;
+  advisor_cc_emails?: string[]; // CC primary advisor + follower advisors
   login_url: string;
 }
 
@@ -1613,12 +1655,15 @@ export async function send_document_rejection_email(data: DocumentRejectionEmail
 
   const html_content = generate_document_rejection_email_html(data);
 
-  const mail_options = {
+  const mail_options: any = {
     from: `${from_name} <${from_email}>`,
     to: data.client_email,
     subject: `Action Required: Please update your ${data.doc_label}`,
     html: html_content,
   };
+
+  const cc_list = build_cc_list(data.advisor_cc_emails);
+  if (cc_list.length > 0) mail_options.cc = cc_list;
 
   console.log(`📧 Sending document rejection email to ${data.client_email} for ${data.doc_label}`);
 
@@ -1642,6 +1687,7 @@ export interface OutstandingDocsReminderData {
   advisor_name?: string | null;
   advisor_email?: string | null;
   advisor_phone?: string | null;
+  advisor_cc_emails?: string[]; // CC primary advisor + follower advisors
   login_url: string;
   reminder_count: number;
 }
@@ -1878,7 +1924,7 @@ export async function send_outstanding_docs_reminder_email(data: OutstandingDocs
   const subject_target = data.business_name || "your application";
   const subject = `Action needed: ${data.missing_docs.length} document${data.missing_docs.length === 1 ? "" : "s"} outstanding for ${subject_target}`;
 
-  const mail_options = {
+  const mail_options: any = {
     from: `${from_name} <${from_email}>`,
     to: data.client_email,
     subject,
@@ -1892,6 +1938,9 @@ export async function send_outstanding_docs_reminder_email(data: OutstandingDocs
       },
     ],
   };
+
+  const cc_list = build_cc_list(data.advisor_cc_emails);
+  if (cc_list.length > 0) mail_options.cc = cc_list;
 
   try {
     const info = await transporter.sendMail(mail_options);
@@ -1912,6 +1961,7 @@ export interface MyScoreIQSetupEmailData {
   client_name: string;
   advisor_name?: string | null;
   advisor_email?: string | null;
+  advisor_cc_emails?: string[]; // CC primary advisor + follower advisors
 }
 
 export function generate_myscoreiq_setup_email_html(data: MyScoreIQSetupEmailData): string {
@@ -2060,13 +2110,16 @@ export async function send_myscoreiq_setup_email(data: MyScoreIQSetupEmailData) 
   const from_email = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
   const from_name = process.env.SMTP_FROM_NAME || "Credit Banc";
 
-  const mail_options = {
+  const mail_options: any = {
     from: `${from_name} <${from_email}>`,
     to: data.client_email,
     subject: "Set up your MyScoreIQ credit report",
     html: generate_myscoreiq_setup_email_html(data),
     text: generate_myscoreiq_setup_email_text(data),
   };
+
+  const cc_list = build_cc_list(data.advisor_cc_emails);
+  if (cc_list.length > 0) mail_options.cc = cc_list;
 
   try {
     const info = await transporter.sendMail(mail_options);
