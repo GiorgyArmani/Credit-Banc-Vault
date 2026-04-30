@@ -282,65 +282,68 @@ export async function POST(request: Request) {
 
     console.log('✅ Basic validations passed');
 
-    // ========== STEP 1.5: RESOLVE ADVISOR FROM SESSION (authoritative) ==========
-    // The client-signup form auto-assigns body.advisor_id from a client-side
-    // lookup that can silently fail if the advisor's `advisors` row isn't
-    // linked to their auth user_id. When it fails, body.advisor_id arrives as
-    // "" and the client ends up orphaned (no advisor_id, no GHL assignment).
-    //
-    // Fix: trust the session, not the payload. If the caller is authenticated
-    // as an advisor, derive their advisor_id/advisor_name from the DB. Also
-    // self-heal the advisors row so the client-side lookup works next time.
-    try {
-      const session_supabase = await createServerSupabaseClient();
-      const { data: { user: session_user } } = await session_supabase.auth.getUser();
+    // ========== STEP 1.5: RESOLVE ADVISOR FROM SESSION (REQUIRED) ==========
+    // Clients are only ever created by authenticated advisors. The session is
+    // the only source of truth for advisor_id — body.advisor_id is ignored.
+    // If we can't resolve an advisor from the session, reject the request so
+    // we never produce an orphaned client row.
+    const session_supabase = await createServerSupabaseClient();
+    const { data: { user: session_user }, error: session_err } =
+      await session_supabase.auth.getUser();
 
-      if (session_user) {
-        // Prefer user_id match; fall back to email if the advisor row isn't linked yet.
-        let { data: advisor_row } = await supabase_admin
-          .from('advisors')
-          .select('id, first_name, last_name, email, user_id')
-          .eq('user_id', session_user.id)
-          .maybeSingle();
-
-        if (!advisor_row && session_user.email) {
-          const { data: by_email } = await supabase_admin
-            .from('advisors')
-            .select('id, first_name, last_name, email, user_id')
-            .ilike('email', session_user.email)
-            .maybeSingle();
-          advisor_row = by_email ?? null;
-
-          // Self-heal: attach user_id to the advisor row so the client-side
-          // lookup in client-sign-up-form.tsx works on future submissions.
-          if (advisor_row && !advisor_row.user_id) {
-            await supabase_admin
-              .from('advisors')
-              .update({ user_id: session_user.id })
-              .eq('id', advisor_row.id);
-            console.log(`🔧 Linked advisor ${advisor_row.id} to user_id ${session_user.id}`);
-          }
-        }
-
-        if (advisor_row) {
-          // Override whatever the form sent — session is source of truth.
-          body.advisor_id = advisor_row.id;
-          body.advisor_name =
-            `${advisor_row.first_name ?? ''} ${advisor_row.last_name ?? ''}`.trim() ||
-            body.advisor_name ||
-            'Unknown';
-          console.log(`✅ Advisor resolved from session: ${advisor_row.id} (${body.advisor_name})`);
-        } else {
-          console.warn(
-            `⚠️ Session user ${session_user.id} (${session_user.email}) has no advisors row — leaving body.advisor_id as-is.`
-          );
-        }
-      }
-    } catch (session_err) {
-      // Non-fatal — fall through to the legacy body-based flow so public
-      // self-signup (no session) still works.
-      console.error('advisor session resolution failed (non-fatal):', session_err);
+    if (session_err || !session_user) {
+      console.error('❌ client-signup: no authenticated session', session_err);
+      return NextResponse.json(
+        { success: false, error: 'Authentication required to create a client.' },
+        { status: 401 }
+      );
     }
+
+    // Prefer user_id match; fall back to email if the advisor row isn't linked yet.
+    let { data: advisor_row } = await supabase_admin
+      .from('advisors')
+      .select('id, first_name, last_name, email, user_id')
+      .eq('user_id', session_user.id)
+      .maybeSingle();
+
+    if (!advisor_row && session_user.email) {
+      const { data: by_email } = await supabase_admin
+        .from('advisors')
+        .select('id, first_name, last_name, email, user_id')
+        .ilike('email', session_user.email)
+        .maybeSingle();
+      advisor_row = by_email ?? null;
+
+      // Self-heal: attach user_id to the advisor row so future lookups by
+      // user_id (here and in the form) succeed on the first try.
+      if (advisor_row && !advisor_row.user_id) {
+        await supabase_admin
+          .from('advisors')
+          .update({ user_id: session_user.id })
+          .eq('id', advisor_row.id);
+        console.log(`🔧 Linked advisor ${advisor_row.id} to user_id ${session_user.id}`);
+      }
+    }
+
+    if (!advisor_row) {
+      console.error(
+        `❌ client-signup: session user ${session_user.id} (${session_user.email}) has no advisors row`
+      );
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            'No advisor record found for the current user. Contact an admin to link your advisor profile before creating clients.',
+        },
+        { status: 403 }
+      );
+    }
+
+    // Session is the source of truth — overwrite anything the form sent.
+    body.advisor_id = advisor_row.id;
+    body.advisor_name =
+      `${advisor_row.first_name ?? ''} ${advisor_row.last_name ?? ''}`.trim() || 'Unknown';
+    console.log(`✅ Advisor resolved from session: ${advisor_row.id} (${body.advisor_name})`);
 
     // ========== STEP 2: CREATE/UPDATE USER IN AUTH ==========
     const { data: existing_user } = await supabase_admin.auth.admin
@@ -407,6 +410,8 @@ export async function POST(request: Request) {
       state: body.company_state,
       city: body.company_city,
       zipCode: body.company_zip_code,
+      advisorId: body.advisor_id,
+      advisorName: body.advisor_name,
     });
     console.log(`✅ User sync completed for ${user_id}`);
 
@@ -622,8 +627,8 @@ export async function POST(request: Request) {
     const vault_data: any = {
       // IDs and references
       user_id: user_id,
-      advisor_name: body.advisor_name || 'Unknown',
-      advisor_id: body.advisor_id || null,
+      advisor_name: body.advisor_name,
+      advisor_id: body.advisor_id,
       ghl_contact_id: ghl_contact_id || null, // Might be null if GHL failed
       ghl_last_sync_at: ghl_contact_id ? new Date().toISOString() : null,
       ghl_sync_error: !ghl_contact_id ? 'GHL sync failed during signup' : null,

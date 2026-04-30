@@ -29,6 +29,8 @@ export interface UnifiedClientData {
     state?: string;
     city?: string;
     zipCode?: string;
+    advisorId?: string;
+    advisorName?: string;
 }
 
 /**
@@ -55,6 +57,8 @@ export async function syncUnifiedClientData(
         state,
         city,
         zipCode,
+        advisorId,
+        advisorName,
     } = data;
 
     const firstName = clientName.split(' ')[0];
@@ -136,7 +140,8 @@ export async function syncUnifiedClientData(
         has_active_judgements: existingVault?.has_active_judgements ?? false,
         funding_eta: existingVault?.funding_eta ?? 'Immediately',
         additional_notes: existingVault?.additional_notes ?? 'Synced from identity',
-        advisor_name: existingVault?.advisor_name ?? 'Unknown',
+        advisor_name: advisorName ?? existingVault?.advisor_name ?? 'Unknown',
+        advisor_id: advisorId ?? existingVault?.advisor_id,
         status: existingVault?.status ?? 'active',
     };
 
