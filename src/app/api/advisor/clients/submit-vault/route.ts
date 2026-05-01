@@ -100,7 +100,15 @@ export async function POST(request: Request) {
             return NextResponse.json({ success: false, error: 'Client not found' }, { status: 404 });
         }
 
-        let has_access = client.advisor_id === advisor_data.id;
+        // Admins bypass owner/follower gate.
+        const { data: caller_role } = await supabase_admin
+            .from('users')
+            .select('role')
+            .eq('id', user.id)
+            .maybeSingle();
+        const is_admin_caller = caller_role?.role === 'admin';
+
+        let has_access = is_admin_caller || client.advisor_id === advisor_data.id;
         if (!has_access) {
             const { data: follower_row } = await supabase_admin
                 .from('client_followers')

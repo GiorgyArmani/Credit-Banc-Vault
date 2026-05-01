@@ -66,6 +66,7 @@ export default function LoginForm({
 
       // Step 4: Map roles to their respective dashboard URLs
       const roleRedirects: Record<string, string> = {
+        admin: "/admin/dashboard",
         advisor: "/advisor/dashboard",
         underwriting: "/underwriting/dashboard",
         premium: "/dashboard",

@@ -4,18 +4,25 @@
  * API ENDPOINT: POST /api/advisor/clients/upload
  * ============================================================================
  *
- * Allows an advisor to upload a document on behalf of one of their clients.
- * The file is stored under the CLIENT's user_id in Supabase storage and
- * synced to GHL exactly the same way as when the client uploads it themselves.
+ * Registers metadata for documents the advisor's browser has already uploaded
+ * directly to Supabase storage via signed upload URLs (see ./sign/route.ts).
+ *
+ * The file bytes never pass through this Vercel function — only JSON metadata
+ * — so Vercel's 4.5 MB request body cap on Hobby/Pro doesn't apply.
+ *
+ * INPUT (JSON):
+ *   {
+ *     client_id,
+ *     doc_code,
+ *     files: [{ storage_path, file_name, file_size, file_type }]
+ *   }
  *
  * FLOW:
  * 1. Authenticate the calling advisor
- * 2. Parse multipart/form-data: client_id, doc_code, file(s)
- * 3. Verify the advisor owns the client (advisor_id check)
- * 4. Upload each file to Supabase storage under {client_user_id}/...
- * 5. Insert row into user_documents with user_id = client.user_id
- * 6. POST to /api/uploads to trigger GHL sync
- * 7. If doc is not core, add submitted_{doc_code} tag to GHL
+ * 2. Verify advisor owns the client (or is admin / follower)
+ * 3. For each file: validate the storage_path is under the client's user_id,
+ *    insert user_documents row, run GHL sync
+ * 4. If doc is not core, add submitted_{doc_code} tag to GHL
  *
  * ============================================================================
  */
@@ -25,11 +32,20 @@ import { createClient } from '@/lib/supabase/server';
 import { createClient as createAdminClient } from '@supabase/supabase-js';
 import { ghlAddTags } from '@/lib/ghl-api';
 
+export const maxDuration = 60;
+
 const supabase_admin = createAdminClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
     { auth: { persistSession: false } }
 );
+
+interface UploadedFileMeta {
+    storage_path: string;
+    file_name: string;
+    file_size: number;
+    file_type: string;
+}
 
 export async function POST(request: Request) {
     try {
@@ -44,12 +60,12 @@ export async function POST(request: Request) {
         }
 
         // ========================================================================
-        // STEP 2: PARSE MULTIPART FORM DATA
+        // STEP 2: PARSE JSON BODY
         // ========================================================================
-        const form_data = await request.formData();
-        const client_id = form_data.get('client_id') as string | null;
-        const doc_code = form_data.get('doc_code') as string | null;
-        const files = form_data.getAll('file') as File[];
+        const body = await request.json().catch(() => null);
+        const client_id: string | undefined = body?.client_id;
+        const doc_code: string | undefined = body?.doc_code;
+        const files: UploadedFileMeta[] = Array.isArray(body?.files) ? body.files : [];
 
         if (!client_id || !doc_code || files.length === 0) {
             return NextResponse.json(
@@ -62,7 +78,6 @@ export async function POST(request: Request) {
         // STEP 3: VERIFY ADVISOR OWNERSHIP
         // ========================================================================
 
-        // Get advisor record
         let { data: advisor_data } = await supabase_admin
             .from('advisors')
             .select('id, first_name, last_name')
@@ -70,7 +85,6 @@ export async function POST(request: Request) {
             .maybeSingle();
 
         if (!advisor_data) {
-            // Fallback: match by email
             const { data: user_record } = await supabase_admin
                 .from('users')
                 .select('email')
@@ -94,7 +108,6 @@ export async function POST(request: Request) {
             );
         }
 
-        // Fetch client and verify ownership
         const { data: client, error: client_error } = await supabase_admin
             .from('client_data_vault')
             .select('id, user_id, client_name, ghl_contact_id, advisor_id')
@@ -105,7 +118,14 @@ export async function POST(request: Request) {
             return NextResponse.json({ success: false, error: 'Client not found' }, { status: 404 });
         }
 
-        let has_access = client.advisor_id === advisor_data.id;
+        const { data: caller_role } = await supabase_admin
+            .from('users')
+            .select('role')
+            .eq('id', user.id)
+            .maybeSingle();
+        const is_admin_caller = caller_role?.role === 'admin';
+
+        let has_access = is_admin_caller || client.advisor_id === advisor_data.id;
         if (!has_access) {
             const { data: follower_row } = await supabase_admin
                 .from('client_followers')
@@ -123,13 +143,11 @@ export async function POST(request: Request) {
         }
 
         const advisor_full_name = `${advisor_data.first_name} ${advisor_data.last_name}`.trim();
-        console.log(`📤 Advisor "${advisor_full_name}" uploading ${files.length} file(s) for client ${client.client_name}`);
+        console.log(`📤 Advisor "${advisor_full_name}" registering ${files.length} file(s) for client ${client.client_name}`);
 
         // ========================================================================
-        // STEP 4 & 5: UPLOAD FILES + INSERT DB RECORDS
+        // STEP 4: LOOK UP DOC METADATA (label + is_core)
         // ========================================================================
-
-        // Get doc type label for naming
         const { data: doc_def } = await supabase_admin
             .from('required_documents')
             .select('label, is_core')
@@ -139,79 +157,74 @@ export async function POST(request: Request) {
         const doc_label = doc_def?.label || doc_code;
         const is_core = doc_def?.is_core ?? true;
 
-        const uploaded_doc_ids: string[] = [];
+        // ========================================================================
+        // STEP 5: INSERT user_documents ROWS (sequential — fast)
+        // ========================================================================
+        const uploaded_documents: any[] = [];
+        const expected_prefix = `${client.user_id}/`;
+        const standardized_name = `${doc_label} - ${client.client_name}`;
 
-        for (const file of files) {
-            const ext = file.name.split('.').pop() || 'bin';
-            const timestamp = Date.now();
-            const random = Math.random().toString(36).substr(2, 9);
-            const normalized_filename = `${doc_code}-${timestamp}-${random}.${ext}`;
-
-            // Store under the CLIENT'S user_id folder (same as self-upload)
-            const file_path = `${client.user_id}/${normalized_filename}`;
-            const standardized_name = `${doc_label} - ${client.client_name}`;
-
-            // Upload to Supabase storage
-            const file_buffer = await file.arrayBuffer();
-            const { error: storage_error } = await supabase_admin.storage
-                .from('user-documents')
-                .upload(file_path, file_buffer, {
-                    contentType: file.type,
-                    upsert: true,
-                });
-
-            if (storage_error) {
-                console.error(`❌ Storage upload failed for ${file.name}:`, storage_error);
+        for (const f of files) {
+            // Security: signed-URL paths are server-minted, but double-check the
+            // browser didn't tamper before we record it as belonging to this client.
+            if (!f.storage_path || !f.storage_path.startsWith(expected_prefix)) {
+                console.error(`❌ Rejected storage_path outside client folder: ${f.storage_path}`);
                 continue;
             }
 
-            // Insert user_documents record
+            const ext = (f.file_name.split('.').pop() || 'bin').toLowerCase();
+
             const { data: doc_record, error: db_error } = await supabase_admin
                 .from('user_documents')
                 .insert({
                     user_id: client.user_id,
                     name: `${standardized_name}.${ext}`,
-                    size: file.size,
-                    type: file.type,
-                    storage_path: file_path,
+                    size: f.file_size,
+                    type: f.file_type,
+                    storage_path: f.storage_path,
                     category: doc_code,
                     doc_code: doc_code,
                     custom_label: standardized_name,
                     uploaded_by_role: 'advisor',
                     metadata: { tags: [doc_code], uploaded_by: 'advisor', advisor_id: advisor_data.id },
                 })
-                .select('id')
+                .select('*')
                 .single();
 
             if (db_error) {
-                console.error(`❌ DB insert failed for ${file.name}:`, db_error);
+                console.error(`❌ DB insert failed for ${f.file_name}:`, db_error);
                 continue;
             }
 
-            uploaded_doc_ids.push(doc_record.id);
-            console.log(`✅ File uploaded: ${file_path}`);
-
-            // ========================================================================
-            // STEP 6: GHL SYNC (call ghlSyncDocument via the shared util)
-            // ========================================================================
-            try {
-                const { ghlSyncDocument } = await import('@/lib/ghl-document-sync');
-                await ghlSyncDocument(supabase_admin, doc_record.id, client.user_id, doc_code);
-                console.log(`✅ GHL sync complete for ${doc_code}`);
-            } catch (ghl_sync_error) {
-                console.warn(`⚠️ GHL sync failed (non-fatal):`, ghl_sync_error);
-            }
+            uploaded_documents.push(doc_record);
+            console.log(`✅ File registered: ${f.storage_path}`);
         }
 
-        if (uploaded_doc_ids.length === 0) {
+        if (uploaded_documents.length === 0) {
             return NextResponse.json(
-                { success: false, error: 'All file uploads failed' },
+                { success: false, error: 'No files could be registered' },
                 { status: 500 }
             );
         }
 
         // ========================================================================
-        // STEP 7: ADD submitted_{doc_code} GHL TAG (for dynamic docs)
+        // STEP 5b: RUN GHL SYNCS IN PARALLEL (slow — Supabase download + GHL upload)
+        // Non-fatal: even if GHL fails, files are safely registered in Supabase.
+        // ========================================================================
+        const { ghlSyncDocument } = await import('@/lib/ghl-document-sync');
+        await Promise.all(
+            uploaded_documents.map(async (doc_record) => {
+                try {
+                    await ghlSyncDocument(supabase_admin, doc_record.id, client.user_id, doc_code);
+                    console.log(`✅ GHL sync complete for ${doc_record.id}`);
+                } catch (ghl_sync_error) {
+                    console.warn(`⚠️ GHL sync failed for ${doc_record.id} (non-fatal):`, ghl_sync_error);
+                }
+            })
+        );
+
+        // ========================================================================
+        // STEP 6: ADD submitted_{doc_code} GHL TAG (for dynamic docs)
         // ========================================================================
         if (!is_core && client.ghl_contact_id && process.env.GHL_TOKEN) {
             try {
@@ -224,8 +237,9 @@ export async function POST(request: Request) {
 
         return NextResponse.json({
             success: true,
-            uploaded: uploaded_doc_ids.length,
-            message: `${uploaded_doc_ids.length} file(s) uploaded successfully`,
+            uploaded: uploaded_documents.length,
+            documents: uploaded_documents,
+            message: `${uploaded_documents.length} file(s) uploaded successfully`,
         });
 
     } catch (error: any) {

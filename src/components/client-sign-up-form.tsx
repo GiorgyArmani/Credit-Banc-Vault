@@ -287,10 +287,14 @@ export default function ClientSignupForm() {
           .eq("id", user.id)
           .maybeSingle();
 
-        if (user_data?.role === "advisor") {
+        // Admins also act as advisors when creating clients — they have an
+        // advisors row of their own and the client must be assigned to them
+        // (same auto-assignment + same form layout, including the manual
+        // funding-app upload section).
+        if (user_data?.role === "advisor" || user_data?.role === "admin") {
           set_is_advisor_context(true);
 
-          // Auto-assign advisor if they are logged in
+          // Auto-assign advisor/admin if they are logged in
           if (user.email) {
             // Find advisor by user_id for more reliable mapping than email
             const { data: advisor_record } = await supabase
@@ -317,7 +321,7 @@ export default function ClientSignupForm() {
                 set_advisor_id(advisor_by_email.id);
                 console.log(`✅ Advisor matched by email: ${advisor_by_email.first_name} ${advisor_by_email.last_name}`);
               } else {
-                console.warn(`⚠️ User is an advisor but no record found in "advisors" table for email: ${user.email} — the server will try to resolve by session at submit time.`);
+                console.warn(`⚠️ User has role "${user_data.role}" but no record found in "advisors" table for email: ${user.email} — the server will try to resolve by session at submit time.`);
               }
             }
           }

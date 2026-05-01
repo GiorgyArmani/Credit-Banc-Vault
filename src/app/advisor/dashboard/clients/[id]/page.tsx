@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { useRouter, useParams } from "next/navigation";
+import { useRouter, useParams, usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -17,6 +17,8 @@ import {
     X,
     FileSignature,
     Pencil,
+    UserCog,
+    BarChart3,
     XCircle,
     Download,
     ChevronLeft,
@@ -45,7 +47,8 @@ import {
     renameClientFile,
     generateMagicLink,
     updateClientSignupNotes,
-    setReferralPartner
+    setReferralPartner,
+    reassignClientAdvisor
 } from "./actions";
 import { fetchInternalNotes, addInternalNote } from "@/app/actions/internal-notes";
 import { fetchFileNotes, addFileNote } from "@/app/actions/client-file-notes";
@@ -69,6 +72,7 @@ import { InternalCommunication } from "./_components/internal-communication";
 import { SubmitUnderwritingCTA } from "./_components/submit-underwriting-cta";
 import { ClientFollowersCard } from "./_components/client-followers-card";
 import { ClientNotesCard, type FileNote } from "./_components/client-notes-card";
+import { AdminLenderReviewCard } from "@/components/admin/admin-lender-review-card";
 
 /**
  * ============================================================================
@@ -228,6 +232,8 @@ interface ClientProfile {
     employees_count?: number;
     is_home_based?: boolean | null;
     referral_partner?: string | null;
+    advisor_id?: string | null;
+    advisor_name?: string | null;
 }
 
 /**
@@ -265,7 +271,17 @@ export default function AdvisorClientDetailsPage() {
     const supabase = createClient();
     const router = useRouter();
     const params = useParams();
+    const pathname = usePathname();
     const client_id = params.id as string;
+
+    // Keep navigation inside whichever portal layout the user entered from
+    // (admin or advisor). Re-exports of this page mount under /admin/* — we
+    // detect that and rewrite back/prev/next links so admins don't get
+    // bounced out into the advisor portal layout.
+    const is_admin_path = pathname?.startsWith("/admin") ?? false;
+    const clients_list_path = is_admin_path ? "/admin/advisor/clients" : "/advisor/dashboard/clients";
+    const client_detail_path = (id: string) =>
+        is_admin_path ? `/admin/advisor/clients/${id}` : `/advisor/dashboard/clients/${id}`;
 
     // component-state: Single source of truth for component state
     const [component_state, set_component_state] = useState<ComponentState>(
@@ -341,6 +357,14 @@ export default function AdvisorClientDetailsPage() {
 
     // Edit Profile state
     const [is_edit_modal_open, set_is_edit_modal_open] = useState(false);
+
+    // Admin-only: reassign advisor state
+    const [is_reassign_modal_open, set_is_reassign_modal_open] = useState(false);
+    const [reassign_advisor_options, set_reassign_advisor_options] = useState<
+        { id: string; first_name: string; last_name: string; email: string }[]
+    >([]);
+    const [reassign_target_id, set_reassign_target_id] = useState("");
+    const [is_reassigning, set_is_reassigning] = useState(false);
 
     // Delete File state
     const [is_delete_file_modal_open, set_is_delete_file_modal_open] = useState(false);
@@ -480,12 +504,14 @@ export default function AdvisorClientDetailsPage() {
                 set_component_state(ComponentState.ERROR);
                 return;
             }
-            if (identity.role !== "advisor") {
-                set_error_message("Access denied. You must be an advisor to view this page.");
+            // Admins can view any client; advisors must have an advisor profile.
+            const is_admin_user = identity.role === "admin";
+            if (identity.role !== "advisor" && !is_admin_user) {
+                set_error_message("Access denied. You must be an advisor or admin to view this page.");
                 set_component_state(ComponentState.ACCESS_DENIED);
                 return;
             }
-            if (!identity.advisor) {
+            if (!is_admin_user && !identity.advisor) {
                 set_error_message(
                     "No advisor profile found. Please contact support to set up your advisor account."
                 );
@@ -527,7 +553,8 @@ export default function AdvisorClientDetailsPage() {
           funding_eta,
           employees_count,
           is_home_based,
-          referral_partner
+          referral_partner,
+          advisor_name
         `)
                 .eq("id", client_id)
                 .maybeSingle();
@@ -549,9 +576,11 @@ export default function AdvisorClientDetailsPage() {
             // ============================================
             // STEP 4: VERIFY ACCESS (owner OR follower)
             // ============================================
-            const owns_client = client_data.advisor_id === advisor_data.id;
+            const owns_client = !is_admin_user && advisor_data
+                ? client_data.advisor_id === advisor_data.id
+                : false;
             let is_follower = false;
-            if (!owns_client) {
+            if (!is_admin_user && !owns_client && advisor_data) {
                 const { data: follower_row, error: follower_err } = await supabase
                     .from("client_followers")
                     .select("id")
@@ -570,14 +599,16 @@ export default function AdvisorClientDetailsPage() {
                 });
             }
 
-            if (!owns_client && !is_follower) {
+            // Admins bypass the owner/follower gate entirely.
+            if (!is_admin_user && !owns_client && !is_follower) {
                 console.error("❌ Access denied: advisor is neither owner nor follower");
                 set_error_message("You do not have permission to view this client.");
                 set_component_state(ComponentState.ACCESS_DENIED);
                 return;
             }
 
-            set_is_owner(owns_client);
+            // Admins get owner-equivalent management rights (matches assertCanManageFollowers in client-access.ts).
+            set_is_owner(owns_client || is_admin_user);
             console.log("✅ Client profile loaded:", client_data.client_name);
             set_client_profile(client_data as ClientProfile);
             // Reflect any existing submission state
@@ -749,6 +780,27 @@ export default function AdvisorClientDetailsPage() {
         } finally {
             setIs_approving_loading(false);
         }
+    }
+
+    /**
+     * refresh_documents: Targeted re-fetch of just the user_documents list for
+     * this client. Used after upload/delete instead of fetch_client_details(),
+     * which sets component_state to LOADING and re-runs ~10 parallel queries
+     * (profile, dynamic docs, submissions, notes, history, approvals, activity)
+     * — that full reload is what the page-flash feels like.
+     */
+    async function refresh_documents() {
+        if (!client_profile?.user_id) return;
+        const { data, error } = await supabase
+            .from("user_documents")
+            .select("*")
+            .eq("user_id", client_profile.user_id)
+            .order("upload_date", { ascending: false });
+        if (error) {
+            console.error("❌ refresh_documents error:", error);
+            return;
+        }
+        set_documents(data || []);
     }
 
     /**
@@ -954,23 +1006,101 @@ export default function AdvisorClientDetailsPage() {
     }
 
     /**
-     * handle-advisor-upload: Uploads selected files on behalf of the client
-     * Sends multipart/form-data to the new advisor-specific upload endpoint
+     * handle-advisor-upload: Uploads selected files on behalf of the client.
+     *
+     * Files go browser → Supabase storage directly via signed upload URLs,
+     * bypassing Vercel's 4.5 MB request body cap. Once uploaded, we POST the
+     * metadata to /api/advisor/clients/upload to record the row and run GHL
+     * sync.
      */
     async function handle_advisor_upload() {
         if (upload_files.length === 0 || !upload_doc_code) return;
 
         set_is_uploading(true);
         try {
-            const form = new FormData();
-            form.append('client_id', client_id);
-            form.append('doc_code', upload_doc_code);
-            upload_files.forEach(f => form.append('file', f));
+            const supabase = createClient();
+
+            const upload_results = await Promise.all(
+                upload_files.map(async (file) => {
+                    try {
+                        const sign_res = await fetch('/api/advisor/clients/upload/sign', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                client_id,
+                                doc_code: upload_doc_code,
+                                file_name: file.name,
+                                file_type: file.type,
+                            }),
+                        });
+
+                        if (!sign_res.ok) {
+                            const text = await sign_res.text();
+                            return { ok: false as const, file_name: file.name, error: text || `Sign failed (${sign_res.status})` };
+                        }
+
+                        const sign_result = await sign_res.json();
+                        if (!sign_result.success) {
+                            return { ok: false as const, file_name: file.name, error: sign_result.error || 'Sign failed' };
+                        }
+
+                        const { error: upload_error } = await supabase.storage
+                            .from('user-documents')
+                            .uploadToSignedUrl(sign_result.file_path, sign_result.token, file, {
+                                contentType: file.type || 'application/octet-stream',
+                                upsert: true,
+                            });
+
+                        if (upload_error) {
+                            return { ok: false as const, file_name: file.name, error: upload_error.message };
+                        }
+
+                        return {
+                            ok: true as const,
+                            storage_path: sign_result.file_path as string,
+                            file_name: file.name,
+                            file_size: file.size,
+                            file_type: file.type,
+                        };
+                    } catch (e: any) {
+                        return { ok: false as const, file_name: file.name, error: e?.message || 'Upload failed' };
+                    }
+                })
+            );
+
+            const successful = upload_results.filter((r): r is Extract<typeof r, { ok: true }> => r.ok);
+            const failed = upload_results.filter((r) => !r.ok);
+
+            failed.forEach((f) => {
+                console.error(`❌ Upload failed for ${f.file_name}:`, f.error);
+                toast.error(`Failed to upload ${f.file_name}: ${f.error}`);
+            });
+
+            if (successful.length === 0) {
+                return;
+            }
 
             const res = await fetch('/api/advisor/clients/upload', {
                 method: 'POST',
-                body: form,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    client_id,
+                    doc_code: upload_doc_code,
+                    files: successful.map((s) => ({
+                        storage_path: s.storage_path,
+                        file_name: s.file_name,
+                        file_size: s.file_size,
+                        file_type: s.file_type,
+                    })),
+                }),
             });
+
+            if (!res.ok) {
+                const text = await res.text();
+                toast.error(`Upload registration failed: ${text || res.status}`);
+                return;
+            }
+
             const result = await res.json();
 
             if (result.success) {
@@ -978,7 +1108,9 @@ export default function AdvisorClientDetailsPage() {
                 set_is_upload_modal_open(false);
                 set_upload_files([]);
                 set_upload_doc_code("");
-                fetch_client_details(); // Refresh to show new docs
+                if (Array.isArray(result.documents) && result.documents.length > 0) {
+                    set_documents(prev => [...result.documents, ...prev]);
+                }
             } else {
                 toast.error(result.error || 'Upload failed');
             }
@@ -1292,7 +1424,7 @@ export default function AdvisorClientDetailsPage() {
                 toast.success("File deleted successfully");
                 set_is_delete_file_modal_open(false);
                 set_file_to_delete(null);
-                fetch_client_details(); // Refresh documents
+                refresh_documents();
             } else {
                 toast.error(result.error || "Failed to delete file");
             }
@@ -1310,7 +1442,7 @@ export default function AdvisorClientDetailsPage() {
             const result = await deleteClientVault(client_id);
             if (result.success) {
                 toast.success("Client vault deleted successfully");
-                router.push("/advisor/dashboard/clients");
+                router.push(clients_list_path);
             } else {
                 toast.error(result.error || "Failed to delete vault");
             }
@@ -1319,6 +1451,46 @@ export default function AdvisorClientDetailsPage() {
             toast.error("An unexpected error occurred");
         } finally {
             set_is_deleting_vault(false);
+        }
+    }
+
+    async function open_reassign_modal() {
+        // Load active advisors for the picker. Admin-only — guarded by render gate.
+        const { data, error } = await supabase
+            .from("advisors")
+            .select("id, first_name, last_name, email")
+            .eq("is_active", true)
+            .order("first_name", { ascending: true });
+        if (error) {
+            toast.error("Failed to load advisor list");
+            return;
+        }
+        set_reassign_advisor_options(data ?? []);
+        set_reassign_target_id("");
+        set_is_reassign_modal_open(true);
+    }
+
+    async function handle_reassign_advisor() {
+        if (!reassign_target_id) return;
+        if (client_profile?.advisor_id === reassign_target_id) {
+            toast.info("That's already the assigned advisor");
+            return;
+        }
+        set_is_reassigning(true);
+        try {
+            const result = await reassignClientAdvisor(client_id, reassign_target_id);
+            if (result.success) {
+                toast.success(`Reassigned to ${result.advisor_name}`);
+                set_is_reassign_modal_open(false);
+                fetch_client_details(); // refresh client_profile
+            } else {
+                toast.error(result.error || "Failed to reassign advisor");
+            }
+        } catch (err: any) {
+            console.error("Reassign advisor error:", err);
+            toast.error("An unexpected error occurred");
+        } finally {
+            set_is_reassigning(false);
         }
     }
 
@@ -1373,7 +1545,7 @@ export default function AdvisorClientDetailsPage() {
                     </h3>
                     <p className="text-gray-600 mb-4">{error_message}</p>
                     <Button
-                        onClick={() => router.push("/advisor/dashboard/clients")}
+                        onClick={() => router.push(clients_list_path)}
                         variant="outline"
                     >
                         <ArrowBigUp className="h-4 w-4 mr-2" />
@@ -1399,7 +1571,7 @@ export default function AdvisorClientDetailsPage() {
                         You do not have permission to view this client's information.
                     </p>
                     <Button
-                        onClick={() => router.push("/advisor/dashboard/clients")}
+                        onClick={() => router.push(clients_list_path)}
                         variant="outline"
                     >
                         <ArrowLeft className="h-4 w-4 mr-2" />
@@ -1430,7 +1602,7 @@ export default function AdvisorClientDetailsPage() {
                 {/* Client navigation */}
                 <div className="inline-flex items-center bg-white rounded-2xl border border-slate-100 shadow-sm p-1.5 gap-1">
                     <button
-                        onClick={() => prev_client_id && router.push(`/advisor/dashboard/clients/${prev_client_id}`)}
+                        onClick={() => prev_client_id && router.push(client_detail_path(prev_client_id))}
                         disabled={!prev_client_id}
                         title="Previous client"
                         className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-50 hover:text-slate-900 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
@@ -1440,7 +1612,7 @@ export default function AdvisorClientDetailsPage() {
                     </button>
                     <div className="w-px h-5 bg-slate-200" />
                     <button
-                        onClick={() => router.push("/advisor/dashboard/clients")}
+                        onClick={() => router.push(clients_list_path)}
                         className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50 hover:text-slate-900 transition-colors"
                     >
                         <ArrowUp className="h-4 w-4" />
@@ -1453,7 +1625,7 @@ export default function AdvisorClientDetailsPage() {
                     </button>
                     <div className="w-px h-5 bg-slate-200" />
                     <button
-                        onClick={() => next_client_id && router.push(`/advisor/dashboard/clients/${next_client_id}`)}
+                        onClick={() => next_client_id && router.push(client_detail_path(next_client_id))}
                         disabled={!next_client_id}
                         title="Next client"
                         className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-50 hover:text-slate-900 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
@@ -1533,11 +1705,44 @@ export default function AdvisorClientDetailsPage() {
                     on_status_change={(status) => handle_status_change(status, "Set by advisor")}
                 />
 
+                {/* ── Admin: Reassign Advisor (admin-only) ──────────────
+                    Lets admins move a client to a different primary advisor.
+                    Renders just above the Followers card so the assignment
+                    chain reads naturally: owner → followers. */}
+                {is_admin_path && (
+                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50/40 p-5 flex items-center justify-between gap-4">
+                        <div>
+                            <p className="text-xs font-black uppercase tracking-[0.2em] text-emerald-700 mb-1">
+                                Assigned Advisor
+                            </p>
+                            <p className="text-base font-bold text-slate-900">
+                                {client_profile.advisor_name || "Unassigned"}
+                            </p>
+                        </div>
+                        <Button
+                            onClick={open_reassign_modal}
+                            size="sm"
+                            variant="outline"
+                            className="h-9 rounded-xl text-[10px] font-black uppercase tracking-widest border-emerald-300 hover:bg-emerald-100"
+                        >
+                            <UserCog className="w-3.5 h-3.5 mr-1.5" />
+                            Reassign Advisor
+                        </Button>
+                    </div>
+                )}
+
                 {/* ── Followers ─────────────────────────────────────── */}
                 <ClientFollowersCard
                     clientId={client_profile.id}
                     canManage={is_owner}
                 />
+
+                {/* ── Admin Lender Review (admin-only) ──────────────────
+                    UW selects matched lenders; admins approve which ones
+                    UW should actually contact. Self-fetches its own data. */}
+                {is_admin_path && (
+                    <AdminLenderReviewCard clientId={client_profile.id} />
+                )}
 
                 {/* ── Docs + Communication 2-col grid ───────────────── */}
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -1963,6 +2168,59 @@ export default function AdvisorClientDetailsPage() {
                         onSuccess={fetch_client_details}
                         clientData={client_profile}
                     />
+                )}
+
+                {/* Reassign Advisor Modal (admin-only) */}
+                {is_admin_path && (
+                    <Dialog
+                        open={is_reassign_modal_open}
+                        onOpenChange={(open) => { if (!is_reassigning) set_is_reassign_modal_open(open); }}
+                    >
+                        <DialogContent className="sm:max-w-md">
+                            <DialogHeader>
+                                <DialogTitle>Reassign Primary Advisor</DialogTitle>
+                                <DialogDescription>
+                                    Move <strong>{client_profile?.client_name}</strong> to a different primary advisor. Existing followers, documents, and pipeline state are preserved. The new advisor will receive future client emails and notifications.
+                                </DialogDescription>
+                            </DialogHeader>
+                            <div className="py-4 space-y-2">
+                                <Label className="text-xs font-black uppercase tracking-widest text-slate-400">
+                                    New advisor
+                                </Label>
+                                <select
+                                    value={reassign_target_id}
+                                    onChange={(e) => set_reassign_target_id(e.target.value)}
+                                    className="w-full h-12 rounded-xl border border-slate-200 px-3 text-sm font-medium bg-white"
+                                >
+                                    <option value="">Select an advisor…</option>
+                                    {reassign_advisor_options
+                                        .filter(a => a.id !== client_profile?.advisor_id)
+                                        .map(a => (
+                                            <option key={a.id} value={a.id}>
+                                                {a.first_name} {a.last_name} — {a.email}
+                                            </option>
+                                        ))}
+                                </select>
+                                {client_profile?.advisor_name && (
+                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2">
+                                        Currently assigned: {client_profile.advisor_name}
+                                    </p>
+                                )}
+                            </div>
+                            <DialogFooter>
+                                <Button variant="ghost" onClick={() => set_is_reassign_modal_open(false)} disabled={is_reassigning}>
+                                    Cancel
+                                </Button>
+                                <Button
+                                    onClick={handle_reassign_advisor}
+                                    disabled={is_reassigning || !reassign_target_id}
+                                    className="bg-emerald-500 hover:bg-emerald-600 text-white"
+                                >
+                                    {is_reassigning ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Reassigning...</> : <><UserCog className="h-4 w-4 mr-2" />Reassign</>}
+                                </Button>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
                 )}
 
                 {/* Delete File Confirmation Modal */}

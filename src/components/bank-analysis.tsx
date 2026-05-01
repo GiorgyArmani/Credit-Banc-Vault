@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import LenderMatch from "./lender-match";
 import { createClient } from "@/lib/supabase/client";
 import BankAnalysisPDF, { type BankAnalysisPDFData } from "./pdf/bank-analysis-pdf";
@@ -651,11 +652,16 @@ interface ClientOption {
 
 export default function BankAnalysis() {
   const supabase = createClient();
+  const searchParams = useSearchParams();
 
   // ── Client loader state ───────────────────────────────────────────────────
+  // The page accepts ?client=<id> so deep-links from the client detail view
+  // (admin/UW "View Bank Analysis" button) auto-load the saved analysis
+  // without forcing the user to scroll the dropdown.
+  const initial_client_id = searchParams?.get("client") ?? "";
   const [clientList, setClientList] = useState<ClientOption[]>([]);
   const [clientSearch, setClientSearch] = useState("");
-  const [selectedClientId, setSelectedClientId] = useState("");
+  const [selectedClientId, setSelectedClientId] = useState(initial_client_id);
   const [loadedClientName, setLoadedClientName] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);

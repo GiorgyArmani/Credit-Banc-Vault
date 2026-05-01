@@ -18,6 +18,18 @@ async function hasClientAccess(
     clientVaultId: string,
     ownerAdvisorId: string | null
 ): Promise<boolean> {
+    // Admins bypass owner/follower gate so they can take advisor-side actions
+    // on any client from the unified admin client view.
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+        const { data: userRow } = await supabase
+            .from("users")
+            .select("role")
+            .eq("id", user.id)
+            .maybeSingle();
+        if (userRow?.role === "admin") return true;
+    }
+
     if (ownerAdvisorId && ownerAdvisorId === advisorId) return true;
     const { data: follower } = await supabase
         .from("client_followers")
@@ -722,8 +734,102 @@ export async function deleteClientVault(clientId: string) {
 }
 
 /**
+ * reassignClientAdvisor
+ *
+ * Admin-only action: change the primary advisor on a client_data_vault row.
+ * Does NOT touch followers (the existing ClientFollowersCard already handles
+ * those). Stamps client_data_vault.advisor_name from the new advisor's record
+ * so downstream emails/UI stay consistent. Pipeline state and documents are
+ * untouched — only the assignment changes.
+ */
+export async function reassignClientAdvisor(clientId: string, newAdvisorId: string) {
+    try {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return { success: false, error: "Unauthorized" };
+
+        // Admin role required.
+        const { data: callerRow } = await supabase
+            .from("users")
+            .select("role")
+            .eq("id", user.id)
+            .maybeSingle();
+        if (callerRow?.role !== "admin") {
+            return { success: false, error: "Only admins can reassign advisors." };
+        }
+
+        const supabaseAdmin = createAdminClient();
+
+        // Resolve the new advisor's display name.
+        const { data: newAdvisor, error: advisorErr } = await supabaseAdmin
+            .from("advisors")
+            .select("id, first_name, last_name, email, is_active")
+            .eq("id", newAdvisorId)
+            .maybeSingle();
+        if (advisorErr || !newAdvisor) {
+            return { success: false, error: "New advisor not found." };
+        }
+        if (newAdvisor.is_active === false) {
+            return { success: false, error: "The selected advisor is inactive." };
+        }
+
+        const advisor_name =
+            `${newAdvisor.first_name ?? ""} ${newAdvisor.last_name ?? ""}`.trim() || "Unknown";
+
+        // Capture the previous advisor for the audit note.
+        const { data: existing } = await supabaseAdmin
+            .from("client_data_vault")
+            .select("advisor_id, advisor_name")
+            .eq("id", clientId)
+            .maybeSingle();
+
+        const { error: updateErr } = await supabaseAdmin
+            .from("client_data_vault")
+            .update({
+                advisor_id: newAdvisorId,
+                advisor_name,
+                updated_at: new Date().toISOString(),
+            })
+            .eq("id", clientId);
+
+        if (updateErr) {
+            return { success: false, error: `Failed to reassign: ${updateErr.message}` };
+        }
+
+        // Drop the new primary advisor from the followers list if present
+        // (a follower can't also be the owner — they'd just be the owner).
+        await supabaseAdmin
+            .from("client_followers")
+            .delete()
+            .eq("client_vault_id", clientId)
+            .eq("advisor_id", newAdvisorId);
+
+        // (loan_status_history requires a valid status enum value, so we
+        // don't write an audit entry here. The change is visible via
+        // client_data_vault.updated_at and the previous owner is captured
+        // on the response below.)
+        const previous_advisor_id = existing?.advisor_id ?? null;
+        const previous_advisor_name = existing?.advisor_name ?? null;
+
+        revalidatePath(`/admin/clients/${clientId}`);
+        revalidatePath(`/admin/advisor/clients/${clientId}`);
+        revalidatePath(`/advisor/dashboard/clients/${clientId}`);
+
+        return {
+            success: true,
+            advisor_name,
+            previous_advisor_id,
+            previous_advisor_name,
+        };
+    } catch (error: any) {
+        console.error("Exception in reassignClientAdvisor:", error);
+        return { success: false, error: error.message || "An unexpected error occurred" };
+    }
+}
+
+/**
  * removeRequestedDocument
- * 
+ *
  * Allows an advisor to remove a document request (dynamic document).
  */
 export async function removeRequestedDocument(clientId: string, documentCode: string) {

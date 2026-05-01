@@ -1,8 +1,11 @@
 "use client";
 
 import { useState, useMemo, useEffect, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
 import type { DealSummary } from "./bank-analysis";
 import { createClient } from "@/lib/supabase/client";
+import { notifyAdminsOfLenderMatchSaved } from "@/app/actions/lender-match-notifications";
+import { toast } from "sonner";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -41,6 +44,9 @@ interface MatchResult {
 }
 
 type LenderDecision = "approved" | "rejected" | null;
+// New, simpler model: UW selects which matched lenders to recommend to admin.
+// Admin then approves/rejects via admin_review on the unified client view.
+// "decisions" map below now only stores 'approved' | null — rejected is gone.
 
 const fmt$ = (v: number) =>
   v === 0 ? "—" : "$" + v.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
@@ -220,12 +226,16 @@ interface ClientOption {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, state: propState = "", industry: propIndustry = "" }: LenderMatchProps) {
+  const searchParams = useSearchParams();
   const [deal, setDeal] = useState<DealSummary>({ ...DEFAULT_DEAL, ...propDeal });
   const [filterState, setFilterState] = useState(propState || propDeal.state || "");
   const [filterIndustry, setFilterIndustry] = useState(propIndustry || propDeal.industry || "");
 
+  // Accept ?client=<id> from URL so deep-links from the client detail view
+  // auto-select the client and load their saved match.
+  const initial_client_id = searchParams?.get("client") ?? "";
   const [clientList, setClientList] = useState<ClientOption[]>([]);
-  const [selectedClientId, setSelectedClientId] = useState<string>("");
+  const [selectedClientId, setSelectedClientId] = useState<string>(initial_client_id);
   const [isLoadingClient, setIsLoadingClient] = useState(false);
   const [specialtyFilter, setSpecialtyFilter] = useState("All");
   const [showPassedOnly, setShowPassedOnly] = useState(false);
@@ -400,8 +410,15 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
     setSaveSuccess(false);
   }
 
+  function toggleRecommended(lender: Lender) {
+    const key = decisionKey(lender);
+    setDecisions((prev) => ({ ...prev, [key]: prev[key] === "approved" ? null : "approved" }));
+    setSaveSuccess(false);
+  }
+
   const approvedCount = Object.values(decisions).filter((d) => d === "approved").length;
   const rejectedCount = Object.values(decisions).filter((d) => d === "rejected").length;
+  const recommendedCount = approvedCount;
 
   // Change 3: Save assignments + stamp loan_status_history
   async function saveAssignments() {
@@ -410,11 +427,22 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
     setSaveSuccess(false);
     const supabase = createClient();
 
-    await supabase.from("client_lender_assignments").delete().eq("client_id", selectedClientId);
+    // Re-running the match wipes prior matches AND any admin reviews on them.
+    // Only rows from the matching tool are cleared — admin-added manual lenders
+    // (source = 'admin_manual') are preserved so the admin doesn't lose their
+    // additions when UW re-runs the engine.
+    await supabase
+      .from("client_lender_assignments")
+      .delete()
+      .eq("client_id", selectedClientId)
+      .eq("source", "match_tool");
 
+    // Only insert lenders UW recommended (decision === "approved").
+    // Skipped/unselected matches are simply not stored — admin sees a clean
+    // list of recommendations on their review queue, not every machine match.
     const rows = Object.entries(decisions)
-      .filter(([, d]) => d !== null)
-      .map(([key, decision]) => {
+      .filter(([, d]) => d === "approved")
+      .map(([key]) => {
         const dashIdx = key.indexOf("-");
         const lenderName = key.slice(0, dashIdx);
         const specialty = key.slice(dashIdx + 1) || null;
@@ -425,29 +453,45 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
           client_id: selectedClientId,
           lender_name: lenderName,
           specialty,
-          decision,
+          decision: "approved" as const,
           payment_type: matchedLender?.payment_type ?? null,
           min_funding: matchedLender?.min_funding ?? null,
           max_funding: matchedLender?.max_funding ?? null,
           assigned_at: new Date().toISOString(),
+          source: "match_tool",
         };
       });
 
     if (rows.length > 0) {
       await supabase.from("client_lender_assignments").insert(rows);
-    }
-
-    const approvedRows = rows.filter((r) => r.decision === "approved");
-    if (approvedRows.length > 0) {
-      const approvedNames = approvedRows
+      const recommendedNames = rows
         .map((r) => `${r.lender_name}${r.specialty ? ` (${r.specialty})` : ""}`)
         .join(", ");
       await supabase.from("loan_status_history").insert({
         client_vault_id: selectedClientId,
         status: "lender_matched",
         changed_by_role: "underwriting",
-        note: `${approvedRows.length} lender${approvedRows.length > 1 ? "s" : ""} approved: ${approvedNames}`,
+        note: `${rows.length} lender${rows.length > 1 ? "s" : ""} recommended for admin review: ${recommendedNames}`,
       });
+    }
+
+    // Fan out admin notifications (best-effort, non-blocking for UX).
+    // Admins land on /admin/dashboard's "Pending lender reviews" tile and the
+    // notification bell next to a deep-link to the unified client view.
+    try {
+      const { notified } = await notifyAdminsOfLenderMatchSaved(
+        selectedClientId,
+        rows.map((r) => ({ lender_name: r.lender_name, specialty: r.specialty }))
+      );
+      if (rows.length > 0 && notified > 0) {
+        toast.success(`Saved · ${notified} admin${notified > 1 ? "s" : ""} notified`);
+      } else if (rows.length > 0) {
+        toast.success("Saved");
+      } else {
+        toast.success("Cleared recommendations");
+      }
+    } catch (err) {
+      console.error("admin notify failed (non-fatal):", err);
     }
 
     setIsSaving(false);
@@ -497,12 +541,8 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
                 <span className="text-lg font-mono font-bold text-red-400">{disqualifiedCount}</span>
               </div>
               <div className="flex flex-col items-end">
-                <span className="text-xs text-gray-500 uppercase tracking-wider">Approved</span>
-                <span className="text-lg font-mono font-bold text-emerald-400">{approvedCount}</span>
-              </div>
-              <div className="flex flex-col items-end">
-                <span className="text-xs text-gray-500 uppercase tracking-wider">Rejected</span>
-                <span className="text-lg font-mono font-bold text-orange-400">{rejectedCount}</span>
+                <span className="text-xs text-gray-500 uppercase tracking-wider">Recommended</span>
+                <span className="text-lg font-mono font-bold text-emerald-400">{recommendedCount}</span>
               </div>
             </div>
           )}
@@ -611,13 +651,12 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
         </div>
       )}
 
-      {/* Save bar */}
-      {selectedClientId && (approvedCount > 0 || rejectedCount > 0) && (
+      {/* Save bar — UW saves their recommendations; admins are notified */}
+      {selectedClientId && recommendedCount > 0 && (
         <div className="rounded-xl border border-gray-700 p-3 flex items-center justify-between flex-wrap gap-3" style={{ background: "#161b22" }}>
           <div className="text-xs text-gray-400 font-mono">
-            <span className="text-emerald-400 font-bold">{approvedCount} approved</span>
-            {" · "}
-            <span className="text-orange-400 font-bold">{rejectedCount} rejected</span>
+            <span className="text-emerald-400 font-bold">{recommendedCount} recommended</span>
+            {" · admin will be notified to approve which lenders to contact"}
           </div>
           <div className="flex items-center gap-3">
             {saveSuccess && <span className="text-xs text-emerald-400 font-mono">✓ Saved successfully</span>}
@@ -744,12 +783,7 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
               )}
               {decision === "approved" && (
                 <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-900/30 border border-emerald-700/50 rounded px-1.5 py-0.5">
-                  ✓ APPROVED
-                </span>
-              )}
-              {decision === "rejected" && (
-                <span className="text-xs font-mono font-bold text-orange-400 bg-orange-900/30 border border-orange-700/50 rounded px-1.5 py-0.5">
-                  ✕ REJECTED
+                  ★ RECOMMENDED
                 </span>
               )}
             </div>
@@ -778,25 +812,16 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
           <span className="text-gray-600 text-xs flex-shrink-0 mt-1">{isExpanded ? "▲" : "▼"}</span>
         </div>
 
-        {/* Approve / Reject buttons */}
+        {/* Recommend toggle — UW selects which matches to send to admin for review */}
         <div className="flex items-center gap-2 px-3 pb-3">
           <button
-            onClick={() => setDecision(result.lender, "approved")}
+            onClick={() => toggleRecommended(result.lender)}
             className={`flex-1 py-1.5 text-xs font-mono font-bold uppercase tracking-wider rounded border transition-all ${decision === "approved"
                 ? "bg-emerald-600 border-emerald-600 text-white"
                 : "border-emerald-800/60 text-emerald-600 hover:bg-emerald-900/30 hover:text-emerald-400 hover:border-emerald-600"
               }`}
           >
-            ✓ Approve
-          </button>
-          <button
-            onClick={() => setDecision(result.lender, "rejected")}
-            className={`flex-1 py-1.5 text-xs font-mono font-bold uppercase tracking-wider rounded border transition-all ${decision === "rejected"
-                ? "bg-orange-700 border-orange-700 text-white"
-                : "border-orange-900/60 text-orange-700 hover:bg-orange-900/20 hover:text-orange-400 hover:border-orange-700"
-              }`}
-          >
-            ✕ Reject
+            {decision === "approved" ? "★ Recommended — click to remove" : "★ Recommend to Admin"}
           </button>
         </div>
 

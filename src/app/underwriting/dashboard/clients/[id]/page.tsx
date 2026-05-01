@@ -31,7 +31,9 @@ import {
     Eye,
     Star,
     Trash2,
-    Pencil
+    Pencil,
+    UploadCloud,
+    BarChart3
 } from "lucide-react";
 import DocumentPreviewModal from "@/components/pdf/pdf-viewer";
 import {
@@ -59,6 +61,13 @@ import { differenceInDays } from "date-fns";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { renameClientFile } from "../../actions";
+import { EditProfileModal } from "@/app/advisor/dashboard/clients/[id]/edit-profile-modal";
+import { ClientFollowersCard } from "@/app/advisor/dashboard/clients/[id]/_components/client-followers-card";
+import {
+    addManualFundingApplication,
+    deleteClientVault,
+} from "@/app/advisor/dashboard/clients/[id]/actions";
+import { BankAnalysisViewer } from "@/components/admin/bank-analysis-viewer";
 
 enum ComponentState {
     LOADING = "LOADING",
@@ -76,15 +85,20 @@ interface ClientProfile {
     company_name: string;
     company_city: string;
     company_state: string;
+    company_zip_code?: string;
     capital_requested: number;
     legal_entity_type: string;
     business_start_date: string;
     avg_monthly_deposits: number;
+    avg_annual_revenue?: number;
     credit_score: string;
     created_at: string;
     proposed_loan_type: string;
     loan_purpose: string;
     industry: string;
+    funding_eta?: string;
+    employees_count?: number;
+    is_home_based?: boolean | null;
     number_of_owners: string;
     owner_1_name: string;
     owner_1_ownership_pct: number;
@@ -121,6 +135,10 @@ interface LenderAssignment {
     min_funding: number | null;
     max_funding: number | null;
     assigned_at: string;
+    admin_review: 'pending' | 'approved' | 'rejected';
+    admin_review_notes: string | null;
+    admin_reviewed_at: string | null;
+    source: 'match_tool' | 'admin_manual';
 }
 
 interface UserDocument {
@@ -151,11 +169,24 @@ export default function UnderwritingClientDetailsPage() {
     const pathname = usePathname();
     const client_id = params.id as string;
 
-    // Detect whether we're under /admin/uw/... or /underwriting/... so prev/next
-    // and the Back button stay within the same namespace.
+    // Detect which portal/namespace we're rendering under so prev/next and the
+    // Back button stay coherent. This page is re-exported from three places:
+    //   /underwriting/dashboard/clients/[id]      → UW portal
+    //   /admin/uw/dashboard/clients/[id]          → admin portal, UW review queue context
+    //   /admin/clients/[id]                       → admin portal, unified client view
     const is_admin_uw_route = pathname?.startsWith("/admin/uw") ?? false;
-    const queue_path = is_admin_uw_route ? "/admin/uw/dashboard" : "/underwriting/dashboard";
-    const client_base_path = is_admin_uw_route ? "/admin/uw/dashboard/clients" : "/underwriting/dashboard/clients";
+    const is_admin_unified_route = pathname?.startsWith("/admin/clients") ?? false;
+    const is_admin_route = is_admin_uw_route || is_admin_unified_route;
+    const queue_path = is_admin_unified_route
+        ? "/admin/dashboard"
+        : is_admin_uw_route
+            ? "/admin/uw/dashboard"
+            : "/underwriting/dashboard";
+    const client_base_path = is_admin_unified_route
+        ? "/admin/clients"
+        : is_admin_uw_route
+            ? "/admin/uw/dashboard/clients"
+            : "/underwriting/dashboard/clients";
 
     const [component_state, set_component_state] = useState<ComponentState>(ComponentState.LOADING);
     const [client_profile, set_client_profile] = useState<ClientProfile | null>(null);
@@ -165,6 +196,40 @@ export default function UnderwritingClientDetailsPage() {
     const [error_message, set_error_message] = useState<string>("");
     const [lender_assignments, set_lender_assignments] = useState<LenderAssignment[]>([]);
     const [is_loading_assignments, set_is_loading_assignments] = useState(false);
+
+    // Pending per-row admin review changes (assignment_id -> { decision, notes }).
+    // Buffered locally so the admin can mark several lenders before submitting in one batch.
+    const [pending_admin_reviews, set_pending_admin_reviews] = useState<
+        Record<string, { decision: 'approved' | 'rejected'; notes: string }>
+    >({});
+    const [is_submitting_review, set_is_submitting_review] = useState(false);
+
+    // Admin-only: client profile edit modal
+    const [is_edit_profile_open, set_is_edit_profile_open] = useState(false);
+
+    // Admin-only: submit vault to underwriting
+    const [is_submit_vault_open, set_is_submit_vault_open] = useState(false);
+    const [is_submitting_vault, set_is_submitting_vault] = useState(false);
+    const [submit_vault_fico, set_submit_vault_fico] = useState("");
+
+    // Admin-only: manual funding application upload
+    const [is_funding_app_open, set_is_funding_app_open] = useState(false);
+    const [funding_app_file, set_funding_app_file] = useState<File | null>(null);
+    const [is_uploading_funding_app, set_is_uploading_funding_app] = useState(false);
+
+    // Admin-only: upload documents on behalf of client
+    const [is_doc_upload_open, set_is_doc_upload_open] = useState(false);
+    const [doc_upload_code, set_doc_upload_code] = useState("");
+    const [doc_upload_files, set_doc_upload_files] = useState<File[]>([]);
+    const [is_uploading_docs, set_is_uploading_docs] = useState(false);
+
+    // Admin-only: delete vault confirmation
+    const [is_delete_vault_open, set_is_delete_vault_open] = useState(false);
+    const [delete_confirm_text, set_delete_confirm_text] = useState("");
+    const [is_deleting_vault, set_is_deleting_vault] = useState(false);
+
+    // Inline bank analysis viewer modal
+    const [is_bank_analysis_viewer_open, set_is_bank_analysis_viewer_open] = useState(false);
 
     const [is_notify_modal_open, set_is_notify_modal_open] = useState(false);
     const [selected_missing_docs, set_selected_missing_docs] = useState<string[]>([]);
@@ -240,11 +305,11 @@ export default function UnderwritingClientDetailsPage() {
             const { data: client, error: client_error } = await supabase
                 .from("client_data_vault")
                 .select(`
-                    id, user_id, client_name, client_email, client_phone, 
-                    company_name, company_city, company_state, capital_requested,
-                    legal_entity_type, business_start_date, avg_monthly_deposits,
-                    credit_score, created_at, 
-                    proposed_loan_type, loan_purpose, industry, 
+                    id, user_id, client_name, client_email, client_phone,
+                    company_name, company_city, company_state, company_zip_code, capital_requested,
+                    legal_entity_type, business_start_date, avg_monthly_deposits, avg_annual_revenue,
+                    credit_score, created_at,
+                    proposed_loan_type, loan_purpose, industry, funding_eta, employees_count, is_home_based,
                     number_of_owners, owner_1_name, owner_1_ownership_pct,
                     owner_2_name, owner_2_ownership_pct, owner_3_name, owner_3_ownership_pct,
                     owner_4_name, owner_4_ownership_pct, owner_5_name, owner_5_ownership_pct,
@@ -589,6 +654,184 @@ export default function UnderwritingClientDetailsPage() {
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
     }
 
+    // ============================================
+    // ADMIN-ONLY ACTION HANDLERS (advisor-side duties)
+    // Available only when is_admin_route is true.
+    // ============================================
+
+    async function handle_admin_submit_vault() {
+        if (!submit_vault_fico) return;
+        set_is_submitting_vault(true);
+        try {
+            const res = await fetch('/api/advisor/clients/submit-vault', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ client_id, credit_score: submit_vault_fico }),
+            });
+            const result = await res.json();
+            if (result.success) {
+                toast.success('Vault submitted to underwriting');
+                set_is_submit_vault_open(false);
+                set_submit_vault_fico("");
+                fetch_client_details();
+            } else {
+                toast.error(result.error || 'Submission failed');
+            }
+        } catch (err: any) {
+            console.error('admin submit vault error:', err);
+            toast.error('An unexpected error occurred');
+        } finally {
+            set_is_submitting_vault(false);
+        }
+    }
+
+    async function handle_admin_funding_app_upload() {
+        if (!funding_app_file) return;
+        set_is_uploading_funding_app(true);
+        try {
+            const fd = new FormData();
+            fd.append('file', funding_app_file);
+            const result = await addManualFundingApplication(client_id, fd);
+            if (result.success) {
+                toast.success('Funding application uploaded');
+                set_is_funding_app_open(false);
+                set_funding_app_file(null);
+                fetch_client_details();
+            } else {
+                toast.error(result.error || 'Upload failed');
+            }
+        } catch (err: any) {
+            console.error('admin funding app upload error:', err);
+            toast.error('An unexpected error occurred');
+        } finally {
+            set_is_uploading_funding_app(false);
+        }
+    }
+
+    async function handle_admin_doc_upload() {
+        if (doc_upload_files.length === 0 || !doc_upload_code) return;
+        set_is_uploading_docs(true);
+        try {
+            const supabase = createClient();
+
+            const upload_results = await Promise.all(
+                doc_upload_files.map(async (file) => {
+                    try {
+                        const sign_res = await fetch('/api/advisor/clients/upload/sign', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                client_id,
+                                doc_code: doc_upload_code,
+                                file_name: file.name,
+                                file_type: file.type,
+                            }),
+                        });
+
+                        if (!sign_res.ok) {
+                            const text = await sign_res.text();
+                            return { ok: false as const, file_name: file.name, error: text || `Sign failed (${sign_res.status})` };
+                        }
+
+                        const sign_result = await sign_res.json();
+                        if (!sign_result.success) {
+                            return { ok: false as const, file_name: file.name, error: sign_result.error || 'Sign failed' };
+                        }
+
+                        const { error: upload_error } = await supabase.storage
+                            .from('user-documents')
+                            .uploadToSignedUrl(sign_result.file_path, sign_result.token, file, {
+                                contentType: file.type || 'application/octet-stream',
+                                upsert: true,
+                            });
+
+                        if (upload_error) {
+                            return { ok: false as const, file_name: file.name, error: upload_error.message };
+                        }
+
+                        return {
+                            ok: true as const,
+                            storage_path: sign_result.file_path as string,
+                            file_name: file.name,
+                            file_size: file.size,
+                            file_type: file.type,
+                        };
+                    } catch (e: any) {
+                        return { ok: false as const, file_name: file.name, error: e?.message || 'Upload failed' };
+                    }
+                })
+            );
+
+            const successful = upload_results.filter((r): r is Extract<typeof r, { ok: true }> => r.ok);
+            const failed = upload_results.filter((r) => !r.ok);
+
+            failed.forEach((f) => {
+                console.error(`admin doc upload failed for ${f.file_name}:`, f.error);
+                toast.error(`Failed to upload ${f.file_name}: ${f.error}`);
+            });
+
+            if (successful.length === 0) {
+                return;
+            }
+
+            const res = await fetch('/api/advisor/clients/upload', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    client_id,
+                    doc_code: doc_upload_code,
+                    files: successful.map((s) => ({
+                        storage_path: s.storage_path,
+                        file_name: s.file_name,
+                        file_size: s.file_size,
+                        file_type: s.file_type,
+                    })),
+                }),
+            });
+
+            if (!res.ok) {
+                const text = await res.text();
+                toast.error(`Upload registration failed: ${text || res.status}`);
+                return;
+            }
+
+            const result = await res.json();
+            if (result.success) {
+                toast.success(`${result.uploaded} file(s) uploaded`);
+                set_is_doc_upload_open(false);
+                set_doc_upload_files([]);
+                set_doc_upload_code("");
+                fetch_client_details();
+            } else {
+                toast.error(result.error || 'Upload failed');
+            }
+        } catch (err: any) {
+            console.error('admin doc upload error:', err);
+            toast.error('An unexpected error occurred');
+        } finally {
+            set_is_uploading_docs(false);
+        }
+    }
+
+    async function handle_admin_delete_vault() {
+        if (delete_confirm_text !== client_profile?.client_name) return;
+        set_is_deleting_vault(true);
+        try {
+            const result = await deleteClientVault(client_id);
+            if (result.success) {
+                toast.success('Client vault deleted');
+                router.push(queue_path);
+            } else {
+                toast.error(result.error || 'Failed to delete vault');
+            }
+        } catch (err: any) {
+            console.error('admin delete vault error:', err);
+            toast.error('An unexpected error occurred');
+        } finally {
+            set_is_deleting_vault(false);
+        }
+    }
+
     /**
      * handle_rename: Updates a document's custom label
      */
@@ -808,15 +1051,30 @@ export default function UnderwritingClientDetailsPage() {
                             </p>
                         </div>
                     </div>
-                    <Button 
-                        variant="outline" 
-                        size="sm" 
-                        onClick={() => router.push('/underwriting/lender-match')}
-                        className="h-8 rounded-xl text-[9px] font-black uppercase tracking-widest border-slate-200 hover:bg-slate-50"
-                    >
-                        <ExternalLink className="w-3 h-3 mr-1.5" />
-                        Match Tool
-                    </Button>
+                    <div className="flex items-center gap-2">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => set_is_bank_analysis_viewer_open(true)}
+                            className="h-8 rounded-xl text-[9px] font-black uppercase tracking-widest border-slate-200 hover:bg-slate-50"
+                        >
+                            <BarChart3 className="w-3 h-3 mr-1.5" />
+                            View Bank Analysis
+                        </Button>
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => router.push(
+                                is_admin_route
+                                    ? `/admin/uw/lender-match?client=${client_id}`
+                                    : `/underwriting/lender-match?client=${client_id}`
+                            )}
+                            className="h-8 rounded-xl text-[9px] font-black uppercase tracking-widest border-slate-200 hover:bg-slate-50"
+                        >
+                            <ExternalLink className="w-3 h-3 mr-1.5" />
+                            Match Tool
+                        </Button>
+                    </div>
                 </CardHeader>
                 <CardContent className="p-0">
                     <div className="divide-y divide-slate-100">
@@ -1028,6 +1286,276 @@ export default function UnderwritingClientDetailsPage() {
                     onSuccess={fetch_client_details}
                 />
             </div>
+
+            {/* Admin Quick Actions — only when an admin is viewing this page.
+                Surfaces advisor-side duties (edit profile, manage followers,
+                submit vault, upload docs, delete) that aren't part of the UW
+                workflow but admins need on the same screen so they don't have
+                to switch portals. */}
+            {is_admin_route && (
+                <Card className="rounded-[2.5rem] border-emerald-200 bg-gradient-to-br from-emerald-50/40 to-white overflow-hidden shadow-sm">
+                    <CardHeader className="pb-4 border-b border-emerald-100/60">
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="bg-emerald-500/10 p-2 rounded-xl">
+                                <ShieldCheck className="h-4 w-4 text-emerald-600" />
+                            </div>
+                            <div>
+                                <CardTitle className="text-xs font-black uppercase tracking-[0.2em] text-slate-500">Admin Actions</CardTitle>
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">
+                                    Advisor-side controls
+                                </p>
+                            </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            <Button
+                                onClick={() => set_is_edit_profile_open(true)}
+                                size="sm"
+                                className="h-9 rounded-xl text-[10px] font-black uppercase tracking-widest bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm"
+                            >
+                                <Pencil className="w-3.5 h-3.5 mr-1.5" />
+                                Edit Profile
+                            </Button>
+                            <Button
+                                onClick={() => set_is_submit_vault_open(true)}
+                                size="sm"
+                                variant="outline"
+                                className="h-9 rounded-xl text-[10px] font-black uppercase tracking-widest"
+                            >
+                                <ShieldCheck className="w-3.5 h-3.5 mr-1.5" />
+                                Submit to UW
+                            </Button>
+                            <Button
+                                onClick={() => set_is_doc_upload_open(true)}
+                                size="sm"
+                                variant="outline"
+                                className="h-9 rounded-xl text-[10px] font-black uppercase tracking-widest"
+                            >
+                                <Plus className="w-3.5 h-3.5 mr-1.5" />
+                                Upload Doc
+                            </Button>
+                            <Button
+                                onClick={() => set_is_funding_app_open(true)}
+                                size="sm"
+                                variant="outline"
+                                className="h-9 rounded-xl text-[10px] font-black uppercase tracking-widest"
+                            >
+                                <FileText className="w-3.5 h-3.5 mr-1.5" />
+                                Funding App
+                            </Button>
+                            <Button
+                                onClick={() => set_is_delete_vault_open(true)}
+                                size="sm"
+                                variant="outline"
+                                className="h-9 rounded-xl text-[10px] font-black uppercase tracking-widest text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
+                            >
+                                <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                                Delete Vault
+                            </Button>
+                        </div>
+                    </CardHeader>
+                    <CardContent className="p-6">
+                        <ClientFollowersCard clientId={client_id} canManage={true} />
+                    </CardContent>
+                </Card>
+            )}
+
+            {/* Edit profile modal (admin-only — but harmless to mount when closed) */}
+            {is_admin_route && client_profile && (
+                <EditProfileModal
+                    isOpen={is_edit_profile_open}
+                    onClose={() => set_is_edit_profile_open(false)}
+                    onSuccess={fetch_client_details}
+                    clientData={client_profile as any}
+                />
+            )}
+
+            {/* Inline bank analysis viewer (UW + admin both) */}
+            <BankAnalysisViewer
+                clientId={client_id}
+                isOpen={is_bank_analysis_viewer_open}
+                onClose={() => set_is_bank_analysis_viewer_open(false)}
+            />
+
+            {/* Submit to Underwriting confirmation (admin-only) */}
+            {is_admin_route && (
+                <Dialog
+                    open={is_submit_vault_open}
+                    onOpenChange={(open) => { if (!is_submitting_vault) set_is_submit_vault_open(open); }}
+                >
+                    <DialogContent className="sm:max-w-md">
+                        <DialogHeader>
+                            <DialogTitle>Submit Vault to Underwriting?</DialogTitle>
+                            <DialogDescription>
+                                Submit <strong>{client_profile?.client_name}</strong>'s vault to the underwriting queue. UW will be notified.
+                            </DialogDescription>
+                        </DialogHeader>
+                        <div className="py-4 border-y border-slate-100 my-2 space-y-2">
+                            <Label htmlFor="submit_vault_fico" className="text-xs font-black uppercase tracking-widest text-slate-400">
+                                Client FICO Score
+                            </Label>
+                            <Input
+                                id="submit_vault_fico"
+                                type="number"
+                                placeholder="e.g. 720"
+                                value={submit_vault_fico}
+                                onChange={(e) => set_submit_vault_fico(e.target.value)}
+                                className="h-12 rounded-xl"
+                            />
+                        </div>
+                        <DialogFooter>
+                            <Button variant="ghost" onClick={() => set_is_submit_vault_open(false)} disabled={is_submitting_vault}>
+                                Cancel
+                            </Button>
+                            <Button
+                                onClick={handle_admin_submit_vault}
+                                disabled={is_submitting_vault || !submit_vault_fico}
+                                className="bg-emerald-500 hover:bg-emerald-600 text-white"
+                            >
+                                {is_submitting_vault ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Submitting...</> : <><ShieldCheck className="h-4 w-4 mr-2" />Submit</>}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+            )}
+
+            {/* Manual Funding Application Upload (admin-only) */}
+            {is_admin_route && (
+                <Dialog
+                    open={is_funding_app_open}
+                    onOpenChange={(open) => { if (!is_uploading_funding_app) set_is_funding_app_open(open); }}
+                >
+                    <DialogContent className="sm:max-w-md">
+                        <DialogHeader>
+                            <DialogTitle>Upload Signed Funding Application</DialogTitle>
+                            <DialogDescription>
+                                For clients who signed outside the vault. Marks the vault contract as completed and syncs to GHL.
+                            </DialogDescription>
+                        </DialogHeader>
+                        <div className="py-4 space-y-2">
+                            <Label htmlFor="funding_app_file" className="text-xs font-black uppercase tracking-widest text-slate-400">
+                                Signed Application (PDF)
+                            </Label>
+                            <Input
+                                id="funding_app_file"
+                                type="file"
+                                accept=".pdf"
+                                onChange={(e) => set_funding_app_file(e.target.files?.[0] ?? null)}
+                                className="h-12 rounded-xl"
+                            />
+                        </div>
+                        <DialogFooter>
+                            <Button variant="ghost" onClick={() => set_is_funding_app_open(false)} disabled={is_uploading_funding_app}>
+                                Cancel
+                            </Button>
+                            <Button
+                                onClick={handle_admin_funding_app_upload}
+                                disabled={is_uploading_funding_app || !funding_app_file}
+                                className="bg-emerald-500 hover:bg-emerald-600 text-white"
+                            >
+                                {is_uploading_funding_app ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Uploading...</> : <><UploadCloud className="h-4 w-4 mr-2" />Upload</>}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+            )}
+
+            {/* Upload documents on behalf of client (admin-only) */}
+            {is_admin_route && (
+                <Dialog
+                    open={is_doc_upload_open}
+                    onOpenChange={(open) => { if (!is_uploading_docs) set_is_doc_upload_open(open); }}
+                >
+                    <DialogContent className="sm:max-w-md">
+                        <DialogHeader>
+                            <DialogTitle>Upload Document on Behalf of Client</DialogTitle>
+                            <DialogDescription>
+                                Choose the document type and attach the file(s). The upload is recorded as advisor-uploaded.
+                            </DialogDescription>
+                        </DialogHeader>
+                        <div className="py-4 space-y-4">
+                            <div className="space-y-2">
+                                <Label className="text-xs font-black uppercase tracking-widest text-slate-400">Document type</Label>
+                                <select
+                                    value={doc_upload_code}
+                                    onChange={(e) => set_doc_upload_code(e.target.value)}
+                                    className="w-full h-12 rounded-xl border border-slate-200 px-3 text-sm font-medium bg-white"
+                                >
+                                    <option value="">Select a document type…</option>
+                                    {all_available_docs.map(d => (
+                                        <option key={d.code} value={d.code}>{d.label}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="doc_upload_files" className="text-xs font-black uppercase tracking-widest text-slate-400">File(s)</Label>
+                                <Input
+                                    id="doc_upload_files"
+                                    type="file"
+                                    multiple
+                                    onChange={(e) => set_doc_upload_files(Array.from(e.target.files ?? []))}
+                                    className="h-12 rounded-xl"
+                                />
+                            </div>
+                        </div>
+                        <DialogFooter>
+                            <Button variant="ghost" onClick={() => set_is_doc_upload_open(false)} disabled={is_uploading_docs}>
+                                Cancel
+                            </Button>
+                            <Button
+                                onClick={handle_admin_doc_upload}
+                                disabled={is_uploading_docs || !doc_upload_code || doc_upload_files.length === 0}
+                                className="bg-emerald-500 hover:bg-emerald-600 text-white"
+                            >
+                                {is_uploading_docs ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Uploading...</> : <><UploadCloud className="h-4 w-4 mr-2" />Upload {doc_upload_files.length > 0 ? `(${doc_upload_files.length})` : ""}</>}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+            )}
+
+            {/* Delete vault confirmation (admin-only, destructive) */}
+            {is_admin_route && (
+                <Dialog
+                    open={is_delete_vault_open}
+                    onOpenChange={(open) => {
+                        if (!is_deleting_vault) {
+                            set_is_delete_vault_open(open);
+                            if (!open) set_delete_confirm_text("");
+                        }
+                    }}
+                >
+                    <DialogContent className="sm:max-w-md">
+                        <DialogHeader>
+                            <DialogTitle className="text-red-600">Delete Client Vault?</DialogTitle>
+                            <DialogDescription>
+                                This permanently deletes <strong>{client_profile?.client_name}</strong>'s vault, all documents, notes, lender assignments, bank analyses, and pipeline history. This cannot be undone.
+                                <br /><br />
+                                Type the client's name <strong>{client_profile?.client_name}</strong> to confirm.
+                            </DialogDescription>
+                        </DialogHeader>
+                        <div className="py-4">
+                            <Input
+                                value={delete_confirm_text}
+                                onChange={(e) => set_delete_confirm_text(e.target.value)}
+                                placeholder={client_profile?.client_name ?? ""}
+                                className="h-12 rounded-xl"
+                            />
+                        </div>
+                        <DialogFooter>
+                            <Button variant="ghost" onClick={() => set_is_delete_vault_open(false)} disabled={is_deleting_vault}>
+                                Cancel
+                            </Button>
+                            <Button
+                                onClick={handle_admin_delete_vault}
+                                disabled={is_deleting_vault || delete_confirm_text !== client_profile?.client_name}
+                                className="bg-red-600 hover:bg-red-700 text-white"
+                            >
+                                {is_deleting_vault ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Deleting...</> : <><Trash2 className="h-4 w-4 mr-2" />Delete Permanently</>}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+            )}
 
             {/* Status row — pipeline + activity at a glance */}
             {(() => {
