@@ -1,17 +1,23 @@
-// middleware.ts (in root of project)
+// src/proxy.ts
+//
+// Next.js 16 renamed middleware.ts → proxy.ts. Lives at src/proxy.ts because
+// the app directory is at src/app — proxy must sit next to the app dir.
+// Runs on the Node.js runtime (proxy default in Next 16).
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 /**
- * Middleware for Role-Based Access Control
- * 
- * This middleware:
+ * Proxy for Role-Based Access Control
+ *
  * 1. Checks if user is authenticated
  * 2. Retrieves user's role from database
  * 3. Redirects users to appropriate dashboard based on role
  * 4. Protects role-specific routes (e.g., only advisors can access /advisor/*)
+ * 5. Gates /admin/* and /api/admin/* to admins only
  */
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
+  console.log(`[MW-START] ${request.method} ${request.nextUrl.pathname}`);
+
   let supabaseResponse = NextResponse.next({
     request: {
       headers: request.headers,
@@ -89,6 +95,11 @@ export async function middleware(request: NextRequest) {
 
     const userRole = userData?.role || "free";
 
+    // TEMP DIAGNOSTIC — remove after verifying admin gate
+    if (path.startsWith("/admin") || path.startsWith("/api/admin")) {
+      console.log(`[MW-DEBUG] path=${path} user=${user.id} userRole=${userRole} userData=${JSON.stringify(userData)}`);
+    }
+
     // Role-based route protection
     // admin is intentionally absent — they bypass all role-specific guards
     const roleRoutes: Record<string, string[]> = {
@@ -111,10 +122,10 @@ export async function middleware(request: NextRequest) {
         .select("contract_completed")
         .eq("user_id", user.id)
         .maybeSingle();
-      
+
       isContractCompleted = vaultData?.contract_completed === true;
-      
-      // If metadata says incomplete but DB says contract is done, 
+
+      // If metadata says incomplete but DB says contract is done,
       // we might still be in the "video" step, so we respect metadata for those.
       // But if DB says contract is NOT done, we FORCE onboarding regardless of metadata.
       if (!isContractCompleted) {
@@ -214,7 +225,7 @@ export async function middleware(request: NextRequest) {
   return supabaseResponse;
 }
 
-// Configure which routes the middleware should run on
+// Configure which routes the proxy should run on
 export const config = {
   matcher: [
     /*
