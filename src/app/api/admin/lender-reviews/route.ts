@@ -11,7 +11,7 @@
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { createClient as createServerSupabaseClient } from '@/lib/supabase/server';
+import { requireAdmin } from '@/lib/auth/require-admin';
 
 const supabase_admin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -27,40 +27,9 @@ interface ReviewItem {
 
 export async function PATCH(request: Request) {
   try {
-    const session_supabase = await createServerSupabaseClient();
-    const { data: { user: session_user } } = await session_supabase.auth.getUser();
-
-    if (!session_user) {
-      return NextResponse.json({ error: 'Authentication required.' }, { status: 401 });
-    }
-
-    // Only admins may record reviews.
-    const { data: user_row } = await supabase_admin
-      .from('users')
-      .select('role')
-      .eq('id', session_user.id)
-      .maybeSingle();
-
-    if (user_row?.role !== 'admin') {
-      return NextResponse.json(
-        { error: 'Only admins can record lender reviews.' },
-        { status: 403 }
-      );
-    }
-
-    // Look up the reviewer's advisor_id so we can stamp admin_reviewed_by.
-    const { data: advisor_row } = await supabase_admin
-      .from('advisors')
-      .select('id')
-      .eq('user_id', session_user.id)
-      .maybeSingle();
-
-    if (!advisor_row) {
-      return NextResponse.json(
-        { error: 'No advisors row linked to the current admin user.' },
-        { status: 403 }
-      );
-    }
+    const gate = await requireAdmin();
+    if (!gate.ok) return gate.response;
+    const { advisor_id } = gate;
 
     const body = await request.json();
     const items: ReviewItem[] = Array.isArray(body?.items) ? body.items : [];
@@ -95,7 +64,7 @@ export async function PATCH(request: Request) {
           .update({
             admin_review: item.decision,
             admin_review_notes: item.notes ?? null,
-            admin_reviewed_by: advisor_row.id,
+            admin_reviewed_by: advisor_id,
             admin_reviewed_at: now,
             updated_at: now,
           })

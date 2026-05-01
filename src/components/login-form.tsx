@@ -69,7 +69,6 @@ export default function LoginForm({
         admin: "/admin/dashboard",
         advisor: "/advisor/dashboard",
         underwriting: "/underwriting/dashboard",
-        premium: "/dashboard",
         free: "/dashboard",
       };
 

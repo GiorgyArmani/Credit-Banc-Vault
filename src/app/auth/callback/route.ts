@@ -81,7 +81,6 @@ export async function GET(request: NextRequest) {
         "advisor": "/advisor/dashboard",
         "underwriting": "/underwriting/dashboard",
         "admin": "/admin/dashboard",
-        "premium": "/dashboard",
         "free": "/dashboard",
       };
 

@@ -16,8 +16,6 @@ import { NextResponse, type NextRequest } from "next/server";
  * 5. Gates /admin/* and /api/admin/* to admins only
  */
 export async function proxy(request: NextRequest) {
-  console.log(`[MW-START] ${request.method} ${request.nextUrl.pathname}`);
-
   let supabaseResponse = NextResponse.next({
     request: {
       headers: request.headers,
@@ -95,23 +93,17 @@ export async function proxy(request: NextRequest) {
 
     const userRole = userData?.role || "free";
 
-    // TEMP DIAGNOSTIC — remove after verifying admin gate
-    if (path.startsWith("/admin") || path.startsWith("/api/admin")) {
-      console.log(`[MW-DEBUG] path=${path} user=${user.id} userRole=${userRole} userData=${JSON.stringify(userData)}`);
-    }
-
     // Role-based route protection
     // admin is intentionally absent — they bypass all role-specific guards
     const roleRoutes: Record<string, string[]> = {
       advisor: ["/advisor"],
       underwriting: ["/underwriting"],
-      premium: ["/premium"],
       free: [], // Free users have access to basic /dashboard only
     };
 
     // Client Onboarding & Contract Check
     let isOnboardingComplete = user.user_metadata?.onboarding_complete === true;
-    const isClient = userRole === "free" || userRole === "premium";
+    const isClient = userRole === "free";
     const isAdmin = userRole === "admin";
 
     // Direct database check for contract status to avoid stale metadata
@@ -161,7 +153,6 @@ export async function proxy(request: NextRequest) {
         const adminRedirectMap: Record<string, string> = {
           advisor: "/advisor/dashboard",
           underwriting: "/underwriting/dashboard",
-          premium: isOnboardingComplete ? "/dashboard" : "/onboarding",
           free: isOnboardingComplete ? "/dashboard" : "/onboarding",
         };
         return redirectWithCookies(adminRedirectMap[userRole] || "/dashboard");
@@ -183,7 +174,6 @@ export async function proxy(request: NextRequest) {
                 advisor: "/advisor/dashboard",
                 underwriting: "/underwriting/dashboard",
                 admin: "/admin/dashboard",
-                premium: isOnboardingComplete ? "/dashboard" : "/onboarding",
                 free: isOnboardingComplete ? "/dashboard" : "/onboarding",
               };
 
@@ -200,7 +190,6 @@ export async function proxy(request: NextRequest) {
         advisor: "/advisor/dashboard",
         underwriting: "/underwriting/dashboard",
         admin: "/admin/dashboard",
-        premium: isOnboardingComplete ? "/dashboard" : "/onboarding",
         free: isOnboardingComplete ? "/dashboard" : "/onboarding",
       };
 
@@ -215,7 +204,6 @@ export async function proxy(request: NextRequest) {
         advisor: "/advisor/dashboard",
         underwriting: "/underwriting/dashboard",
         admin: "/admin/dashboard",
-        premium: isOnboardingComplete ? "/dashboard" : "/onboarding",
         free: isOnboardingComplete ? "/dashboard" : "/onboarding",
       };
       return redirectWithCookies(redirectMap[userRole] || "/dashboard");
