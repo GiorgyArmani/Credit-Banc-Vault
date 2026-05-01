@@ -134,6 +134,29 @@ export async function middleware(request: NextRequest) {
       return redirectWithCookies("/onboarding");
     }
 
+    // /admin/* and /api/admin/* require admin role.
+    // Non-admins on /admin/* get redirected to their own dashboard.
+    // Non-admins on /api/admin/* get a JSON 403 (don't redirect — breaks API clients).
+    if (!isAdmin) {
+      if (path.startsWith("/api/admin")) {
+        console.warn(`[RBAC] Non-admin user ${user.id} (role=${userRole}) hit ${path}`);
+        return NextResponse.json(
+          { error: "Forbidden — admin role required" },
+          { status: 403 }
+        );
+      }
+      if (path.startsWith("/admin")) {
+        console.warn(`[RBAC] Non-admin user ${user.id} (role=${userRole}) attempted to access ${path}`);
+        const adminRedirectMap: Record<string, string> = {
+          advisor: "/advisor/dashboard",
+          underwriting: "/underwriting/dashboard",
+          premium: isOnboardingComplete ? "/dashboard" : "/onboarding",
+          free: isOnboardingComplete ? "/dashboard" : "/onboarding",
+        };
+        return redirectWithCookies(adminRedirectMap[userRole] || "/dashboard");
+      }
+    }
+
     // Check if user is trying to access a role-specific route
     // Admins bypass all role-specific guards — they can access /advisor/* and /underwriting/* freely
     if (!isAdmin) {

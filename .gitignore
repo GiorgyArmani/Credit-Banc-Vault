@@ -46,10 +46,7 @@ private-data
 
 
 
-# Exclude all admin portal pieces until ready
-**/admin/*
-src/app/admin/
-src/components/layout/admin/
+
 scripts
 *.sql
 
