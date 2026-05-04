@@ -1922,7 +1922,7 @@ export async function send_outstanding_docs_reminder_email(data: OutstandingDocs
   const from_name = process.env.SMTP_FROM_NAME || "Credit Banc Vault";
 
   const subject_target = data.business_name || "your application";
-  const subject = `Action needed: ${data.missing_docs.length} document${data.missing_docs.length === 1 ? "" : "s"} outstanding for ${subject_target}`;
+  const subject = `Document reminder: Here's what we're missing ${data.missing_docs.length} document${data.missing_docs.length === 1 ? "" : "s"} outstanding for ${subject_target}`;
 
   const mail_options: any = {
     from: `${from_name} <${from_email}>`,

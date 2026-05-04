@@ -155,22 +155,6 @@ export async function GET(req: Request) {
         : { data: [] as any[] };
     const advisorMap = new Map<string, any>((advisorRows || []).map(a => [a.id, a]));
 
-    // 5.5 Followers per client — every follower advisor should be CC'd just like the primary advisor.
-    const followerEmailsMap = new Map<string, string[]>();
-    {
-        const { data: followerRows } = await supabase
-            .from("client_followers")
-            .select("client_vault_id, advisors:advisor_id ( email )")
-            .in("client_vault_id", vaultIds);
-        (followerRows || []).forEach((row: any) => {
-            const email = row.advisors?.email;
-            if (!email || typeof email !== "string" || !email.includes("@")) return;
-            const list = followerEmailsMap.get(row.client_vault_id) ?? [];
-            list.push(email);
-            followerEmailsMap.set(row.client_vault_id, list);
-        });
-    }
-
     // 6. Per-client decision loop.
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://vault.creditbanc.io";
     const loginUrl = `${appUrl}/auth/login`;
@@ -249,11 +233,6 @@ export async function GET(req: Request) {
             const advisor = client.advisor_id ? advisorMap.get(client.advisor_id) : null;
             const ownerName = client.client_name?.trim() || "there";
 
-            const cc_emails = overrideEmail
-                ? []
-                : [advisor?.email, ...(followerEmailsMap.get(client.id) ?? [])]
-                    .filter((e): e is string => typeof e === "string" && e.includes("@"));
-
             await send_outstanding_docs_reminder_email({
                 client_email: overrideEmail || client.client_email,
                 client_name: ownerName,
@@ -262,7 +241,6 @@ export async function GET(req: Request) {
                 advisor_name: advisor ? `${advisor.first_name ?? ""} ${advisor.last_name ?? ""}`.trim() || null : null,
                 advisor_email: advisor?.email ?? null,
                 advisor_phone: advisor?.phone ?? null,
-                advisor_cc_emails: cc_emails,
                 login_url: loginUrl,
                 reminder_count: (client.reminder_count ?? 0) + 1,
             });
