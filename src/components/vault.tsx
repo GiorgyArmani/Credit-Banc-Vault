@@ -15,6 +15,7 @@ import { Progress } from "@/components/ui/progress";
 import { PremiumLoader } from "./ui/premium-loader";
 import { Send } from "lucide-react";
 import DocumentPreviewModal from "@/components/pdf/pdf-viewer";
+import { isClientScopedDoc, matchesActiveBusiness } from "@/lib/document-scope";
 
 /**
  * DocumentType: Interface for documents requested for the user
@@ -69,6 +70,10 @@ interface DocumentCardProps {
   isApproved?: boolean;
   isRejected?: boolean;
   rejectionReason?: string;
+  /** Active business tab. Uploads land scoped to this business, unless the
+   *  doc is client-scoped (DL/PFS/MyScoreIQ), which always land NULL so they
+   *  serve every tab and survive business deletion. */
+  activeBusinessId?: string | null;
 }
 
 function DocumentCard({
@@ -84,7 +89,8 @@ function DocumentCard({
   clientName,
   isApproved = false,
   isRejected = false,
-  rejectionReason
+  rejectionReason,
+  activeBusinessId,
 }: DocumentCardProps) {
   const supabase = createClient();
   const { toast } = useToast();
@@ -172,14 +178,25 @@ function DocumentCard({
             doc_code: docType.code,
             custom_label: standardizedName,
             uploaded_by_role: 'client',
+            // Scope this upload to the active business tab. Client-scoped docs
+            // (driver's license, MyScoreIQ, PFS) land with business_profile_id
+            // NULL so they aren't pinned to a single business — the matcher
+            // surfaces them on every tab and they survive business deletion.
+            business_profile_id: isClientScopedDoc(docType.code)
+              ? null
+              : (activeBusinessId ?? null),
             metadata: { tags: [docType.code] },
           })
           .select("*")
           .single();
         if (dbErr) throw dbErr;
 
+        // /api/uploads runs GHL sync + audit-event insert + advisor
+        // notification. Failure here doesn't roll back the local upload (the
+        // file is already in Supabase) but it does mean GHL/advisor see
+        // nothing. Log it so we can see it in monitoring.
         try {
-          await fetch("/api/uploads", {
+          const res = await fetch("/api/uploads", {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({
@@ -188,7 +205,12 @@ function DocumentCard({
               doc_code: docType.code
             }),
           });
-        } catch (e) {}
+          if (!res.ok) {
+            console.error(`Post-upload sync failed for ${docType.code}: ${res.status} ${await res.text().catch(() => "")}`);
+          }
+        } catch (e) {
+          console.error(`Post-upload sync threw for ${docType.code}:`, e);
+        }
 
         successCount++;
       }
@@ -365,11 +387,14 @@ function DocumentCard({
 export default function Vault({
   onChecklist,
   clientName,
-  onLoad
+  onLoad,
+  activeBusinessId,
 }: {
   onChecklist?: (info: ChecklistInfo & { isSubmitted: boolean }) => void;
   clientName: string | null;
   onLoad?: () => void;
+  /** When provided, all doc requests / uploads / approvals are scoped to this business. */
+  activeBusinessId?: string | null;
 }) {
   const supabase = createClient();
   const { toast } = useToast();
@@ -393,11 +418,17 @@ export default function Vault({
   const [is_renaming_loading, setIs_renaming_loading] = useState(false);
 
   useEffect(() => {
+    // Wait for the parent to resolve which business tab is active before
+    // hitting any of the doc endpoints. Otherwise an unfiltered fetch returns
+    // dynamic-doc rows from EVERY business, producing duplicate React keys
+    // (same doc_code seen twice — once per business) and a render crash.
+    if (!activeBusinessId) return;
+
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       setUserId(user.id);
-      
+
       const { data: vault } = await supabase.from("client_data_vault").select("id").eq("user_id", user.id).single();
       const vid = vault?.id || '';
       setVaultId(vid);
@@ -410,32 +441,75 @@ export default function Vault({
       setLoading(false);
       setLoadingDynamic(false);
     })();
-  }, []);
+  // Re-run when activeBusinessId changes so docs/approvals/requirements rescope.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeBusinessId]);
 
   const fetchApprovals = async (vid: string) => {
     if (!vid) return;
     try {
-      const { data } = await supabase.from("document_category_approvals").select("doc_code").eq("client_vault_id", vid);
-      setApprovals(new Set(data?.map(d => d.doc_code) || []));
-    } catch (e) {}
+      const { data, error } = await supabase
+        .from("document_category_approvals")
+        .select("doc_code, business_profile_id")
+        .eq("client_vault_id", vid);
+      if (error) throw error;
+      // Scope to active business via the shared matcher — client-scoped doc
+      // approvals (DL/PFS/MyScoreIQ) automatically surface on every tab.
+      const filtered = (data || []).filter((d: any) =>
+        matchesActiveBusiness(d.business_profile_id, activeBusinessId, d.doc_code)
+      );
+      setApprovals(new Set(filtered.map((d: any) => d.doc_code)));
+    } catch (e) {
+      console.error("fetchApprovals failed:", e);
+    }
   };
 
   const fetchDynamicRequirements = async () => {
     try {
-      const res = await fetch('/api/vault/requirements');
-      if (!res.ok) throw new Error('Fail');
+      const url = activeBusinessId
+        ? `/api/vault/requirements?business_profile_id=${encodeURIComponent(activeBusinessId)}`
+        : '/api/vault/requirements';
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`requirements fetch failed: ${res.status}`);
       const data = await res.json();
-      setDynamicDocs(data.requirements || []);
-    } catch (e) {}
+      // Defensive dedupe by code. Strict business scoping already guarantees
+      // uniqueness, but if a caller ever fetches without a business filter
+      // (initial mount, debug, etc.) this keeps React's key check from blowing
+      // up with duplicate doc_codes coming from sibling businesses.
+      const raw: DocumentType[] = data.requirements || [];
+      const seen = new Set<string>();
+      const deduped: DocumentType[] = [];
+      for (const d of raw) {
+        if (seen.has(d.code)) continue;
+        seen.add(d.code);
+        deduped.push(d);
+      }
+      setDynamicDocs(deduped);
+    } catch (e) {
+      console.error("fetchDynamicRequirements failed:", e);
+    }
   };
 
   const fetchDocuments = async (uid: string, silent = false) => {
     try {
-      const { data } = await supabase.from("user_documents").select("*").eq("user_id", uid).order("upload_date", { ascending: false });
-      setDocuments(data || []);
+      const { data, error } = await supabase
+        .from("user_documents")
+        .select("*, business_profile_id, doc_code")
+        .eq("user_id", uid)
+        .order("upload_date", { ascending: false });
+      if (error) throw error;
+      // Scope to active business via the shared matcher — client-scoped docs
+      // (DL/PFS/MyScoreIQ) automatically surface on every tab regardless of
+      // which business they were uploaded under.
+      const filtered = (data || []).filter((d: any) =>
+        matchesActiveBusiness(d.business_profile_id, activeBusinessId, d.doc_code || d.category)
+      );
+      setDocuments(filtered);
       const { data: v } = await supabase.from("client_data_vault").select("data_vault_submitted_at").eq("user_id", uid).maybeSingle();
       if (v?.data_vault_submitted_at) setIsSubmitted(true);
-    } catch (e) {}
+    } catch (e) {
+      console.error("fetchDocuments failed:", e);
+    }
   };
 
   const handleDelete = async (doc: UserDocument) => {
@@ -594,6 +668,7 @@ export default function Vault({
                   documents={documents}
                   userId={userId || ""}
                   clientName={clientName}
+                  activeBusinessId={activeBusinessId}
                   onUploadComplete={() => fetchDocuments(userId || "", true)}
                   onDelete={handleDelete}
                   onEdit={d => set_renaming_file({ id: d.id, label: d.custom_label || d.name })}
@@ -624,6 +699,7 @@ export default function Vault({
                   documents={documents}
                   userId={userId || ""}
                   clientName={clientName}
+                  activeBusinessId={activeBusinessId}
                   onUploadComplete={() => fetchDocuments(userId || "", true)}
                   onDelete={handleDelete}
                   onEdit={d => set_renaming_file({ id: d.id, label: d.custom_label || d.name })}
@@ -639,12 +715,16 @@ export default function Vault({
         )}
       </div>
 
-      <DocumentPreviewModal 
+      <DocumentPreviewModal
         isOpen={preview_modal.isOpen}
         onClose={() => set_preview_modal({ isOpen: false, doc: null })}
         docName={preview_modal.doc?.custom_label || preview_modal.doc?.name || ""}
         storagePath={preview_modal.doc?.storage_path || ""}
         fileType={preview_modal.doc?.type}
+        onRename={preview_modal.doc ? () => set_renaming_file({
+          id: preview_modal.doc!.id,
+          label: preview_modal.doc!.custom_label || preview_modal.doc!.name,
+        }) : undefined}
       />
 
       <Dialog open={!!renaming_file} onOpenChange={(open) => !open && set_renaming_file(null)}>

@@ -1,7 +1,7 @@
 // src/app/advisor/dashboard/clients/[id]/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter, useParams, usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -66,6 +66,8 @@ import DocumentPreviewModal from "@/components/pdf/pdf-viewer";
 
 // ── New UI components ─────────────────────────────────────────────────────────
 import { ClientProfileHeader } from "./_components/client-profile-header";
+import { BusinessTabStrip, type BusinessTab } from "./_components/business-tab-strip";
+import { AddBusinessModal } from "./_components/add-business-modal";
 import { FundingPipelineCard } from "./_components/funding-pipeline-card";
 import { DocumentUploadStatus } from "./_components/document-upload-status";
 import { InternalCommunication } from "./_components/internal-communication";
@@ -73,6 +75,8 @@ import { SubmitUnderwritingCTA } from "./_components/submit-underwriting-cta";
 import { ClientFollowersCard } from "./_components/client-followers-card";
 import { ClientNotesCard, type FileNote } from "./_components/client-notes-card";
 import { AdminLenderReviewCard } from "@/components/admin/admin-lender-review-card";
+import { CollapsibleSection, broadcast_toggle_all } from "./_components/collapsible-section";
+import { isClientScopedDoc, matchesActiveBusiness, normalizeSupabaseJoin } from "@/lib/document-scope";
 
 /**
  * ============================================================================
@@ -250,6 +254,7 @@ interface UserDocument {
     is_favorite: boolean;
     upload_date: string;
     storage_path: string;
+    business_profile_id?: string | null;
 }
 
 interface InternalNote {
@@ -262,6 +267,10 @@ interface InternalNote {
 
 // Note: REQUIRED_DOC_TYPES is now fetched dynamically from the database
 // for each client to match the specific requests made during signup.
+
+// matchesActiveBusiness now lives in @/lib/document-scope alongside
+// isClientScopedDoc — same shared implementation used by the UW page,
+// vault.tsx, and any future surface. Don't re-define it here.
 
 export default function AdvisorClientDetailsPage() {
     // ============================================
@@ -302,11 +311,26 @@ export default function AdvisorClientDetailsPage() {
     // Drives the activity-age badge in the detail header.
     const [last_activity_at, set_last_activity_at] = useState<string | null>(null);
 
+    // businesses-state: All business_profiles rows for this client. Powers the
+    // BusinessTabStrip. Primary is auto-created by syncUnifiedClientData on signup;
+    // additional businesses come from the "Add Business" CTA.
+    const [businesses, set_businesses] = useState<BusinessTab[]>([]);
+    const [active_business_id, set_active_business_id] = useState<string | null>(null);
+    const [is_add_business_open, set_is_add_business_open] = useState(false);
+    // Pending-deletion business: { id, company_name } when the user clicks the
+    // × on a non-primary tab. Null when no confirmation dialog is open.
+    const [business_pending_delete, set_business_pending_delete] = useState<BusinessTab | null>(null);
+    const [is_deleting_business, set_is_deleting_business] = useState(false);
+
     // documents-state: Stores all client documents
     const [documents, set_documents] = useState<UserDocument[]>([]);
 
-    // required-docs-state: Stores dynamic document requirements for this client
-    const [required_docs, set_required_docs] = useState<{ code: string; label: string }[]>([]);
+    // required-docs-state: Stores dynamic document requirements for this client.
+    // business_profile_id is carried through so the UI can scope to active tab.
+    const [required_docs, set_required_docs] = useState<{ code: string; label: string; business_profile_id?: string | null }[]>([]);
+    // approvals-raw: each approval carries its business_profile_id so the
+    // approvals Set can be derived per active tab.
+    const [approvals_raw, set_approvals_raw] = useState<{ doc_code: string; business_profile_id: string | null }[]>([]);
 
     // all-available-docs-state: Stores all possible document types for request
     const [all_doc_types, set_all_doc_types] = useState<{ id: string; code: string; label: string }[]>([]);
@@ -401,8 +425,57 @@ export default function AdvisorClientDetailsPage() {
     const [category_to_approve, set_category_to_approve] = useState<{ code: string; label: string } | null>(null);
     const [is_approving, set_is_approving] = useState(false);
 
-    // NEW: Document Management UX State
-    const [approvals, set_approvals] = useState<Set<string>>(new Set());
+    // NEW: Document Management UX State.
+    // `approvals` is derived from approvals_raw filtered by the active tab,
+    // so switching businesses automatically recomputes which categories are
+    // shown as approved + drives the completion percentage.
+    const approvals = useMemo<Set<string>>(() => {
+        return new Set(
+            approvals_raw
+                .filter((a) => matchesActiveBusiness(a.business_profile_id, active_business_id, a.doc_code))
+                .map((a) => a.doc_code)
+        );
+    }, [approvals_raw, active_business_id]);
+
+    // Scoped versions of the dynamic doc requests + uploaded files for the
+    // active business tab. The matchesActiveBusiness predicate also lets
+    // client-scoped docs (driver's license, MyScoreIQ, PFS) through for any
+    // tab, since they describe the person and shouldn't be re-collected per
+    // business.
+    const scoped_documents = useMemo(() => {
+        return documents.filter((d) => {
+            const code = (d as any).doc_code ?? (d as any).category ?? null;
+            return matchesActiveBusiness((d as any).business_profile_id ?? null, active_business_id, code);
+        });
+    }, [documents, active_business_id]);
+
+    // Categories to render in the doc-status accordion = (active dynamic
+    // requests for the business, deduped by code) ∪ (categories of uploaded
+    // files in scope whose code exists in the global doc catalog). The union
+    // matters: a file with a known code must group under its category section,
+    // never fall into "Additional Documents" — even if its dynamic request row
+    // was later deactivated (e.g. GHL tag removed, file already uploaded).
+    const scoped_required_docs = useMemo(() => {
+        const seen = new Set<string>();
+        const out: { code: string; label: string }[] = [];
+        for (const d of required_docs) {
+            if (!matchesActiveBusiness(d.business_profile_id ?? null, active_business_id, d.code)) continue;
+            if (seen.has(d.code)) continue;
+            seen.add(d.code);
+            out.push({ code: d.code, label: d.label });
+        }
+        const types_by_code = new Map(all_doc_types.map(t => [t.code, t]));
+        for (const doc of scoped_documents) {
+            const code = (doc as any).doc_code ?? doc.category;
+            if (!code || seen.has(code)) continue;
+            const type = types_by_code.get(code);
+            if (!type) continue;
+            seen.add(code);
+            out.push({ code: type.code, label: type.label });
+        }
+        return out;
+    }, [required_docs, scoped_documents, all_doc_types, active_business_id]);
+
     const [expanded_categories, set_expanded_categories] = useState<Set<string>>(new Set());
     const [preview_modal, set_preview_modal] = useState<{ isOpen: boolean; doc: UserDocument | null }>({
         isOpen: false,
@@ -643,15 +716,16 @@ export default function AdvisorClientDetailsPage() {
                 history_result,
                 approvals_result,
                 activity_result,
+                businesses_result,
             ] = await Promise.all([
                 supabase
                     .from("user_documents")
-                    .select("*")
+                    .select("*, business_profile_id")
                     .eq("user_id", client_data.user_id)
                     .order("upload_date", { ascending: false }),
                 supabase
                     .from("client_dynamic_documents")
-                    .select(`required_documents!inner (code, label)`)
+                    .select(`business_profile_id, required_documents!inner (code, label)`)
                     .eq("user_id", client_data.user_id)
                     .eq("is_active", true),
                 all_doc_types_promise,
@@ -665,9 +739,16 @@ export default function AdvisorClientDetailsPage() {
                 getClientPipelineHistory(client_id),
                 supabase
                     .from("document_category_approvals")
-                    .select("doc_code")
+                    .select("doc_code, business_profile_id")
                     .eq("client_vault_id", client_id),
                 getBulkClientActivity([client_id]),
+                supabase
+                    .from("business_profiles")
+                    .select("id, company_name, is_primary, display_order, legal_entity_type, business_start_date, company_city, company_state, company_zip_code, avg_monthly_deposits, avg_annual_revenue, employees_count, is_home_based, industry")
+                    .eq("client_vault_id", client_id)
+                    .order("is_primary", { ascending: false })
+                    .order("display_order", { ascending: true })
+                    .order("created_at", { ascending: true }),
             ]);
 
             // Documents
@@ -687,9 +768,14 @@ export default function AdvisorClientDetailsPage() {
                     { code: "voided_check", label: "Voided Check" },
                 ]);
             } else {
+                // normalizeSupabaseJoin handles SDK array-vs-object variance
+                // for the embedded required_documents row. See document-scope.ts.
                 const formatted_reqs = (dynamic_reqs_result.data || [])
-                    .map((item: any) => item.required_documents)
-                    .filter((doc: any) => doc.code !== "funding_application");
+                    .map((item: any) => ({
+                        ...(normalizeSupabaseJoin(item.required_documents) || {}),
+                        business_profile_id: item.business_profile_id ?? null,
+                    }))
+                    .filter((doc: any) => doc.code && doc.code !== "funding_application");
                 set_required_docs(formatted_reqs);
             }
 
@@ -726,15 +812,33 @@ export default function AdvisorClientDetailsPage() {
                 }
             }
 
-            // Document category approvals
+            // Document category approvals — store with business_profile_id
+            // so we can scope to the active tab. set_approvals stays in sync
+            // via the derived scoped_approvals memo below.
             if (approvals_result.error) {
                 console.error("❌ Error fetching approvals:", approvals_result.error);
             } else {
-                set_approvals(new Set((approvals_result.data || []).map(a => a.doc_code)));
+                set_approvals_raw((approvals_result.data || []).map((a: any) => ({
+                    doc_code: a.doc_code,
+                    business_profile_id: a.business_profile_id ?? null,
+                })));
             }
 
             // Last activity (drives the activity-age badge)
             set_last_activity_at(activity_result.get(client_id) ?? null);
+
+            // Businesses for the tab strip
+            if (businesses_result.error) {
+                console.error("❌ Error fetching businesses:", businesses_result.error);
+            } else {
+                const rows = (businesses_result.data || []) as BusinessTab[];
+                set_businesses(rows);
+                // Default the active tab to the primary business (or the first row if none flagged).
+                const primary = rows.find((b) => b.is_primary) || rows[0];
+                if (primary && !active_business_id) {
+                    set_active_business_id(primary.id);
+                }
+            }
 
             set_component_state(ComponentState.SUCCESS);
         } catch (error: any) {
@@ -769,12 +873,20 @@ export default function AdvisorClientDetailsPage() {
 
         setIs_approving_loading(true);
         try {
-            const result = await approveDocumentCategory(client_id, category_to_approve.code);
+            const result = await approveDocumentCategory(client_id, category_to_approve.code, active_business_id);
             if (result.success) {
                 toast.success(`Category "${category_to_approve.label}" approved!`);
-                const new_approvals = new Set(approvals);
-                new_approvals.add(category_to_approve.code);
-                set_approvals(new_approvals);
+                // Push into approvals_raw scoped to the active business; the
+                // `approvals` memo automatically picks this up.
+                set_approvals_raw((prev) => {
+                    const code = category_to_approve.code;
+                    const business_profile_id = active_business_id;
+                    // De-dupe: if a row for this (code, business) already exists, no change.
+                    if (prev.some((a) => a.doc_code === code && a.business_profile_id === business_profile_id)) {
+                        return prev;
+                    }
+                    return [...prev, { doc_code: code, business_profile_id }];
+                });
                 setIs_approving_modal_open(false);
                 set_category_to_approve(null);
             } else {
@@ -796,9 +908,13 @@ export default function AdvisorClientDetailsPage() {
      */
     async function refresh_documents() {
         if (!client_profile?.user_id) return;
+        // Must explicitly include business_profile_id — without it the
+        // scoped_documents matcher evaluates `undefined === active_business_id`
+        // and drops every refreshed row from the active tab until the next
+        // full fetch_client_details() pass repaints state.
         const { data, error } = await supabase
             .from("user_documents")
-            .select("*")
+            .select("*, business_profile_id")
             .eq("user_id", client_profile.user_id)
             .order("upload_date", { ascending: false });
         if (error) {
@@ -822,6 +938,11 @@ export default function AdvisorClientDetailsPage() {
                 set_documents(prev => prev.map(d =>
                     d.id === renaming_file.id ? { ...d, custom_label: newLabel.trim() } : d
                 ));
+                // Keep the preview modal title in sync when rename was invoked
+                // from inside the preview itself.
+                set_preview_modal(prev => prev.doc && prev.doc.id === renaming_file.id
+                    ? { ...prev, doc: { ...prev.doc, custom_label: newLabel.trim() } }
+                    : prev);
                 set_renaming_file(null);
             } else {
                 toast.error(result.error || "Failed to rename file.");
@@ -974,7 +1095,11 @@ export default function AdvisorClientDetailsPage() {
      * get-documents-by-category: Groups documents by their category
      */
     function get_documents_by_category(category_code: string): UserDocument[] {
-        return documents.filter(doc => doc.category === category_code);
+        // Must use scoped_documents — using the unscoped array meant the
+        // outstanding-docs banner counted uploads from every business on
+        // every tab, so a doc uploaded on Business A looked satisfied while
+        // viewing Business B.
+        return scoped_documents.filter(doc => doc.category === category_code);
     }
 
     /**
@@ -1091,6 +1216,10 @@ export default function AdvisorClientDetailsPage() {
                 body: JSON.stringify({
                     client_id,
                     doc_code: upload_doc_code,
+                    // Scope this advisor-uploaded file to the currently active
+                    // business tab. The API stamps business_profile_id on the
+                    // resulting user_documents row.
+                    business_profile_id: active_business_id ?? null,
                     files: successful.map((s) => ({
                         storage_path: s.storage_path,
                         file_name: s.file_name,
@@ -1270,7 +1399,8 @@ export default function AdvisorClientDetailsPage() {
                 client_id,
                 reject_doc_type.code,
                 reject_doc_type.label,
-                reject_reason
+                reject_reason,
+                active_business_id
             );
 
             if (result.success) {
@@ -1305,7 +1435,7 @@ export default function AdvisorClientDetailsPage() {
             const formData = new FormData();
             formData.append("file", funding_file);
 
-            const result = await addManualFundingApplication(client_id, formData);
+            const result = await addManualFundingApplication(client_id, formData, active_business_id);
 
             if (result.success) {
                 toast.success("Funding application uploaded and synced successfully!");
@@ -1334,7 +1464,7 @@ export default function AdvisorClientDetailsPage() {
 
         set_is_requesting(true);
         try {
-            const result = await requestDocuments(client_id, selected_doc_ids);
+            const result = await requestDocuments(client_id, selected_doc_ids, active_business_id);
 
             if (result.success) {
                 toast.success(`${selected_doc_ids.length} document(s) requested successfully!`);
@@ -1504,7 +1634,7 @@ export default function AdvisorClientDetailsPage() {
 
         set_is_removing_request(true);
         try {
-            const result = await removeRequestedDocument(client_id, doc_to_remove_request.code);
+            const result = await removeRequestedDocument(client_id, doc_to_remove_request.code, active_business_id);
             if (result.success) {
                 toast.success(`Request for ${doc_to_remove_request.label} removed`);
                 set_is_remove_request_modal_open(false);
@@ -1594,8 +1724,9 @@ export default function AdvisorClientDetailsPage() {
     function render_success_state() {
         if (!client_profile) return null;
 
-        const total_required = required_docs.length;
-        const completed_categories = required_docs.filter(
+        // Doc completion is scoped to the active business tab.
+        const total_required = scoped_required_docs.length;
+        const completed_categories = scoped_required_docs.filter(
             doc_type => approvals.has(doc_type.code)
         ).length;
         const completion_percentage = total_required > 0
@@ -1672,11 +1803,122 @@ export default function AdvisorClientDetailsPage() {
                 })()}
 
                 {/* Outstanding actions banner */}
-                {render_outstanding_banner(required_docs)}
+                {render_outstanding_banner(scoped_required_docs)}
 
-                {/* ── Profile Header ────────────────────────────────── */}
+                {/* ── Business tab strip ─────────────────────────────
+                    Renders one tab per business. The "Add Business" CTA at the
+                    end opens the modal for creating an additional business
+                    under this client. Switching tabs updates active_business_id;
+                    per-tab data scoping (docs / pipeline / etc.) lands in a
+                    later pass. */}
+                <BusinessTabStrip
+                    businesses={businesses}
+                    active_business_id={active_business_id}
+                    on_select={set_active_business_id}
+                    on_add={() => set_is_add_business_open(true)}
+                    on_delete={(b) => set_business_pending_delete(b)}
+                />
+
+                <AddBusinessModal
+                    client_vault_id={client_id}
+                    open={is_add_business_open}
+                    on_close={() => set_is_add_business_open(false)}
+                    on_created={(b) => {
+                        // Carry every field the API returned so the new tab
+                        // shows the correct profile data immediately on switch
+                        // (otherwise the fallback to client_data_vault would
+                        // show the primary's info on the new business's tab).
+                        set_businesses((prev) => [...prev, { ...b, is_primary: false }]);
+                        set_active_business_id(b.id);
+                    }}
+                />
+
+                {/* Confirm dialog for removing a non-primary business. Cascades
+                    on the server: storage objects + dynamic doc requests + open
+                    positions + approvals + uploads + pipeline rows scoped to
+                    this business all go. */}
+                {business_pending_delete && (
+                    <Dialog open={true} onOpenChange={(open) => { if (!open && !is_deleting_business) set_business_pending_delete(null); }}>
+                        <DialogContent>
+                            <DialogHeader>
+                                <DialogTitle>Remove {business_pending_delete.company_name}?</DialogTitle>
+                                <DialogDescription>
+                                    This permanently deletes this business and everything tied to it:
+                                    uploaded documents, doc requests, open positions, pipeline events,
+                                    and any funding deals. The client's other businesses are unaffected.
+                                </DialogDescription>
+                            </DialogHeader>
+                            <DialogFooter>
+                                <Button
+                                    variant="outline"
+                                    onClick={() => set_business_pending_delete(null)}
+                                    disabled={is_deleting_business}
+                                >
+                                    Cancel
+                                </Button>
+                                <Button
+                                    variant="destructive"
+                                    onClick={async () => {
+                                        const target = business_pending_delete;
+                                        if (!target) return;
+                                        set_is_deleting_business(true);
+                                        try {
+                                            const res = await fetch(`/api/advisor/clients/${client_id}/businesses/${target.id}`, { method: "DELETE" });
+                                            const json = await res.json();
+                                            if (!res.ok) throw new Error(json.error || "Failed to remove business");
+                                            toast.success(`${target.company_name} removed`);
+                                            set_businesses((prev) => prev.filter((b) => b.id !== target.id));
+                                            // Fall back to the primary tab so the docs view doesn't go blank.
+                                            const primary = businesses.find((b) => b.is_primary && b.id !== target.id);
+                                            if (primary) set_active_business_id(primary.id);
+                                            set_business_pending_delete(null);
+                                        } catch (e: any) {
+                                            toast.error(e.message || "Could not remove business");
+                                        } finally {
+                                            set_is_deleting_business(false);
+                                        }
+                                    }}
+                                    disabled={is_deleting_business}
+                                >
+                                    {is_deleting_business ? "Removing…" : "Remove Business"}
+                                </Button>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
+                )}
+
+                {/* ── Profile Header ──────────────────────────────────
+                    Client-level identity fields (name, email, phone, credit
+                    score, referral, funding app status) stay constant across
+                    tabs. The "Business" + "Financials" columns rescope to the
+                    active tab.
+
+                    For the PRIMARY tab we keep reading from client_data_vault
+                    (legacy fat row — has every field populated from signup).
+                    For NON-PRIMARY tabs we read STRICTLY from the business_profiles
+                    row — no fallback to cdv. Missing fields render as "—" so
+                    the advisor can see what's actually on each business
+                    instead of accidentally showing primary's data. */}
+                {(() => {
+                    const active_business = businesses.find((b) => b.id === active_business_id);
+                    const use_business = active_business && !active_business.is_primary;
+                    const displayed_profile = use_business
+                        ? {
+                            ...client_profile,
+                            // Per-business fields — strictly from business_profiles.
+                            // null/empty surfaces as "—" in the header (already
+                            // handled by format_date / fallback strings there).
+                            company_name: active_business!.company_name || "—",
+                            company_city: active_business!.company_city || "",
+                            company_state: active_business!.company_state || "",
+                            legal_entity_type: active_business!.legal_entity_type || "—",
+                            business_start_date: active_business!.business_start_date || "",
+                            avg_monthly_deposits: active_business!.avg_monthly_deposits ?? 0,
+                        }
+                        : client_profile;
+                    return (
                 <ClientProfileHeader
-                    client_profile={client_profile}
+                    client_profile={displayed_profile}
                     completion_percentage={completion_percentage}
                     is_resending={is_resending}
                     is_generating_magic_link={is_generating_magic_link}
@@ -1690,72 +1932,145 @@ export default function AdvisorClientDetailsPage() {
                     on_send_password_reset={handle_send_password_reset}
                     on_referral_partner_change={handle_referral_partner_change}
                 />
+                    );
+                })()}
+
+                {/* Section folding controls — broadcasts an event to every
+                    CollapsibleSection on the page so the user can blow open or
+                    collapse everything in one click. */}
+                <div className="flex items-center justify-end gap-2 -mt-2">
+                    <button
+                        type="button"
+                        onClick={() => broadcast_toggle_all(true)}
+                        className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 hover:text-emerald-600 transition-colors px-3 py-1.5 rounded-lg border border-slate-200 bg-white shadow-sm"
+                    >
+                        Expand all
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => broadcast_toggle_all(false)}
+                        className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 hover:text-emerald-600 transition-colors px-3 py-1.5 rounded-lg border border-slate-200 bg-white shadow-sm"
+                    >
+                        Collapse all
+                    </button>
+                </div>
 
                 {/* ── Client Notes (signup context + file notes) ────── */}
-                <ClientNotesCard
-                    loan_purpose={client_profile.loan_purpose || ""}
-                    additional_notes={client_profile.additional_notes || ""}
-                    file_notes={file_notes}
-                    new_file_note={new_file_note}
-                    is_adding_file_note={is_adding_file_note}
-                    on_new_file_note_change={set_new_file_note}
-                    on_add_file_note={handle_add_file_note}
-                    on_save_signup_notes={handle_save_signup_notes}
-                />
+                <CollapsibleSection
+                    clientId={client_profile.id}
+                    slug="notes"
+                    title="Client Notes"
+                    summary={
+                        file_notes.length === 0
+                            ? "Loan purpose + signup notes"
+                            : `${file_notes.length} file note${file_notes.length === 1 ? "" : "s"}`
+                    }
+                    defaultOpen
+                >
+                    <ClientNotesCard
+                        loan_purpose={client_profile.loan_purpose || ""}
+                        additional_notes={client_profile.additional_notes || ""}
+                        file_notes={file_notes}
+                        new_file_note={new_file_note}
+                        is_adding_file_note={is_adding_file_note}
+                        on_new_file_note_change={set_new_file_note}
+                        on_add_file_note={handle_add_file_note}
+                        on_save_signup_notes={handle_save_signup_notes}
+                    />
+                </CollapsibleSection>
 
                 {/* ── Funding Pipeline ──────────────────────────────── */}
-                <FundingPipelineCard
-                    current_pipeline_status={current_pipeline_status}
-                    pipeline_history={pipeline_history}
-                    on_status_change={(status) => handle_status_change(status, "Set by advisor")}
-                />
+                <CollapsibleSection
+                    clientId={client_profile.id}
+                    slug="pipeline"
+                    title="Funding Pipeline"
+                    summary={current_pipeline_status
+                        ? current_pipeline_status.replace(/_/g, " ")
+                        : undefined}
+                    defaultOpen
+                >
+                    <FundingPipelineCard
+                        current_pipeline_status={current_pipeline_status}
+                        pipeline_history={pipeline_history}
+                        on_status_change={(status) => handle_status_change(status, "Set by advisor")}
+                    />
+                </CollapsibleSection>
 
                 {/* ── Admin: Reassign Advisor (admin-only) ──────────────
                     Lets admins move a client to a different primary advisor.
                     Renders just above the Followers card so the assignment
                     chain reads naturally: owner → followers. */}
                 {is_admin_path && (
-                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50/40 p-5 flex items-center justify-between gap-4">
-                        <div>
-                            <p className="text-xs font-black uppercase tracking-[0.2em] text-emerald-700 mb-1">
-                                Assigned Advisor
-                            </p>
-                            <p className="text-base font-bold text-slate-900">
-                                {client_profile.advisor_name || "Unassigned"}
-                            </p>
+                    <CollapsibleSection
+                        clientId={client_profile.id}
+                        slug="reassign"
+                        title="Assigned Advisor"
+                        summary={client_profile.advisor_name || "Unassigned"}
+                        defaultOpen={false}
+                    >
+                        <div className="rounded-2xl border border-emerald-200 bg-emerald-50/40 p-5 flex items-center justify-between gap-4">
+                            <div>
+                                <p className="text-xs font-black uppercase tracking-[0.2em] text-emerald-700 mb-1">
+                                    Assigned Advisor
+                                </p>
+                                <p className="text-base font-bold text-slate-900">
+                                    {client_profile.advisor_name || "Unassigned"}
+                                </p>
+                            </div>
+                            <Button
+                                onClick={open_reassign_modal}
+                                size="sm"
+                                variant="outline"
+                                className="h-9 rounded-xl text-[10px] font-black uppercase tracking-widest border-emerald-300 hover:bg-emerald-100"
+                            >
+                                <UserCog className="w-3.5 h-3.5 mr-1.5" />
+                                Reassign Advisor
+                            </Button>
                         </div>
-                        <Button
-                            onClick={open_reassign_modal}
-                            size="sm"
-                            variant="outline"
-                            className="h-9 rounded-xl text-[10px] font-black uppercase tracking-widest border-emerald-300 hover:bg-emerald-100"
-                        >
-                            <UserCog className="w-3.5 h-3.5 mr-1.5" />
-                            Reassign Advisor
-                        </Button>
-                    </div>
+                    </CollapsibleSection>
                 )}
 
                 {/* ── Followers ─────────────────────────────────────── */}
-                <ClientFollowersCard
+                <CollapsibleSection
                     clientId={client_profile.id}
-                    canManage={is_owner}
-                />
+                    slug="followers"
+                    title="Followers"
+                    defaultOpen={false}
+                >
+                    <ClientFollowersCard
+                        clientId={client_profile.id}
+                        canManage={is_owner}
+                    />
+                </CollapsibleSection>
 
                 {/* ── Admin Lender Review (admin-only) ──────────────────
                     UW selects matched lenders; admins approve which ones
                     UW should actually contact. Self-fetches its own data. */}
                 {is_admin_path && (
-                    <AdminLenderReviewCard clientId={client_profile.id} />
+                    <CollapsibleSection
+                        clientId={client_profile.id}
+                        slug="lender-match"
+                        title="Lender Match — Admin Review"
+                        defaultOpen
+                    >
+                        <AdminLenderReviewCard clientId={client_profile.id} />
+                    </CollapsibleSection>
                 )}
 
                 {/* ── Docs + Communication 2-col grid ───────────────── */}
+                <CollapsibleSection
+                    clientId={client_profile.id}
+                    slug="docs-comm"
+                    title="Documents & Communication"
+                    summary={`${completion_percentage}% complete${notes.length > 0 ? ` · ${notes.length} note${notes.length === 1 ? "" : "s"}` : ""}`}
+                    defaultOpen
+                >
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     {/* Left: document accordion */}
                     <div className="lg:col-span-2">
                         <DocumentUploadStatus
-                            required_docs={required_docs}
-                            documents={documents}
+                            required_docs={scoped_required_docs}
+                            documents={scoped_documents}
                             approvals={approvals}
                             expanded_categories={expanded_categories}
                             completion_percentage={completion_percentage}
@@ -1801,6 +2116,7 @@ export default function AdvisorClientDetailsPage() {
                         />
                     </div>
                 </div>
+                </CollapsibleSection>
 
                 {/* ── Submit to Underwriting CTA ────────────────────── */}
                 <SubmitUnderwritingCTA
@@ -1819,6 +2135,10 @@ export default function AdvisorClientDetailsPage() {
                     docName={preview_modal.doc?.custom_label || preview_modal.doc?.name || ""}
                     storagePath={preview_modal.doc?.storage_path || ""}
                     fileType={preview_modal.doc?.type}
+                    onRename={preview_modal.doc ? () => set_renaming_file({
+                        id: preview_modal.doc!.id,
+                        label: preview_modal.doc!.custom_label || preview_modal.doc!.name,
+                    }) : undefined}
                 />
 
                 {/* Rename File Dialog */}

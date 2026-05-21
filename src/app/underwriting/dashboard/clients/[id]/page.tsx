@@ -1,7 +1,7 @@
 // src/app/underwriting/dashboard/clients/[id]/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter, useParams, usePathname } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -68,6 +68,9 @@ import {
     deleteClientVault,
 } from "@/app/advisor/dashboard/clients/[id]/actions";
 import { BankAnalysisViewer } from "@/components/admin/bank-analysis-viewer";
+import { BusinessTabStrip, type BusinessTab } from "@/app/advisor/dashboard/clients/[id]/_components/business-tab-strip";
+import { CollapsibleSection, broadcast_toggle_all } from "@/app/advisor/dashboard/clients/[id]/_components/collapsible-section";
+import { isClientScopedDoc, matchesActiveBusiness, normalizeSupabaseJoin } from "@/lib/document-scope";
 
 enum ComponentState {
     LOADING = "LOADING",
@@ -139,6 +142,26 @@ interface LenderAssignment {
     admin_review_notes: string | null;
     admin_reviewed_at: string | null;
     source: 'match_tool' | 'admin_manual';
+    status: 'pending' | 'submitted';
+}
+
+// Five effective UI states for a lender assignment. The matching engine
+// proposes (decision), admin clears for outreach (admin_review), then UW
+// physically pushes the file out (status). The label rendered to UW is the
+// derived combination of those three columns.
+type LenderRowState =
+    | 'rejected_by_matcher'   // decision = rejected
+    | 'skipped_by_admin'       // decision = approved, admin_review = rejected
+    | 'awaiting_admin'         // decision = approved, admin_review = pending
+    | 'ready_to_submit'        // all approved, status = pending
+    | 'submitted';             // status = submitted
+
+function derive_lender_row_state(a: LenderAssignment): LenderRowState {
+    if (a.decision !== 'approved') return 'rejected_by_matcher';
+    if (a.admin_review === 'rejected') return 'skipped_by_admin';
+    if (a.admin_review !== 'approved') return 'awaiting_admin';
+    if (a.status === 'submitted') return 'submitted';
+    return 'ready_to_submit';
 }
 
 interface UserDocument {
@@ -147,11 +170,13 @@ interface UserDocument {
     size: number;
     type: string;
     category: string | null;
+    doc_code?: string | null;
     custom_label: string | null;
     upload_date: string;
     storage_path: string;
     viewed_at: string | null;
     uploaded_by_role?: 'advisor' | 'client';
+    business_profile_id?: string | null;
 }
 
 interface InternalNote {
@@ -161,6 +186,9 @@ interface InternalNote {
     content: string;
     created_at: string;
 }
+
+// matchesActiveBusiness is shared with the advisor page + vault.tsx — see
+// @/lib/document-scope. Don't re-declare it here.
 
 export default function UnderwritingClientDetailsPage() {
     const supabase = createClient();
@@ -192,10 +220,44 @@ export default function UnderwritingClientDetailsPage() {
     const [client_profile, set_client_profile] = useState<ClientProfile | null>(null);
     const [documents, set_documents] = useState<UserDocument[]>([]);
     const [open_positions, set_open_positions] = useState<OpenPosition[]>([]);
-    const [required_docs, set_required_docs] = useState<{ code: string; label: string }[]>([]);
+    // required_docs carries business_profile_id so the UW view can rescope
+    // per active tab without re-querying. Same shape as the advisor page.
+    const [required_docs, set_required_docs] = useState<{ code: string; label: string; business_profile_id?: string | null }[]>([]);
+
+    // Multi-business support. UW reviews per-business — each tab has its own
+    // doc set + approval state. Client-scoped docs (DL/PFS/MyScoreIQ) surface
+    // on every tab via the matcher (see scoped_* memos below).
+    const [businesses, set_businesses] = useState<BusinessTab[]>([]);
+    const [active_business_id, set_active_business_id] = useState<string | null>(null);
+    // approvals_raw is the ungrouped fetch from document_category_approvals;
+    // the `approvals` Set used by render code is derived per active tab.
+    const [approvals_raw, set_approvals_raw] = useState<{ doc_code: string; business_profile_id: string | null }[]>([]);
     const [error_message, set_error_message] = useState<string>("");
     const [lender_assignments, set_lender_assignments] = useState<LenderAssignment[]>([]);
     const [is_loading_assignments, set_is_loading_assignments] = useState(false);
+    const [submitting_assignment_id, set_submitting_assignment_id] = useState<string | null>(null);
+
+    async function mark_assignment_submitted(assignment_id: string) {
+        set_submitting_assignment_id(assignment_id);
+        try {
+            const res = await fetch(`/api/lender-assignments/${assignment_id}/submit`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+            });
+            const result = await res.json();
+            if (!res.ok || !result?.success) {
+                toast.error(result?.error || 'Failed to mark as submitted');
+                return;
+            }
+            toast.success('Marked as submitted to lender');
+            await fetch_lender_assignments();
+        } catch (err: any) {
+            console.error('mark_assignment_submitted error:', err);
+            toast.error('An unexpected error occurred');
+        } finally {
+            set_submitting_assignment_id(null);
+        }
+    }
 
     // Pending per-row admin review changes (assignment_id -> { decision, notes }).
     // Buffered locally so the admin can mark several lenders before submitting in one batch.
@@ -243,8 +305,46 @@ export default function UnderwritingClientDetailsPage() {
     const [new_standalone_note, set_new_standalone_note] = useState("");
     const [is_adding_note, set_is_adding_note] = useState(false);
 
-    // Documents state enhancement
-    const [approvals, set_approvals] = useState<Set<string>>(new Set());
+    // Documents state enhancement. `approvals` is derived from approvals_raw
+    // filtered by the active business tab, so switching tabs auto-recomputes
+    // which categories show as approved + drives the completion percentage.
+    const approvals = useMemo<Set<string>>(() => {
+        return new Set(
+            approvals_raw
+                .filter((a) => matchesActiveBusiness(a.business_profile_id, active_business_id, a.doc_code))
+                .map((a) => a.doc_code)
+        );
+    }, [approvals_raw, active_business_id]);
+
+    // Scoped docs + required docs for the active business tab. Client-scoped
+    // codes (driver's license / MyScoreIQ / PFS) surface on every tab. De-dupe
+    // the requested-doc list by code so a client-scoped doc requested under
+    // multiple businesses still renders as a single card.
+    const scoped_documents = useMemo<UserDocument[]>(() => {
+        return documents.filter((d) => {
+            const code = (d as any).doc_code ?? (d as any).category ?? null;
+            return matchesActiveBusiness(
+                (d as any).business_profile_id ?? null,
+                active_business_id,
+                code
+            );
+        });
+    }, [documents, active_business_id]);
+
+    const scoped_required_docs = useMemo(() => {
+        const filtered = required_docs.filter((d) =>
+            matchesActiveBusiness(d.business_profile_id ?? null, active_business_id, d.code)
+        );
+        const seen = new Set<string>();
+        const out: typeof filtered = [];
+        for (const d of filtered) {
+            if (seen.has(d.code)) continue;
+            seen.add(d.code);
+            out.push(d);
+        }
+        return out;
+    }, [required_docs, active_business_id]);
+
     const [expanded_categories, set_expanded_categories] = useState<Set<string>>(new Set());
     const [preview_modal, set_preview_modal] = useState<{ isOpen: boolean; doc: UserDocument | null }>({
         isOpen: false,
@@ -348,12 +448,24 @@ export default function UnderwritingClientDetailsPage() {
                 .order("position_number", { ascending: true });
             set_open_positions(positions || []);
 
-            // 3. Fetch current requirements (core + dynamic)
-            const { data: coreDocs } = await supabase
-                .from("required_documents")
-                .select("code, label")
-                .eq("is_core", true);
-            const coreReqs = coreDocs || [];
+            // 3. Fetch current requirements (dynamic — every active doc request
+            //    for this user across all of their businesses, with the
+            //    business linkage so the UI can rescope per active tab).
+            const { data: dynamicDocs } = await supabase
+                .from("client_dynamic_documents")
+                .select("business_profile_id, required_documents(code, label)")
+                .eq("user_id", client.user_id)
+                .eq("is_active", true);
+
+            // normalizeSupabaseJoin handles SDK array-vs-object variance on
+            // the embedded required_documents row. See document-scope.ts.
+            const dynamicReqs = (dynamicDocs || [])
+                .map((d: any) => ({
+                    ...(normalizeSupabaseJoin(d.required_documents) || {}),
+                    business_profile_id: d.business_profile_id ?? null,
+                }))
+                .filter((d: any) => d.code);
+            set_required_docs(dynamicReqs);
 
             // 4. Fetch all available document types FOR THE CATALOG
             const { data: allDocs } = await supabase
@@ -361,19 +473,6 @@ export default function UnderwritingClientDetailsPage() {
                 .select("code, label")
                 .order("label", { ascending: true });
             set_all_available_docs(allDocs || []);
-
-            const { data: dynamicDocs } = await supabase
-                .from("client_dynamic_documents")
-                .select("required_documents(code, label)")
-                .eq("user_id", client.user_id)
-                .eq("is_active", true);
-
-            const dynamicReqs = (dynamicDocs || []).map((d: any) => d.required_documents).filter(Boolean);
-            const allReqs = [...coreReqs, ...dynamicReqs];
-
-            // Unique by code
-            const uniqueReqs = Array.from(new Map(allReqs.map(r => [r.code, r])).values());
-            set_required_docs(uniqueReqs);
 
             // 5. Fetch internal notes
             const notesRes = await fetchInternalNotes(client_id);
@@ -388,12 +487,35 @@ export default function UnderwritingClientDetailsPage() {
                 set_current_pipeline_status(history[history.length - 1].status);
             }
 
-            // 7. Fetch approvals for this client
+            // 7. Fetch approvals for this client — carry business_profile_id so
+            //    the approvals memo can rescope per active tab.
             const { data: categoryApprovals } = await supabase
                 .from("document_category_approvals")
-                .select("doc_code")
+                .select("doc_code, business_profile_id")
                 .eq("client_vault_id", client_id);
-            set_approvals(new Set((categoryApprovals || []).map(a => a.doc_code)));
+            set_approvals_raw(
+                (categoryApprovals || []).map((a: any) => ({
+                    doc_code: a.doc_code,
+                    business_profile_id: a.business_profile_id ?? null,
+                }))
+            );
+
+            // 8. Businesses for the tab strip — order primary first, then by
+            //    display_order, then creation. Default the active tab to the
+            //    primary so single-business clients see identical UI.
+            const { data: businessRows } = await supabase
+                .from("business_profiles")
+                .select("id, company_name, is_primary, display_order, legal_entity_type, business_start_date, company_city, company_state, company_zip_code, avg_monthly_deposits, avg_annual_revenue, employees_count, is_home_based, industry")
+                .eq("client_vault_id", client_id)
+                .order("is_primary", { ascending: false })
+                .order("display_order", { ascending: true })
+                .order("created_at", { ascending: true });
+            const rows = (businessRows || []) as BusinessTab[];
+            set_businesses(rows);
+            const primary = rows.find((b) => b.is_primary) || rows[0];
+            if (primary && !active_business_id) {
+                set_active_business_id(primary.id);
+            }
 
             // 8. Fetch Lender Assignments
             await fetch_lender_assignments();
@@ -628,10 +750,13 @@ export default function UnderwritingClientDetailsPage() {
     }
 
     /**
-     * get_documents_by_category: Groups documents by their category
+     * get_documents_by_category: Groups documents by their category for the
+     * active business tab. Reads from scoped_documents so client-scoped docs
+     * (driver's license / MyScoreIQ / PFS) carry across every tab while
+     * business-scoped docs stay pinned.
      */
     function get_documents_by_category(category_code: string): UserDocument[] {
-        return documents.filter(doc => doc.category === category_code);
+        return scoped_documents.filter(doc => doc.category === category_code);
     }
 
     /**
@@ -691,7 +816,7 @@ export default function UnderwritingClientDetailsPage() {
         try {
             const fd = new FormData();
             fd.append('file', funding_app_file);
-            const result = await addManualFundingApplication(client_id, fd);
+            const result = await addManualFundingApplication(client_id, fd, active_business_id);
             if (result.success) {
                 toast.success('Funding application uploaded');
                 set_is_funding_app_open(false);
@@ -780,6 +905,11 @@ export default function UnderwritingClientDetailsPage() {
                 body: JSON.stringify({
                     client_id,
                     doc_code: doc_upload_code,
+                    // Scope UW-side upload to the active business tab. Without
+                    // this, business_profile_id is stamped null and the doc
+                    // is hidden from every per-business tab (or, for client-
+                    // scoped codes, surfaces correctly anyway).
+                    business_profile_id: active_business_id ?? null,
                     files: successful.map((s) => ({
                         storage_path: s.storage_path,
                         file_name: s.file_name,
@@ -939,7 +1069,7 @@ export default function UnderwritingClientDetailsPage() {
      * render_document_category: Renders a category section with its documents for underwriting
      */
     function render_document_category(doc_type: { code: string; label: string }) {
-        const category_docs = documents.filter(d => d.category === doc_type.code);
+        const category_docs = scoped_documents.filter(d => d.category === doc_type.code);
         const has_docs = category_docs.length > 0;
         const is_approved = approvals.has(doc_type.code);
         const is_expanded = expanded_categories.has(doc_type.code);
@@ -1034,8 +1164,16 @@ export default function UnderwritingClientDetailsPage() {
     function render_lender_assignments() {
         if (lender_assignments.length === 0) return null;
 
-        const approved = lender_assignments.filter(a => a.decision === 'approved');
-        const rejected = lender_assignments.filter(a => a.decision === 'rejected');
+        const ready_count = lender_assignments.filter(a => derive_lender_row_state(a) === 'ready_to_submit').length;
+        const submitted_count = lender_assignments.filter(a => derive_lender_row_state(a) === 'submitted').length;
+
+        const STATE_BADGE: Record<LenderRowState, { label: string; classes: string }> = {
+            rejected_by_matcher: { label: 'Rejected (matcher)', classes: 'bg-rose-100 text-rose-700 hover:bg-rose-100' },
+            skipped_by_admin:    { label: 'Skipped (admin)',     classes: 'bg-orange-100 text-orange-700 hover:bg-orange-100' },
+            awaiting_admin:      { label: 'Awaiting admin',      classes: 'bg-amber-100 text-amber-700 hover:bg-amber-100' },
+            ready_to_submit:     { label: 'Ready to submit',     classes: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100' },
+            submitted:           { label: 'Submitted · awaiting lender', classes: 'bg-blue-100 text-blue-700 hover:bg-blue-100' },
+        };
 
         return (
             <Card className="rounded-[2.5rem] border-slate-200 overflow-hidden shadow-sm">
@@ -1047,7 +1185,7 @@ export default function UnderwritingClientDetailsPage() {
                         <div>
                             <CardTitle className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">Lender Matching Results</CardTitle>
                             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">
-                                {approved.length} Approved • {rejected.length} Rejected
+                                {ready_count} Ready · {submitted_count} Submitted · {lender_assignments.length} Total
                             </p>
                         </div>
                     </div>
@@ -1078,50 +1216,83 @@ export default function UnderwritingClientDetailsPage() {
                 </CardHeader>
                 <CardContent className="p-0">
                     <div className="divide-y divide-slate-100">
-                        {lender_assignments.map((assign) => (
-                            <div key={assign.id} className="p-4 flex items-center justify-between hover:bg-slate-50/50 transition-all group">
-                                <div className="flex items-center gap-4">
-                                    <div className={clsx(
-                                        "w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm shadow-sm",
-                                        assign.decision === 'approved' ? "bg-emerald-500 text-white" : "bg-orange-500 text-white"
-                                    )}>
-                                        {assign.decision === 'approved' ? '✓' : '✕'}
+                        {lender_assignments.map((assign) => {
+                            const row_state = derive_lender_row_state(assign);
+                            const badge = STATE_BADGE[row_state];
+                            const is_submitting_this = submitting_assignment_id === assign.id;
+                            const tile_classes =
+                                row_state === 'submitted'           ? 'bg-blue-500 text-white' :
+                                row_state === 'ready_to_submit'     ? 'bg-emerald-500 text-white' :
+                                row_state === 'awaiting_admin'      ? 'bg-amber-500 text-white' :
+                                row_state === 'skipped_by_admin'    ? 'bg-orange-500 text-white' :
+                                                                       'bg-rose-500 text-white';
+                            const tile_glyph =
+                                row_state === 'submitted'           ? '→' :
+                                row_state === 'ready_to_submit'     ? '✓' :
+                                row_state === 'awaiting_admin'      ? '…' :
+                                                                       '✕';
+
+                            return (
+                                <div key={assign.id} className="p-4 flex items-center justify-between hover:bg-slate-50/50 transition-all group gap-4">
+                                    <div className="flex items-center gap-4 min-w-0">
+                                        <div className={clsx(
+                                            "w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm shadow-sm shrink-0",
+                                            tile_classes
+                                        )}>
+                                            {tile_glyph}
+                                        </div>
+                                        <div className="min-w-0">
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                                <p className="font-black text-slate-900 group-hover:text-emerald-600 transition-colors uppercase tracking-tight truncate">
+                                                    {assign.lender_name}
+                                                </p>
+                                                {assign.specialty && (
+                                                    <Badge variant="outline" className="text-[8px] font-black tracking-widest uppercase py-0 px-2 border-slate-200 text-slate-400">
+                                                        {assign.specialty}
+                                                    </Badge>
+                                                )}
+                                            </div>
+                                            <div className="flex items-center gap-3 mt-1 text-[10px] text-slate-400 font-bold uppercase tracking-widest">
+                                                <span>{assign.payment_type || 'Custom Terms'}</span>
+                                                {assign.min_funding && (
+                                                    <>
+                                                        <span className="opacity-30">•</span>
+                                                        <span>Min: ${(assign.min_funding / 1000).toFixed(0)}k</span>
+                                                    </>
+                                                )}
+                                            </div>
+                                        </div>
                                     </div>
-                                    <div>
-                                        <div className="flex items-center gap-2">
-                                            <p className="font-black text-slate-900 group-hover:text-emerald-600 transition-colors uppercase tracking-tight">
-                                                {assign.lender_name}
+                                    <div className="flex items-center gap-3 shrink-0">
+                                        {row_state === 'ready_to_submit' && (
+                                            <Button
+                                                size="sm"
+                                                disabled={is_submitting_this}
+                                                onClick={() => mark_assignment_submitted(assign.id)}
+                                                className="h-8 rounded-lg text-[10px] font-black uppercase tracking-widest bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm"
+                                            >
+                                                {is_submitting_this ? (
+                                                    <><Loader2 className="h-3 w-3 mr-1 animate-spin" />Submitting</>
+                                                ) : (
+                                                    'Mark as Submitted'
+                                                )}
+                                            </Button>
+                                        )}
+                                        <div className="text-right">
+                                            <Badge className={clsx(
+                                                "font-black text-[9px] uppercase tracking-widest px-3 py-1",
+                                                badge.classes
+                                            )}>
+                                                {badge.label}
+                                            </Badge>
+                                            <p className="text-[8px] font-bold text-slate-300 mt-1 uppercase tracking-tighter">
+                                                Assigned {format(new Date(assign.assigned_at), 'MMM d')}
                                             </p>
-                                            {assign.specialty && (
-                                                <Badge variant="outline" className="text-[8px] font-black tracking-widest uppercase py-0 px-2 border-slate-200 text-slate-400">
-                                                    {assign.specialty}
-                                                </Badge>
-                                            )}
-                                        </div>
-                                        <div className="flex items-center gap-3 mt-1 text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-                                            <span>{assign.payment_type || 'Custom Terms'}</span>
-                                            {assign.min_funding && (
-                                                <>
-                                                    <span className="opacity-30">•</span>
-                                                    <span>Min: ${(assign.min_funding / 1000).toFixed(0)}k</span>
-                                                </>
-                                            )}
                                         </div>
                                     </div>
                                 </div>
-                                <div className="text-right">
-                                    <Badge className={clsx(
-                                        "font-black text-[9px] uppercase tracking-widest px-3 py-1",
-                                        assign.decision === 'approved' ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-100" : "bg-orange-100 text-orange-700 hover:bg-orange-100"
-                                    )}>
-                                        {assign.decision}
-                                    </Badge>
-                                    <p className="text-[8px] font-bold text-slate-300 mt-1 uppercase tracking-tighter">
-                                        Assigned {format(new Date(assign.assigned_at), 'MMM d')}
-                                    </p>
-                                </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 </CardContent>
             </Card>
@@ -1152,8 +1323,11 @@ export default function UnderwritingClientDetailsPage() {
 
     if (!client_profile) return null;
 
-    const completed_count = required_docs.filter(r => documents.some(d => d.category === r.code)).length;
-    const total_count = required_docs.length;
+    // Doc completion is computed against the active business tab. Client-scoped
+    // docs surface on every tab via the scoped_* memos, so the completion
+    // percentage is consistent across tabs for those rows.
+    const completed_count = scoped_required_docs.filter(r => scoped_documents.some(d => d.category === r.code)).length;
+    const total_count = scoped_required_docs.length;
     const completion_pct = Math.round((completed_count / (total_count || 1)) * 100);
 
     return (
@@ -1213,8 +1387,8 @@ export default function UnderwritingClientDetailsPage() {
                             <div className="space-y-3">
                                 <p className="text-xs font-black uppercase tracking-widest text-slate-400">Select Missing Required Items</p>
                                 <div className="grid grid-cols-1 gap-2 border rounded-2xl p-4 bg-slate-50/50">
-                                    {required_docs.map((doc) => {
-                                        const is_done = documents.some(d => d.category === doc.code);
+                                    {scoped_required_docs.map((doc) => {
+                                        const is_done = scoped_documents.some(d => d.category === doc.code);
                                         return (
                                             <div key={doc.code} className="flex items-center space-x-3 p-2 rounded-lg hover:bg-white transition-colors">
                                                 <Checkbox
@@ -1238,7 +1412,7 @@ export default function UnderwritingClientDetailsPage() {
                                 <p className="text-xs font-black uppercase tracking-widest text-slate-400">Select Additional Documents to Request</p>
                                 <div className="grid grid-cols-1 gap-2 border rounded-2xl p-4 bg-slate-50/50 max-h-[250px] overflow-y-auto custom-scrollbar">
                                     {all_available_docs
-                                        .filter(doc => !required_docs.some(r => r.code === doc.code))
+                                        .filter(doc => !scoped_required_docs.some(r => r.code === doc.code))
                                         .map((doc) => (
                                             <div key={`extra-${doc.code}`} className="flex items-center space-x-3 p-2 rounded-lg hover:bg-white transition-colors">
                                                 <Checkbox
@@ -1287,12 +1461,37 @@ export default function UnderwritingClientDetailsPage() {
                 />
             </div>
 
+            {/* Section folding controls — same pattern as the advisor page so
+                UW + admin can blow open or collapse everything in one click. */}
+            <div className="flex items-center justify-end gap-2">
+                <button
+                    type="button"
+                    onClick={() => broadcast_toggle_all(true)}
+                    className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 hover:text-emerald-600 transition-colors px-3 py-1.5 rounded-lg border border-slate-200 bg-white shadow-sm"
+                >
+                    Expand all
+                </button>
+                <button
+                    type="button"
+                    onClick={() => broadcast_toggle_all(false)}
+                    className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 hover:text-emerald-600 transition-colors px-3 py-1.5 rounded-lg border border-slate-200 bg-white shadow-sm"
+                >
+                    Collapse all
+                </button>
+            </div>
+
             {/* Admin Quick Actions — only when an admin is viewing this page.
                 Surfaces advisor-side duties (edit profile, manage followers,
                 submit vault, upload docs, delete) that aren't part of the UW
                 workflow but admins need on the same screen so they don't have
                 to switch portals. */}
             {is_admin_route && (
+                <CollapsibleSection
+                    clientId={client_id}
+                    slug="uw-admin-actions"
+                    title="Admin Actions"
+                    defaultOpen
+                >
                 <Card className="rounded-[2.5rem] border-emerald-200 bg-gradient-to-br from-emerald-50/40 to-white overflow-hidden shadow-sm">
                     <CardHeader className="pb-4 border-b border-emerald-100/60">
                         <div className="flex items-center gap-3 mb-4">
@@ -1357,6 +1556,7 @@ export default function UnderwritingClientDetailsPage() {
                         <ClientFollowersCard clientId={client_id} canManage={true} />
                     </CardContent>
                 </Card>
+                </CollapsibleSection>
             )}
 
             {/* Edit profile modal (admin-only — but harmless to mount when closed) */}
@@ -1588,10 +1788,29 @@ export default function UnderwritingClientDetailsPage() {
                 );
             })()}
 
+            {/* Business tab strip — surface per-business doc reviews. The
+                "+ Add Business" CTA is intentionally omitted on the UW side;
+                creating new businesses lives with advisors. Delete is also
+                hidden here. Single-business clients render no tabs since
+                show_when_single defaults to true but the strip is a no-op
+                visually when there's only one business and no actions. */}
+            <BusinessTabStrip
+                businesses={businesses}
+                active_business_id={active_business_id}
+                on_select={set_active_business_id}
+            />
+
             {/* Outstanding Documents Banner */}
-            {render_outstanding_banner(required_docs)}
+            {render_outstanding_banner(scoped_required_docs)}
 
             {/* Pipeline Status Card */}
+            <CollapsibleSection
+                clientId={client_id}
+                slug="uw-pipeline"
+                title="Funding Pipeline"
+                summary={current_pipeline_status.replace(/_/g, " ")}
+                defaultOpen
+            >
             <Card className="bg-white border-slate-200 rounded-[2.5rem] shadow-sm overflow-hidden">
                 <CardHeader className="px-8 pt-8 pb-4">
                     <div className="flex items-center justify-between">
@@ -1638,6 +1857,7 @@ export default function UnderwritingClientDetailsPage() {
                     />
                 </CardContent>
             </Card>
+            </CollapsibleSection>
 
             {/* Profile Hero */}
             <Card className="bg-slate-900 text-white border-slate-800 rounded-[3rem] shadow-2xl overflow-hidden relative">
@@ -1647,9 +1867,19 @@ export default function UnderwritingClientDetailsPage() {
                         <Badge className="bg-white/10 text-emerald-400 hover:bg-white/10 border-white/20 uppercase tracking-widest font-black text-[10px] px-3 py-1">
                             {completion_pct}% Documentation Verified
                         </Badge>
-                        <h2 className="text-4xl md:text-5xl font-black uppercase tracking-tighter leading-none">{client_profile.client_name}</h2>
+                        {/* Company name leads — UW identifies the file by
+                            business. When a non-primary tab is active we
+                            display that business's name; primary falls back
+                            to client_profile.company_name. */}
+                        <h2 className="text-4xl md:text-5xl font-black uppercase tracking-tighter leading-none">
+                            {(() => {
+                                const active = businesses.find((b) => b.id === active_business_id);
+                                const useBiz = active && !active.is_primary;
+                                return useBiz ? active!.company_name : client_profile.company_name;
+                            })()}
+                        </h2>
                         <div className="flex flex-wrap items-center justify-center md:justify-start gap-6 text-slate-400 font-bold">
-                            <span className="flex items-center gap-2"><Building2 className="w-4 h-4" /> {client_profile.company_name}</span>
+                            <span className="flex items-center gap-2"><Building2 className="w-4 h-4" /> {client_profile.client_name}</span>
                             <span className="flex items-center gap-2 text-emerald-400"><DollarSign className="w-4 h-4" /> {client_profile.capital_requested.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</span>
                         </div>
                     </div>
@@ -1659,6 +1889,12 @@ export default function UnderwritingClientDetailsPage() {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 pb-20">
                 {/* Information Column */}
                 <div className="lg:col-span-1 space-y-6">
+                    <CollapsibleSection
+                        clientId={client_id}
+                        slug="uw-company-integrity"
+                        title="Company Integrity"
+                        defaultOpen
+                    >
                     <Card className="rounded-[2.5rem] border-slate-200">
                         <CardHeader className="pb-4">
                             <CardTitle className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">Company Integrity</CardTitle>
@@ -1699,7 +1935,15 @@ export default function UnderwritingClientDetailsPage() {
                             </div>
                         </CardContent>
                     </Card>
+                    </CollapsibleSection>
 
+                    <CollapsibleSection
+                        clientId={client_id}
+                        slug="uw-ownership"
+                        title="Ownership & Structure"
+                        summary={`${client_profile.number_of_owners} owner${String(client_profile.number_of_owners) === "1" ? "" : "s"}`}
+                        defaultOpen={false}
+                    >
                     <Card className="rounded-[2.5rem] border-slate-200">
                         <CardHeader className="pb-4">
                             <CardTitle className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">Ownership & Structure</CardTitle>
@@ -1745,7 +1989,15 @@ export default function UnderwritingClientDetailsPage() {
                             </div>
                         </CardContent>
                     </Card>
+                    </CollapsibleSection>
 
+                    <CollapsibleSection
+                        clientId={client_id}
+                        slug="uw-contact"
+                        title="Client Direct Contact"
+                        summary={client_profile.client_email}
+                        defaultOpen={false}
+                    >
                     <Card className="rounded-[2.5rem] border-slate-200">
                         <CardHeader className="pb-4">
                             <CardTitle className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">Client Direct Contact</CardTitle>
@@ -1761,8 +2013,16 @@ export default function UnderwritingClientDetailsPage() {
                             </div>
                         </CardContent>
                     </Card>
+                    </CollapsibleSection>
 
                     {/* Internal Notes Feed */}
+                    <CollapsibleSection
+                        clientId={client_id}
+                        slug="uw-internal-comm"
+                        title="Internal Communication"
+                        summary={notes.length === 0 ? "No notes yet" : `${notes.length} note${notes.length === 1 ? "" : "s"}`}
+                        defaultOpen
+                    >
                     <Card className="rounded-[2.5rem] border-slate-200 flex flex-col h-[500px]">
                         <CardHeader className="pb-4 shrink-0">
                             <CardTitle className="text-xs font-black uppercase tracking-[0.2em] text-slate-400 flex items-center justify-between">
@@ -1818,6 +2078,7 @@ export default function UnderwritingClientDetailsPage() {
                             </div>
                         </CardContent>
                     </Card>
+                    </CollapsibleSection>
                 </div>
 
                 {/* Documents Column */}
@@ -1826,6 +2087,13 @@ export default function UnderwritingClientDetailsPage() {
                     <div className="space-y-6">
                         <div className="grid grid-cols-1 gap-6">
                             {/* Use of Proceeds */}
+                            <CollapsibleSection
+                                clientId={client_id}
+                                slug="uw-use-of-proceeds"
+                                title="Use of Proceeds"
+                                summary={client_profile.loan_purpose ? client_profile.loan_purpose.slice(0, 60) : "Not specified"}
+                                defaultOpen
+                            >
                             <Card className="rounded-[2rem] border-emerald-100 bg-emerald-50/10 overflow-hidden">
                                 <CardHeader className="bg-emerald-50/30 pb-3">
                                     <CardTitle className="text-[10px] font-black uppercase tracking-widest text-emerald-800/40">Use of Proceeds</CardTitle>
@@ -1836,11 +2104,26 @@ export default function UnderwritingClientDetailsPage() {
                                     </p>
                                 </CardContent>
                             </Card>
+                            </CollapsibleSection>
 
                             {/* Lender Matching Results */}
-                            {render_lender_assignments()}
+                            <CollapsibleSection
+                                clientId={client_id}
+                                slug="uw-lender-matches"
+                                title="Lender Matching Results"
+                                defaultOpen
+                            >
+                                {render_lender_assignments()}
+                            </CollapsibleSection>
 
                             {/* Open Positions Table */}
+                            <CollapsibleSection
+                                clientId={client_id}
+                                slug="uw-open-positions"
+                                title="Open Positions (Previous Debt)"
+                                summary={open_positions.length === 0 ? "None reported" : `${open_positions.length} position${open_positions.length === 1 ? "" : "s"}`}
+                                defaultOpen
+                            >
                             <Card className="rounded-[2.5rem] border-slate-200 overflow-hidden">
                                 <CardHeader className="pb-4 border-b border-slate-100">
                                     <div className="flex items-center justify-between">
@@ -1894,40 +2177,61 @@ export default function UnderwritingClientDetailsPage() {
                                     )}
                                 </CardContent>
                             </Card>
+                            </CollapsibleSection>
                         </div>
                     </div>
 
                     {/* Required Documents Section */}
+                    <CollapsibleSection
+                        clientId={client_id}
+                        slug="uw-required-docs"
+                        title="Required Review Packet"
+                        summary={`${completion_pct}% complete · ${completed_count}/${total_count} docs`}
+                        defaultOpen
+                    >
                     <div className="space-y-4">
                         <h3 className="text-xs font-black uppercase tracking-[0.3em] text-slate-400 flex items-center gap-3 ml-2">
                             <FileText className="w-4 h-4" /> Required Review Packet
                         </h3>
                         <div className="space-y-4">
-                            {required_docs.map((docType) => render_document_category(docType))}
+                            {scoped_required_docs.map((docType) => render_document_category(docType))}
                         </div>
                     </div>
+                    </CollapsibleSection>
 
                     {/* Uncategorized Documents Section */}
-                    {documents.filter(d => !required_docs.some(r => r.code === d.category)).length > 0 && (
+                    {scoped_documents.filter(d => !scoped_required_docs.some(r => r.code === d.category)).length > 0 && (
+                        <CollapsibleSection
+                            clientId={client_id}
+                            slug="uw-misc-files"
+                            title="Miscellaneous Files"
+                            summary={`${scoped_documents.filter(d => !scoped_required_docs.some(r => r.code === d.category)).length} file(s)`}
+                            defaultOpen={false}
+                        >
                         <div className="space-y-4 pt-8 border-t border-slate-100">
                             <h3 className="text-xs font-black uppercase tracking-[0.3em] text-slate-400 flex items-center gap-3 ml-2">
                                 <Plus className="w-4 h-4" /> Miscellaneous Files
                             </h3>
                             <div className="grid grid-cols-1 gap-4">
-                                {documents.filter(d => !required_docs.some(r => r.code === d.category)).map(doc => render_document_card(doc))}
+                                {scoped_documents.filter(d => !scoped_required_docs.some(r => r.code === d.category)).map(doc => render_document_card(doc))}
                             </div>
                         </div>
+                        </CollapsibleSection>
                     )}
                 </div>
             </div>
 
             {/* Document Preview Modal */}
-            <DocumentPreviewModal 
+            <DocumentPreviewModal
                 isOpen={preview_modal.isOpen}
                 onClose={() => set_preview_modal({ isOpen: false, doc: null })}
                 docName={preview_modal.doc?.custom_label || preview_modal.doc?.name || ""}
                 storagePath={preview_modal.doc?.storage_path || ""}
                 fileType={preview_modal.doc?.type}
+                onRename={preview_modal.doc ? () => set_renaming_file({
+                    id: preview_modal.doc!.id,
+                    label: preview_modal.doc!.custom_label || preview_modal.doc!.name,
+                }) : undefined}
             />
 
             {/* Rename Document Dialog */}

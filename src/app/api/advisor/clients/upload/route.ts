@@ -31,6 +31,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createClient as createAdminClient } from '@supabase/supabase-js';
 import { ghlAddTags } from '@/lib/ghl-api';
+import { isClientScopedDoc } from '@/lib/document-scope';
 
 export const maxDuration = 60;
 
@@ -65,6 +66,7 @@ export async function POST(request: Request) {
         const body = await request.json().catch(() => null);
         const client_id: string | undefined = body?.client_id;
         const doc_code: string | undefined = body?.doc_code;
+        const business_profile_id: string | null = body?.business_profile_id ?? null;
         const files: UploadedFileMeta[] = Array.isArray(body?.files) ? body.files : [];
 
         if (!client_id || !doc_code || files.length === 0) {
@@ -145,6 +147,15 @@ export async function POST(request: Request) {
         const advisor_full_name = `${advisor_data.first_name} ${advisor_data.last_name}`.trim();
         console.log(`📤 Advisor "${advisor_full_name}" registering ${files.length} file(s) for client ${client.client_name}`);
 
+        // Client-scoped docs (DL/MyScoreIQ/PFS) describe the person, not a
+        // business — they must land with business_profile_id = NULL so the
+        // read-side matcher surfaces them on every business tab. Without
+        // this override, uploading a driver's license while on Business B
+        // pinned the personal doc to B and it disappeared when B was deleted.
+        const resolved_business_profile_id = isClientScopedDoc(doc_code)
+            ? null
+            : business_profile_id;
+
         // ========================================================================
         // STEP 4: LOOK UP DOC METADATA (label + is_core)
         // ========================================================================
@@ -186,6 +197,7 @@ export async function POST(request: Request) {
                     doc_code: doc_code,
                     custom_label: standardized_name,
                     uploaded_by_role: 'advisor',
+                    business_profile_id: resolved_business_profile_id,
                     metadata: { tags: [doc_code], uploaded_by: 'advisor', advisor_id: advisor_data.id },
                 })
                 .select('*')

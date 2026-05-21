@@ -1,17 +1,35 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, Check, X, Star, ExternalLink, BarChart3 } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+    Command,
+    CommandEmpty,
+    CommandGroup,
+    CommandInput,
+    CommandItem,
+    CommandList,
+} from "@/components/ui/command";
+import { Loader2, Check, X, Star, ExternalLink, BarChart3, Plus } from "lucide-react";
 import Link from "next/link";
 import { BankAnalysisViewer } from "./bank-analysis-viewer";
 import { toast } from "sonner";
 import clsx from "clsx";
 import { format } from "date-fns";
+
+interface LenderGuideline {
+    id: string;
+    lender_name: string;
+    specialty: string | null;
+    payment_type: string | null;
+    min_funding: number | null;
+    max_funding: number | null;
+}
 
 interface LenderAssignment {
     id: string;
@@ -49,26 +67,108 @@ export function AdminLenderReviewCard({ clientId }: Props) {
         Record<string, { decision: 'approved' | 'rejected'; notes: string }>
     >({});
     const [is_bank_analysis_open, set_is_bank_analysis_open] = useState(false);
+    const [lender_options, set_lender_options] = useState<LenderGuideline[]>([]);
+    const [taken_lender_names, set_taken_lender_names] = useState<Set<string>>(new Set());
+    const [is_picker_open, set_is_picker_open] = useState(false);
+    const [is_adding_lender, set_is_adding_lender] = useState(false);
 
     async function fetch_assignments() {
         set_is_loading(true);
-        const { data, error } = await supabase
-            .from("client_lender_assignments")
-            .select("*")
-            .eq("client_id", clientId)
-            .eq("decision", "approved") // only show lenders the matching engine cleared
-            .order("assigned_at", { ascending: false });
-        if (error) {
-            console.error("AdminLenderReviewCard fetch error:", error);
+        // Two queries: one filtered for the visible list (no rejected rows),
+        // one unfiltered to know which lenders have ever been used on this
+        // client so the + Add Lender picker hides them too. Lender selection
+        // is per-client — once a lender is rejected for client X, it's off
+        // the table for client X regardless of how the admin re-opens the
+        // file. (Matches the backend duplicate check in POST.)
+        const [{ data: visible, error: visible_error }, { data: all_for_client, error: all_error }] = await Promise.all([
+            supabase
+                .from("client_lender_assignments")
+                .select("*")
+                .eq("client_id", clientId)
+                .eq("decision", "approved")
+                .neq("admin_review", "rejected")
+                .order("assigned_at", { ascending: false }),
+            supabase
+                .from("client_lender_assignments")
+                .select("lender_name")
+                .eq("client_id", clientId),
+        ]);
+        if (visible_error) {
+            console.error("AdminLenderReviewCard fetch error:", visible_error);
         }
-        set_assignments(data ?? []);
+        if (all_error) {
+            console.error("AdminLenderReviewCard taken-names fetch error:", all_error);
+        }
+        set_assignments(visible ?? []);
+        set_taken_lender_names(new Set(
+            (all_for_client ?? []).map(r => (r.lender_name as string).toLowerCase())
+        ));
         set_is_loading(false);
+    }
+
+    async function fetch_lender_options() {
+        const { data, error } = await supabase
+            .from("lender_guidelines")
+            .select("id, lender_name, specialty, payment_type, min_funding, max_funding")
+            .order("lender_name", { ascending: true });
+        if (error) {
+            console.error("AdminLenderReviewCard lender_guidelines fetch error:", error);
+            return;
+        }
+        set_lender_options(data ?? []);
     }
 
     useEffect(() => {
         fetch_assignments();
+        fetch_lender_options();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [clientId]);
+
+    // Hide lenders that have ever been assigned to this client — including
+    // previously rejected ones, since lender selection is per-client and a
+    // skip means "off the table for this client". Backend POST enforces the
+    // same rule, this filter just stops the UI from offering doomed picks.
+    const available_lenders = useMemo(() => {
+        return lender_options.filter(l => !taken_lender_names.has(l.lender_name.toLowerCase()));
+    }, [lender_options, taken_lender_names]);
+
+    async function add_lender_manually(lender: LenderGuideline) {
+        set_is_adding_lender(true);
+        try {
+            const res = await fetch('/api/admin/lender-reviews', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    client_id: clientId,
+                    lender_guideline_id: lender.id,
+                }),
+            });
+            const result = await res.json();
+            if (!res.ok || !result.success) {
+                toast.error(result?.error || 'Failed to add lender');
+                return;
+            }
+            toast.success(`Added ${lender.lender_name} — click Save Review to notify UW`);
+            set_is_picker_open(false);
+            // Manual-add inserts admin_review='pending'. Auto-stage a Contact
+            // decision on the new row so the admin only has to click Save
+            // Review once to approve and trigger the UW email. The new
+            // assignment id comes back on result.assignment.
+            const new_assignment = result.assignment;
+            if (new_assignment?.id) {
+                set_pending(prev => ({
+                    ...prev,
+                    [new_assignment.id]: { decision: 'approved', notes: '' },
+                }));
+            }
+            await fetch_assignments();
+        } catch (err: any) {
+            console.error('AdminLenderReviewCard add error:', err);
+            toast.error('An unexpected error occurred');
+        } finally {
+            set_is_adding_lender(false);
+        }
+    }
 
     const stage_decision = (assignment_id: string, decision: 'approved' | 'rejected') => {
         set_pending(prev => ({
@@ -125,7 +225,6 @@ export function AdminLenderReviewCard({ clientId }: Props) {
 
     const pending_count = Object.keys(pending).length;
     const approved_final = assignments.filter(a => a.admin_review === 'approved').length;
-    const rejected_final = assignments.filter(a => a.admin_review === 'rejected').length;
     const still_pending = assignments.filter(a => a.admin_review === 'pending').length;
 
     return (
@@ -141,7 +240,7 @@ export function AdminLenderReviewCard({ clientId }: Props) {
                             Lender Match — Admin Review
                         </CardTitle>
                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">
-                            {still_pending} pending · {approved_final} approved · {rejected_final} rejected
+                            {still_pending} pending · {approved_final} approved
                         </p>
                     </div>
                 </div>
@@ -165,6 +264,68 @@ export function AdminLenderReviewCard({ clientId }: Props) {
                             Match Tool
                         </Button>
                     </Link>
+                    <Popover open={is_picker_open} onOpenChange={set_is_picker_open}>
+                        <PopoverTrigger asChild>
+                            <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={is_adding_lender}
+                                className="h-9 rounded-xl text-[10px] font-black uppercase tracking-widest border-slate-200"
+                            >
+                                {is_adding_lender ? (
+                                    <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                                ) : (
+                                    <Plus className="h-3.5 w-3.5 mr-1.5" />
+                                )}
+                                Add Lender
+                            </Button>
+                        </PopoverTrigger>
+                        <PopoverContent align="end" className="w-80 p-0 rounded-2xl">
+                            <Command>
+                                <CommandInput placeholder="Search lenders..." className="h-10 text-sm" />
+                                <CommandList className="max-h-72">
+                                    <CommandEmpty>
+                                        <p className="text-xs text-slate-500 py-4">
+                                            {lender_options.length === 0
+                                                ? 'No lenders in database.'
+                                                : 'No matching lender available.'}
+                                        </p>
+                                    </CommandEmpty>
+                                    <CommandGroup heading="Lender Database">
+                                        {available_lenders.map((lender) => (
+                                            <CommandItem
+                                                key={lender.id}
+                                                value={lender.lender_name}
+                                                onSelect={() => add_lender_manually(lender)}
+                                                disabled={is_adding_lender}
+                                                className="cursor-pointer"
+                                            >
+                                                <div className="flex flex-col gap-0.5 min-w-0 w-full">
+                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                        <span className="font-bold text-slate-900 truncate">
+                                                            {lender.lender_name}
+                                                        </span>
+                                                        {lender.specialty && (
+                                                            <Badge variant="outline" className="text-[8px] font-black tracking-widest uppercase py-0 px-2 border-slate-200 text-slate-500">
+                                                                {lender.specialty}
+                                                            </Badge>
+                                                        )}
+                                                    </div>
+                                                    {(lender.min_funding != null || lender.max_funding != null) && (
+                                                        <span className="text-[10px] text-slate-400 font-medium">
+                                                            {lender.min_funding != null && `Min $${(lender.min_funding / 1000).toFixed(0)}k`}
+                                                            {lender.min_funding != null && lender.max_funding != null && ' • '}
+                                                            {lender.max_funding != null && `Max $${(lender.max_funding / 1000).toFixed(0)}k`}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </CommandItem>
+                                        ))}
+                                    </CommandGroup>
+                                </CommandList>
+                            </Command>
+                        </PopoverContent>
+                    </Popover>
                     {pending_count > 0 && (
                         <Button
                             size="sm"

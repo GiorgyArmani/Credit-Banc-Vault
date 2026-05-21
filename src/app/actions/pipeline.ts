@@ -100,8 +100,11 @@ export async function updateLoanStatus(
     .limit(1)
     .single();
 
-  if (latestEntry?.status === newStatus && !note) {
-    // If status is the same and there's no custom note, skip the update
+  if (latestEntry?.status === newStatus) {
+    // Same-status calls are no-ops regardless of note. Kanban drops always
+    // pass a "Moved in Pipeline" note, so without this skip, re-dropping a
+    // card on its current column would insert a duplicate history row —
+    // breaking funded-event dedupe on the admin dashboard.
     return { success: true };
   }
 

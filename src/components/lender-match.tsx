@@ -25,6 +25,10 @@ interface Lender {
   restricted_states: string | null;
   ownership_percentage: number | null;
   number_of_positions: number | null;
+  /** Minimum open positions the lender accepts. 0 = will take first-position
+   *  files; N>0 = won't fund unless the deal has at least N existing
+   *  positions. Defines the low water mark of the open-position window. */
+  min_positions: number | null;
   bankruptcies: string | null;
   tax_liens_limit: number | string | null;
   min_funding: number | string | null;
@@ -51,21 +55,24 @@ type LenderDecision = "approved" | "rejected" | null;
 const fmt$ = (v: number) =>
   v === 0 ? "—" : "$" + v.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
+// Specialty pills sit on white surfaces now — use light tints with deeper
+// text + matching border. Keeps the per-specialty color coding analysts
+// rely on without losing legibility against the new light backdrop.
 const SPECIALTY_COLORS: Record<string, string> = {
-  MCA: "bg-blue-900/40 text-blue-300 border-blue-700/40",
-  SBA: "bg-green-900/40 text-green-300 border-green-700/40",
-  LOC: "bg-purple-900/40 text-purple-300 border-purple-700/40",
-  Equipment: "bg-yellow-900/40 text-yellow-300 border-yellow-700/40",
-  Amortizing: "bg-blue-400/20 text-blue-400 border-blue-400/30",
-  "Term Loan": "bg-orange-900/40 text-orange-300 border-orange-700/40",
-  "Real Estate": "bg-cyan-900/40 text-cyan-300 border-cyan-700/40",
-  Trucking: "bg-red-900/40 text-red-300 border-red-700/40",
-  "Invoice Factoring": "bg-pink-900/40 text-pink-300 border-pink-700/40",
-  Consolidation: "bg-indigo-900/40 text-indigo-300 border-indigo-700/40",
-  "Reverse consolidation": "bg-teal-900/40 text-teal-300 border-teal-700/40",
-  "Contract Financing": "bg-amber-900/40 text-amber-300 border-amber-700/40",
-  Acquisition: "bg-violet-900/40 text-violet-300 border-violet-700/40",
-  General: "bg-slate-700/40 text-slate-300 border-slate-600/40",
+  MCA: "bg-blue-50 text-blue-700 border-blue-200",
+  SBA: "bg-green-50 text-green-700 border-green-200",
+  LOC: "bg-purple-50 text-purple-700 border-purple-200",
+  Equipment: "bg-yellow-50 text-yellow-700 border-yellow-200",
+  Amortizing: "bg-sky-50 text-sky-700 border-sky-200",
+  "Term Loan": "bg-orange-50 text-orange-700 border-orange-200",
+  "Real Estate": "bg-cyan-50 text-cyan-700 border-cyan-200",
+  Trucking: "bg-red-50 text-red-700 border-red-200",
+  "Invoice Factoring": "bg-pink-50 text-pink-700 border-pink-200",
+  Consolidation: "bg-indigo-50 text-indigo-700 border-indigo-200",
+  "Reverse consolidation": "bg-teal-50 text-teal-700 border-teal-200",
+  "Contract Financing": "bg-amber-50 text-amber-700 border-amber-200",
+  Acquisition: "bg-violet-50 text-violet-700 border-violet-200",
+  General: "bg-slate-50 text-slate-700 border-slate-200",
 };
 
 const DEFAULT_DEAL: DealSummary = {
@@ -147,9 +154,14 @@ function matchLender(lender: Lender, deal: DealSummary): MatchResult {
   if ((lender.monthly_deposits ?? 0) > 0 && deal.avgMonthlyDeposits > 0 && deal.avgMonthlyDeposits < lender.monthly_deposits!)
     flags.push(`Deposits ${deal.avgMonthlyDeposits} < min ${lender.monthly_deposits}`);
 
-  // Open positions — only check if lender has a limit AND deal has position data
+  // Open positions — enforce both the max (number_of_positions) and the min
+  // (min_positions, e.g. "won't fund unless there are already N positions").
+  // Skip each check when its threshold is null so partially-configured lenders
+  // don't get false-flagged.
   if (lender.number_of_positions !== null && deal.numOpenPositions > 0 && deal.numOpenPositions > lender.number_of_positions)
     flags.push(`${deal.numOpenPositions} positions > max ${lender.number_of_positions}`);
+  if ((lender.min_positions ?? 0) > 0 && deal.numOpenPositions < (lender.min_positions ?? 0))
+    flags.push(`${deal.numOpenPositions} positions < min ${lender.min_positions}`);
 
   // Avg daily balance — only check if both sides have a value
   if ((lender.avg_daily_balance ?? 0) > 0 && deal.avgDailyBalance > 0 && deal.avgDailyBalance < lender.avg_daily_balance!)
@@ -295,11 +307,16 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
     setIsLoadingClient(true);
     const supabase = createClient();
 
+    // History-aware load: take the LATEST snapshot. bank_analysis_results
+    // no longer has UNIQUE(client_id) — each save in the bank-analysis tool
+    // appends a row, so we sort desc + limit 1 to get the current state.
     const { data: analysis, error: aError } = await supabase
       .from("bank_analysis_results")
       .select("*")
       .eq("client_id", clientId)
-      .single();
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
     if (analysis && !aError) {
       const client = clientList.find((c) => c.id === clientId);
@@ -503,11 +520,11 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
 
   return (
     <div
-      className="min-h-screen text-gray-100 space-y-4 p-4"
-      style={{ background: "#0d1117", fontFamily: "'IBM Plex Mono', monospace" }}
+      className="min-h-screen text-slate-900 space-y-4 p-4"
+      style={{ background: "#f8fafc", fontFamily: "'IBM Plex Mono', monospace" }}
     >
       {/* Header */}
-      <div className="rounded-xl border border-gray-700 p-4" style={{ background: "#161b22" }}>
+      <div className="rounded-xl border border-slate-200 p-4" style={{ background: "#ffffff" }}>
         <div className="flex items-center justify-between flex-wrap gap-3 mb-3">
           <div>
             <div className="text-xs font-bold text-gray-500 uppercase tracking-widest">Lender Match</div>
@@ -518,7 +535,7 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
                   setSelectedClientId(e.target.value);
                   loadClientResults(e.target.value);
                 }}
-                className="bg-gray-950 border border-gray-700 rounded px-2 py-1.5 text-sm font-mono text-gray-100 focus:outline-none focus:border-blue-500 min-w-[240px]"
+                className="bg-slate-50 border border-slate-200 rounded px-2 py-1.5 text-sm font-mono text-slate-900 focus:outline-none focus:border-emerald-500 min-w-[240px]"
               >
                 <option value="">Select Client Analysis...</option>
                 {clientList.map((c) => (
@@ -565,7 +582,7 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
           ]
             .filter((p) => p.value !== null)
             .map(({ label, value }) => (
-              <div key={label} className="flex items-center gap-1.5 bg-gray-900 border border-gray-700 rounded-lg px-2.5 py-1">
+              <div key={label} className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg px-2.5 py-1">
                 <span className="text-xs text-gray-500">{label}</span>
                 <span className="text-xs font-mono font-bold text-blue-400">{value}</span>
               </div>
@@ -574,13 +591,13 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
 
         {/* Ownership Details */}
         {deal.ownershipDetails.length > 0 && (
-          <div className="mt-4 pt-4 border-t border-gray-700/50">
+          <div className="mt-4 pt-4 border-t border-slate-200">
             <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2">Ownership Structure</div>
             <div className="flex flex-wrap gap-4">
               {deal.ownershipDetails.map((owner, idx) => (
                 <div key={idx} className="flex items-center gap-2">
                   <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-                  <span className="text-xs text-gray-300">{owner.name}</span>
+                  <span className="text-xs text-slate-600">{owner.name}</span>
                   <span className="text-xs font-mono font-bold text-blue-400">{owner.pct}%</span>
                 </div>
               ))}
@@ -594,7 +611,7 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
       )}
 
       {/* Match Filters */}
-      <div className="rounded-xl border border-gray-700 p-4" style={{ background: "#161b22" }}>
+      <div className="rounded-xl border border-slate-200 p-4" style={{ background: "#ffffff" }}>
         <div className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3">Match Filters</div>
         <div className="grid grid-cols-2 gap-3">
           <div>
@@ -608,7 +625,7 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
                 setDeal((prev) => ({ ...prev, state: val }));
               }}
               placeholder="FL"
-              className="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5 text-sm font-mono text-gray-100 uppercase focus:outline-none focus:border-blue-500 transition-colors"
+              className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1.5 text-sm font-mono text-slate-900 uppercase focus:outline-none focus:border-emerald-500 transition-colors"
             />
           </div>
           <div>
@@ -621,7 +638,7 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
                 setDeal((prev) => ({ ...prev, industry: e.target.value }));
               }}
               placeholder="e.g. Restaurant, Trucking..."
-              className="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5 text-sm font-mono text-gray-100 focus:outline-none focus:border-blue-500 transition-colors"
+              className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1.5 text-sm font-mono text-slate-900 focus:outline-none focus:border-emerald-500 transition-colors"
             />
           </div>
         </div>
@@ -629,14 +646,14 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
 
       {/* Eligibility bar */}
       {dataEntered && (
-        <div className="rounded-xl border border-gray-700 p-4" style={{ background: "#161b22" }}>
+        <div className="rounded-xl border border-slate-200 p-4" style={{ background: "#ffffff" }}>
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs text-gray-500 uppercase tracking-widest">Eligibility</span>
             <span className="text-xs font-mono text-gray-400">
               {viableResults.length > 0 ? Math.round((passedCount / viableResults.length) * 100) : 0}% of viable lenders ({viableResults.length} with full guidelines)
             </span>
           </div>
-          <div className="h-2 rounded-full bg-gray-800 overflow-hidden">
+          <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
             <div
               className="h-full rounded-full bg-gradient-to-r from-green-500 to-blue-500 transition-all duration-500"
               style={{ width: `${viableResults.length > 0 ? (passedCount / viableResults.length) * 100 : 0}%` }}
@@ -653,7 +670,7 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
 
       {/* Save bar — UW saves their recommendations; admins are notified */}
       {selectedClientId && recommendedCount > 0 && (
-        <div className="rounded-xl border border-gray-700 p-3 flex items-center justify-between flex-wrap gap-3" style={{ background: "#161b22" }}>
+        <div className="rounded-xl border border-slate-200 p-3 flex items-center justify-between flex-wrap gap-3" style={{ background: "#ffffff" }}>
           <div className="text-xs text-gray-400 font-mono">
             <span className="text-emerald-400 font-bold">{recommendedCount} recommended</span>
             {" · admin will be notified to approve which lenders to contact"}
@@ -679,7 +696,7 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
             onClick={() => setSpecialtyFilter(s)}
             className={`px-2.5 py-1 text-xs font-mono uppercase tracking-wider rounded border transition-all ${specialtyFilter === s
                 ? "bg-blue-600 border-blue-600 text-white"
-                : "border-gray-700 text-gray-500 hover:border-blue-600 hover:text-blue-400"
+                : "border-slate-200 text-gray-500 hover:border-blue-600 hover:text-blue-400"
               }`}
           >
             {s}
@@ -689,7 +706,7 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
           onClick={() => setShowPassedOnly(!showPassedOnly)}
           className={`px-3 py-1 text-xs font-mono uppercase tracking-wider rounded border transition-all ${showPassedOnly
               ? "bg-green-900/30 border-green-600/60 text-green-400"
-              : "border-gray-700 text-gray-500 hover:text-green-400"
+              : "border-slate-200 text-gray-500 hover:text-green-400"
             }`}
         >
           {showPassedOnly ? "✓ Eligible Only" : "Show All"}
@@ -702,14 +719,14 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
       {/* Matched Lenders Section */}
       <div className="space-y-3">
         <div className="flex items-center gap-3">
-          <div className="h-px flex-1 bg-gray-800" />
+          <div className="h-px flex-1 bg-slate-100" />
           <span className="text-[10px] font-bold text-gray-500 uppercase tracking-[0.2em]">Matched Lenders ({filteredViable.length})</span>
-          <div className="h-px flex-1 bg-gray-800" />
+          <div className="h-px flex-1 bg-slate-100" />
         </div>
         
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           {filteredViable.length === 0 && (
-            <div className="lg:col-span-2 py-8 text-center border border-dashed border-gray-800 rounded-xl">
+            <div className="lg:col-span-2 py-8 text-center border border-dashed border-slate-200 rounded-xl">
               <span className="text-xs text-gray-600 font-mono uppercase">No matched lenders found</span>
             </div>
           )}
@@ -720,14 +737,14 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
       {/* Incomplete Guidelines Section */}
       <div className="space-y-3 pt-4">
         <div className="flex items-center gap-3">
-          <div className="h-px flex-1 bg-gray-800" />
+          <div className="h-px flex-1 bg-slate-100" />
           <span className="text-[10px] font-bold text-gray-500 uppercase tracking-[0.2em]">Incomplete Guidelines ({filteredIncomplete.length})</span>
-          <div className="h-px flex-1 bg-gray-800" />
+          <div className="h-px flex-1 bg-slate-100" />
         </div>
         
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           {filteredIncomplete.length === 0 && (
-            <div className="lg:col-span-2 py-8 text-center border border-dashed border-gray-800 rounded-xl">
+            <div className="lg:col-span-2 py-8 text-center border border-dashed border-slate-200 rounded-xl">
               <span className="text-xs text-gray-600 font-mono uppercase">No lenders with incomplete guidelines</span>
             </div>
           )}
@@ -741,7 +758,7 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
     const dKey = decisionKey(result.lender);
     const decision = decisions[dKey] ?? null;
     const isExpanded = expandedKey === key;
-    const specColor = SPECIALTY_COLORS[result.lender.specialty ?? ""] ?? "bg-gray-900/40 text-gray-400 border-gray-700/40";
+    const specColor = SPECIALTY_COLORS[result.lender.specialty ?? ""] ?? "bg-slate-100 text-gray-400 border-slate-200";
     const minF = typeof result.lender.min_funding === "number" ? result.lender.min_funding : null;
     const maxF = typeof result.lender.max_funding === "number" ? result.lender.max_funding : null;
 
@@ -749,12 +766,12 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
       decision === "approved" ? "border-emerald-600/70" :
         decision === "rejected" ? "border-orange-700/60" :
           result.passed && !isIncomplete ? "border-green-800/40 hover:border-green-600/60" :
-            "border-gray-800 hover:border-red-800/40";
+            "border-slate-200 hover:border-red-800/40";
 
     const cardBg =
       decision === "approved" ? "#0d2318" :
         decision === "rejected" ? "#1f1108" :
-          result.passed && !isIncomplete ? "#161b22" : "#13191f";
+          result.passed && !isIncomplete ? "#ffffff" : "#f8fafc";
 
     return (
       <div key={key} className={`rounded-xl border transition-all ${cardBorder} ${isIncomplete ? 'opacity-70' : ''}`} style={{ background: cardBg }}>
@@ -763,12 +780,12 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
           onClick={() => setExpandedKey(isExpanded ? null : key)}
         >
           <div
-            className={`mt-1 flex-shrink-0 w-2 h-2 rounded-full ${isIncomplete ? 'bg-gray-600' : (result.passed ? "bg-green-400" : "bg-red-500")}`}
+            className={`mt-1 flex-shrink-0 w-2 h-2 rounded-full ${isIncomplete ? 'bg-slate-300' : (result.passed ? "bg-green-400" : "bg-red-500")}`}
             style={{ boxShadow: !isIncomplete ? (result.passed ? "0 0 6px #4ade80" : "0 0 6px #f87171") : "none" }}
           />
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-sm font-semibold text-gray-100 font-mono">{result.lender.lender_name}</span>
+              <span className="text-sm font-semibold text-slate-900 font-mono">{result.lender.lender_name}</span>
               {result.lender.specialty && (
                 <span className={`text-xs font-mono border rounded px-1.5 py-0.5 ${specColor}`}>
                   {result.lender.specialty}
@@ -826,46 +843,47 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
         </div>
 
         {isExpanded && (
-          <div className="px-3 pb-3 border-t border-gray-800 pt-3 space-y-2">
+          <div className="px-3 pb-3 border-t border-slate-200 pt-3 space-y-2">
             <div className="grid grid-cols-2 gap-2 text-xs">
               {([
                 ["Min FICO", result.lender.min_fico ?? "—"],
                 ["Min TIB", result.lender.time_in_business_months ? `${result.lender.time_in_business_months}mo` : "—"],
                 ["Min Revenue", result.lender.avg_monthly_revenue ? fmt$(result.lender.avg_monthly_revenue) : "—"],
                 ["Max Neg Days", result.lender.negative_days ?? "—"],
+                ["Min Positions", result.lender.min_positions ?? "—"],
                 ["Max Positions", result.lender.number_of_positions ?? "—"],
                 ["Payment Type", result.lender.payment_type ?? "—"],
                 ["Bankruptcies OK", result.lender.bankruptcies ?? "—"],
                 ["Restricted States", result.lender.restricted_states || "None"],
               ] as [string, string | number][]).map(([label, val]) => (
-                <div key={label} className="flex justify-between gap-2 bg-gray-950 rounded px-2 py-1">
+                <div key={label} className="flex justify-between gap-2 bg-slate-50 rounded px-2 py-1">
                   <span className="text-gray-500">{label}</span>
-                  <span className={`font-mono text-right ${val === 0 || val === "—" ? 'text-red-500/70' : 'text-gray-200'}`}>{String(val)}</span>
+                  <span className={`font-mono text-right ${val === 0 || val === "—" ? 'text-red-500/70' : 'text-slate-700'}`}>{String(val)}</span>
                 </div>
               ))}
             </div>
             {result.lender.preferred_industries && (
-              <div className="bg-gray-950 rounded px-2 py-2">
+              <div className="bg-slate-50 rounded px-2 py-2">
                 <div className="text-xs text-green-600 uppercase tracking-wider mb-1">Preferred Industries</div>
-                <div className="text-xs text-gray-300 leading-relaxed">{result.lender.preferred_industries}</div>
+                <div className="text-xs text-slate-600 leading-relaxed">{result.lender.preferred_industries}</div>
               </div>
             )}
             {result.lender.restricted_industries && (
-              <div className="bg-gray-950 rounded px-2 py-2">
+              <div className="bg-slate-50 rounded px-2 py-2">
                 <div className="text-xs text-red-600 uppercase tracking-wider mb-1">Restricted Industries</div>
-                <div className="text-xs text-gray-300 leading-relaxed">{result.lender.restricted_industries}</div>
+                <div className="text-xs text-slate-600 leading-relaxed">{result.lender.restricted_industries}</div>
               </div>
             )}
             {result.lender.restricted_industry_exceptions && (
-              <div className="bg-gray-950 rounded px-2 py-2">
+              <div className="bg-slate-50 rounded px-2 py-2">
                 <div className="text-xs text-orange-500 uppercase tracking-wider mb-1">Exceptions</div>
-                <div className="text-xs text-gray-300 leading-relaxed">{result.lender.restricted_industry_exceptions}</div>
+                <div className="text-xs text-slate-600 leading-relaxed">{result.lender.restricted_industry_exceptions}</div>
               </div>
             )}
             {result.lender.additional_info && (
-              <div className="bg-gray-950 rounded px-2 py-2">
+              <div className="bg-slate-50 rounded px-2 py-2">
                 <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">Additional Notes</div>
-                <div className="text-xs text-gray-300 leading-relaxed">{result.lender.additional_info}</div>
+                <div className="text-xs text-slate-600 leading-relaxed">{result.lender.additional_info}</div>
               </div>
             )}
             {result.flags.length > 0 && !isIncomplete && (

@@ -23,6 +23,10 @@ interface AccountData {
   accountNumber: string;
   months: MonthlyData[];
   notes: string[];
+  /** Per-account override of the visible month window. Falls back to the
+   *  global range when undefined. Lets the user shrink/extend an individual
+   *  account when only a partial run of statements is available. */
+  monthRange?: number;
 }
 
 interface OpenPosition {
@@ -76,6 +80,16 @@ export interface DealSummary {
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const TERM_MONTHS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+
+/** Compute the active month indices anchored at `prevMonthIdx`, counting
+ *  backwards `range` months. Used for both the global window and per-account
+ *  overrides so the slice math stays in one place. */
+function computeMonthIndices(prevMonthIdx: number, range: number): number[] {
+  const safeRange = Math.max(1, Math.min(12, Math.floor(range)));
+  return Array.from({ length: safeRange }, (_, i) =>
+    (prevMonthIdx - safeRange + 1 + i + 12) % 12
+  );
+}
 
 const emptyMonthly = (): MonthlyData => ({
   totalDeposits: "",
@@ -259,7 +273,7 @@ function CurrencyInput({
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
-      className={`w-full bg-[#0d1117] border border-[#30363d] rounded px-2 py-1 text-right text-sm font-mono text-[#e6edf3] placeholder-[#484f58] focus:outline-none focus:border-[#388bfd] focus:ring-1 focus:ring-[#388bfd]/30 transition-colors ${className}`}
+      className={`w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 text-right text-sm font-mono text-slate-900 placeholder-slate-400 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors ${className}`}
     />
   );
 }
@@ -281,7 +295,7 @@ function TextInput({
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
-      className={`w-full bg-[#0d1117] border border-[#30363d] rounded px-2 py-1 text-sm text-[#e6edf3] placeholder-[#484f58] focus:outline-none focus:border-[#388bfd] focus:ring-1 focus:ring-[#388bfd]/30 transition-colors ${className}`}
+      className={`w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors ${className}`}
     />
   );
 }
@@ -289,8 +303,8 @@ function TextInput({
 function StatCell({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex flex-col items-end gap-0.5">
-      <span className="text-[10px] text-[#8b949e] uppercase tracking-wider whitespace-nowrap">{label}</span>
-      <span className="text-sm font-mono font-semibold text-[#58a6ff]">{value}</span>
+      <span className="text-[10px] text-slate-500 uppercase tracking-wider whitespace-nowrap">{label}</span>
+      <span className="text-sm font-mono font-semibold text-emerald-500">{value}</span>
     </div>
   );
 }
@@ -298,11 +312,11 @@ function StatCell({ label, value }: { label: string; value: string }) {
 function SectionHeader({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-3 mb-4">
-      <div className="h-px flex-1 bg-gradient-to-r from-[#30363d] to-transparent" />
-      <span className="text-xs font-bold tracking-[0.2em] uppercase text-[#8b949e] whitespace-nowrap px-2">
+      <div className="h-px flex-1 bg-gradient-to-r from-slate-200 to-transparent" />
+      <span className="text-xs font-bold tracking-[0.2em] uppercase text-slate-500 whitespace-nowrap px-2">
         {children}
       </span>
-      <div className="h-px flex-1 bg-gradient-to-l from-[#30363d] to-transparent" />
+      <div className="h-px flex-1 bg-gradient-to-l from-slate-200 to-transparent" />
     </div>
   );
 }
@@ -315,14 +329,18 @@ function AccountBlock({
   onChange,
   onRemove,
   canRemove,
-  activeMonthIndices = [1, 0, 11],
+  prevMonthIdx,
+  globalRange,
 }: {
   account: AccountData;
   index: number;
   onChange: (a: AccountData) => void;
   onRemove: () => void;
   canRemove: boolean;
-  activeMonthIndices?: number[];
+  /** Index of the month immediately preceding today (anchor for the window). */
+  prevMonthIdx: number;
+  /** Range applied when this account has no per-account override. */
+  globalRange: number;
 }) {
   const updateMonth = (mi: number, field: keyof MonthlyData, val: string) => {
     let months = [...account.months];
@@ -335,6 +353,18 @@ function AccountBlock({
     }
 
     onChange({ ...account, months });
+  };
+
+  // Per-account window. Falls back to the global range when no override is
+  // set. Used when an individual account only has 5 months of statements
+  // (or extends to 9, etc.) without disturbing the other accounts.
+  const effectiveRange = Math.max(1, Math.min(12, account.monthRange ?? globalRange));
+  const activeMonthIndices = computeMonthIndices(prevMonthIdx, effectiveRange);
+
+  const setRange = (next: number) => {
+    const clamped = Math.max(1, Math.min(12, Math.floor(next)));
+    if (clamped === effectiveRange) return;
+    onChange({ ...account, monthRange: clamped });
   };
 
   const activeMonths = activeMonthIndices.map(mi => account.months[mi]);
@@ -356,18 +386,54 @@ function AccountBlock({
   ];
 
   return (
-    <div className="rounded-xl border border-[#30363d] bg-[#161b22] overflow-hidden mb-6">
+    <div className="rounded-xl border border-slate-200 bg-white overflow-hidden mb-6">
       {/* Account header */}
-      <div className="flex items-center gap-4 px-4 py-3 bg-[#1c2128] border-b border-[#30363d]">
+      <div className="flex items-center gap-4 px-4 py-3 bg-slate-50 border-b border-slate-200">
         <div className="flex items-center gap-2">
-          <span className="text-xs text-[#8b949e] font-mono uppercase tracking-wider">Account {index + 1}</span>
-          <div className="w-px h-4 bg-[#30363d]" />
+          <span className="text-xs text-slate-500 font-mono uppercase tracking-wider">Account {index + 1}</span>
+          <div className="w-px h-4 bg-slate-200" />
           <TextInput
             value={account.accountNumber}
             onChange={(v) => onChange({ ...account, accountNumber: v })}
             placeholder="Account No."
             className="w-40"
           />
+        </div>
+        {/* Per-account range stepper. Lets the analyst trim a single account
+            to e.g. 5 months when the client couldn't deliver the 6th, or
+            extend it beyond the global window if extra history is available. */}
+        <div className="flex items-center gap-1 ml-2">
+          <button
+            type="button"
+            onClick={() => setRange(effectiveRange - 1)}
+            disabled={effectiveRange <= 1}
+            className="w-6 h-6 rounded bg-slate-50 border border-slate-200 text-slate-700 hover:border-emerald-500/60 hover:text-emerald-500 disabled:opacity-30 disabled:cursor-not-allowed text-sm leading-none font-bold transition-colors"
+            title="Remove one month from this account"
+          >
+            −
+          </button>
+          <span className="text-[10px] text-slate-500 font-mono uppercase tracking-wider min-w-[3.5rem] text-center">
+            {effectiveRange} Mo
+          </span>
+          <button
+            type="button"
+            onClick={() => setRange(effectiveRange + 1)}
+            disabled={effectiveRange >= 12}
+            className="w-6 h-6 rounded bg-slate-50 border border-slate-200 text-slate-700 hover:border-emerald-500/60 hover:text-emerald-500 disabled:opacity-30 disabled:cursor-not-allowed text-sm leading-none font-bold transition-colors"
+            title="Add one month to this account"
+          >
+            +
+          </button>
+          {account.monthRange !== undefined && account.monthRange !== globalRange && (
+            <button
+              type="button"
+              onClick={() => onChange({ ...account, monthRange: undefined })}
+              className="ml-1 text-[9px] text-slate-400 hover:text-slate-500 font-mono uppercase tracking-wider transition-colors"
+              title="Use the global range"
+            >
+              reset
+            </button>
+          )}
         </div>
         <div className="flex-1" />
         {/* Summary stats */}
@@ -382,7 +448,7 @@ function AccountBlock({
         {canRemove && (
           <button
             onClick={onRemove}
-            className="ml-2 text-[#8b949e] hover:text-[#f85149] transition-colors text-xs font-mono border border-[#30363d] hover:border-[#f85149]/40 rounded px-2 py-1"
+            className="ml-2 text-slate-500 hover:text-rose-600 transition-colors text-xs font-mono border border-slate-200 hover:border-rose-500/40 rounded px-2 py-1"
           >
             Remove
           </button>
@@ -393,16 +459,16 @@ function AccountBlock({
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
           <thead>
-            <tr className="border-b border-[#30363d]">
-              <th className="text-left px-4 py-2 text-[#8b949e] font-medium w-36 sticky left-0 bg-[#161b22] z-10">
+            <tr className="border-b border-slate-200">
+              <th className="text-left px-4 py-2 text-slate-500 font-medium w-36 sticky left-0 bg-white z-10">
                 Field
               </th>
               {activeMonthIndices.map((mi) => (
-                <th key={mi} className="text-center px-2 py-2 text-[#8b949e] font-medium min-w-[100px]">
+                <th key={mi} className="text-center px-2 py-2 text-slate-500 font-medium min-w-[100px]">
                   {MONTHS[mi].slice(0, 3)}
                 </th>
               ))}
-              <th className="text-center px-3 py-2 text-[#388bfd] font-semibold min-w-[110px] bg-[#1c2128]">
+              <th className="text-center px-3 py-2 text-emerald-600 font-semibold min-w-[110px] bg-slate-50">
                 Avg / Total
               </th>
             </tr>
@@ -419,10 +485,10 @@ function AccountBlock({
               return (
                 <tr
                   key={row.key}
-                  className={`border-b border-[#21262d] ${ri % 2 === 0 ? "bg-[#161b22]" : "bg-[#13191f]"} hover:bg-[#1f2937]/30 transition-colors`}
+                  className={`border-b border-slate-100 ${ri % 2 === 0 ? "bg-white" : "bg-slate-100"} hover:bg-slate-100/30 transition-colors`}
                 >
-                  <td className="px-4 py-1.5 text-[#c9d1d9] font-medium sticky left-0 z-10 whitespace-nowrap"
-                    style={{ background: ri % 2 === 0 ? "#161b22" : "#13191f" }}>
+                  <td className="px-4 py-1.5 text-slate-700 font-medium sticky left-0 z-10 whitespace-nowrap"
+                    style={{ background: ri % 2 === 0 ? "#ffffff" : "#f8fafc" }}>
                     {row.label}
                   </td>
                   {activeMonthIndices.map((mi) => {
@@ -437,7 +503,7 @@ function AccountBlock({
                       </td>
                     );
                   })}
-                  <td className="px-3 py-1 text-center bg-[#1c2128] font-mono font-semibold text-[#58a6ff]">
+                  <td className="px-3 py-1 text-center bg-slate-50 font-mono font-semibold text-emerald-500">
                     {row.isMoney
                       ? formatMoney(avg)
                       : !Number.isFinite(avg) ? "—"
@@ -451,10 +517,10 @@ function AccountBlock({
       </div>
 
       {/* Notes */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 border-t border-[#21262d] bg-[#13191f]">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 border-t border-slate-100 bg-slate-100">
         {account.notes.map((note, ni) => (
           <div key={ni}>
-            <label className="text-[10px] text-[#8b949e] uppercase tracking-wider block mb-1">Note {ni + 1}</label>
+            <label className="text-[10px] text-slate-500 uppercase tracking-wider block mb-1">Note {ni + 1}</label>
             <TextInput
               value={note}
               onChange={(v) => {
@@ -497,15 +563,15 @@ function OpenPositions({
   };
 
   return (
-    <div className="rounded-xl border border-[#30363d] bg-[#161b22] overflow-hidden">
-      <div className="px-4 py-3 bg-[#1c2128] border-b border-[#30363d] flex items-center justify-between flex-wrap gap-3">
-        <span className="text-xs font-bold tracking-[0.15em] uppercase text-[#8b949e]">Open Positions</span>
+    <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+      <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between flex-wrap gap-3">
+        <span className="text-xs font-bold tracking-[0.15em] uppercase text-slate-500">Open Positions</span>
         <div className="flex items-center gap-6 flex-wrap">
           <StatCell label="Current Monthly Remit" value={formatMoney(totalRemit)} />
           <StatCell label="Used Remit %" value={formatPct(usedRemitPct)} />
           <div className="flex flex-col items-end gap-0.5">
-            <span className="text-[10px] text-[#8b949e] uppercase tracking-wider">Available Remit (20%)</span>
-            <span className={`text-sm font-mono font-semibold ${availableRemit >= 0 ? "text-[#3fb950]" : "text-[#f85149]"}`}>
+            <span className="text-[10px] text-slate-500 uppercase tracking-wider">Available Remit (20%)</span>
+            <span className={`text-sm font-mono font-semibold ${availableRemit >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
               {formatMoney(availableRemit)}
             </span>
           </div>
@@ -515,9 +581,9 @@ function OpenPositions({
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
           <thead>
-            <tr className="border-b border-[#30363d]">
+            <tr className="border-b border-slate-200">
               {["Funder / Lender", "Loan Type", "Payment Type", "Amount", "Balance", "Term", "Remit % (derived)", "Monthly Remit", "Actions"].map((h) => (
-                <th key={h} className="text-left px-3 py-2 text-[#8b949e] font-medium whitespace-nowrap">
+                <th key={h} className="text-left px-3 py-2 text-slate-500 font-medium whitespace-nowrap">
                   {h}
                 </th>
               ))}
@@ -531,12 +597,12 @@ function OpenPositions({
                 : null;
               const qualityColor =
                 metrics.dataQualityFlag === "impossible"
-                  ? "text-[#f85149]"
+                  ? "text-rose-600"
                   : metrics.dataQualityFlag === "high"
-                    ? "text-[#f0883e]"
-                    : "text-[#3fb950]";
+                    ? "text-orange-500"
+                    : "text-emerald-600";
               return (
-              <tr key={i} className="border-b border-[#21262d] hover:bg-[#1f2937]/20">
+              <tr key={i} className="border-b border-slate-100 hover:bg-slate-100/20">
                 <td className="px-2 py-1.5">
                   <TextInput value={pos.funderLender} onChange={(v) => updatePosition(i, "funderLender", v)} placeholder="Funder name..." />
                 </td>
@@ -544,16 +610,16 @@ function OpenPositions({
                   <select
                     value={pos.loanType}
                     onChange={(e) => updatePosition(i, "loanType", e.target.value)}
-                    className="w-full bg-transparent border-none outline-none text-xs text-[#e6edf3] font-mono focus:ring-0 cursor-pointer"
+                    className="w-full bg-transparent border-none outline-none text-xs text-slate-900 font-mono focus:ring-0 cursor-pointer"
                   >
-                    <option value="" className="bg-[#161b22]">—</option>
+                    <option value="" className="bg-white">—</option>
                     {pos.loanType && !LOAN_TYPES.includes(pos.loanType) && (
-                      <option key={pos.loanType} value={pos.loanType} className="bg-[#161b22]">
+                      <option key={pos.loanType} value={pos.loanType} className="bg-white">
                         {pos.loanType} (legacy)
                       </option>
                     )}
                     {LOAN_TYPES.map((t) => (
-                      <option key={t} value={t} className="bg-[#161b22]">{t}</option>
+                      <option key={t} value={t} className="bg-white">{t}</option>
                     ))}
                   </select>
                 </td>
@@ -561,16 +627,16 @@ function OpenPositions({
                   <select
                     value={pos.frequency}
                     onChange={(e) => updatePosition(i, "frequency", e.target.value)}
-                    className="w-full bg-transparent border-none outline-none text-xs text-[#e6edf3] font-mono focus:ring-0 cursor-pointer"
+                    className="w-full bg-transparent border-none outline-none text-xs text-slate-900 font-mono focus:ring-0 cursor-pointer"
                   >
-                    <option value="" className="bg-[#161b22]">—</option>
+                    <option value="" className="bg-white">—</option>
                     {pos.frequency && !PAYMENT_FREQUENCIES.includes(pos.frequency) && (
-                      <option key={pos.frequency} value={pos.frequency} className="bg-[#161b22]">
+                      <option key={pos.frequency} value={pos.frequency} className="bg-white">
                         {pos.frequency} (legacy)
                       </option>
                     )}
                     {PAYMENT_FREQUENCIES.map((f) => (
-                      <option key={f} value={f} className="bg-[#161b22]">{f}</option>
+                      <option key={f} value={f} className="bg-white">{f}</option>
                     ))}
                   </select>
                 </td>
@@ -584,21 +650,21 @@ function OpenPositions({
                   <TextInput value={pos.term} onChange={(v) => updatePosition(i, "term", v)} placeholder="Term..." />
                 </td>
                 <td className="px-2 py-1.5 w-24">
-                  <div className={`text-sm font-mono font-semibold ${derivedPctLabel ? qualityColor : "text-[#484f58]"}`}>
+                  <div className={`text-sm font-mono font-semibold ${derivedPctLabel ? qualityColor : "text-slate-400"}`}>
                     {derivedPctLabel ?? "—"}
                   </div>
                   {metrics.dataQualityFlag === "high" && (
-                    <div className="text-[9px] font-mono text-[#f0883e] mt-0.5 opacity-80">review</div>
+                    <div className="text-[9px] font-mono text-orange-500 mt-0.5 opacity-80">review</div>
                   )}
                   {metrics.dataQualityFlag === "impossible" && (
-                    <div className="text-[9px] font-mono text-[#f85149] mt-0.5 opacity-80">review inputs</div>
+                    <div className="text-[9px] font-mono text-rose-600 mt-0.5 opacity-80">review inputs</div>
                   )}
                 </td>
                 <td className="px-2 py-1.5 w-28">
                   <div className={`text-sm font-mono font-semibold ${
-                    metrics.dataQualityFlag === "impossible" ? "text-[#f85149]" :
-                    metrics.dataQualityFlag === "high" ? "text-[#f0883e]" :
-                    Number.isFinite(metrics.monthlyRemit) ? "text-[#e6edf3]" : "text-[#484f58]"
+                    metrics.dataQualityFlag === "impossible" ? "text-rose-600" :
+                    metrics.dataQualityFlag === "high" ? "text-orange-500" :
+                    Number.isFinite(metrics.monthlyRemit) ? "text-slate-900" : "text-slate-400"
                   }`}>
                     {Number.isFinite(metrics.monthlyRemit) ? formatMoney(metrics.monthlyRemit) : "—"}
                   </div>
@@ -606,7 +672,7 @@ function OpenPositions({
                 <td className="px-2 py-1.5">
                   <button
                     onClick={() => onChange(positions.filter((_, pi) => pi !== i))}
-                    className="text-[#f85149] hover:text-[#ff7b72] text-[10px] font-mono border border-[#f85149]/30 hover:border-[#f85149]/60 rounded px-2 py-0.5 transition-colors"
+                    className="text-rose-600 hover:text-rose-500 text-[10px] font-mono border border-rose-500/30 hover:border-rose-500/60 rounded px-2 py-0.5 transition-colors"
                   >
                     ×
                   </button>
@@ -618,10 +684,10 @@ function OpenPositions({
         </table>
       </div>
 
-      <div className="px-4 py-2 border-t border-[#21262d]">
+      <div className="px-4 py-2 border-t border-slate-100">
         <button
           onClick={() => onChange([...positions, emptyPosition()])}
-          className="text-xs text-[#58a6ff] hover:text-[#79c0ff] font-mono border border-[#388bfd]/30 hover:border-[#388bfd]/60 rounded px-3 py-1 transition-colors"
+          className="text-xs text-emerald-500 hover:text-emerald-400 font-mono border border-emerald-500/30 hover:border-emerald-500/60 rounded px-3 py-1 transition-colors"
         >
           + Add Position
         </button>
@@ -650,6 +716,23 @@ interface ClientOption {
   proposed_loan_type: string;
 }
 
+// Per-business projection. Multi-business clients (~1% of the book) own >1 row
+// here; for them the analyst picks which business the analysis is for. The 99%
+// single-business case auto-selects the lone (primary) row and renders no picker.
+interface BusinessOption {
+  id: string;
+  is_primary: boolean;
+  display_order: number;
+  company_name: string | null;
+  business_name: string | null;
+  legal_entity_type: string | null;
+  business_start_date: string | null;
+  company_state: string | null;
+  industry: string | null;
+  avg_monthly_deposits: number | null;
+  avg_annual_revenue: number | null;
+}
+
 export default function BankAnalysis() {
   const supabase = createClient();
   const searchParams = useSearchParams();
@@ -659,13 +742,114 @@ export default function BankAnalysis() {
   // (admin/UW "View Bank Analysis" button) auto-load the saved analysis
   // without forcing the user to scroll the dropdown.
   const initial_client_id = searchParams?.get("client") ?? "";
+  // Deep-link can carry a business id too (?client=X&business=Y) so the
+  // "View Bank Analysis" CTA from the per-business detail page lands on the
+  // correct business. Picked up by loadClient() once the businesses list is
+  // fetched; ignored if the id doesn't belong to this client.
+  const initial_business_id = searchParams?.get("business") ?? "";
   const [clientList, setClientList] = useState<ClientOption[]>([]);
   const [clientSearch, setClientSearch] = useState("");
   const [selectedClientId, setSelectedClientId] = useState(initial_client_id);
   const [loadedClientName, setLoadedClientName] = useState("");
+
+  // Multi-business state. `businesses` is the per-client list (1 row for the
+  // 99% case, N for multi-business). `selectedBusinessId` drives every
+  // business-scoped read (open positions, snapshot history, prefill) and is
+  // written onto each saved bank_analysis_results row alongside the resolved
+  // latest-open funding_deal_id.
+  const [businesses, setBusinesses] = useState<BusinessOption[]>([]);
+  const [selectedBusinessId, setSelectedBusinessId] = useState<string>("");
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+
+  // Bank analysis history (side panel). Each save creates a new snapshot;
+  // selecting one in the panel re-hydrates the form with its accounts /
+  // positions / questions. loadedSnapshotId tracks which row drove the
+  // current workspace state so the panel can highlight it.
+  interface HistorySnapshot {
+    id: string;
+    created_at: string;
+    business_name: string | null;
+    avg_revenue: number | null;
+    total_neg_days: number | null;
+    num_open_positions: number | null;
+  }
+  const [history, setHistory] = useState<HistorySnapshot[]>([]);
+  const [loadedSnapshotId, setLoadedSnapshotId] = useState<string | null>(null);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(true);
+
+  // Fetches the snapshot list for the side panel. Light projection (no
+  // jsonb columns) so it stays fast even with many rows per client.
+  //
+  // Scoping rule: when a business id is provided AND the client has >1
+  // business, filter snapshots to that business so each business gets its own
+  // history stack. When the client has a single business (or no business id
+  // is supplied — e.g. legacy callers), fall back to client-scoped to keep
+  // pre-multi-business snapshots (NULL business_profile_id) visible.
+  const refreshHistory = async (clientId: string, businessId?: string) => {
+    if (!clientId) {
+      setHistory([]);
+      return;
+    }
+    let query = supabase
+      .from("bank_analysis_results")
+      .select("id, created_at, business_name, avg_revenue, total_neg_days, num_open_positions")
+      .eq("client_id", clientId);
+    if (businessId) {
+      query = query.eq("business_profile_id", businessId);
+    }
+    const { data } = await query.order("created_at", { ascending: false });
+    setHistory((data as HistorySnapshot[]) || []);
+  };
+
+  // Loads a specific snapshot into the workspace. Pulls the full row
+  // (with jsonb payloads) on demand, since the list-projection above skips
+  // accounts_data / positions_data / questions_data.
+  const loadSnapshot = async (snapshotId: string) => {
+    const { data: snap } = await supabase
+      .from("bank_analysis_results")
+      .select("*")
+      .eq("id", snapshotId)
+      .maybeSingle();
+    if (!snap) {
+      toast.error("Snapshot not found");
+      return;
+    }
+    if (snap.accounts_data) setAccounts(snap.accounts_data);
+    if (snap.positions_data) setPositions(snap.positions_data);
+    if (snap.questions_data) setQuestions(snap.questions_data);
+    if (typeof snap.has_bankruptcy === "boolean") setHasBankruptcy(snap.has_bankruptcy);
+    if (snap.business_name) setBusinessName(snap.business_name);
+    if (snap.owner_name) setOwnerName(snap.owner_name);
+    setLoadedSnapshotId(snap.id);
+    toast.success("Snapshot loaded", {
+      description: new Date(snap.created_at).toLocaleString(),
+    });
+  };
+
+  // Removes a snapshot. Hard delete — snapshots are cheap and the analyst
+  // usually wants the bad ones gone, not archived.
+  const deleteSnapshot = async (snapshotId: string) => {
+    const { error } = await supabase
+      .from("bank_analysis_results")
+      .delete()
+      .eq("id", snapshotId);
+    if (error) {
+      toast.error("Could not delete snapshot", { description: error.message });
+      return;
+    }
+    if (loadedSnapshotId === snapshotId) setLoadedSnapshotId(null);
+    // Re-fetch with the same business scope the panel is currently showing
+    // so we don't accidentally widen back to all-client snapshots on delete.
+    if (selectedClientId) {
+      refreshHistory(
+        selectedClientId,
+        businesses.length > 1 && selectedBusinessId ? selectedBusinessId : undefined,
+      );
+    }
+    toast.success("Snapshot removed");
+  };
 
   const [businessName, setBusinessName] = useState("");
   const [ownerName, setOwnerName] = useState("");
@@ -698,9 +882,7 @@ export default function BankAnalysis() {
   // Always count backwards from previous month
   // e.g. current=March(2), previous=February(1), 3 months: [Dec(11), Jan(0), Feb(1)]
   const prevMonthIdx = (new Date().getMonth() - 1 + 12) % 12;
-  const activeMonthIndices = Array.from({ length: monthRange }, (_, i) =>
-    (prevMonthIdx - monthRange + 1 + i + 12) % 12
-  );
+  const activeMonthIndices = computeMonthIndices(prevMonthIdx, monthRange);
 
   // ── Fetch clients on mount ────────────────────────────────────────────────
   useEffect(() => {
@@ -744,47 +926,129 @@ export default function BankAnalysis() {
   }
 
   // ── Load selected client into form ───────────────────────────────────────
+  //
+  // Two-phase load:
+  //   1. Identity prefill (owner, phone, FICO, num owners, capital ask, TIB)
+  //      from client_data_vault — these are client-scoped, not business-scoped.
+  //   2. Fetch the per-business list and delegate to loadBusinessScopedData
+  //      for the resolved business. Single-business clients (99%) just get
+  //      their lone business auto-selected; multi-business honors the
+  //      ?business=<id> deep-link or falls back to the primary row.
   async function loadClient() {
     if (!selectedClientId) return;
     setIsLoading(true);
     const client = clientList.find(c => c.id === selectedClientId);
     if (!client) { setIsLoading(false); return; }
 
-    setBusinessName(client.company_name || "");
+    // Client-scoped identity fields (same regardless of which business is active).
     setOwnerName(client.owner_1_name || client.client_name || "");
     setOwnerName2(client.owner_2_name || "");
     setPhone(client.client_phone || "");
-    setState(client.company_state || "");
-    setIndustry(client.industry || "");
-
     setQuestions(q => ({
       ...q,
-      businessType: client.legal_entity_type || "",
       capitalRequested: client.capital_requested ? `$${client.capital_requested.toLocaleString()}` : "",
       numOwners: client.num_owners || "",
-      timeInBusiness: formatFullDate(client.business_start_date),
       ficoScore: client.credit_score || "",
     }));
-    setLoadedClientName(`${client.client_name} — ${client.company_name}`);
+    setLoadedClientName(`${client.company_name} — ${client.client_name}`);
 
-    // Fetch state and industry from client_data_vault
-    const { data: profile } = await supabase
-      .from("client_data_vault")
-      .select("company_state, industry, avg_monthly_deposits")
-      .eq("id", selectedClientId)
-      .single();
+    // Fetch the businesses owned by this client. Ordered so the primary
+    // surfaces first; ties broken by display_order then created_at.
+    const { data: bizRows } = await supabase
+      .from("business_profiles")
+      .select("id, is_primary, display_order, company_name, business_name, legal_entity_type, business_start_date, company_state, industry, avg_monthly_deposits, avg_annual_revenue")
+      .eq("client_vault_id", selectedClientId)
+      .order("is_primary", { ascending: false })
+      .order("display_order", { ascending: true })
+      .order("created_at", { ascending: true });
 
-    if (profile) {
-      setState(profile.company_state || "");
-      setIndustry(profile.industry || "");
+    const list = (bizRows as BusinessOption[]) || [];
+    setBusinesses(list);
+
+    // Resolve which business to load:
+    //   1. ?business=<id> deep-link, if it belongs to this client
+    //   2. primary (is_primary=true), if any
+    //   3. first in the list (post-ordering, that's primary anyway)
+    // If the client has NO business_profiles rows (shouldn't happen
+    // post-backfill, but guards against legacy data), fall back to a
+    // synthetic stub built from client_data_vault so the form still loads.
+    const deepLinked = initial_business_id && list.find(b => b.id === initial_business_id);
+    const resolved = deepLinked || list.find(b => b.is_primary) || list[0] || null;
+
+    if (resolved) {
+      setSelectedBusinessId(resolved.id);
+      await loadBusinessScopedData(resolved, client, list);
+    } else {
+      // Legacy path: no business_profiles row exists. Prefill from
+      // client_data_vault directly so the screen still works.
+      setSelectedBusinessId("");
+      setBusinessName(client.company_name || "");
+      setState(client.company_state || "");
+      setIndustry(client.industry || "");
+      setQuestions(q => ({
+        ...q,
+        businessType: client.legal_entity_type || "",
+        timeInBusiness: formatFullDate(client.business_start_date),
+      }));
+      await loadBusinessScopedData(null, client, list);
+    }
+  }
+
+  // ── Load business-scoped slice (prefill + snapshot + positions + history) ──
+  //
+  // Called from loadClient on initial load AND from the BusinessPicker when
+  // the analyst switches businesses on a multi-business client. Reads are
+  // scoped to `business?.id` when present; on legacy single-business clients
+  // (no business_profile row) we fall through to the client-scoped queries
+  // so the historical snapshots and positions stay reachable.
+  //
+  // bizList is passed as a parameter (rather than read from `businesses`
+  // state) because the caller invokes this immediately after setBusinesses,
+  // and React's state batching means the state hook hasn't flushed yet.
+  async function loadBusinessScopedData(
+    business: BusinessOption | null,
+    client: ClientOption,
+    bizList: BusinessOption[],
+  ) {
+    const isMultiBusiness = bizList.length > 1;
+    // Business-level prefill (only when we have a business row — otherwise the
+    // caller already populated from client_data_vault as a legacy fallback).
+    if (business) {
+      // company_name on business_profiles is the post-refactor source of
+      // truth; for legacy/backfilled rows it mirrors client_data_vault.
+      setBusinessName(business.company_name || business.business_name || client.company_name || "");
+      setState(business.company_state || client.company_state || "");
+      setIndustry(business.industry || client.industry || "");
+      setQuestions(q => ({
+        ...q,
+        businessType: business.legal_entity_type || client.legal_entity_type || "",
+        timeInBusiness: formatFullDate(business.business_start_date || client.business_start_date),
+      }));
     }
 
-    // 1. Attempt to fetch saved bank analysis state (the underwriter's workspace)
-    const { data: analysis } = await supabase
+    // 1. Latest saved snapshot. For multi-business clients (>1 business) we
+    //    scope by business_profile_id so each business gets its own history
+    //    stack — analyses for Acme Roofing never bleed into Acme HVAC. For
+    //    single-business clients we keep the client-scoped read so legacy
+    //    snapshots (NULL business_profile_id, predating this code) remain
+    //    visible.
+    let snapshotQuery = supabase
       .from("bank_analysis_results")
       .select("*")
-      .eq("client_id", selectedClientId)
-      .single();
+      .eq("client_id", selectedClientId);
+    if (business && isMultiBusiness) {
+      snapshotQuery = snapshotQuery.eq("business_profile_id", business.id);
+    } else if (business) {
+      // N=1 case: prefer the business-tagged snapshot if any exists, otherwise
+      // the legacy untagged ones. Postgrest `or` filter handles both.
+      snapshotQuery = snapshotQuery.or(
+        `business_profile_id.eq.${business.id},business_profile_id.is.null`,
+      );
+    }
+    const { data: analysis } = await snapshotQuery
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
     let savedPositions: OpenPosition[] = [];
     if (analysis) {
@@ -792,34 +1056,61 @@ export default function BankAnalysis() {
       if (analysis.positions_data) savedPositions = analysis.positions_data;
       if (analysis.questions_data) setQuestions(analysis.questions_data);
       if (typeof analysis.has_bankruptcy === 'boolean') setHasBankruptcy(analysis.has_bankruptcy);
+      setLoadedSnapshotId(analysis.id);
     } else {
       setAccounts([emptyAccount()]);
       setHasBankruptcy(false);
+      setLoadedSnapshotId(null);
     }
 
-    // 2. Fetch the "ground truth" from Client Vault (submitted positions)
-    const { data: dbPositions } = await supabase
+    // History side-panel: business-scoped only when multi-business; otherwise
+    // client-scoped so legacy snapshots stay in the list.
+    refreshHistory(selectedClientId, isMultiBusiness && business ? business.id : undefined);
+
+    // 2. Open positions ("ground truth" from Client Vault). Same scoping
+    //    rule: business-scoped when multi-business, client-scoped otherwise
+    //    so legacy NULL rows still show up for the 99% case.
+    let positionsQuery = supabase
       .from("client_open_positions")
       .select("*")
-      .eq("client_vault_id", selectedClientId)
+      .eq("client_vault_id", selectedClientId);
+    if (business && isMultiBusiness) {
+      positionsQuery = positionsQuery.eq("business_profile_id", business.id);
+    }
+    const { data: dbPositions } = await positionsQuery
       .order("position_number", { ascending: true });
 
     if (dbPositions && dbPositions.length > 0) {
       const mappedPositions = dbPositions.map(p => {
         // Look for matching position in saved analysis to preserve underwriter-only fields
         const saved = savedPositions.find(sp => sp.funderLender === p.lender_name);
+        // Frequency lives on client_open_positions.payment_frequency after the
+        // 20260518 migration. Fall back to a saved snapshot (for analyses that
+        // pre-date the migration) and then to the legacy payment_term text
+        // column in case it carried a recognizable cadence ("Daily" etc.).
+        const freq = p.payment_frequency || saved?.frequency || (
+          ['Daily', 'Weekly', 'Bi-Weekly', 'Monthly'].includes(p.payment_term ?? '')
+            ? p.payment_term
+            : ''
+        ) || "";
+        // Term comes from term_remaining (structured count) when present;
+        // otherwise fall back to the legacy free-text payment_term.
+        const term_value = p.term_remaining != null
+          ? String(p.term_remaining)
+          : (p.payment_term && !['Daily', 'Weekly', 'Bi-Weekly', 'Monthly'].includes(p.payment_term)
+              ? p.payment_term
+              : "");
         return {
           funderLender: p.lender_name,
           // Loan product type (MCA / Term Loan / LOC / etc.) — comes from the
           // client signup and lives on client_open_positions.loan_type.
           loanType: saved?.loanType || p.loan_type || "",
-          // Payment cadence (Daily / Weekly / Monthly) — underwriter-only field,
-          // stored in positions_data on bank_analysis_results.
-          frequency: saved?.frequency || "",
+          // Payment cadence (Daily / Weekly / Bi-Weekly / Monthly).
+          frequency: freq,
           numDebits: saved?.numDebits || "0",
           amount: p.payment_amount?.toString() || "",
           balance: p.current_balance?.toString() || "",
-          term: p.payment_term || "",
+          term: term_value,
           remitPct: saved?.remitPct || "0",
         };
       });
@@ -846,8 +1137,28 @@ export default function BankAnalysis() {
     )
     : clientList;
 
-  // Derived averages across all accounts (filtered by activeMonthIndices)
-  const activeMonthsForAllAccounts = accounts.flatMap(a => activeMonthIndices.map(mi => a.months[mi]));
+  // Active business row for any display reads that vary per-business
+  // (e.g. avg annual revenue, avg monthly deposits in the Economic Data
+  // sidebar). Falls back to the client_data_vault projection in clientList
+  // for legacy/single-business clients where business_profiles isn't the
+  // source of truth yet.
+  const activeBusiness = businesses.find(b => b.id === selectedBusinessId) || null;
+  const activeClient = clientList.find(c => c.id === selectedClientId);
+  const activeAvgAnnualRevenue =
+    activeBusiness?.avg_annual_revenue ?? activeClient?.avg_annual_revenue ?? 0;
+  const activeAvgMonthlyDeposits =
+    activeBusiness?.avg_monthly_deposits ?? activeClient?.avg_monthly_deposits ?? 0;
+
+  // Derived averages across all accounts. Each account contributes only the
+  // months inside its OWN effective window so a 5-month account doesn't
+  // dilute a 6-month sibling with phantom empty cells (and vice-versa for
+  // an extended account).
+  const accountEffectiveIndices = accounts.map((a) =>
+    computeMonthIndices(prevMonthIdx, a.monthRange ?? monthRange)
+  );
+  const activeMonthsForAllAccounts = accounts.flatMap((a, i) =>
+    accountEffectiveIndices[i].map((mi) => a.months[mi])
+  );
 
   const allDepositMonths = activeMonthsForAllAccounts.map((m) => m.totalDeposits);
   const avgRevenue = avgOfFilled(allDepositMonths);
@@ -858,10 +1169,17 @@ export default function BankAnalysis() {
   const allDepositCountMonths = activeMonthsForAllAccounts.map((m) => m.numDeposits);
   const avgMonthlyDepositsAcrossAccounts = avgOfIntegers(allDepositCountMonths);
 
-  const totalNegDaysSum = accounts.reduce((sum, acc) => {
-    return sum + activeMonthIndices.reduce((mSum, mi) => mSum + (parseInt(acc.months[mi].negativeDays) || 0), 0);
+  const totalNegDaysSum = accounts.reduce((sum, acc, i) => {
+    return sum + accountEffectiveIndices[i].reduce(
+      (mSum, mi) => mSum + (parseInt(acc.months[mi].negativeDays) || 0),
+      0,
+    );
   }, 0);
-  const avgNegDaysAcrossAccounts = totalNegDaysSum / (monthRange || 1);
+  const totalActiveMonthCells = accountEffectiveIndices.reduce(
+    (s, arr) => s + arr.length,
+    0,
+  );
+  const avgNegDaysAcrossAccounts = totalNegDaysSum / (totalActiveMonthCells || 1);
 
   const updateQ = (k: keyof QualifyingQuestions, v: string) =>
     setQuestions((q) => ({ ...q, [k]: v }));
@@ -885,30 +1203,64 @@ export default function BankAnalysis() {
       // is not valid for numeric columns.
       const safe = (n: number) => (Number.isFinite(n) ? n : 0);
 
-      const { error } = await supabase.from('bank_analysis_results').upsert({
-        client_id: selectedClientId,
-        business_name: businessName,
-        owner_name: ownerName,
-        fico: parseInt(questions.ficoScore) || 0,
-        tib_months: tibMonths || parseInt(questions.timeInBusiness) || 0,
-        avg_revenue: safe(avgRevenue),
-        avg_daily_balance: safe(avgDailyBalanceAcrossAccounts),
-        avg_monthly_deposits: safe(avgMonthlyDepositsAcrossAccounts),
-        total_neg_days: totalNegDaysSum,
-        num_open_positions: positions.filter(p => p.funderLender || p.balance).length,
-        has_bankruptcy: questions.bankruptcy.toLowerCase().includes("yes") || hasBankruptcy,
-        capital_requested: capitalRequested || parseMoney(questions.capitalRequested),
-        company_state: state,    // ← NEW — snapshot from client vault / override field
-        industry: industry,      // ← NEW — snapshot from client vault / override field
-        accounts_data: accounts,
-        positions_data: positions,
-        questions_data: questions
-      }, { onConflict: 'client_id' });
+      // Resolve the funding_deal_id to attach this snapshot to. Rule (see
+      // funding_deals refactor design): latest non-funded deal under the
+      // active business. If none exists (pre-funding stage or no deals
+      // created yet), leave NULL — the snapshot is still pinned to a
+      // business via business_profile_id which is enough for grouping.
+      // For single-business clients with no business row at all (legacy
+      // pre-backfill), both columns stay NULL.
+      let fundingDealId: string | null = null;
+      if (selectedBusinessId) {
+        const { data: openDeal } = await supabase
+          .from("funding_deals")
+          .select("id")
+          .eq("business_profile_id", selectedBusinessId)
+          .is("funded_at", null)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        fundingDealId = openDeal?.id ?? null;
+      }
+
+      // Append-only: each save creates a NEW snapshot row. The history
+      // side panel surfaces prior runs; loading a snapshot stamps
+      // loadedSnapshotId so a subsequent save shows the relationship.
+      const { data: inserted, error } = await supabase
+        .from('bank_analysis_results')
+        .insert({
+          client_id: selectedClientId,
+          business_profile_id: selectedBusinessId || null,
+          funding_deal_id: fundingDealId,
+          business_name: businessName,
+          owner_name: ownerName,
+          fico: parseInt(questions.ficoScore) || 0,
+          tib_months: tibMonths || parseInt(questions.timeInBusiness) || 0,
+          avg_revenue: safe(avgRevenue),
+          avg_daily_balance: safe(avgDailyBalanceAcrossAccounts),
+          avg_monthly_deposits: safe(avgMonthlyDepositsAcrossAccounts),
+          total_neg_days: totalNegDaysSum,
+          num_open_positions: positions.filter(p => p.funderLender || p.balance).length,
+          has_bankruptcy: questions.bankruptcy.toLowerCase().includes("yes") || hasBankruptcy,
+          capital_requested: capitalRequested || parseMoney(questions.capitalRequested),
+          company_state: state,
+          industry: industry,
+          accounts_data: accounts,
+          positions_data: positions,
+          questions_data: questions,
+        })
+        .select("id")
+        .single();
 
       if (error) {
         throw error;
       }
-      toast.success("Analysis saved", {
+      if (inserted?.id) setLoadedSnapshotId(inserted.id);
+      refreshHistory(
+        selectedClientId,
+        businesses.length > 1 && selectedBusinessId ? selectedBusinessId : undefined,
+      );
+      toast.success("Snapshot saved", {
         id: savingToastId,
         description: `${businessName || "Client"} · ${positions.filter(p => p.funderLender || p.balance).length} positions, ${accounts.length} account${accounts.length === 1 ? "" : "s"}`,
       });
@@ -1050,29 +1402,29 @@ export default function BankAnalysis() {
   ];
 
   return (
-    <div className="min-h-screen bg-[#0d1117] text-[#e6edf3]" style={{ fontFamily: "'IBM Plex Mono', 'Fira Code', monospace" }}>
+    <div className="min-h-screen bg-slate-50 text-slate-900">
       {/* Top bar */}
-      <div className="border-b border-[#30363d] bg-[#161b22]">
+      <div className="border-b border-slate-200 bg-white">
         <div className="max-w-[1600px] mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-2 h-2 rounded-full bg-[#388bfd] shadow-[0_0_8px_#388bfd]" />
-            <span className="text-sm font-bold tracking-[0.1em] uppercase text-[#e6edf3]">
+            <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]" />
+            <span className="text-sm font-bold tracking-[0.1em] uppercase text-slate-900">
               Credit Banc
             </span>
-            <span className="text-[#484f58] text-sm">/</span>
-            <span className="text-sm text-[#8b949e]">Bank Analysis</span>
+            <span className="text-slate-400 text-sm">/</span>
+            <span className="text-sm text-slate-500">Bank Analysis</span>
           </div>
           <div className="flex items-center gap-4">
             <div className="hidden sm:flex items-center gap-4">
-              <div className="flex items-center gap-2 bg-[#1c2128] border border-[#30363d] rounded-lg px-3 py-1.5">
-                <div className="w-1.5 h-1.5 rounded-full bg-[#3fb950]" />
-                <span className="text-[10px] text-[#8b949e] uppercase tracking-wider">Avg Revenue</span>
-                <span className="text-sm font-mono font-bold text-[#3fb950] ml-1">{formatMoney(avgRevenue)}</span>
+              <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5">
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                <span className="text-[10px] text-slate-500 uppercase tracking-wider">Avg Revenue</span>
+                <span className="text-sm font-mono font-bold text-emerald-600 ml-1">{formatMoney(avgRevenue)}</span>
               </div>
-              <div className="flex items-center gap-2 bg-[#1c2128] border border-[#30363d] rounded-lg px-3 py-1.5">
-                <div className="w-1.5 h-1.5 rounded-full bg-[#388bfd]" />
-                <span className="text-[10px] text-[#8b949e] uppercase tracking-wider">Avg Daily Bal</span>
-                <span className="text-sm font-mono font-bold text-[#388bfd] ml-1">{formatMoney(avgDailyBalanceAcrossAccounts)}</span>
+              <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5">
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                <span className="text-[10px] text-slate-500 uppercase tracking-wider">Avg Daily Bal</span>
+                <span className="text-sm font-mono font-bold text-emerald-600 ml-1">{formatMoney(avgDailyBalanceAcrossAccounts)}</span>
               </div>
             </div>
             {/* Moved Save Analysis to the bottom */}
@@ -1080,60 +1432,111 @@ export default function BankAnalysis() {
         </div>
       </div>
 
-      <div className="max-w-[1600px] mx-auto px-4 py-6">
+      <div className="max-w-[1600px] mx-auto px-4 py-6 flex gap-6 items-start">
+        {/* Left column — main workspace. min-w-0 lets the inner tables
+            shrink/scroll horizontally without pushing the side panel off-screen. */}
+        <div className="flex-1 min-w-0 space-y-0">
 
         {/* ── Client Selection ── */}
-        <div className="rounded-xl border border-[#30363d] bg-[#161b22] p-4 mb-6">
+        <div className="rounded-xl border border-slate-200 bg-white p-4 mb-6">
           <div className="flex items-center gap-2 mb-3">
-            <div className="w-1.5 h-1.5 rounded-full bg-[#388bfd]" />
-            <span className="text-[10px] font-bold tracking-[0.2em] uppercase text-[#388bfd]">Load Client Data</span>
+            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+            <span className="text-[10px] font-bold tracking-[0.2em] uppercase text-emerald-600">Load Client Data</span>
             {loadedClientName && (
-              <span className="ml-auto text-[10px] text-[#3fb950] font-mono">✓ Loaded: {loadedClientName}</span>
+              <span className="ml-auto text-[10px] text-emerald-600 font-mono">✓ Loaded: {loadedClientName}</span>
             )}
           </div>
           <div className="flex gap-2">
             <div className="relative flex-1">
-              <svg xmlns="http://www.w3.org/2000/svg" className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#484f58]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+              <svg xmlns="http://www.w3.org/2000/svg" className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
               <input
                 type="text"
                 value={clientSearch}
                 onChange={e => setClientSearch(e.target.value)}
                 placeholder="Search client name or company..."
-                className="w-full bg-[#0d1117] border border-[#30363d] rounded px-2 py-1.5 pl-8 text-sm text-[#e6edf3] placeholder-[#484f58] focus:outline-none focus:border-[#388bfd] transition-colors"
+                className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1.5 pl-8 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-emerald-500 transition-colors"
               />
             </div>
             <select
               value={selectedClientId}
               onChange={e => setSelectedClientId(e.target.value)}
-              className="flex-1 bg-[#0d1117] border border-[#30363d] rounded px-2 py-1.5 text-sm text-[#e6edf3] focus:outline-none focus:border-[#388bfd] transition-colors font-mono"
+              className="flex-1 bg-slate-50 border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-900 focus:outline-none focus:border-emerald-500 transition-colors font-mono"
             >
               <option value="">— Select client —</option>
               {filteredClients.map(c => (
                 <option key={c.id} value={c.id}>
-                  {c.client_name} · {c.company_name}
+                  {c.company_name} · {c.client_name}
                 </option>
               ))}
             </select>
             <button
               onClick={loadClient}
               disabled={!selectedClientId || isLoading}
-              className="px-4 py-1.5 rounded text-xs font-bold tracking-wider uppercase bg-[#388bfd] hover:bg-[#58a6ff] disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors whitespace-nowrap"
+              className="px-4 py-1.5 rounded text-xs font-bold tracking-wider uppercase bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors whitespace-nowrap"
             >
               {isLoading ? "Loading..." : "Load →"}
             </button>
           </div>
         </div>
 
+        {/* ── Business Picker ──
+            Only renders for the ~1% of clients with >1 business. The 99%
+            single-business case never sees this control — the lone business
+            is auto-selected by loadClient and the screen looks identical
+            to pre-multi-business. Switching businesses re-scopes the
+            snapshot, history, positions, and prefill via
+            loadBusinessScopedData. */}
+        {businesses.length > 1 && (
+          <div className="rounded-xl border border-slate-200 bg-white p-4 mb-6">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+              <span className="text-[10px] font-bold tracking-[0.2em] uppercase text-amber-600">
+                Business · {businesses.length} on file
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {businesses.map((b) => {
+                const label = b.company_name || b.business_name || "(Unnamed business)";
+                const isActive = b.id === selectedBusinessId;
+                return (
+                  <button
+                    key={b.id}
+                    onClick={async () => {
+                      if (isActive || isLoading) return;
+                      const client = clientList.find(c => c.id === selectedClientId);
+                      if (!client) return;
+                      setIsLoading(true);
+                      setSelectedBusinessId(b.id);
+                      await loadBusinessScopedData(b, client, businesses);
+                    }}
+                    disabled={isLoading}
+                    className={
+                      "px-3 py-1.5 rounded text-xs font-mono border transition-colors disabled:opacity-40 disabled:cursor-not-allowed " +
+                      (isActive
+                        ? "bg-emerald-500 border-emerald-500 text-white"
+                        : "bg-slate-50 border-slate-200 text-slate-700 hover:border-emerald-500 hover:text-emerald-600")
+                    }
+                    title={b.is_primary ? "Primary business" : undefined}
+                  >
+                    {b.is_primary && <span className="opacity-60 mr-1">★</span>}
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Business & Financial Information */}
-        <div className="rounded-xl border border-[#30363d] bg-[#161b22] p-5 mb-6 shadow-xl">
+        <div className="rounded-xl border border-slate-200 bg-white p-5 mb-6 shadow-xl">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
             {/* Left Column: Business Details */}
             <div className="lg:col-span-8 space-y-6">
               <div>
                 <div className="flex items-center gap-2 mb-4">
-                  <div className="w-1.5 h-6 bg-[#388bfd] rounded-full" />
-                  <h3 className="text-xs font-bold tracking-[0.2em] uppercase text-[#e6edf3]">Business & Contact Details</h3>
+                  <div className="w-1.5 h-6 bg-emerald-500 rounded-full" />
+                  <h3 className="text-xs font-bold tracking-[0.2em] uppercase text-slate-900">Business & Contact Details</h3>
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                   {[
@@ -1145,8 +1548,8 @@ export default function BankAnalysis() {
                     { label: "Referred By", value: referredBy, onChange: setReferredBy },
                   ].map((f) => (
                     <div key={f.label}>
-                      <label className="text-[9px] text-[#8b949e] uppercase tracking-widest block mb-1.5">{f.label}</label>
-                      <TextInput value={f.value} onChange={f.onChange} placeholder={f.label} className="!bg-[#0d1117]/50" />
+                      <label className="text-[9px] text-slate-500 uppercase tracking-widest block mb-1.5">{f.label}</label>
+                      <TextInput value={f.value} onChange={f.onChange} placeholder={f.label} className="!bg-slate-50/50" />
                     </div>
                   ))}
                 </div>
@@ -1154,46 +1557,46 @@ export default function BankAnalysis() {
 
               <div>
                 <div className="flex items-center gap-2 mb-4">
-                  <div className="w-1.5 h-6 bg-[#d29922] rounded-full" />
-                  <h3 className="text-xs font-bold tracking-[0.2em] uppercase text-[#e6edf3]">Underwriting Profile</h3>
+                  <div className="w-1.5 h-6 bg-amber-500 rounded-full" />
+                  <h3 className="text-xs font-bold tracking-[0.2em] uppercase text-slate-900">Underwriting Profile</h3>
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div>
-                    <label className="text-[9px] text-[#8b949e] uppercase tracking-widest block mb-1.5">Capital Requested</label>
+                    <label className="text-[9px] text-slate-500 uppercase tracking-widest block mb-1.5">Capital Requested</label>
                     <TextInput value={questions.capitalRequested} onChange={v => updateQ("capitalRequested", v)} placeholder="$0" />
                   </div>
                   <div>
-                    <label className="text-[9px] text-[#8b949e] uppercase tracking-widest block mb-1.5">FICO Score</label>
+                    <label className="text-[9px] text-slate-500 uppercase tracking-widest block mb-1.5">FICO Score</label>
                     <TextInput value={questions.ficoScore} onChange={v => updateQ("ficoScore", v)} placeholder="e.g. 700+" />
                   </div>
                   <div>
-                    <label className="text-[9px] text-[#8b949e] uppercase tracking-widest block mb-1.5">Business Start Date (TIB)</label>
+                    <label className="text-[9px] text-slate-500 uppercase tracking-widest block mb-1.5">Business Start Date (TIB)</label>
                     <TextInput value={questions.timeInBusiness} onChange={v => updateQ("timeInBusiness", v)} placeholder="Full date..." />
                   </div>
                   <div>
-                    <label className="text-[9px] text-[#8b949e] uppercase tracking-widest block mb-1.5"># of Owners</label>
+                    <label className="text-[9px] text-slate-500 uppercase tracking-widest block mb-1.5"># of Owners</label>
                     <TextInput value={questions.numOwners} onChange={v => updateQ("numOwners", v)} placeholder="e.g. 1" />
                   </div>
                   <div>
-                    <label className="text-[9px] text-[#8b949e] uppercase tracking-widest block mb-1.5">Entity Type</label>
+                    <label className="text-[9px] text-slate-500 uppercase tracking-widest block mb-1.5">Entity Type</label>
                     <TextInput value={questions.businessType} onChange={v => updateQ("businessType", v)} placeholder="LLC, Corp..." />
                   </div>
                   <div>
-                    <label className="text-[9px] text-[#8b949e] uppercase tracking-widest block mb-1.5">Industry</label>
+                    <label className="text-[9px] text-slate-500 uppercase tracking-widest block mb-1.5">Industry</label>
                     <TextInput value={industry} onChange={setIndustry} placeholder="Industry type..." />
                   </div>
                   <div>
-                    <label className="text-[9px] text-[#8b949e] uppercase tracking-widest block mb-1.5">Proposed Loan Type</label>
-                    <div className="w-full bg-[#0d1117] border border-[#30363d] rounded px-2 py-1 text-sm text-[#e6edf3] min-h-[30px] flex items-center">
+                    <label className="text-[9px] text-slate-500 uppercase tracking-widest block mb-1.5">Proposed Loan Type</label>
+                    <div className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 text-sm text-slate-900 min-h-[30px] flex items-center">
                       {clientList.find(c => c.id === selectedClientId)?.proposed_loan_type || "—"}
                     </div>
                   </div>
                   <div>
-                    <label className="text-[9px] text-[#8b949e] uppercase tracking-widest block mb-1.5">Bankruptcy History</label>
+                    <label className="text-[9px] text-slate-500 uppercase tracking-widest block mb-1.5">Bankruptcy History</label>
                     <TextInput value={questions.bankruptcy} onChange={v => updateQ("bankruptcy", v)} placeholder="No..." />
                   </div>
                   <div>
-                    <label className="text-[9px] text-[#8b949e] uppercase tracking-widest block mb-1.5">Default History</label>
+                    <label className="text-[9px] text-slate-500 uppercase tracking-widest block mb-1.5">Default History</label>
                     <TextInput value={questions.modifiedOrDefaulted} onChange={v => updateQ("modifiedOrDefaulted", v)} placeholder="None..." />
                   </div>
                 </div>
@@ -1201,46 +1604,46 @@ export default function BankAnalysis() {
             </div>
 
             {/* Right Column: Economic Summary */}
-            <div className="lg:col-span-4 lg:border-l lg:border-[#30363d] lg:pl-6">
+            <div className="lg:col-span-4 lg:border-l lg:border-slate-200 lg:pl-6">
               <div className="sticky top-4 space-y-4">
                 <div className="flex items-center gap-2 mb-4">
-                  <div className="w-1.5 h-6 bg-[#3fb950] rounded-full" />
-                  <h3 className="text-xs font-bold tracking-[0.2em] uppercase text-[#e6edf3]">Economic Data</h3>
+                  <div className="w-1.5 h-6 bg-emerald-500 rounded-full" />
+                  <h3 className="text-xs font-bold tracking-[0.2em] uppercase text-slate-900">Economic Data</h3>
                 </div>
 
                 <div className="space-y-3">
-                  <div className="p-3 rounded-lg bg-[#0d1117] border border-[#30363d] hover:border-[#3fb950]/30 transition-colors">
-                    <span className="text-[9px] text-[#8b949e] uppercase tracking-widest block mb-1">Avg Annual Revenue (Vault)</span>
-                    <span className="text-xl font-mono font-bold text-[#c9d1d9]">
-                      {clientList.find(c => c.id === selectedClientId)?.avg_annual_revenue ? formatMoney(clientList.find(c => c.id === selectedClientId)!.avg_annual_revenue) : "—"}
+                  <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 hover:border-emerald-500/30 transition-colors">
+                    <span className="text-[9px] text-slate-500 uppercase tracking-widest block mb-1">Avg Annual Revenue (Vault)</span>
+                    <span className="text-xl font-mono font-bold text-slate-700">
+                      {activeAvgAnnualRevenue ? formatMoney(activeAvgAnnualRevenue) : "—"}
                     </span>
                   </div>
-                  <div className="p-3 rounded-lg bg-[#0d1117] border border-[#30363d] hover:border-[#3fb950]/30 transition-colors">
-                    <span className="text-[9px] text-[#8b949e] uppercase tracking-widest block mb-1">Avg Monthly Revenue (Analysis/Vault)</span>
-                    <span className="text-xl font-mono font-bold text-[#3fb950]">
-                      {avgRevenue > 0 ? formatMoney(avgRevenue) : (clientList.find(c => c.id === selectedClientId)?.avg_monthly_deposits ? formatMoney(clientList.find(c => c.id === selectedClientId)!.avg_monthly_deposits) : "—")}
+                  <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 hover:border-emerald-500/30 transition-colors">
+                    <span className="text-[9px] text-slate-500 uppercase tracking-widest block mb-1">Avg Monthly Revenue (Analysis/Vault)</span>
+                    <span className="text-xl font-mono font-bold text-emerald-600">
+                      {avgRevenue > 0 ? formatMoney(avgRevenue) : (activeAvgMonthlyDeposits ? formatMoney(activeAvgMonthlyDeposits) : "—")}
                     </span>
                   </div>
-                  <div className="p-3 rounded-lg bg-[#0d1117] border border-[#30363d] hover:border-[#388bfd]/30 transition-colors">
-                    <span className="text-[9px] text-[#8b949e] uppercase tracking-widest block mb-1">Avg Daily Balance</span>
-                    <span className="text-xl font-mono font-bold text-[#388bfd]">{formatMoney(avgDailyBalanceAcrossAccounts)}</span>
+                  <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 hover:border-emerald-500/30 transition-colors">
+                    <span className="text-[9px] text-slate-500 uppercase tracking-widest block mb-1">Avg Daily Balance</span>
+                    <span className="text-xl font-mono font-bold text-emerald-600">{formatMoney(avgDailyBalanceAcrossAccounts)}</span>
                   </div>
-                  <div className="p-3 rounded-lg bg-[#0d1117] border border-[#30363d] hover:border-[#d29922]/30 transition-colors">
-                    <span className="text-[9px] text-[#8b949e] uppercase tracking-widest block mb-1">Avg Monthly Deposits</span>
-                    <span className="text-xl font-mono font-bold text-[#d29922]">{avgMonthlyDepositsAcrossAccounts.toFixed(1)}</span>
+                  <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 hover:border-amber-500/30 transition-colors">
+                    <span className="text-[9px] text-slate-500 uppercase tracking-widest block mb-1">Avg Monthly Deposits</span>
+                    <span className="text-xl font-mono font-bold text-amber-600">{avgMonthlyDepositsAcrossAccounts.toFixed(1)}</span>
                   </div>
-                  <div className="p-3 rounded-lg bg-[#0d1117] border border-[#30363d] hover:border-[#f85149]/30 transition-colors">
-                    <span className="text-[9px] text-[#8b949e] uppercase tracking-widest block mb-1">Total Negative Days</span>
-                    <span className={`text-xl font-mono font-bold ${totalNegDaysSum > 0 ? "text-[#f85149]" : "text-[#8b949e]"}`}>
+                  <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 hover:border-rose-500/30 transition-colors">
+                    <span className="text-[9px] text-slate-500 uppercase tracking-widest block mb-1">Total Negative Days</span>
+                    <span className={`text-xl font-mono font-bold ${totalNegDaysSum > 0 ? "text-rose-600" : "text-slate-500"}`}>
                       {totalNegDaysSum.toString()}
                     </span>
                   </div>
                 </div>
 
                 <div className="pt-2">
-                  <div className="flex items-center justify-between text-[10px] text-[#8b949e] uppercase tracking-widest mb-1 px-1">
+                  <div className="flex items-center justify-between text-[10px] text-slate-500 uppercase tracking-widest mb-1 px-1">
                     <span>State (Override)</span>
-                    <span className="font-mono text-[#c9d1d9]">{state || "N/A"}</span>
+                    <span className="font-mono text-slate-700">{state || "N/A"}</span>
                   </div>
                 </div>
               </div>
@@ -1249,14 +1652,14 @@ export default function BankAnalysis() {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 mb-6 border-b border-[#30363d] pb-0">
+        <div className="flex gap-1 mb-6 border-b border-slate-200 pb-0">
           {TABS.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={`px-4 py-2 text-xs font-medium tracking-wider uppercase transition-all border-b-2 -mb-px ${activeTab === tab.id
-                ? "text-[#58a6ff] border-[#388bfd]"
-                : "text-[#8b949e] border-transparent hover:text-[#c9d1d9]"
+                ? "text-emerald-500 border-emerald-500"
+                : "text-slate-500 border-transparent hover:text-slate-700"
                 }`}
             >
               {tab.label}
@@ -1269,20 +1672,25 @@ export default function BankAnalysis() {
           <div>
             {/* Month range selector */}
             <div className="flex items-center gap-2 mb-4">
-              <span className="text-[10px] text-[#8b949e] uppercase tracking-wider font-mono">Range:</span>
+              <span className="text-[10px] text-slate-500 uppercase tracking-wider font-mono">Range:</span>
               {([3, 6, 8, 12] as const).map(n => (
                 <button
                   key={n}
-                  onClick={() => setMonthRange(n)}
+                  onClick={() => {
+                    // Clicking a global preset re-syncs every account back to
+                    // the global window, blowing away per-account overrides.
+                    setMonthRange(n);
+                    setAccounts((prev) => prev.map((a) => ({ ...a, monthRange: undefined })));
+                  }}
                   className={`px-3 py-1 rounded text-xs font-mono font-bold tracking-wider transition-all ${monthRange === n
-                    ? "bg-[#388bfd] text-white shadow-[0_0_8px_#388bfd50]"
-                    : "bg-[#1c2128] text-[#8b949e] border border-[#30363d] hover:border-[#388bfd]/40 hover:text-[#c9d1d9]"
+                    ? "bg-emerald-500 text-white shadow-[0_0_8px_rgba(16,185,129,0.4)]"
+                    : "bg-slate-50 text-slate-500 border border-slate-200 hover:border-emerald-500/40 hover:text-slate-700"
                     }`}
                 >
                   {n} Mo
                 </button>
               ))}
-              <span className="text-[10px] text-[#484f58] font-mono ml-1">
+              <span className="text-[10px] text-slate-400 font-mono ml-1">
                 {MONTHS[activeMonthIndices[0]].slice(0, 3)} → {MONTHS[activeMonthIndices[activeMonthIndices.length - 1]].slice(0, 3)}
               </span>
             </div>
@@ -1295,12 +1703,13 @@ export default function BankAnalysis() {
                 onChange={(a) => setAccounts(accounts.map((ac, ai) => (ai === i ? a : ac)))}
                 onRemove={() => setAccounts(accounts.filter((_, ai) => ai !== i))}
                 canRemove={accounts.length > 1}
-                activeMonthIndices={activeMonthIndices}
+                prevMonthIdx={prevMonthIdx}
+                globalRange={monthRange}
               />
             ))}
             <button
               onClick={() => setAccounts([...accounts, emptyAccount()])}
-              className="w-full rounded-xl border border-dashed border-[#30363d] hover:border-[#388bfd]/50 py-3 text-xs text-[#8b949e] hover:text-[#58a6ff] transition-all font-mono tracking-wider uppercase"
+              className="w-full rounded-xl border border-dashed border-slate-200 hover:border-emerald-500/50 py-3 text-xs text-slate-500 hover:text-emerald-500 transition-all font-mono tracking-wider uppercase"
             >
               + Add Bank Account
             </button>
@@ -1318,7 +1727,7 @@ export default function BankAnalysis() {
           <button
             onClick={exportToPDF}
             disabled={isExporting}
-            className="flex items-center justify-center gap-3 px-8 py-4 font-bold text-[#e6edf3] bg-[#30363d] hover:bg-[#484f58] border border-[#6e7681]/40 rounded-2xl text-xs uppercase tracking-[0.2em] shadow-2xl shadow-black/20 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-40 disabled:hover:scale-100 group"
+            className="flex items-center justify-center gap-3 px-8 py-4 font-bold text-slate-900 bg-slate-200 hover:bg-slate-300 border border-slate-300/40 rounded-2xl text-xs uppercase tracking-[0.2em] shadow-2xl shadow-black/20 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-40 disabled:hover:scale-100 group"
           >
             {isExporting ? (
               <>
@@ -1336,7 +1745,8 @@ export default function BankAnalysis() {
           <button
             onClick={saveAnalysis}
             disabled={isSaving || !selectedClientId}
-            className="flex items-center justify-center gap-3 px-10 py-4 font-bold text-white bg-[#238636] hover:bg-[#2ea043] border border-[#2ea043]/50 rounded-2xl text-xs uppercase tracking-[0.2em] shadow-2xl shadow-[#238636]/20 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-40 disabled:hover:scale-100 group"
+            title="Each save appends a new snapshot to the history — prior runs stay browsable in the panel on the right."
+            className="flex items-center justify-center gap-3 px-10 py-4 font-bold text-white bg-emerald-600 hover:bg-emerald-700 border border-emerald-600/50 rounded-2xl text-xs uppercase tracking-[0.2em] shadow-2xl shadow-emerald-600/20 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-40 disabled:hover:scale-100 group"
           >
             {isSaving ? (
               <>
@@ -1351,6 +1761,108 @@ export default function BankAnalysis() {
             )}
           </button>
         </div>
+
+        </div>{/* ── /Left column ── */}
+
+        {/* ── History side panel ──────────────────────────────────────────
+            Shows every saved snapshot for the loaded client. Each save
+            appends a new row (no more upsert-on-client_id), so the analyst
+            can scroll back through prior runs, click to re-hydrate the
+            workspace, and delete throwaway versions. Auto-hides until a
+            client is loaded — empty panel adds noise. */}
+        {selectedClientId && (
+          <aside className={`flex-shrink-0 transition-all ${isHistoryOpen ? "w-72" : "w-10"}`}>
+            <div className="sticky top-6 rounded-xl border border-slate-200 bg-white overflow-hidden">
+              <div className="flex items-center justify-between px-3 py-2.5 border-b border-slate-200 bg-slate-50">
+                {isHistoryOpen ? (
+                  <>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                      <span className="text-[10px] font-bold tracking-[0.15em] uppercase text-emerald-600 truncate">
+                        History · {history.length}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsHistoryOpen(false)}
+                      title="Collapse history panel"
+                      className="text-slate-500 hover:text-slate-700 text-xs px-1 leading-none transition-colors"
+                    >
+                      ›
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setIsHistoryOpen(true)}
+                    title="Expand history panel"
+                    className="w-full text-center text-[10px] font-bold tracking-widest uppercase text-emerald-600 hover:text-emerald-500 transition-colors"
+                  >
+                    ‹
+                  </button>
+                )}
+              </div>
+
+              {isHistoryOpen && (
+                <div className="max-h-[calc(100vh-200px)] overflow-y-auto p-2 space-y-1.5">
+                  {history.length === 0 ? (
+                    <p className="text-[10px] text-slate-400 font-mono uppercase tracking-wider text-center py-6">
+                      No snapshots yet.<br />Click <span className="text-emerald-600">Save</span> to create one.
+                    </p>
+                  ) : (
+                    history.map((snap, i) => {
+                      const isCurrent = snap.id === loadedSnapshotId;
+                      const created = new Date(snap.created_at);
+                      const dateStr = created.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+                      const timeStr = created.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+                      return (
+                        <div
+                          key={snap.id}
+                          className={`group rounded-lg border px-2.5 py-2 cursor-pointer transition-all ${
+                            isCurrent
+                              ? "bg-emerald-500/10 border-emerald-500/40 shadow-[0_0_0_1px_rgba(16,185,129,0.3)]"
+                              : "bg-slate-50 border-slate-200 hover:border-emerald-500/40 hover:bg-slate-50"
+                          }`}
+                          onClick={() => loadSnapshot(snap.id)}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className={`text-[10px] font-mono font-bold tracking-wider ${isCurrent ? "text-emerald-500" : "text-slate-700"}`}>
+                              {dateStr} · {timeStr}
+                            </span>
+                            <span className={`text-[9px] font-mono ${isCurrent ? "text-emerald-500" : "text-slate-400"}`}>
+                              v{history.length - i}
+                            </span>
+                          </div>
+                          <div className="mt-1 text-[10px] font-mono text-slate-500 truncate">
+                            {snap.business_name || "—"}
+                          </div>
+                          <div className="mt-1 flex items-center gap-2 text-[9px] font-mono text-slate-400">
+                            <span>Rev {formatMoney(Number(snap.avg_revenue) || 0)}</span>
+                            <span>·</span>
+                            <span>{snap.num_open_positions ?? 0} pos</span>
+                            <span>·</span>
+                            <span>{snap.total_neg_days ?? 0} neg</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deleteSnapshot(snap.id);
+                            }}
+                            title="Delete snapshot"
+                            className="opacity-0 group-hover:opacity-100 mt-1 text-[9px] font-mono uppercase tracking-wider text-slate-400 hover:text-rose-600 transition-all"
+                          >
+                            delete
+                          </button>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              )}
+            </div>
+          </aside>
+        )}
 
       </div>
     </div>

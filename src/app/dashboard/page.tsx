@@ -17,6 +17,10 @@ import WebsiteTour from '@/components/tour/website-tour';
 import { Button } from '@/components/ui/button';
 import { LoanPipelineFull } from '@/components/loan-pipeline-status';
 import { getClientPipelineHistory, updateLoanStatus, PipelineStatusEntry, LoanStatus } from '@/app/actions/pipeline';
+import { BusinessTabStrip, type BusinessTab } from '@/app/advisor/dashboard/clients/[id]/_components/business-tab-strip';
+import { CollapsibleSection, broadcast_toggle_all } from '@/app/advisor/dashboard/clients/[id]/_components/collapsible-section';
+import { PendingContractsBanner } from '@/components/onboarding/pending-contracts-banner';
+import { PendingContractsModal } from '@/components/onboarding/pending-contracts-modal';
 
 import { Suspense } from 'react';
 
@@ -48,22 +52,22 @@ function DashboardContent() {
   const [pipelineHistory, setPipelineHistory] = useState<PipelineStatusEntry[]>([]);
   const [currentStatus, setCurrentStatus] = useState<LoanStatus>("created");
 
+  // Multi-business: tabs for clients who have more than one business under their
+  // account. Single-business clients see no UI difference (the strip is hidden).
+  const [businesses, setBusinesses] = useState<BusinessTab[]>([]);
+  const [activeBusinessId, setActiveBusinessId] = useState<string | null>(null);
+
   useEffect(() => {
     async function fetchPipeline() {
       if (vaultId) {
-        let history = await getClientPipelineHistory(vaultId);
-        
-        // Check if we need to auto-advance to "documents_requested"
-        const latestStatus = history.length > 0 ? history[history.length - 1].status : "created";
-        
-        if (latestStatus === "created" || latestStatus === "onboarding") {
-          const result = await updateLoanStatus(vaultId, "documents_requested", "Auto-transitioned on vault access");
-          if (result.success) {
-            // Re-fetch history to get the new entry
-            history = await getClientPipelineHistory(vaultId);
-          }
-        }
-        
+        const history = await getClientPipelineHistory(vaultId);
+        // Pipeline transitions are owned by their real-world events now:
+        //   created     → onboarding         : onboarding-gate, on first vault access
+        //   onboarding  → documents_requested: signwell-contract webhook on signature
+        //                                      (also /api/onboarding/complete as fallback)
+        //   docs_*      → docs_received      : uploads route, on first upload
+        // No auto-advance from the dashboard mount — that masked the real event
+        // and could re-fire if pipeline was ever moved back manually.
         setPipelineHistory(history);
         if (history.length > 0) {
           setCurrentStatus(history[history.length - 1].status);
@@ -72,6 +76,31 @@ function DashboardContent() {
     }
     fetchPipeline();
   }, [vaultId]);
+
+  // Fetch businesses for this client (drives the tab strip).
+  useEffect(() => {
+    if (!vaultId) return;
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from('business_profiles')
+        .select('id, company_name, is_primary, display_order')
+        .eq('client_vault_id', vaultId)
+        .order('is_primary', { ascending: false })
+        .order('display_order', { ascending: true })
+        .order('created_at', { ascending: true });
+      if (cancelled) return;
+      if (error) {
+        console.error('Error fetching businesses for client dashboard:', error);
+        return;
+      }
+      const rows = (data || []) as BusinessTab[];
+      setBusinesses(rows);
+      const primary = rows.find((b) => b.is_primary) || rows[0];
+      if (primary) setActiveBusinessId(primary.id);
+    })();
+    return () => { cancelled = true; };
+  }, [vaultId, supabase]);
 
   const handleChecklist = useCallback((info: { progress: number; complete: boolean; isSubmitted?: boolean }) => {
     setIsVaultSubmitted(!!info.isSubmitted && info.complete);
@@ -187,38 +216,109 @@ function DashboardContent() {
           </div>
         </div>
 
+        {/* Auto-opening contract-signing modal. Fires on dashboard mount
+            when the advisor has added a business with a pending Signwell
+            contract. Closes to the always-visible banner below, so the
+            client can still complete signing later from the same screen. */}
+        <PendingContractsModal clientVaultId={vaultId} />
+
         {/* CONTENT AREA */}
         {activeTab === 'dashboard' && (
-          <div className="space-y-8">
-            <div className="grid gap-8">
-              <AdvisorDisplay onLoad={onAdvisorLoad} />
+          <div className="space-y-4">
+            {/* Pending-contract banner — fallback for when the modal has
+                been dismissed. Same source of truth (usePendingContracts)
+                so the banner reflects the modal's state automatically. */}
+            <PendingContractsBanner clientVaultId={vaultId} />
 
-              <ProfileDisplay onLoad={onProfileLoad} />
+            {/* Section folding controls — broadcasts an event to every
+                CollapsibleSection on the page so the client can blow open or
+                collapse everything in one click. */}
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => broadcast_toggle_all(true)}
+                className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 hover:text-emerald-600 transition-colors px-3 py-1.5 rounded-lg border border-slate-200 bg-white shadow-sm"
+              >
+                Expand all
+              </button>
+              <button
+                type="button"
+                onClick={() => broadcast_toggle_all(false)}
+                className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 hover:text-emerald-600 transition-colors px-3 py-1.5 rounded-lg border border-slate-200 bg-white shadow-sm"
+              >
+                Collapse all
+              </button>
             </div>
 
-            {/* PIPELINE VISUALIZATION */}
-            <Card className="bg-white border-emerald-50 overflow-hidden rounded-[2.5rem] shadow-sm">
-              <CardHeader className="pb-4 pt-10 px-10">
-                <CardTitle className="text-2xl font-black text-emerald-950 tracking-tighter uppercase">Application Status</CardTitle>
-                <p className="text-emerald-900/60 font-bold">Track your application progress through our underwriting pipeline.</p>
-              </CardHeader>
-              <CardContent className="px-10 pb-10">
-                <LoanPipelineFull 
-                  currentStatus={currentStatus} 
-                  history={pipelineHistory} 
-                  showAllSteps={false}
-                />
-              </CardContent>
-            </Card>
+            <CollapsibleSection
+              clientId={vaultId || 'self'}
+              slug="advisor"
+              title="Your Advisor"
+              defaultOpen
+            >
+              <AdvisorDisplay onLoad={onAdvisorLoad} />
+            </CollapsibleSection>
 
-            <Card className="bg-white border-emerald-50 overflow-hidden rounded-[2.5rem] shadow-sm">
-              <CardHeader className="pb-0 pt-10 px-10">
-                <CardTitle className="text-2xl font-black text-emerald-950 tracking-tighter uppercase">DOCUMENT VAULT</CardTitle>
-              </CardHeader>
-              <CardContent className="p-10 pt-6">
-                <Vault clientName={clientName} onLoad={onVaultLoad} onChecklist={handleChecklist} />
-              </CardContent>
-            </Card>
+            <CollapsibleSection
+              clientId={vaultId || 'self'}
+              slug="profile"
+              title="Business Profile"
+              defaultOpen
+            >
+              <ProfileDisplay onLoad={onProfileLoad} />
+            </CollapsibleSection>
+
+            <CollapsibleSection
+              clientId={vaultId || 'self'}
+              slug="pipeline"
+              title="Application Status"
+              summary={currentStatus ? currentStatus.replace(/_/g, ' ') : undefined}
+              defaultOpen
+            >
+              <Card className="bg-white border-emerald-50 overflow-hidden rounded-[2.5rem] shadow-sm">
+                <CardHeader className="pb-4 pt-10 px-10">
+                  <CardTitle className="text-2xl font-black text-emerald-950 tracking-tighter uppercase">Application Status</CardTitle>
+                  <p className="text-emerald-900/60 font-bold">Track your application progress through our underwriting pipeline.</p>
+                </CardHeader>
+                <CardContent className="px-10 pb-10">
+                  <LoanPipelineFull
+                    currentStatus={currentStatus}
+                    history={pipelineHistory}
+                    showAllSteps={false}
+                  />
+                </CardContent>
+              </Card>
+            </CollapsibleSection>
+
+            <CollapsibleSection
+              clientId={vaultId || 'self'}
+              slug="vault"
+              title="Document Vault"
+              defaultOpen
+            >
+              <Card className="bg-white border-emerald-50 overflow-hidden rounded-[2.5rem] shadow-sm">
+                <CardHeader className="pb-0 pt-10 px-10">
+                  <CardTitle className="text-2xl font-black text-emerald-950 tracking-tighter uppercase">DOCUMENT VAULT</CardTitle>
+                </CardHeader>
+                <CardContent className="p-10 pt-6">
+                  {/* Business tabs — only render when the client has multiple
+                      businesses. No "Add" button on the client side (advisor-only). */}
+                  <BusinessTabStrip
+                    businesses={businesses}
+                    active_business_id={activeBusinessId}
+                    on_select={setActiveBusinessId}
+                    show_when_single={false}
+                  />
+                  <Vault
+                    clientName={clientName}
+                    onLoad={onVaultLoad}
+                    onChecklist={handleChecklist}
+                    activeBusinessId={activeBusinessId}
+                  />
+                </CardContent>
+              </Card>
+            </CollapsibleSection>
+
             {isVaultSubmitted && <MyScoreIQCarousel />}
           </div>
         )}

@@ -34,8 +34,11 @@ export async function POST(request: Request) {
 
             if (vault) {
                 const { updateLoanStatus } = await import('@/app/actions/pipeline');
-                await updateLoanStatus(vault.id, 'onboarding', 'Client completed onboarding (Profile & Contract)');
-                console.log('✅ Pipeline status updated to "onboarding" (complete)');
+                // Onboarding is now finished — advance the pipeline past the
+                // onboarding stage into documents_requested. The dashboard's
+                // auto-transition becomes a no-op once this runs.
+                await updateLoanStatus(vault.id, 'documents_requested', 'Client completed onboarding (Profile & Contract)');
+                console.log('✅ Pipeline status advanced past onboarding → documents_requested');
             }
         } catch (pipeline_error) {
             console.error('⚠️ Error updating pipeline status (non-fatal):', pipeline_error);

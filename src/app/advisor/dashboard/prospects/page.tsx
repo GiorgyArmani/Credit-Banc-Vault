@@ -12,6 +12,7 @@ import { getBulkClientActivity } from "@/app/actions/advisor";
 import { LoanPipelineBadge } from "@/components/loan-pipeline-status";
 import { ActivityAgeBadge } from "@/components/advisor/activity-age-badge";
 import { differenceInDays } from "date-fns";
+import { normalizeSupabaseJoin } from "@/lib/document-scope";
 
 function format_currency(amount: number): string {
     return new Intl.NumberFormat("en-US", {
@@ -219,7 +220,12 @@ export default function ProspectsListPage() {
                         .eq("user_id", client.user_id)
                         .eq("is_active", true);
 
-                    const dynamicCodes = (dynamicDocs as any)?.map((d: any) => d.required_documents?.code).filter(Boolean) || [];
+                    // normalizeSupabaseJoin handles SDK array-vs-object embed
+                    // variance. Without it the dynamic-doc completion counter
+                    // reads as zero for every prospect.
+                    const dynamicCodes = (dynamicDocs as any[] | null)
+                        ?.map((d: any) => normalizeSupabaseJoin<{ code?: string }>(d.required_documents)?.code)
+                        .filter((c: string | undefined): c is string => !!c) || [];
                     const allRequiredCodes = new Set([...coreCodes, ...dynamicCodes]);
 
                     const { data: uploadedDocs } = await supabase

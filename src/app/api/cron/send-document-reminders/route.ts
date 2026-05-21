@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { calculateOutstandingDocuments } from "@/lib/outstanding-documents";
+import { calculateOutstandingDocumentsByBusiness } from "@/lib/outstanding-documents";
 import { send_outstanding_docs_reminder_email } from "@/lib/email";
 
 // Cadence rules (per user spec):
@@ -215,7 +215,12 @@ export async function GET(req: Request) {
                 }
             }
 
-            const missingDocs = await calculateOutstandingDocuments(client.user_id);
+            // Per-business breakdown. The grouped structure drives the
+            // per-business sections in the email; the flat list still drives
+            // the subject line + "any outstanding docs at all?" gate so the
+            // cadence rules stay identical to the pre-multi-business behavior.
+            const breakdown = await calculateOutstandingDocumentsByBusiness(client.user_id);
+            const missingDocs = breakdown.flat;
             result.missingDocs = missingDocs;
             if (missingDocs.length === 0) {
                 result.skipReason = "no_outstanding_docs";
@@ -238,6 +243,11 @@ export async function GET(req: Request) {
                 client_name: ownerName,
                 business_name: client.company_name,
                 missing_docs: missingDocs,
+                groups: breakdown.groups.map(g => ({
+                    business_name: g.business_name,
+                    is_primary: g.is_primary,
+                    missing_docs: g.missing_docs,
+                })),
                 advisor_name: advisor ? `${advisor.first_name ?? ""} ${advisor.last_name ?? ""}`.trim() || null : null,
                 advisor_email: advisor?.email ?? null,
                 advisor_phone: advisor?.phone ?? null,

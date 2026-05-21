@@ -22,24 +22,9 @@ import ClientSignUpForm from "@/components/client-sign-up-form";
  * LOCATION: /advisor/clients/new
  */
 export default function AdvisorNewClientPage() {
-  return (
-    <div className="flex min-h-screen w-full items-center justify-center p-6 md:p-10">
-      <div className="w-full max-w-6xl mx-auto">
-        {/* 
-          page-header: Provides context for the advisor
-          - Makes it clear this is for client creation
-          - Matches the professional tone of your app
-        */}
-
-
-        {/* 
-          client-sign-up-form: Your existing form component
-          - Same component, now in advisor-protected context
-          - Middleware handles authentication automatically
-          - Form will auto-detect advisor and hide dropdown
-        */}
-        <ClientSignUpForm />
-      </div>
-    </div>
-  );
+  // The surrounding admin/advisor shell already provides max-width centering,
+  // horizontal padding, and vertical layout — wrapping the form in another
+  // `min-h-screen flex items-center justify-center` collided with the shell
+  // and pushed the form behind the sticky topbar. Render the form directly.
+  return <ClientSignUpForm />;
 }

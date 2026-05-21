@@ -80,27 +80,11 @@ export async function syncUnifiedClientData(
         // Continue anyway, but log it
     }
 
-    // 2. Sync business_profiles (Critical for AI Chat)
-    const { error: profileError } = await supabase
-        .from('business_profiles')
-        .upsert({
-            user_id: userId,
-            business_name: companyName,
-            industry: industry || null,
-            state: state || null,
-            city: city || null,
-            zip: zipCode || null,
-            phone: phone || null,
-        }, { onConflict: 'user_id' });
-
-    if (profileError) {
-        console.error('[User Sync] Error upserting business_profiles:', profileError);
-        // Continue
-    }
-
-    // 3. Ensure client_data_vault has basic info (Critical for Dashboard)
-    // We use .upsert() but first we fetch existing data to ensure NOT NULL constraints 
-    // are satisfied during the 'INSERT' phase of the upsert, while preserving data during 'UPDATE'.
+    // 2. Ensure client_data_vault has basic info (Critical for Dashboard).
+    //    Runs BEFORE business_profiles because the new schema links each business
+    //    to its client_data_vault row (client_vault_id), and primary-business
+    //    uniqueness is enforced per-vault (not per-user) by the partial unique
+    //    index `business_profiles_one_primary_per_client`.
     const { data: existingVault } = await supabase
         .from('client_data_vault')
         .select('*')
@@ -145,12 +129,60 @@ export async function syncUnifiedClientData(
         status: existingVault?.status ?? 'active',
     };
 
-    const { error: vaultError } = await supabase
+    const { data: vaultRow, error: vaultError } = await supabase
         .from('client_data_vault')
-        .upsert(vaultPayload, { onConflict: 'user_id' });
+        .upsert(vaultPayload, { onConflict: 'user_id' })
+        .select('id')
+        .single();
 
     if (vaultError) {
         console.error('[User Sync] Error upserting client_data_vault:', vaultError);
+    }
+
+    // 3. Sync the primary business_profiles row for this client (Critical for AI Chat
+    //    + new per-business deal flow). user_id is no longer unique, so we resolve
+    //    "the primary business" by (client_vault_id, is_primary=true) instead.
+    let profileError: unknown = null;
+    if (vaultRow?.id) {
+        const { data: existingBp } = await supabase
+            .from('business_profiles')
+            .select('id')
+            .eq('client_vault_id', vaultRow.id)
+            .eq('is_primary', true)
+            .maybeSingle();
+
+        const bpPayload = {
+            user_id: userId,
+            client_vault_id: vaultRow.id,
+            is_primary: true,
+            company_name: companyName,
+            business_name: companyName,
+            industry: industry || null,
+            company_state: state || null,
+            company_city: city || null,
+            company_zip_code: zipCode || null,
+            state: state || null,
+            city: city || null,
+            zip: zipCode || null,
+            phone: phone || null,
+        };
+
+        if (existingBp) {
+            const { error } = await supabase
+                .from('business_profiles')
+                .update(bpPayload)
+                .eq('id', existingBp.id);
+            profileError = error;
+        } else {
+            const { error } = await supabase
+                .from('business_profiles')
+                .insert(bpPayload);
+            profileError = error;
+        }
+
+        if (profileError) {
+            console.error('[User Sync] Error syncing business_profiles:', profileError);
+        }
     }
 
     return { success: !userError && !profileError && !vaultError };

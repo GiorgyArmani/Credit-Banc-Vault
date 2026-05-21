@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { syncOutstandingDocuments } from "@/lib/outstanding-documents";
+import { isClientScopedDoc } from "@/lib/document-scope";
 
 export const dynamic = 'force-dynamic';
 
@@ -84,7 +85,7 @@ export async function POST(request: Request) {
         // 4. Find user by ghl_contact_id in client_data_vault table
         const { data: clientData, error: clientError } = await supabase
             .from("client_data_vault")
-            .select("user_id")
+            .select("id, user_id")
             .eq("ghl_contact_id", contactId)
             .single();
 
@@ -97,6 +98,28 @@ export async function POST(request: Request) {
         }
 
         const userId = clientData.user_id;
+
+        // GHL tags don't carry a business — the vault is the translation
+        // layer. Fetch every business under this contact so we can fan out
+        // business-scoped doc requests (one row per business) and anchor
+        // client-scoped requests (DL/MyScoreIQ/PFS) on the primary business.
+        // The unique index on client_dynamic_documents is
+        // (business_profile_id, document_id), so the upsert's onConflict has
+        // to match that target — not the legacy (user_id, document_id) shape.
+        const { data: businessRows } = await supabase
+            .from("business_profiles")
+            .select("id, is_primary")
+            .eq("client_vault_id", clientData.id);
+        const businesses = (businessRows ?? []) as Array<{ id: string; is_primary: boolean | null }>;
+        const primaryBusinessId =
+            businesses.find(b => b.is_primary)?.id ?? businesses[0]?.id ?? null;
+        if (!primaryBusinessId) {
+            console.warn(`⚠️ GHL tag sync: no business for user ${userId} — dynamic doc requests skipped`);
+            return NextResponse.json(
+                { error: "No business found — cannot scope doc requests" },
+                { status: 409 }
+            );
+        }
 
         // 3. Filter tags to only 'requested_*' tags
         const requestedTags = tags.filter((tag: string) =>
@@ -129,34 +152,44 @@ export async function POST(request: Request) {
             if (docData) {
                 documentIds.push(docData.id);
 
-                // Insert into client_dynamic_documents (upsert to avoid duplicates)
-                const { data: insertedData, error: insertError } = await supabase
-                    .from("client_dynamic_documents")
-                    .upsert(
-                        {
-                            user_id: userId,
-                            document_id: docData.id,
-                            requested_via: "ghl_webhook",
-                            is_active: true,
-                        },
-                        {
-                            onConflict: "user_id,document_id",
-                            ignoreDuplicates: false,
-                        }
-                    )
-                    .select("*");
+                // Fan-out target list:
+                //   • client-scoped codes (DL/MyScoreIQ/PFS) → one row anchored
+                //     on the primary business. Read paths ignore business_profile_id
+                //     for these codes (see document-scope.ts).
+                //   • business-scoped codes → one row per business on this contact,
+                //     so every business tab shows the request and uploads can
+                //     satisfy their own business's row.
+                const targetBusinessIds = isClientScopedDoc(docData.code)
+                    ? [primaryBusinessId]
+                    : businesses.map(b => b.id);
 
-                if (insertError) {
-                    console.error(`❌ Error inserting dynamic document for tag "${tag}":`, insertError.message);
-                } else {
-                    console.log(`✅ Successfully inserted/updated dynamic document:`, {
-                        tag,
-                        documentCode: docData.code,
-                        documentLabel: docData.label,
-                        userId,
-                        insertedData
-                    });
+                for (const businessId of targetBusinessIds) {
+                    const { error: insertError } = await supabase
+                        .from("client_dynamic_documents")
+                        .upsert(
+                            {
+                                user_id: userId,
+                                document_id: docData.id,
+                                business_profile_id: businessId,
+                                requested_via: "ghl_webhook",
+                                is_active: true,
+                            },
+                            {
+                                onConflict: "business_profile_id,document_id",
+                                ignoreDuplicates: false,
+                            }
+                        );
+
+                    if (insertError) {
+                        console.error(
+                            `❌ Error inserting dynamic document for tag "${tag}" / business "${businessId}":`,
+                            insertError.message
+                        );
+                    }
                 }
+                console.log(
+                    `✅ Upserted ${targetBusinessIds.length} dynamic-doc row(s) for tag "${tag}" (${docData.code})`
+                );
             } else {
                 console.warn(`⚠️ Tag ignored: "${tag}" does not exist in required_documents table or is not a dynamic document (is_core=false).`);
             }

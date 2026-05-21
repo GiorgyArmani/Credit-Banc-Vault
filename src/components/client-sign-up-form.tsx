@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import { addManualFundingApplication } from "@/app/advisor/dashboard/clients/[id]/actions";
 import { FollowersPicker } from "@/components/followers-picker";
+import { FUNDING_OPTIONS, LOAN_TYPES } from "@/data/loan-types";
 
 
 // Estados de EE.UU.
@@ -49,17 +50,6 @@ const CREDIT_SCORE_OPTIONS = [
   { value: '600 - 650', label: '600 - 650' },
   { value: '550 - 600', label: '550 - 600' },
   { value: 'Below 550', label: 'Below 550' },
-];
-
-// Tipos de préstamo
-const LOAN_TYPES = [
-  'Line of Credit',
-  'MCA',
-  'SBA Loan',
-  'Personal Term Loan',
-  'Real Estate Loan',
-  'AR Loan',
-  'Other'
 ];
 
 // Tipos de entidad legal
@@ -106,9 +96,34 @@ type Advisor = {
 type OpenPosition = {
   lender_name: string;
   loan_type: string;
+  initial_balance: string;       // original advance / starting principal — optional
   current_balance: string;
   payment_amount: string;
-  payment_term: string;
+  payment_frequency: string;     // 'Daily' | 'Weekly' | 'Bi-Weekly' | 'Monthly'
+  term_remaining: string;        // # of remaining payments — optional
+};
+
+const PAYMENT_FREQUENCIES = ['Daily', 'Weekly', 'Bi-Weekly', 'Monthly'] as const;
+
+// Default cadence + term-unit label per loan type. Drives the auto-fill that
+// fires when the advisor picks a loan type, and the help text on the term
+// field. Unknown loan types fall through to a no-default empty state.
+const LOAN_TYPE_DEFAULTS: Record<string, { frequency: string; term_unit: string }> = {
+  'MCA':                      { frequency: 'Daily',   term_unit: 'remaining debits' },
+  'Factor':                   { frequency: 'Daily',   term_unit: 'remaining debits' },
+  'AR Loan':                  { frequency: 'Daily',   term_unit: 'remaining debits' },
+  'Revenue Based Loan':       { frequency: 'Daily',   term_unit: 'remaining debits' },
+  'SBA Loan':                 { frequency: 'Monthly', term_unit: 'months remaining' },
+  'Term Loan':                { frequency: 'Monthly', term_unit: 'months remaining' },
+  'Real Estate Loan':         { frequency: 'Monthly', term_unit: 'months remaining' },
+  'Acquisition':              { frequency: 'Monthly', term_unit: 'months remaining' },
+  'Personal Term Loan':       { frequency: 'Monthly', term_unit: 'months remaining' },
+  'Project Financing':        { frequency: 'Monthly', term_unit: 'months remaining' },
+  'Equipment':                { frequency: 'Monthly', term_unit: 'months remaining' },
+  'Inventory Financing':      { frequency: 'Monthly', term_unit: 'months remaining' },
+  'Purchase Order Financing': { frequency: 'Monthly', term_unit: 'months remaining' },
+  'E-commerce':               { frequency: 'Weekly',  term_unit: 'weeks remaining' },
+  'Line of Credit':           { frequency: 'Monthly', term_unit: 'months remaining' },
 };
 
 
@@ -218,11 +233,43 @@ export default function ClientSignupForm() {
   const empty_position = (): OpenPosition => ({
     lender_name: "",
     loan_type: "",
+    initial_balance: "",
     current_balance: "",
     payment_amount: "",
-    payment_term: "",
+    payment_frequency: "",
+    term_remaining: "",
   });
   const [open_positions, set_open_positions] = useState<OpenPosition[]>([empty_position()]);
+  // Lender autocomplete source — pulled from lender_guidelines so the same
+  // names the in-app match tool knows about are offered here. Mismatch
+  // (custom-typed text) is allowed for one-off / private lenders.
+  const [lender_options, set_lender_options] = useState<string[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('lender_guidelines')
+        .select('lender_name')
+        .order('lender_name', { ascending: true });
+      if (cancelled) return;
+      // Dedupe case-insensitively — the lender_guidelines table has duplicate
+      // rows (multiple programs per lender), and the datalist key is the name
+      // itself, so dupes cause React key collisions on render.
+      const seen = new Set<string>();
+      const unique: string[] = [];
+      for (const r of (data ?? []) as { lender_name: string }[]) {
+        const name = r.lender_name;
+        if (!name) continue;
+        const key = name.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        unique.push(name);
+      }
+      set_lender_options(unique);
+    })();
+    return () => { cancelled = true; };
+  }, [supabase]);
 
   const add_position = () => {
     if (open_positions.length < 5) {
@@ -238,6 +285,52 @@ export default function ClientSignupForm() {
     set_open_positions((prev) =>
       prev.map((pos, i) => (i === idx ? { ...pos, [field]: value } : pos))
     );
+  };
+
+  // Picking a loan type auto-fills payment_frequency when it's still empty.
+  // We don't overwrite an existing choice — once the advisor has set Daily
+  // and then changes loan type, their explicit choice stays.
+  const set_position_loan_type = (idx: number, loan_type: string) => {
+    set_open_positions((prev) =>
+      prev.map((pos, i) => {
+        if (i !== idx) return pos;
+        const defaults = LOAN_TYPE_DEFAULTS[loan_type];
+        return {
+          ...pos,
+          loan_type,
+          payment_frequency: pos.payment_frequency || defaults?.frequency || "",
+        };
+      })
+    );
+  };
+
+  // Per-position validation used at submit time. Returns the first error or
+  // null if the position is valid (or empty — empty positions are dropped
+  // before send by the lender_name.trim() filter).
+  const validate_position = (pos: OpenPosition, idx: number): string | null => {
+    const is_empty = !pos.lender_name.trim() && !pos.loan_type && !pos.current_balance
+      && !pos.payment_amount && !pos.payment_frequency;
+    if (is_empty) return null;
+    const label = `Position ${idx + 1}`;
+    if (!pos.lender_name.trim()) return `${label}: lender name is required.`;
+    if (!pos.loan_type) return `${label}: loan type is required.`;
+    if (!pos.payment_frequency) return `${label}: payment frequency is required.`;
+    if (!PAYMENT_FREQUENCIES.includes(pos.payment_frequency as any)) {
+      return `${label}: invalid payment frequency.`;
+    }
+    const balance = parseFloat(pos.current_balance);
+    if (!Number.isFinite(balance) || balance < 0) return `${label}: current balance must be a non-negative number.`;
+    const payment = parseFloat(pos.payment_amount);
+    if (!Number.isFinite(payment) || payment < 0) return `${label}: payment amount must be a non-negative number.`;
+    if (pos.initial_balance) {
+      const init = parseFloat(pos.initial_balance);
+      if (!Number.isFinite(init) || init < 0) return `${label}: initial balance must be a non-negative number.`;
+    }
+    if (pos.term_remaining) {
+      const term = parseInt(pos.term_remaining, 10);
+      if (!Number.isFinite(term) || term < 0) return `${label}: term remaining must be a non-negative whole number.`;
+    }
+    return null;
   };
 
   // ===== PASO 6: Timeline, Notas y Advisor =====
@@ -440,6 +533,15 @@ export default function ClientSignupForm() {
         throw new Error("Ownership percentages must sum to 100%");
       }
 
+      // Validate open positions only when the client claims existing loans —
+      // an empty positions list with the flag unchecked is still a valid form.
+      if (has_existing_loans) {
+        for (let i = 0; i < open_positions.length; i++) {
+          const err = validate_position(open_positions[i], i);
+          if (err) throw new Error(err);
+        }
+      }
+
       // Obtener nombre del advisor
       const selected_advisor = advisors.find(a => a.id === advisor_id);
       const advisor_name = selected_advisor
@@ -590,7 +692,7 @@ export default function ClientSignupForm() {
   };
 
   return (
-    <div className="min-h-screen bg-[#f0fdf7] relative overflow-hidden">
+    <div className="relative overflow-hidden rounded-[3rem] bg-[#f0fdf7]">
       {/* aurora-glow effect for consistency */}
       <div className="absolute inset-0 bg-gradient-to-br from-emerald-100/30 via-white/80 to-white pointer-events-none" />
       <div className="absolute top-0 right-0 w-[50%] h-[50%] bg-emerald-200/10 blur-[120px] rounded-full pointer-events-none animate-aurora" />
@@ -937,7 +1039,7 @@ export default function ClientSignupForm() {
                         Proposed Loan Type * <span className="normal-case font-bold text-emerald-500">(select all that apply)</span>
                       </Label>
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                        {LOAN_TYPES.map((type) => {
+                        {FUNDING_OPTIONS.map((type) => {
                           const selected = proposed_loan_types.includes(type);
                           return (
                             <button
@@ -1366,7 +1468,10 @@ export default function ClientSignupForm() {
                           </button>
                         </div>
 
-                        {open_positions.map((pos, idx) => (
+                        {open_positions.map((pos, idx) => {
+                          const term_unit = LOAN_TYPE_DEFAULTS[pos.loan_type]?.term_unit ?? "remaining payments";
+                          const lender_datalist_id = `lender-options-pos-${idx}`;
+                          return (
                           <div key={idx} className="bg-white rounded-[1.5rem] border border-emerald-100 p-6 space-y-4 relative">
                             {/* Position header */}
                             <div className="flex items-center justify-between mb-2">
@@ -1386,15 +1491,21 @@ export default function ClientSignupForm() {
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                              {/* Lender Name */}
+                              {/* Lender Name — datalist autocomplete from lender_guidelines, free text allowed */}
                               <div>
                                 <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Lender *</Label>
                                 <Input
+                                  list={lender_datalist_id}
                                   value={pos.lender_name}
                                   onChange={(e) => update_position(idx, "lender_name", e.target.value)}
                                   className="h-12 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-5"
                                   placeholder="e.g. Chase, PayPal, OnDeck"
                                 />
+                                <datalist id={lender_datalist_id}>
+                                  {lender_options.map((name) => (
+                                    <option key={name} value={name} />
+                                  ))}
+                                </datalist>
                               </div>
 
                               {/* Loan Type */}
@@ -1402,7 +1513,7 @@ export default function ClientSignupForm() {
                                 <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Type of Loan *</Label>
                                 <Select
                                   value={pos.loan_type}
-                                  onValueChange={(val) => update_position(idx, "loan_type", val)}
+                                  onValueChange={(val) => set_position_loan_type(idx, val)}
                                 >
                                   <SelectTrigger className="h-12 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-5">
                                     <SelectValue placeholder="Select type" />
@@ -1415,13 +1526,35 @@ export default function ClientSignupForm() {
                                 </Select>
                               </div>
 
-                              {/* Current Balance */}
+                              {/* Initial Balance (optional) */}
                               <div>
-                                <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Current Balance</Label>
+                                <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">
+                                  Initial Balance <span className="text-emerald-900/30 normal-case tracking-normal">(optional)</span>
+                                </Label>
                                 <div className="relative">
                                   <span className="absolute left-5 top-1/2 -translate-y-1/2 text-emerald-700 font-black text-sm">$</span>
                                   <Input
                                     type="number"
+                                    inputMode="decimal"
+                                    step="0.01"
+                                    min="0"
+                                    value={pos.initial_balance}
+                                    onChange={(e) => update_position(idx, "initial_balance", e.target.value)}
+                                    className="h-12 pl-9 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold"
+                                    placeholder="Original advance"
+                                  />
+                                </div>
+                              </div>
+
+                              {/* Current Balance */}
+                              <div>
+                                <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Current Balance *</Label>
+                                <div className="relative">
+                                  <span className="absolute left-5 top-1/2 -translate-y-1/2 text-emerald-700 font-black text-sm">$</span>
+                                  <Input
+                                    type="number"
+                                    inputMode="decimal"
+                                    step="0.01"
                                     min="0"
                                     value={pos.current_balance}
                                     onChange={(e) => update_position(idx, "current_balance", e.target.value)}
@@ -1433,11 +1566,13 @@ export default function ClientSignupForm() {
 
                               {/* Payment Amount */}
                               <div>
-                                <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Payment Amount</Label>
+                                <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Payment Amount *</Label>
                                 <div className="relative">
                                   <span className="absolute left-5 top-1/2 -translate-y-1/2 text-emerald-700 font-black text-sm">$</span>
                                   <Input
                                     type="number"
+                                    inputMode="decimal"
+                                    step="0.01"
                                     min="0"
                                     value={pos.payment_amount}
                                     onChange={(e) => update_position(idx, "payment_amount", e.target.value)}
@@ -1447,19 +1582,44 @@ export default function ClientSignupForm() {
                                 </div>
                               </div>
 
-                              {/* Payment Term */}
+                              {/* Payment Frequency */}
+                              <div>
+                                <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Payment Frequency *</Label>
+                                <Select
+                                  value={pos.payment_frequency}
+                                  onValueChange={(val) => update_position(idx, "payment_frequency", val)}
+                                >
+                                  <SelectTrigger className="h-12 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-5">
+                                    <SelectValue placeholder="Select cadence" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {PAYMENT_FREQUENCIES.map((freq) => (
+                                      <SelectItem key={freq} value={freq}>{freq}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+
+                              {/* Term Remaining (optional) */}
                               <div className="md:col-span-2">
-                                <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Payment Term</Label>
+                                <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">
+                                  Term Remaining <span className="text-emerald-900/30 normal-case tracking-normal">(optional, in {term_unit})</span>
+                                </Label>
                                 <Input
-                                  value={pos.payment_term}
-                                  onChange={(e) => update_position(idx, "payment_term", e.target.value)}
+                                  type="number"
+                                  inputMode="numeric"
+                                  step="1"
+                                  min="0"
+                                  value={pos.term_remaining}
+                                  onChange={(e) => update_position(idx, "term_remaining", e.target.value)}
                                   className="h-12 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-5"
-                                  placeholder="e.g. Daily, Weekly, Monthly, 12 months"
+                                  placeholder={pos.loan_type ? `# of ${term_unit}` : "Select loan type first"}
                                 />
                               </div>
                             </div>
                           </div>
-                        ))}
+                          );
+                        })}
 
                         {open_positions.length >= 5 && (
                           <p className="text-xs font-bold text-emerald-900/40 text-center">Maximum of 5 positions reached</p>

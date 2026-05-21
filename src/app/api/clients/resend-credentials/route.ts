@@ -22,6 +22,7 @@ import { createClient } from '@supabase/supabase-js';
 import { createClient as createServerClient } from '@/lib/supabase/server';
 import { generateSecurePassword } from '@/lib/user-management';
 import { send_client_welcome_email } from '@/lib/email';
+import { normalizeSupabaseJoin } from '@/lib/document-scope';
 
 /**
  * Supabase admin client — needed to reset user passwords
@@ -163,8 +164,8 @@ export async function POST(request: Request) {
             .eq('is_active', true);
 
         const requested_documents = (dynamic_requirements || [])
-            .map((item: any) => item.required_documents?.label)
-            .filter(Boolean);
+            .map((item: any) => normalizeSupabaseJoin<{ label?: string }>(item.required_documents)?.label)
+            .filter((l: string | undefined): l is string => !!l);
 
         // ========================================================================
         // STEP 6: RESEND WELCOME EMAIL (WITH ADVISOR + FOLLOWERS CC)

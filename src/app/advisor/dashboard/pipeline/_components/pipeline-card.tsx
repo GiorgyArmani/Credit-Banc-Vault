@@ -1,7 +1,6 @@
 "use client";
 
-import { Building2, DollarSign, Mail, Phone, ChevronRight } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { Mail, Phone, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { ActivityAgeBadge } from "@/components/advisor/activity-age-badge";
 
@@ -18,87 +17,91 @@ interface PipelineCardProps {
     created_at: string;
     last_activity_at?: string;
   };
+  detailHref: string;
   onDragStart: (e: React.DragEvent, id: string) => void;
 }
 
-export function PipelineDealCard({ deal, onDragStart }: PipelineCardProps) {
-  const docsProgress = deal.total_required_docs > 0 
-    ? (deal.document_count / deal.total_required_docs) * 100 
+const fmt_currency = (n: number) =>
+  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n || 0);
+
+export function PipelineDealCard({ deal, detailHref, onDragStart }: PipelineCardProps) {
+  const docsProgress = deal.total_required_docs > 0
+    ? Math.min(100, (deal.document_count / deal.total_required_docs) * 100)
     : 0;
+  const docsComplete = deal.total_required_docs > 0 && deal.document_count >= deal.total_required_docs;
 
   return (
     <div
       draggable
       onDragStart={(e) => onDragStart(e, deal.id)}
-      className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-2.5 md:p-3 shadow-sm hover:shadow-2xl hover:scale-[1.03] hover:border-emerald-500/30 transition-all duration-300 cursor-grab active:cursor-grabbing group select-none relative overflow-hidden"
+      className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3 shadow-sm hover:shadow-lg hover:border-emerald-500/40 transition-all duration-200 cursor-grab active:cursor-grabbing group select-none"
     >
-      <div className="flex justify-between items-start mb-1 md:mb-2">
-        <h4 className="font-headline font-black text-slate-900 dark:text-slate-100 text-[13px] md:text-sm group-hover:text-emerald-600 transition-colors truncate pr-2">
+      {/* Title row */}
+      <div className="flex items-start justify-between gap-2 mb-1.5">
+        <h4 className="font-black text-slate-900 dark:text-slate-100 text-[13px] leading-tight group-hover:text-emerald-600 transition-colors break-words flex-1 min-w-0">
           {deal.client_name}
         </h4>
-        <Link 
-          href={`/advisor/dashboard/clients/${deal.id}`} 
-          className="text-slate-300 hover:text-emerald-500 transition-colors flex-shrink-0 bg-slate-50 dark:bg-slate-800 p-0.5 md:p-0.5 rounded-lg"
+        <Link
+          href={detailHref}
+          onClick={(e) => e.stopPropagation()}
+          className="text-slate-300 hover:text-emerald-500 transition-colors flex-shrink-0 bg-slate-50 dark:bg-slate-800 p-0.5 rounded-lg"
+          title="Open deal"
         >
-          <ChevronRight className="h-3.5 w-3.5 md:h-4 md:w-4" />
+          <ChevronRight className="h-4 w-4" />
         </Link>
       </div>
 
-      <div className="space-y-1 md:space-y-1.5 mb-3 md:mb-4">
-        <div className="flex items-center gap-1.5 md:gap-2 text-slate-500 dark:text-slate-400">
-          <div className="bg-slate-100 dark:bg-slate-800 p-1 md:p-1 rounded-lg flex-shrink-0">
-            <Building2 className="h-3 md:h-3.5 w-3 md:w-3.5" />
-          </div>
-          <p className="text-[10px] md:text-xs font-bold truncate">
-            {deal.company_name}
-          </p>
-        </div>
-        <div className="flex items-center gap-1.5 md:gap-2">
-          <div className="bg-emerald-50 dark:bg-emerald-900/20 p-1 md:p-1.5 rounded-lg flex-shrink-0">
-            <DollarSign className="h-3 md:h-3.5 w-3 md:w-3.5 text-emerald-500" />
-          </div>
-          <p className="text-xs md:text-sm font-black text-slate-900 dark:text-slate-100">
-            {new Intl.NumberFormat("en-US", {
-              style: "currency",
-              currency: "USD",
-              maximumFractionDigits: 0
-            }).format(deal.capital_requested)}
-          </p>
-        </div>
-        <div className="pt-0.5">
-          <ActivityAgeBadge created_at={deal.created_at} last_activity_at={deal.last_activity_at} variant="compact" />
-        </div>
+      {/* Company */}
+      <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 truncate mb-2">
+        {deal.company_name || "—"}
+      </p>
+
+      {/* Currency on its own row — never gets cropped */}
+      <div className="text-[15px] font-black text-slate-900 dark:text-slate-100 tabular-nums mb-2">
+        {fmt_currency(deal.capital_requested)}
       </div>
 
-      {/* Doc Progress */}
-      <div className="space-y-1.5 md:space-y-2 mb-3 md:mb-4 bg-slate-50/50 dark:bg-slate-800/20 p-2 md:p-2 rounded-xl border border-slate-100 dark:border-slate-800">
-        <div className="flex justify-between text-[9px] md:text-[10px] uppercase tracking-widest font-black text-slate-400">
-          <span>Documents</span>
-          <span className="text-emerald-500">{deal.document_count} / {deal.total_required_docs}</span>
+      {/* Activity chip — full width to avoid wrapping */}
+      <div className="mb-2.5">
+        <ActivityAgeBadge
+          created_at={deal.created_at}
+          last_activity_at={deal.last_activity_at}
+          variant="compact"
+          className="max-w-full"
+        />
+      </div>
+
+      {/* Doc progress — minimal */}
+      <div className="space-y-1 mb-2.5">
+        <div className="flex justify-between items-center text-[9px] uppercase tracking-wider font-black">
+          <span className="text-slate-400">Docs</span>
+          <span className={docsComplete ? "text-emerald-600" : "text-slate-500"}>
+            {deal.document_count}/{deal.total_required_docs}
+          </span>
         </div>
-        <div className="w-full bg-slate-200 dark:bg-slate-700 h-1 md:h-1.5 rounded-full overflow-hidden">
-          <div 
-            className="h-full bg-emerald-500 transition-all duration-1000 ease-out shadow-[0_0_8px_rgba(16,185,129,0.5)]" 
+        <div className="w-full bg-slate-100 dark:bg-slate-800 h-1 rounded-full overflow-hidden">
+          <div
+            className={docsComplete ? "h-full bg-emerald-500 transition-all duration-700" : "h-full bg-emerald-400 transition-all duration-700"}
             style={{ width: `${docsProgress}%` }}
           />
         </div>
       </div>
 
       {/* Quick Actions */}
-      <div className="flex items-center gap-1.5 md:gap-2 pt-2 md:pt-3 border-t border-slate-100 dark:border-slate-800/50" onClick={(e) => e.stopPropagation()}>
-        <a 
-          href={`mailto:${deal.client_email}`} 
-          className="flex-1 h-7 md:h-8 rounded-xl bg-slate-50 dark:bg-slate-800/50 flex items-center justify-center text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 transition-all border border-transparent hover:border-emerald-200 dark:hover:border-emerald-800"
-          title="Email"
+      <div className="flex items-center gap-1.5 pt-2 border-t border-slate-100 dark:border-slate-800/50" onClick={(e) => e.stopPropagation()}>
+        <a
+          href={`mailto:${deal.client_email}`}
+          className="flex-1 h-7 rounded-lg bg-slate-50 dark:bg-slate-800/50 flex items-center justify-center text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 transition-all"
+          title={`Email ${deal.client_email}`}
         >
-          <Mail className="h-3 md:h-3.5 w-3 md:w-3.5" />
+          <Mail className="h-3.5 w-3.5" />
         </a>
-        <a 
-          href={`tel:${deal.client_phone}`} 
-          className="flex-1 h-7 md:h-8 rounded-xl bg-slate-50 dark:bg-slate-800/50 flex items-center justify-center text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 transition-all border border-transparent hover:border-emerald-200 dark:hover:border-emerald-800"
-          title="Call"
+        <a
+          href={`tel:${deal.client_phone}`}
+          className="flex-1 h-7 rounded-lg bg-slate-50 dark:bg-slate-800/50 flex items-center justify-center text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 transition-all"
+          title={`Call ${deal.client_phone}`}
         >
-          <Phone className="h-3 md:h-3.5 w-3 md:w-3.5" />
+          <Phone className="h-3.5 w-3.5" />
         </a>
       </div>
     </div>

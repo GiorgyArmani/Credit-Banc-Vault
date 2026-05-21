@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { FUNDING_OPTIONS } from "@/data/loan-types";
 import {
     Select,
     SelectContent,
@@ -56,11 +57,6 @@ const CREDIT_SCORE_OPTIONS = [
 
 const LEGAL_ENTITY_TYPES = ['LLC', 'C-Corp', 'S-Corp', 'Sole Prop', 'Other'];
 const FUNDING_URGENCY = ['Immediately', '1–3 Weeks', '3 Weeks +'];
-const PROPOSED_LOAN_TYPES = [
-    "Term Loan", "MCA", "SBA Loan", "Line of Credit", 
-    "Personal Term Loan", "Real Estate Loan", "Equipment Financing", 
-    "Asset Based Loan", "Bridge Loan", "Invoice Factoring", "Other"
-];
 
 const formSchema = z.object({
     client_name: z.string().min(2, "Name must be at least 2 characters"),
@@ -362,7 +358,7 @@ export function EditProfileModal({ isOpen, onClose, onSuccess, clientData }: Edi
                                             <FormLabel className="text-[10px] font-black uppercase tracking-widest text-emerald-900/60 ml-1">Proposed Loan Types</FormLabel>
                                             <FormControl>
                                                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 p-4 bg-emerald-50/20 border border-emerald-100 rounded-2xl">
-                                                    {PROPOSED_LOAN_TYPES.map((type) => {
+                                                    {FUNDING_OPTIONS.map((type) => {
                                                         const isSelected = field.value.includes(type);
                                                         return (
                                                             <div 

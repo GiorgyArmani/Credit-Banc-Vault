@@ -7,6 +7,7 @@ import { ghlAddTags, ghlUpdateContact } from "@/lib/ghl-api";
 import { syncUnifiedClientData } from "@/lib/user-management";
 import { updateLoanStatus } from "@/app/actions/pipeline";
 import { ghlSyncDocument } from "@/lib/ghl-document-sync";
+import { isClientScopedDoc } from "@/lib/document-scope";
 
 /**
  * Owner OR follower check. Admin flow isn't covered here (advisor-persona actions).
@@ -46,7 +47,7 @@ async function hasClientAccess(
  * Allows an advisor to manually upload a signed funding application (contract)
  * for a client. 
  */
-export async function addManualFundingApplication(clientId: string, formData: FormData) {
+export async function addManualFundingApplication(clientId: string, formData: FormData, businessProfileId?: string | null) {
     try {
         const supabase = await createClient();
 
@@ -85,6 +86,17 @@ export async function addManualFundingApplication(clientId: string, formData: Fo
             throw new Error(`Upload failed: ${uploadError.message}`);
         }
 
+        // The funding application is per-deal — scope to the active
+        // business so it shows up only on that tab. Fall back to the
+        // primary business when no active tab was passed.
+        const { data: primary } = await supabaseAdmin
+            .from("business_profiles")
+            .select("id")
+            .eq("client_vault_id", clientId)
+            .eq("is_primary", true)
+            .maybeSingle();
+        const resolvedBusinessProfileId = businessProfileId ?? primary?.id ?? null;
+
         // 4. Create user_documents record
         const { data: doc, error: docError } = await supabaseAdmin
             .from("user_documents")
@@ -96,6 +108,7 @@ export async function addManualFundingApplication(clientId: string, formData: Fo
                 storage_path: storagePath,
                 category: "funding_application",
                 doc_code: "funding_application",
+                business_profile_id: resolvedBusinessProfileId,
                 status: "verified"
             })
             .select()
@@ -151,7 +164,7 @@ export async function addManualFundingApplication(clientId: string, formData: Fo
  * Allows an advisor to request one or more new documents from a client.
  * Updates the database and syncs the request tags to GoHighLevel.
  */
-export async function requestDocuments(clientId: string, documentIds: string[]) {
+export async function requestDocuments(clientId: string, documentIds: string[], businessProfileId?: string | null) {
     try {
         if (!documentIds || documentIds.length === 0) {
             throw new Error("No documents selected");
@@ -187,18 +200,38 @@ export async function requestDocuments(clientId: string, documentIds: string[]) 
             throw new Error("Selected document types not found");
         }
 
-        // 4. Batch upsert into client_dynamic_documents
+        // 4. Resolve which business each request belongs to. Falls back to the
+        // primary business for the caller-supplied default. Client-scoped doc
+        // codes (driver's license, MyScoreIQ, PFS) are always pinned to the
+        // primary so a single source of truth serves every business tab via
+        // the matcher predicate on the read side.
         const supabaseAdmin = createAdminClient();
-        const dynamicsToInsert = documentIds.map(docId => ({
-            user_id: client.user_id,
-            document_id: docId,
-            is_active: true,
-            requested_at: new Date().toISOString()
-        }));
+        const { data: primary } = await supabaseAdmin
+            .from("business_profiles")
+            .select("id")
+            .eq("client_vault_id", clientId)
+            .eq("is_primary", true)
+            .maybeSingle();
+        const primaryId = primary?.id ?? null;
+        const defaultBusinessProfileId = businessProfileId ?? primaryId;
+
+        // 5. Batch upsert into client_dynamic_documents scoped to that business.
+        const dynamicsToInsert = documentIds.map(docId => {
+            const def = docDefs.find((d: any) => d.id === docId);
+            const code: string | undefined = def?.code;
+            const bizId = isClientScopedDoc(code) ? primaryId : defaultBusinessProfileId;
+            return {
+                user_id: client.user_id,
+                document_id: docId,
+                business_profile_id: bizId,
+                is_active: true,
+                requested_at: new Date().toISOString()
+            };
+        });
 
         const { error: insertError } = await supabaseAdmin
             .from("client_dynamic_documents")
-            .upsert(dynamicsToInsert, { onConflict: 'user_id, document_id' });
+            .upsert(dynamicsToInsert, { onConflict: 'business_profile_id, document_id' });
 
         if (insertError) {
             console.error("Error inserting dynamic documents:", insertError);
@@ -686,45 +719,31 @@ export async function deleteClientVault(clientId: string) {
 
         const supabaseAdmin = createAdminClient();
 
-        // 3. Delete all client documents from storage first
+        // 3. Remove the client's files from Storage. The DB rows cascade via
+        //    auth.users below, but Storage objects don't — they have to go
+        //    explicitly or they'll orphan in the bucket.
         const { data: docs } = await supabaseAdmin
             .from("user_documents")
             .select("storage_path")
             .eq("user_id", client.user_id);
 
         if (docs && docs.length > 0) {
-            const paths = docs.map(d => d.storage_path);
-            await supabaseAdmin.storage.from("user-documents").remove(paths);
+            const paths = docs.map(d => d.storage_path).filter(Boolean);
+            if (paths.length > 0) {
+                await supabaseAdmin.storage.from("user-documents").remove(paths);
+            }
         }
 
-        // 4. Perform thorough cleanup of related records manually to ensure no orphans
-        // Some of these might be cascaded, but explicit delete ensures a clean slate
-        // for re-onboarding with the same user_id/email.
+        // 4. One-shot cascade. Deleting the auth.users row triggers ON DELETE
+        //    CASCADE through public.users + client_data_vault + business_profiles
+        //    + funding_deals + every dependent table (docs, dynamic docs, notes,
+        //    pipeline history, lender assignments, bank analyses, followers,
+        //    notifications, credit reports, etc.). Nothing left behind.
+        const { error: authDeleteError } = await supabaseAdmin.auth.admin.deleteUser(client.user_id);
 
-        // Delete from tables keyed by user_id
-        await supabaseAdmin.from("user_documents").delete().eq("user_id", client.user_id);
-        await supabaseAdmin.from("client_dynamic_documents").delete().eq("user_id", client.user_id);
-        await supabaseAdmin.from("submissions").delete().eq("user_id", client.user_id);
-        await supabaseAdmin.from("credit_reports").delete().eq("user_id", client.user_id);
-        await supabaseAdmin.from("in_app_notifications").delete().eq("user_id", client.user_id);
-
-        // Delete from tables keyed by client_vault_id (clientId)
-        await supabaseAdmin.from("client_open_positions").delete().eq("client_vault_id", clientId);
-        await supabaseAdmin.from("loan_status_history").delete().eq("client_vault_id", clientId);
-        await supabaseAdmin.from("bank_analysis_results").delete().eq("client_id", clientId);
-        await supabaseAdmin.from("document_category_approvals").delete().eq("client_vault_id", clientId);
-        await supabaseAdmin.from("client_internal_notes").delete().eq("client_id", clientId);
-
-        // 5. Delete client_data_vault record
-        const { error: deleteError } = await supabaseAdmin
-            .from("client_data_vault")
-            .delete()
-            .eq("id", clientId);
-
-        if (deleteError) throw new Error(`Failed to delete client vault: ${deleteError.message}`);
-
-        // Note: We are NOT deleting the actual auth.user or public.users record 
-        // to avoid breaking other potential links, but the vault access is gone.
+        if (authDeleteError) {
+            throw new Error(`Failed to delete client: ${authDeleteError.message}`);
+        }
 
         return { success: true };
     } catch (error: any) {
@@ -831,7 +850,7 @@ export async function reassignClientAdvisor(clientId: string, newAdvisorId: stri
  *
  * Allows an advisor to remove a document request (dynamic document).
  */
-export async function removeRequestedDocument(clientId: string, documentCode: string) {
+export async function removeRequestedDocument(clientId: string, documentCode: string, businessProfileId?: string | null) {
     try {
         const supabase = await createClient();
 
@@ -869,12 +888,34 @@ export async function removeRequestedDocument(clientId: string, documentCode: st
 
         const supabaseAdmin = createAdminClient();
 
-        // 4. Delete from client_dynamic_documents
-        const { error: deleteError } = await supabaseAdmin
+        // Resolve which business this removal targets. Mirrors
+        // requestDocuments / approveDocumentCategory: client-scoped doc
+        // codes target the primary so the single shared row is removed,
+        // business-scoped codes target the active tab so a sibling
+        // business's request isn't collaterally wiped.
+        const { data: primary } = await supabaseAdmin
+            .from("business_profiles")
+            .select("id")
+            .eq("client_vault_id", clientId)
+            .eq("is_primary", true)
+            .maybeSingle();
+        const primaryId = primary?.id ?? null;
+        const resolvedBusinessProfileId = isClientScopedDoc(documentCode)
+            ? primaryId
+            : (businessProfileId ?? primaryId);
+
+        // 4. Delete from client_dynamic_documents, scoped to this business.
+        const deleteQuery = supabaseAdmin
             .from("client_dynamic_documents")
             .delete()
             .eq("user_id", client.user_id)
             .eq("document_id", docDef.id);
+        if (resolvedBusinessProfileId) {
+            deleteQuery.eq("business_profile_id", resolvedBusinessProfileId);
+        } else {
+            deleteQuery.is("business_profile_id", null);
+        }
+        const { error: deleteError } = await deleteQuery;
 
         if (deleteError) throw new Error(`Failed to remove document request: ${deleteError.message}`);
 
@@ -897,7 +938,7 @@ export async function removeRequestedDocument(clientId: string, documentCode: st
  * 
  * Allows an advisor to mark a category as approved.
  */
-export async function approveDocumentCategory(clientId: string, docCode: string) {
+export async function approveDocumentCategory(clientId: string, docCode: string, businessProfileId?: string | null) {
     try {
         const supabase = await createClient();
         const { data: { user: advisorUser } } = await supabase.auth.getUser();
@@ -922,14 +963,31 @@ export async function approveDocumentCategory(clientId: string, docCode: string)
         }
 
         const supabaseAdmin = createAdminClient();
+        // Resolve which business this approval belongs to. Callers pass the
+        // active tab; client-scoped doc codes (driver's license, MyScoreIQ,
+        // PFS) always stamp against the primary so one approval row serves
+        // every business tab (the read-side matcher surfaces it on all tabs).
+        const { data: primary } = await supabaseAdmin
+            .from("business_profiles")
+            .select("id")
+            .eq("client_vault_id", clientId)
+            .eq("is_primary", true)
+            .maybeSingle();
+        const primaryId = primary?.id ?? null;
+
+        const resolvedBusinessProfileId = isClientScopedDoc(docCode)
+            ? primaryId
+            : (businessProfileId ?? primaryId);
+
         const { error } = await supabaseAdmin
             .from("document_category_approvals")
             .upsert({
                 client_vault_id: clientId,
+                business_profile_id: resolvedBusinessProfileId,
                 doc_code: docCode,
                 approved_by: advisorUser.id,
                 approved_at: new Date().toISOString()
-            }, { onConflict: 'client_vault_id, doc_code' });
+            }, { onConflict: 'business_profile_id, doc_code' });
 
         if (error) {
             console.error("Supabase error in approveDocumentCategory:", error);
@@ -963,7 +1021,7 @@ export async function approveDocumentCategory(clientId: string, docCode: string)
  * Allows an advisor to reject a document category, notify the client,
  * and provide feedback on why it was rejected.
  */
-export async function rejectDocumentCategory(clientId: string, docCode: string, docLabel: string, reason: string) {
+export async function rejectDocumentCategory(clientId: string, docCode: string, docLabel: string, reason: string, businessProfileId?: string | null) {
     try {
         const supabase = await createClient();
         const { data: { user: advisorUser } } = await supabase.auth.getUser();
@@ -990,26 +1048,58 @@ export async function rejectDocumentCategory(clientId: string, docCode: string, 
 
         const supabaseAdmin = createAdminClient();
 
-        // 2. Delete any existing approval
-        await supabaseAdmin
-            .from("document_category_approvals")
-            .delete()
+        // Resolve the business this rejection belongs to. Mirrors
+        // approveDocumentCategory: client-scoped doc codes (DL/MyScoreIQ/PFS)
+        // always target the primary business so a single row serves every
+        // tab via the read-side matcher.
+        const { data: primary } = await supabaseAdmin
+            .from("business_profiles")
+            .select("id")
             .eq("client_vault_id", clientId)
-            .eq("doc_code", docCode);
+            .eq("is_primary", true)
+            .maybeSingle();
+        const primaryId = primary?.id ?? null;
+        const resolvedBusinessProfileId = isClientScopedDoc(docCode)
+            ? primaryId
+            : (businessProfileId ?? primaryId);
 
-        // 3. Update documents in this category to 'rejected' status and store reason
-        const { error: updateError } = await supabaseAdmin
+        // 2. Delete any existing approval, scoped to this business. Without
+        // the business scope, rejecting on Business B used to wipe Business
+        // A's approval for the same doc code — data corruption visible to
+        // the client.
+        {
+            const approvalDelete = supabaseAdmin
+                .from("document_category_approvals")
+                .delete()
+                .eq("client_vault_id", clientId)
+                .eq("doc_code", docCode);
+            if (resolvedBusinessProfileId) {
+                approvalDelete.eq("business_profile_id", resolvedBusinessProfileId);
+            } else {
+                approvalDelete.is("business_profile_id", null);
+            }
+            await approvalDelete;
+        }
+
+        // 3. Update documents in this category to 'rejected' status and
+        // store reason — scoped to the same business so uploads on a
+        // sibling business aren't flipped to rejected.
+        const userDocsUpdate = supabaseAdmin
             .from("user_documents")
-            .update({ 
+            .update({
                 status: 'rejected',
-                metadata: { 
+                metadata: {
                     rejection_reason: reason,
                     rejected_at: new Date().toISOString(),
                     rejected_by: advisorUser.id
-                } 
+                }
             })
             .eq("user_id", client.user_id)
             .eq("doc_code", docCode);
+        if (resolvedBusinessProfileId && !isClientScopedDoc(docCode)) {
+            userDocsUpdate.eq("business_profile_id", resolvedBusinessProfileId);
+        }
+        const { error: updateError } = await userDocsUpdate;
 
         if (updateError) {
             console.error("❌ Error updating document status:", updateError);

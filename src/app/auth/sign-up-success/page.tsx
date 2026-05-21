@@ -1,27 +1,18 @@
 // src/app/auth/sign-up-success/page.tsx
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { CheckCircle2, Mail, Lock, ArrowRight, Copy, Check } from "lucide-react";
+import { CheckCircle2, Mail, Lock, ArrowRight } from "lucide-react";
 
 // Separate component that uses useSearchParams
 function SuccessContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const email = searchParams.get("email");
-  const [copied, set_copied] = useState(false);
-
-  const default_password = "CreditBanc2025!";
-
-  const copy_password = async () => {
-    await navigator.clipboard.writeText(default_password);
-    set_copied(true);
-    setTimeout(() => set_copied(false), 2000);
-  };
 
   return (
     <div className="min-h-screen bg-[#f0fdf7] relative overflow-hidden flex items-center justify-center p-4">
@@ -48,8 +39,8 @@ function SuccessContent() {
         <CardContent className="p-8 md:p-12 space-y-8">
           <div className="bg-emerald-50/50 rounded-[2.5rem] p-8 border border-emerald-50">
             <h3 className="text-xs font-black text-emerald-900/40 uppercase tracking-[0.2em] mb-8 flex items-center gap-2">
-              <Lock className="w-4 h-4" />
-              Your Login Credentials
+              <Mail className="w-4 h-4" />
+              Check Your Email
             </h3>
 
             <div className="space-y-4">
@@ -66,27 +57,9 @@ function SuccessContent() {
                   <Lock className="w-3 h-3" />
                   Temporary Password
                 </Label>
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-xl font-black text-emerald-950 tracking-tight">{default_password}</p>
-                  <Button
-                    onClick={copy_password}
-                    variant="outline"
-                    size="sm"
-                    className="h-10 px-4 border-2 border-emerald-100 text-emerald-950 font-black rounded-xl hover:bg-emerald-50 transition-all active:scale-95"
-                  >
-                    {copied ? (
-                      <>
-                        <Check className="w-4 h-4 mr-1 text-emerald-500" />
-                        Copied!
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-4 h-4 mr-1" />
-                        Copy
-                      </>
-                    )}
-                  </Button>
-                </div>
+                <p className="text-base font-bold text-emerald-950/80 leading-relaxed">
+                  We&apos;ve emailed you a one-time password. Check your inbox (and spam folder) for a message from Credit Banc to log in for the first time.
+                </p>
               </div>
             </div>
           </div>
@@ -100,7 +73,7 @@ function SuccessContent() {
             <ul className="space-y-3 text-emerald-50/60 font-medium relative z-10">
               <li className="flex items-start gap-3">
                 <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 mt-1.5 shrink-0" />
-                <span>This is a <strong>temporary password</strong> for initial access.</span>
+                <span>Your <strong>temporary password</strong> was sent to your email for initial access.</span>
               </li>
               <li className="flex items-start gap-3">
                 <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 mt-1.5 shrink-0" />
@@ -114,12 +87,12 @@ function SuccessContent() {
           </div>
 
           <div className="bg-emerald-50/30 rounded-[2.5rem] p-8 border border-emerald-50">
-            <h3 className="text-xs font-black text-emerald-900/40 uppercase tracking-[0.2em] mb-6">✅ Next Steps</h3>
+            <h3 className="text-xs font-black text-emerald-900/40 uppercase tracking-[0.2em] mb-6">Next Steps</h3>
             <div className="space-y-4">
               {[
-                "Log into your account with the credentials above",
+                "Open the welcome email we just sent you",
+                "Log in with the temporary password from that email",
                 "Complete your business profile and upload documents",
-                "Track your funding application in real-time",
                 "Update your password for enhanced security"
               ].map((step, i) => (
                 <div key={i} className="flex items-start gap-4 group">
@@ -162,7 +135,7 @@ export default function SignUpSuccessPage() {
           <div className="absolute inset-0 bg-gradient-to-br from-emerald-100/30 via-white/80 to-white pointer-events-none" />
           <div className="text-center relative z-10">
             <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-emerald-500 mx-auto mb-6"></div>
-            <p className="text-emerald-950/40 text-lg font-black uppercase tracking-widest">Loading credentials...</p>
+            <p className="text-emerald-950/40 text-lg font-black uppercase tracking-widest">Loading...</p>
           </div>
         </div>
       }

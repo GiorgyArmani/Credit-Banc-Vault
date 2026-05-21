@@ -8,7 +8,7 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog"
 import { Button } from '@/components/ui/button'
-import { Download, FileText, Loader2, X, ExternalLink } from 'lucide-react'
+import { Download, FileText, Loader2, X, ExternalLink, Pencil } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 
 interface DocumentPreviewModalProps {
@@ -17,6 +17,8 @@ interface DocumentPreviewModalProps {
     docName: string
     storagePath: string
     fileType?: string
+    /** When provided, renders a "Rename" button in the header that calls this. */
+    onRename?: () => void
 }
 
 export default function DocumentPreviewModal({
@@ -24,7 +26,8 @@ export default function DocumentPreviewModal({
     onClose,
     docName,
     storagePath,
-    fileType
+    fileType,
+    onRename,
 }: DocumentPreviewModalProps) {
     const [signedUrl, setSignedUrl] = useState<string | null>(null)
     const [isLoading, setIsLoading] = useState(false)
@@ -82,6 +85,17 @@ export default function DocumentPreviewModal({
                     <div className="flex items-center gap-2">
                         {signedUrl && (
                             <div className="flex items-center gap-2">
+                                {onRename && (
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={onRename}
+                                        className="bg-white/5 border-white/10 text-white hover:bg-white/10 h-9 px-4 rounded-xl font-bold text-[10px] uppercase tracking-widest hidden sm:flex"
+                                    >
+                                        <Pencil className="h-3.5 w-3.5 mr-2" />
+                                        Rename
+                                    </Button>
+                                )}
                                 <Button
                                     size="sm"
                                     variant="outline"

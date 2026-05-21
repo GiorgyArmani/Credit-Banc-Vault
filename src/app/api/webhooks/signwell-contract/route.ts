@@ -66,6 +66,41 @@ export async function POST(request: NextRequest) {
 
         console.log('🔍 Buscando cliente con email:', client_email);
 
+        // 3.5. Multi-business contract resolution. Prefer matching by the
+        //      Signwell document_id against funding_deals.signwell_envelope_id
+        //      so a signed contract gets stamped on the correct business when
+        //      a client has multiple businesses. Falls back to the legacy
+        //      "lookup by email" behavior if no funding_deal matches (covers
+        //      the original onboarding contract which lives on client_data_vault).
+        const signwellDocumentId: string | null = payload.document_id || payload.contract_id || null;
+        let matchedFundingDealId: string | null = null;
+        let matchedBusinessProfileId: string | null = null;
+        if (signwellDocumentId) {
+            const { data: deal } = await supabase
+                .from('funding_deals')
+                .select('id, business_profile_id, contract_completed')
+                .eq('signwell_envelope_id', signwellDocumentId)
+                .maybeSingle();
+            if (deal) {
+                matchedFundingDealId = deal.id;
+                matchedBusinessProfileId = deal.business_profile_id;
+                // Mark the funding_deal completed up front; the per-business
+                // contract status is now the source of truth, while the
+                // client_data_vault flag below covers the legacy single-deal
+                // dashboard banner. Idempotent (skip if already completed).
+                if (!deal.contract_completed) {
+                    const { error: dealUpdErr } = await supabase
+                        .from('funding_deals')
+                        .update({
+                            contract_completed: true,
+                            contract_completed_at: parse_date_to_iso(payload.completed_at),
+                        })
+                        .eq('id', deal.id);
+                    if (dealUpdErr) console.error('⚠️ funding_deal complete update failed:', dealUpdErr.message);
+                }
+            }
+        }
+
         // 4. Buscar el registro del cliente en la base de datos
         const { data: client_data, error: fetch_error } = await supabase
             .from('client_data_vault')
@@ -149,6 +184,51 @@ export async function POST(request: NextRequest) {
                 },
                 { status: 500 }
             );
+        }
+
+        // 7.5 Advance pipeline: signing the Signwell contract IS the
+        //     "onboarding complete" event for this app. Push the client past
+        //     onboarding into documents_requested so the advisor's pipeline
+        //     view reflects reality without any manual click.
+        //
+        //     Idempotent: skip the insert if the pipeline is already at or past
+        //     documents_requested (e.g. webhook fired twice, or advisor already
+        //     advanced manually).
+        try {
+            const PAST_ONBOARDING = new Set([
+                'documents_requested',
+                'documents_received',
+                'under_review',
+                'lender_matched',
+                'funded',
+                'declined',
+            ]);
+            const { data: latestStatus } = await supabase
+                .from('loan_status_history')
+                .select('status')
+                .eq('client_vault_id', client_data.id)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+
+            if (!latestStatus || !PAST_ONBOARDING.has(latestStatus.status)) {
+                const { error: pipelineError } = await supabase
+                    .from('loan_status_history')
+                    .insert({
+                        client_vault_id: client_data.id,
+                        status: 'documents_requested',
+                        changed_by: client_data.user_id,
+                        changed_by_role: 'client',
+                        note: 'Onboarding completed — Signwell contract signed',
+                    });
+                if (pipelineError) {
+                    console.error('⚠️ Failed to advance pipeline status (non-fatal):', pipelineError);
+                } else {
+                    console.log('✅ Pipeline advanced: onboarding → documents_requested');
+                }
+            }
+        } catch (pipelineCatch) {
+            console.error('⚠️ Pipeline advance threw (non-fatal):', pipelineCatch);
         }
 
         // 8. Download SignWell PDF and upload to vault

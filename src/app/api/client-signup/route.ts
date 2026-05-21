@@ -727,28 +727,83 @@ export async function POST(request: Request) {
       console.log(`✅ Data saved to client_data_vault: ${vault_id}`);
     }
 
+    // ========== STEP 5.1: SEED INITIAL PIPELINE STATUS ==========
+    // Without this row, getBulkLatestStatus returns nothing and the UI defaults
+    // to "created" forever. Inserting an explicit 'created' entry gives every
+    // new client a real audit trail starting at signup.
+    await supabase_admin.from('loan_status_history').insert({
+      client_vault_id: vault_id,
+      status: 'created',
+      changed_by: body.advisor_id || null,
+      changed_by_role: 'advisor',
+      note: 'Client created via signup',
+    });
+
     // ========== STEP 5.2: SAVE OPEN POSITIONS ==========
     // If the client has existing loans, persist each position to client_open_positions
     const open_positions: any[] = body.open_positions || [];
     if (body.has_existing_loans && open_positions.length > 0) {
+      // Resolve the primary business_profiles row that syncUnifiedClientData
+      // created moments ago. Positions are business-scoped post-refactor — the
+      // bank-analysis picker filters by business_profile_id when switching
+      // between businesses on multi-business clients. Tagging at insert time
+      // keeps that path correct without needing a separate backfill for
+      // newly-created clients.
+      const { data: primaryBusinessForPositions } = await supabase_admin
+        .from('business_profiles')
+        .select('id')
+        .eq('client_vault_id', vault_id)
+        .eq('is_primary', true)
+        .maybeSingle();
+
+      if (!primaryBusinessForPositions) {
+        // Non-fatal: insert without tagging so the data is preserved. The
+        // backfill migration (20260520_backfill_client_open_positions_business_profile.sql)
+        // covers any rows that slip through.
+        console.error('⚠️ Primary business_profiles row missing at position insert — positions will be untagged.');
+      }
+
       // Delete any previously stored positions for this vault entry (handles re-signups)
       await supabase_admin
         .from('client_open_positions')
         .delete()
         .eq('client_vault_id', vault_id);
 
-      // Build insert records, filtering out rows without a lender name
+      // Build insert records, filtering out rows without a lender name.
+      // Validates the enum + numeric ranges on the server too — form already
+      // does this but the API must not trust the client.
+      const VALID_FREQUENCIES = new Set(['Daily', 'Weekly', 'Bi-Weekly', 'Monthly']);
+      const num_or_null = (v: any): number | null => {
+        if (v == null || v === '') return null;
+        const n = typeof v === 'number' ? v : parseFloat(v);
+        return Number.isFinite(n) && n >= 0 ? n : null;
+      };
+      const int_or_null = (v: any): number | null => {
+        if (v == null || v === '') return null;
+        const n = typeof v === 'number' ? v : parseInt(v, 10);
+        return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : null;
+      };
       const position_records = open_positions
         .filter((p: any) => p.lender_name?.trim())
-        .map((p: any, index: number) => ({
-          client_vault_id: vault_id,
-          position_number: index + 1,
-          lender_name: p.lender_name.trim(),
-          loan_type: p.loan_type || '',
-          current_balance: p.current_balance ? parseFloat(p.current_balance) : null,
-          payment_amount: p.payment_amount ? parseFloat(p.payment_amount) : null,
-          payment_term: p.payment_term?.trim() || null,
-        }));
+        .map((p: any, index: number) => {
+          const freq = typeof p.payment_frequency === 'string' ? p.payment_frequency.trim() : '';
+          return {
+            client_vault_id: vault_id,
+            business_profile_id: primaryBusinessForPositions?.id ?? null,
+            position_number: index + 1,
+            lender_name: p.lender_name.trim(),
+            loan_type: p.loan_type || '',
+            initial_balance: num_or_null(p.initial_balance),
+            current_balance: num_or_null(p.current_balance),
+            payment_amount: num_or_null(p.payment_amount),
+            payment_frequency: VALID_FREQUENCIES.has(freq) ? freq : null,
+            term_remaining: int_or_null(p.term_remaining),
+            // Legacy free-text column kept for backward compat with existing
+            // rows / reads. Mirrors the frequency for new submissions so old
+            // consumers that read payment_term don't go blank.
+            payment_term: VALID_FREQUENCIES.has(freq) ? freq : (p.payment_term?.trim() || null),
+          };
+        });
 
       if (position_records.length > 0) {
         const { error: positions_error } = await supabase_admin
@@ -810,22 +865,36 @@ export async function POST(request: Request) {
     if (docLookupError) {
       console.error('⚠️ Error looking up document definitions:', docLookupError);
     } else if (docDefinitions && docDefinitions.length > 0) {
-      // Upsert records into client_dynamic_documents to avoid unique constraint errors
-      const dynamicDocRecords = docDefinitions.map(doc => ({
-        user_id: user_id,
-        document_id: doc.id,
-        is_active: true,
-        requested_at: new Date().toISOString()
-      }));
+      // Resolve the primary business_profiles row that syncUnifiedClientData
+      // created moments ago. Per-business doc scoping requires every dynamic
+      // doc request to be tied to a business.
+      const { data: primaryBusiness } = await supabase_admin
+        .from('business_profiles')
+        .select('id')
+        .eq('client_vault_id', vault_id)
+        .eq('is_primary', true)
+        .maybeSingle();
 
-      const { error: insertError } = await supabase_admin
-        .from('client_dynamic_documents')
-        .upsert(dynamicDocRecords, { onConflict: 'user_id, document_id' });
-
-      if (insertError) {
-        console.error('⚠️ Error upserting dynamic documents:', insertError);
+      if (!primaryBusiness) {
+        console.error('⚠️ Primary business_profiles row missing — dynamic docs cannot be scoped. Aborting doc seed.');
       } else {
-        console.log(`✅ Upserted ${dynamicDocRecords.length} dynamic document requirements`);
+        const dynamicDocRecords = docDefinitions.map(doc => ({
+          user_id: user_id,
+          document_id: doc.id,
+          business_profile_id: primaryBusiness.id,
+          is_active: true,
+          requested_at: new Date().toISOString()
+        }));
+
+        const { error: insertError } = await supabase_admin
+          .from('client_dynamic_documents')
+          .upsert(dynamicDocRecords, { onConflict: 'business_profile_id, document_id' });
+
+        if (insertError) {
+          console.error('⚠️ Error upserting dynamic documents:', insertError);
+        } else {
+          console.log(`✅ Upserted ${dynamicDocRecords.length} dynamic document requirements (scoped to primary business)`);
+        }
       }
     }
 

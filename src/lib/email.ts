@@ -89,6 +89,21 @@ export interface UnderwritingVaultReadyData {
 }
 
 /**
+ * Interface for "admin approved lenders for outreach" notification data
+ */
+export interface LenderReviewApprovedNotificationData {
+  underwriter_email: string;
+  client_name: string;
+  company_name: string;
+  admin_name: string;
+  /** List of lender names the admin just cleared for outreach. */
+  approved_lenders: string[];
+  /** Optional per-lender notes (visible to UW). */
+  notes_by_lender?: Record<string, string | null>;
+  client_profile_url: string;
+}
+
+/**
  * Interface for client vault submitted notification data
  */
 export interface ClientVaultSubmittedData {
@@ -1448,6 +1463,134 @@ export async function send_underwriting_vault_ready_notification(data: Underwrit
 }
 
 /**
+ * HTML template for the "admin approved lenders" UW notification.
+ */
+export function generate_lender_review_approved_html(
+  data: LenderReviewApprovedNotificationData
+): string {
+  const { client_name, company_name, admin_name, approved_lenders, notes_by_lender, client_profile_url } = data;
+
+  const lender_rows = approved_lenders
+    .map((name) => {
+      const note = notes_by_lender?.[name];
+      const note_html = note
+        ? `<p style="margin: 4px 0 0; color: #64748b; font-size: 13px; font-style: italic;">Note: ${note}</p>`
+        : '';
+      return `
+        <li style="margin: 0 0 10px; padding: 12px 16px; background-color: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 8px; list-style: none;">
+          <p style="margin: 0; color: #065f46; font-size: 15px; font-weight: 600;">${name}</p>
+          ${note_html}
+        </li>`;
+    })
+    .join('');
+
+  const count_label = `${approved_lenders.length} lender${approved_lenders.length === 1 ? '' : 's'}`;
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lenders Approved for Outreach: ${client_name}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f6f9fc;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse;">
+    <tr>
+      <td align="center" style="padding: 40px 0;">
+        <table role="presentation" style="width: 600px; max-width: 100%; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+
+          <!-- Header -->
+          <tr>
+            <td style="padding: 40px 40px 20px; text-align: center; background-color: #065f46;">
+              <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 700;">Lenders Cleared for Outreach</h1>
+              <p style="margin: 8px 0 0; color: #a7f3d0; font-size: 13px; font-weight: 500;">${count_label} ready to contact</p>
+            </td>
+          </tr>
+
+          <!-- Message -->
+          <tr>
+            <td style="padding: 40px 40px 20px;">
+              <p style="margin: 0 0 16px; color: #475569; font-size: 16px; line-height: 1.6;">
+                <strong>${admin_name}</strong> has approved the following lender${approved_lenders.length === 1 ? '' : 's'} for outreach on <strong>${client_name}</strong> (${company_name}).
+              </p>
+
+              <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px; margin-bottom: 24px;">
+                <p style="margin: 0 0 8px; color: #334155; font-size: 14px;"><strong>Client:</strong> ${client_name}</p>
+                <p style="margin: 0; color: #334155; font-size: 14px;"><strong>Company:</strong> ${company_name}</p>
+              </div>
+
+              <h3 style="margin: 0 0 12px; color: #1e293b; font-size: 15px; font-weight: 600;">Approved lenders</h3>
+              <ul style="margin: 0 0 24px; padding: 0;">
+                ${lender_rows}
+              </ul>
+
+              <p style="margin: 0 0 24px; color: #475569; font-size: 16px; line-height: 1.6;">
+                Open the client file to start outreach and update each assignment's status as contact happens.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Action Button -->
+          <tr>
+            <td style="padding: 0 40px 40px;" align="center">
+              <a href="${client_profile_url}" style="display: inline-block; background-color: #065f46; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-size: 16px; font-weight: 600;">
+                Open Client File
+              </a>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding: 40px; text-align: center; color: #94a3b8; font-size: 13px; line-height: 1.6; border-top: 1px solid #f1f5f9;">
+              <p style="margin: 0;">© ${new Date().getFullYear()} Credit Banc Vault. Confidential Internal Use Only.</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `;
+}
+
+/**
+ * Sends the "admin approved lenders" notification to a single underwriter.
+ */
+export async function send_lender_review_approved_notification(
+  data: LenderReviewApprovedNotificationData
+) {
+  const transporter = create_smtp_transporter();
+
+  const from_email = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  const from_name = process.env.SMTP_FROM_NAME || 'Credit Banc Vault';
+  const recipient_email =
+    data.underwriter_email || process.env.UNDERWRITING_EMAIL || 'underwriting@creditbanc.io';
+
+  const html_content = generate_lender_review_approved_html(data);
+
+  const mail_options = {
+    from: `${from_name} <${from_email}>`,
+    to: recipient_email,
+    subject: `Lenders cleared for outreach: ${data.client_name} (${data.approved_lenders.length})`,
+    html: html_content,
+  };
+
+  console.log(`📧 Attempting to send lender-review email to: ${recipient_email}`);
+
+  try {
+    const result = await transporter.sendMail(mail_options);
+    console.log(`✅ SMTP Result for ${data.client_name} lender review:`, result.messageId);
+    return result;
+  } catch (error) {
+    console.error(`❌ SMTP Error sending lender-review email to ${recipient_email}:`, error);
+    throw error;
+  }
+}
+
+/**
  * ============================================================================
  * LOAN FUNDED NOTIFICATION FUNCTIONS
  * ============================================================================
@@ -1679,11 +1822,26 @@ export async function send_document_rejection_email(data: DocumentRejectionEmail
 
 // ─── Outstanding Documents Reminder ────────────────────────────────────────────
 
+/** Per-business grouping for the reminder email. When supplied, renders
+ *  each entry as its own labeled section in the email body. */
+export interface OutstandingDocsReminderGroup {
+  business_name: string;
+  is_primary?: boolean;
+  missing_docs: string[];
+}
+
 export interface OutstandingDocsReminderData {
   client_email: string;
   client_name: string;
   business_name?: string | null;
+  /** Flat de-duped list. Always required (drives the subject line + the
+   *  legacy single-business rendering). For multi-business clients, also
+   *  populate `groups` so the body renders per-business sections. */
   missing_docs: string[];
+  /** Optional per-business breakdown. If two or more groups are present,
+   *  the body renders one section per business with a heading; otherwise
+   *  the email falls back to the flat `missing_docs` rendering used today. */
+  groups?: OutstandingDocsReminderGroup[];
   advisor_name?: string | null;
   advisor_email?: string | null;
   advisor_phone?: string | null;
@@ -1709,7 +1867,21 @@ export function generate_outstanding_docs_reminder_html(data: OutstandingDocsRem
   } = data;
 
   const year = new Date().getFullYear();
-  const docs_html = missing_docs.map(d => escape_html(d)).join("<br> ");
+  // Doc-list rendering: when a multi-business breakdown is provided, render
+  // one labeled section per business so the client knows exactly which file
+  // each doc belongs to. Single-business (or unprovided) callers fall back
+  // to the flat list, identical to the pre-multi-business UX. Output stays
+  // inline-only (<strong>/<br>) so it nests safely inside the template's
+  // surrounding <p> wrapper without breaking email-client renderers.
+  const groups = (data.groups ?? []).filter(g => g.missing_docs.length > 0);
+  const useGrouped = groups.length >= 2;
+  const docs_html = useGrouped
+    ? groups.map(g => {
+        const heading = `<strong style="font-size:15px;color:#103A2A;">${escape_html(g.business_name)}</strong>`;
+        const items = g.missing_docs.map(d => escape_html(d)).join("<br>");
+        return `${heading}<br>${items}`;
+      }).join("<br><br>")
+    : missing_docs.map(d => escape_html(d)).join("<br> ");
   const advisor_line = advisor_name
     ? `<p><span style="font-size: 16px">${escape_html(advisor_name)}</span>${advisor_email ? `<br><span style="font-size: 16px">${escape_html(advisor_email)}</span>` : ""}</p>`
     : "";
@@ -1900,13 +2072,20 @@ function escape_html(value: string): string {
 export function generate_outstanding_docs_reminder_text(data: OutstandingDocsReminderData): string {
   const { client_name, business_name, missing_docs, advisor_name, advisor_email, advisor_phone, login_url } = data;
   const subject_target = business_name ? business_name : "your application";
+  const groups = (data.groups ?? []).filter(g => g.missing_docs.length > 0);
+  const useGrouped = groups.length >= 2;
+  const docs_text = useGrouped
+    ? groups
+        .map(g => `${g.business_name}:\n${g.missing_docs.map(d => `  - ${d}`).join("\n")}`)
+        .join("\n\n")
+    : missing_docs.map(d => `- ${d}`).join("\n");
   return `
 Hi ${client_name},
 
 We're still waiting on a few items to keep ${subject_target} moving forward.
 
 Outstanding Documents:
-${missing_docs.map(d => `- ${d}`).join("\n")}
+${docs_text}
 
 Upload them here: ${login_url}
 
@@ -2127,6 +2306,201 @@ export async function send_myscoreiq_setup_email(data: MyScoreIQSetupEmailData) 
     return info;
   } catch (error) {
     console.error(`❌ Failed to send MyScoreIQ setup email to ${data.client_email}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * ============================================================================
+ * NEW BUSINESS ADDED NOTIFICATION
+ * Sent when an advisor creates a second (or Nth) business under an existing
+ * client. Goes To the client with the advisor + followers CC'd so everyone
+ * sees the new doc requests + funding ask.
+ * ============================================================================
+ */
+
+export interface NewBusinessAddedEmailData {
+  client_name: string;
+  client_email: string;
+  advisor_name: string;
+  advisor_email: string;
+  advisor_phone?: string;
+  advisor_cc_emails?: string[];
+  business: {
+    company_name: string;
+    legal_entity_type?: string | null;
+    industry?: string | null;
+    company_city?: string | null;
+    company_state?: string | null;
+    business_start_date?: string | null;
+    employees_count?: number | null;
+  };
+  funding?: {
+    capital_requested?: number | null;
+    proposed_loan_type?: string | null;
+    loan_purpose?: string | null;
+    funding_eta?: string | null;
+  };
+  requested_documents: string[]; // Human-readable labels
+  login_url: string;
+}
+
+function format_currency_or_dash(n: number | null | undefined): string {
+  if (n === null || n === undefined || !Number.isFinite(Number(n))) return '—';
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(Number(n));
+}
+
+export function generate_new_business_added_email_html(data: NewBusinessAddedEmailData): string {
+  const { client_name, advisor_name, advisor_email, advisor_phone, business, funding, requested_documents, login_url } = data;
+
+  const business_rows: [string, string][] = [
+    ['Company', business.company_name],
+    ['Entity Type', business.legal_entity_type || '—'],
+    ['Industry', business.industry || '—'],
+    ['Location', [business.company_city, business.company_state].filter(Boolean).join(', ') || '—'],
+    ['Business Start Date', business.business_start_date || '—'],
+    ['Employees', business.employees_count != null ? String(business.employees_count) : '—'],
+  ];
+
+  const funding_rows: [string, string][] = funding ? [
+    ['Capital Requested', format_currency_or_dash(funding.capital_requested)],
+    ['Loan Type', funding.proposed_loan_type || '—'],
+    ['Loan Purpose', funding.loan_purpose || '—'],
+    ['Funding ETA', funding.funding_eta || '—'],
+  ] : [];
+
+  const row_html = (rows: [string, string][]) => rows.map(([k, v]) => `
+    <tr>
+      <td style="padding: 8px 12px; color: #64748b; font-size: 14px; border-bottom: 1px solid #f1f5f9; width: 40%;">${k}</td>
+      <td style="padding: 8px 12px; color: #0f172a; font-size: 14px; font-weight: 600; border-bottom: 1px solid #f1f5f9;">${v}</td>
+    </tr>
+  `).join('');
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>New Business Added to Your Vault</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f6f9fc;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse;">
+    <tr>
+      <td align="center" style="padding: 40px 0;">
+        <table role="presentation" style="width: 620px; max-width: 100%; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.08);">
+
+          <tr>
+            <td style="padding: 32px 40px; background-color: #065f46; text-align: left;">
+              <h1 style="margin: 0; color: #ffffff; font-size: 22px; font-weight: 700;">New business added to your vault</h1>
+              <p style="margin: 8px 0 0; color: #a7f3d0; font-size: 14px;">${business.company_name}</p>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding: 32px 40px 8px;">
+              <h2 style="margin: 0 0 12px; color: #0f172a; font-size: 18px; font-weight: 600;">Hi ${client_name},</h2>
+              <p style="margin: 0 0 16px; color: #334155; font-size: 15px; line-height: 1.6;">
+                Your advisor <strong>${advisor_name}</strong> has set up a new business under your Credit Banc Vault account. Below are the details and the documents we'll need from you to move this one forward.
+              </p>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding: 8px 40px;">
+              <h3 style="margin: 0 0 12px; color: #0f172a; font-size: 15px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">Business details</h3>
+              <table role="presentation" style="width: 100%; border-collapse: collapse; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
+                ${row_html(business_rows)}
+              </table>
+            </td>
+          </tr>
+
+          ${funding_rows.length > 0 ? `
+          <tr>
+            <td style="padding: 20px 40px 8px;">
+              <h3 style="margin: 0 0 12px; color: #0f172a; font-size: 15px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">Funding ask</h3>
+              <table role="presentation" style="width: 100%; border-collapse: collapse; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
+                ${row_html(funding_rows)}
+              </table>
+            </td>
+          </tr>
+          ` : ''}
+
+          <tr>
+            <td style="padding: 20px 40px 8px;">
+              <h3 style="margin: 0 0 12px; color: #0f172a; font-size: 15px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">Documents we need (${requested_documents.length})</h3>
+              ${requested_documents.length === 0 ? `
+                <p style="margin: 0; color: #64748b; font-size: 14px;">No documents are requested at this time. We'll reach out as we need them.</p>
+              ` : `
+                <div style="background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 16px 20px;">
+                  <ul style="margin: 0; padding-left: 20px; color: #166534; font-size: 14px; line-height: 1.8;">
+                    ${requested_documents.map(d => `<li>${d}</li>`).join('')}
+                  </ul>
+                </div>
+              `}
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding: 28px 40px 8px;" align="center">
+              <a href="${login_url}" style="display: inline-block; background-color: #059669; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-size: 15px; font-weight: 600;">
+                Open my vault
+              </a>
+              <p style="margin: 12px 0 0; color: #94a3b8; font-size: 13px;">
+                Sign in with your existing credentials. The new business appears as its own tab.
+              </p>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding: 32px 40px; background-color: #f8fafc; border-top: 1px solid #e2e8f0;">
+              <p style="margin: 0 0 6px; color: #64748b; font-size: 13px; line-height: 1.6;">
+                <strong style="color: #334155;">Questions?</strong> Reach out to ${advisor_name}.
+              </p>
+              <p style="margin: 0; color: #64748b; font-size: 13px; line-height: 1.6;">
+                ${advisor_email}${advisor_phone ? ` · ${advisor_phone}` : ''}
+              </p>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding: 24px 40px; text-align: center; color: #94a3b8; font-size: 12px;">
+              © ${new Date().getFullYear()} Credit Banc Vault.
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `;
+}
+
+export async function send_new_business_added_notification(data: NewBusinessAddedEmailData) {
+  const transporter = create_smtp_transporter();
+
+  const from_email = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  const from_name = process.env.SMTP_FROM_NAME || 'Credit Banc Vault';
+
+  const mail_options: any = {
+    from: `${from_name} <${from_email}>`,
+    to: data.client_email,
+    subject: `New business added to your vault: ${data.business.company_name}`,
+    html: generate_new_business_added_email_html(data),
+  };
+
+  // Always CC the advisor; include follower advisors when provided.
+  const cc_list = build_cc_list(data.advisor_email, data.advisor_cc_emails);
+  if (cc_list.length > 0) mail_options.cc = cc_list;
+
+  try {
+    const info = await transporter.sendMail(mail_options);
+    console.log(`✅ New-business email sent to ${data.client_email} (cc: ${cc_list.join(', ') || 'none'}): ${info.messageId}`);
+    return info;
+  } catch (error) {
+    console.error(`❌ Failed to send new-business email to ${data.client_email}:`, error);
     throw error;
   }
 }

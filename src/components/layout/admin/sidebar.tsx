@@ -16,7 +16,6 @@ import {
   Database,
   Users,
   LayoutGrid,
-  BookCheck,
   UserCog,
   ChevronDown,
 } from 'lucide-react'
@@ -39,8 +38,7 @@ const uwNavItems = [
 ]
 
 const advisorNavItems = [
-  { label: 'Dashboard', href: '/admin/advisor/dashboard', icon: BookCheck },
-  { label: 'Pipeline', href: '/admin/advisor/pipeline', icon: LayoutGrid },
+  { label: 'Pipeline', href: '/admin/pipeline', icon: LayoutGrid },
   { label: 'Prospects', href: '/admin/prospects', icon: Users },
   { label: 'Clients', href: '/admin/clients', icon: ShieldCheck },
 ]

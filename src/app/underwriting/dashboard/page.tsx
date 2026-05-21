@@ -26,6 +26,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import clsx from "clsx";
 import { getBulkLatestStatus, type LoanStatus } from "@/app/actions/pipeline";
 import { LoanPipelineBadge } from "@/components/loan-pipeline-status";
+import { normalizeSupabaseJoin } from "@/lib/document-scope";
 
 enum ComponentState {
     LOADING = "LOADING",
@@ -146,7 +147,12 @@ export default function UnderwritingDashboardPage() {
 
                 // Document stats calculation - Simplified view for dashboard
                 const { data: dynamicDocs } = await supabase.from("client_dynamic_documents").select("required_documents(code)").eq("user_id", client.user_id).eq("is_active", true);
-                const dynamicCodes = dynamicDocs?.map((d: any) => d.required_documents?.code).filter(Boolean) || [];
+                // normalizeSupabaseJoin: SDK returns the embed as object or array.
+                // Without the normalize the UW queue dashboard counts zero
+                // dynamic docs for every client.
+                const dynamicCodes = (dynamicDocs as any[] | null)
+                    ?.map((d: any) => normalizeSupabaseJoin<{ code?: string }>(d.required_documents)?.code)
+                    .filter((c: string | undefined): c is string => !!c) || [];
                 const allRequiredCodes = new Set([...coreCodes, ...dynamicCodes]);
 
                 const { data: uploadedDocs } = await supabase.from("user_documents").select("category, doc_code").eq("user_id", client.user_id);
@@ -235,12 +241,15 @@ export default function UnderwritingDashboardPage() {
                                     {client.document_count}/{client.total_required_docs} Docs
                                 </span>
                             </div>
-                            <CardTitle className="text-xl font-black text-slate-900 uppercase tracking-tighter group-hover:text-emerald-600 transition-colors">
-                                {client.client_name}
-                            </CardTitle>
-                            <CardDescription className="text-sm font-bold text-slate-400 flex items-center gap-2">
-                                <Building2 className="w-3.5 h-3.5" />
+                            {/* Company name leads — UW identifies clients by
+                                business, not by owner. Owner name moves to
+                                the description row for context. */}
+                            <CardTitle className="text-xl font-black text-slate-900 uppercase tracking-tighter group-hover:text-emerald-600 transition-colors flex items-center gap-2">
+                                <Building2 className="w-4 h-4 text-slate-400" />
                                 {client.company_name}
+                            </CardTitle>
+                            <CardDescription className="text-sm font-bold text-slate-400">
+                                {client.client_name}
                             </CardDescription>
                         </div>
                         <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center group-hover:bg-slate-900 group-hover:text-white transition-all duration-300">

@@ -69,10 +69,16 @@ export function BankAnalysisViewer({ clientId, isOpen, onClose }: Props) {
         (async () => {
             set_is_loading(true);
             set_error_message(null);
+            // Latest snapshot only — the table is now append-only so each
+            // save adds a new row. The admin viewer is read-only and meant
+            // to surface "what does UW have right now," which is the most
+            // recent row.
             const { data, error } = await supabase
                 .from("bank_analysis_results")
                 .select("*")
                 .eq("client_id", clientId)
+                .order("created_at", { ascending: false })
+                .limit(1)
                 .maybeSingle();
             if (cancelled) return;
             if (error) {

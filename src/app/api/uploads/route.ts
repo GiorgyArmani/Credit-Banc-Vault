@@ -414,9 +414,39 @@ export async function POST(req: Request) {
 
     const profileId = vaultRecord?.id;
 
-    // 3. Create event record (audit trail)
+    // 3. Advance pipeline to documents_received on the first upload for this
+    //    client. updateLoanStatus is idempotent (it skips redundant consecutive
+    //    entries), so calling it on every upload is safe — only the first one
+    //    actually inserts a row.
     if (profileId) {
-      const { data: bp } = await admin.from("business_profiles").select("id").eq("user_id", doc.user_id).maybeSingle();
+      const { data: latest } = await admin
+        .from("loan_status_history")
+        .select("status")
+        .eq("client_vault_id", profileId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (latest?.status !== "documents_received" && latest?.status !== "under_review"
+          && latest?.status !== "lender_matched" && latest?.status !== "funded") {
+        await admin.from("loan_status_history").insert({
+          client_vault_id: profileId,
+          status: "documents_received",
+          changed_by: doc.user_id,
+          changed_by_role: "client",
+          note: `Document uploaded (${doc_code})`,
+        });
+      }
+    }
+
+    // 4. Create event record (audit trail)
+    if (profileId) {
+      const { data: bp } = await admin
+        .from("business_profiles")
+        .select("id")
+        .eq("client_vault_id", vaultRecord!.id)
+        .eq("is_primary", true)
+        .maybeSingle();
 
       if (bp) {
         await admin.from("events").insert({

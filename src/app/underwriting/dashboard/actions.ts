@@ -5,6 +5,20 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { send_advisor_document_notification, send_loan_funded_notification } from "@/lib/email";
 import { createClient } from "@/lib/supabase/server";
 import { ghlUpdateContact, ghlAddTags } from "@/lib/ghl-api";
+import { revalidatePath } from "next/cache";
+
+/**
+ * Centralizes the cache-invalidation surface every mutation in this file
+ * needs to hit so the UW dashboard and the touched client's detail page
+ * refresh after the action returns. Without these calls the user sees
+ * stale data until manual refresh.
+ */
+function revalidateClientSurfaces(clientId: string) {
+    revalidatePath("/underwriting/dashboard");
+    revalidatePath(`/underwriting/dashboard/clients/${clientId}`);
+    revalidatePath("/admin/dashboard");
+    revalidatePath(`/admin/clients/${clientId}`);
+}
 
 export async function notifyAdvisor(clientId: string, requestedDocs: string[], customNote?: string) {
     const supabaseAdmin = createAdminClient();
@@ -97,6 +111,7 @@ export async function notifyAdvisor(clientId: string, requestedDocs: string[], c
             login_url: `${process.env.NEXT_PUBLIC_APP_URL || 'https://vault.creditbanc.io'}/auth/login`
         });
 
+        revalidateClientSurfaces(clientId);
         return { success: true };
     } catch (error: any) {
         console.error("notifyAdvisor error:", error);
@@ -226,6 +241,7 @@ export async function fundLoanAction(clientId: string, data: {
             // Non-fatal, let it succeed
         }
 
+        revalidateClientSurfaces(clientId);
         return { success: true };
     } catch (error: any) {
         console.error("fundLoanAction error:", error);
@@ -278,6 +294,22 @@ export async function renameClientFile(documentId: string, newLabel: string) {
             .eq("id", documentId);
 
         if (error) throw error;
+
+        // Find the client to revalidate. The rename only updates the file,
+        // so we lookup the user_id → client_vault_id for the cache touch.
+        const { data: doc } = await supabaseAdmin
+            .from("user_documents")
+            .select("user_id")
+            .eq("id", documentId)
+            .maybeSingle();
+        if (doc?.user_id) {
+            const { data: vault } = await supabaseAdmin
+                .from("client_data_vault")
+                .select("id")
+                .eq("user_id", doc.user_id)
+                .maybeSingle();
+            if (vault?.id) revalidateClientSurfaces(vault.id);
+        }
 
         return { success: true };
     } catch (error: any) {

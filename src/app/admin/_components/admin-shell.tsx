@@ -38,8 +38,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
       '/admin/uw/bank-analysis': 'Bank Analysis',
       '/admin/uw/lender-match': 'Lender Match',
       '/admin/uw/lender-guidelines': 'Lender Database',
-      '/admin/advisor/dashboard': 'Advisor Dashboard',
-      '/admin/advisor/pipeline': 'Pipeline',
+      '/admin/pipeline': 'Pipeline',
       '/admin/prospects': 'Prospects',
       '/admin/clients': 'Clients',
     }

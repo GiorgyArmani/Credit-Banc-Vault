@@ -14,7 +14,6 @@ import {
   Database,
   Users,
   LayoutGrid,
-  BookCheck,
   ArrowRight,
   ShieldCheck,
   UserCog,
@@ -27,9 +26,16 @@ import {
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { resolve_range, compute_delta, type ResolvedRange } from './_lib/range'
+import { compute_funded_amount } from './_lib/funded-amount'
 import { DateRangePicker } from './_components/date-range-picker'
+import { AdvisorFilter } from './_components/advisor-filter'
 import { FundedSparkline } from './_components/funded-sparkline'
 import { ConversionFunnel } from './_components/conversion-funnel'
+
+// 30-day activity window for Active / Stale classification. Activity sources
+// are document uploads (any role) and pipeline status changes — see the
+// last_activity_at computation in load_metrics.
+const ACTIVITY_WINDOW_DAYS = 30
 
 export const dynamic = 'force-dynamic'
 
@@ -50,6 +56,18 @@ const PIPELINE_STAGES = [
   'declined',
 ] as const
 
+// Stages that represent live, in-flight work (used for the "Pipeline $" tile
+// and the Stale bucket). Funded and declined are terminal — clients in those
+// stages aren't part of the in-flight pipeline regardless of activity.
+const IN_FLIGHT_STAGES: ReadonlySet<string> = new Set([
+  'created',
+  'onboarding',
+  'documents_requested',
+  'documents_received',
+  'under_review',
+  'lender_matched',
+])
+
 const FUNNEL_STAGES = [
   'created',
   'onboarding',
@@ -69,13 +87,19 @@ const STAGE_LABEL: Record<string, string> = {
   lender_matched: 'Matched',
   funded: 'Funded',
   declined: 'Declined',
+  stale: 'Stale',
 }
+
+// Stages shown in the snapshot grid — same as PIPELINE_STAGES plus an
+// at-the-end "stale" bucket derived from inactivity rather than status.
+const SNAPSHOT_STAGES: ReadonlyArray<string> = [...PIPELINE_STAGES, 'stale']
 
 interface DashboardMetrics {
   // Point-in-time
-  total_active: number
-  pending_lender_reviews: number
-  pipeline_counts: Record<string, number>
+  total_active: number              // clients with activity in the last ACTIVITY_WINDOW_DAYS
+  pending_lender_reviews: number     // distinct clients with at least one lender assignment ready to send
+  total_pipeline_amount: number      // sum of capital_requested across in-flight, non-stale clients
+  pipeline_counts: Record<string, number>  // includes a synthetic 'stale' key
   avg_days_in_stage: Record<string, number>
 
   // Range-scoped current period
@@ -127,55 +151,78 @@ function date_key(d: Date | string): string {
   return dt.toISOString().slice(0, 10)
 }
 
-async function load_metrics(range: ResolvedRange): Promise<DashboardMetrics> {
+async function load_metrics(
+  range: ResolvedRange,
+  advisor_id: string | null,
+): Promise<DashboardMetrics> {
   const now = new Date()
   const range_from = range.from.toISOString()
   const range_to = range.to.toISOString()
-  const prev_from = range.prev_from.toISOString()
-  const prev_to = range.prev_to.toISOString()
+
+  // Build query helpers — same shape with an optional .eq('advisor_id', ...).
+  // We filter at the vault level; downstream rows are filtered in-memory once
+  // we know which vault ids are in scope, which keeps these queries parallel.
+  const vault_query = supabase_admin
+    .from('client_data_vault')
+    .select('id, user_id, client_name, company_name, capital_requested, advisor_id, advisor_name, created_at')
+  if (advisor_id) vault_query.eq('advisor_id', advisor_id)
+
+  const recent_signup_query = supabase_admin
+    .from('client_data_vault')
+    .select('id, client_name, company_name, advisor_name, created_at')
+    .gte('created_at', range_from)
+    .lte('created_at', range_to)
+    .order('created_at', { ascending: false })
+    .limit(8)
+  if (advisor_id) recent_signup_query.eq('advisor_id', advisor_id)
 
   const [
-    { count: total_active },
-    { count: pending_lender_reviews },
     { data: history_rows },
     { data: vault_rows },
     { data: recent_signup_rows },
+    { data: upload_rows },
+    { data: pending_review_rows },
   ] = await Promise.all([
-    supabase_admin
-      .from('client_data_vault')
-      .select('id', { count: 'exact', head: true })
-      .eq('status', 'active'),
-
-    supabase_admin
-      .from('client_lender_assignments')
-      .select('id', { count: 'exact', head: true })
-      .eq('admin_review', 'pending')
-      .eq('decision', 'approved'),
-
     supabase_admin
       .from('loan_status_history')
       .select('client_vault_id, status, created_at')
       .order('created_at', { ascending: true }),
 
-    supabase_admin
-      .from('client_data_vault')
-      .select('id, client_name, company_name, capital_requested, advisor_id, advisor_name, created_at'),
+    vault_query,
+    recent_signup_query,
 
+    // Activity source #1 — every document upload (any role). user_documents is
+    // keyed on auth user_id, so we join in-memory via vault.user_id.
     supabase_admin
-      .from('client_data_vault')
-      .select('id, client_name, company_name, advisor_name, created_at')
-      .gte('created_at', range_from)
-      .lte('created_at', range_to)
-      .order('created_at', { ascending: false })
-      .limit(8),
+      .from('user_documents')
+      .select('user_id, upload_date'),
+
+    // "Ready to send to lender UW" queue — matched by the algorithm, approved
+    // by an admin, and not yet submitted to the lender. We pull client_id so
+    // we can count DISTINCT files (one file with 3 ready lenders = 1 review).
+    supabase_admin
+      .from('client_lender_assignments')
+      .select('client_id')
+      .eq('decision', 'approved')
+      .eq('admin_review', 'approved')
+      .eq('status', 'pending'),
   ])
 
   // ─── Index helpers ─────────────────────────────────────────────────────
   const vault_by_id = new Map<string, any>()
-  for (const v of vault_rows ?? []) vault_by_id.set(v.id, v)
+  const user_to_vault = new Map<string, string>()
+  for (const v of vault_rows ?? []) {
+    vault_by_id.set(v.id, v)
+    if (v.user_id) user_to_vault.set(v.user_id, v.id)
+  }
+
+  // When an advisor filter is applied, vault_rows is already scoped — drop any
+  // history / activity / lender-review row whose vault isn't in scope.
+  const in_scope = (vault_id: string) => vault_by_id.has(vault_id)
 
   const history_by_client = new Map<string, Array<{ status: string; created_at: string }>>()
   for (const r of history_rows ?? []) {
+    if (advisor_id && !in_scope(r.client_vault_id)) continue
     const arr = history_by_client.get(r.client_vault_id) ?? []
     arr.push({ status: r.status, created_at: r.created_at })
     history_by_client.set(r.client_vault_id, arr)
@@ -187,27 +234,84 @@ async function load_metrics(range: ResolvedRange): Promise<DashboardMetrics> {
     latest_by_client.set(id, arr[arr.length - 1])
   }
 
+  // ─── last_activity_at per vault ────────────────────────────────────────
+  // Seed with vault creation timestamp, then take the max over: pipeline status
+  // changes (loan_status_history) and document uploads (user_documents). These
+  // are the two signals the user wants for Active / Stale classification —
+  // logins and internal notes are intentionally excluded.
+  const activity_by_vault = new Map<string, number>()
+  for (const v of vault_rows ?? []) {
+    activity_by_vault.set(v.id, new Date(v.created_at).getTime())
+  }
+  for (const r of history_rows ?? []) {
+    if (advisor_id && !in_scope(r.client_vault_id)) continue
+    const ts = new Date(r.created_at).getTime()
+    const cur = activity_by_vault.get(r.client_vault_id) ?? 0
+    if (ts > cur) activity_by_vault.set(r.client_vault_id, ts)
+  }
+  for (const u of upload_rows ?? []) {
+    const vid = user_to_vault.get(u.user_id)
+    if (!vid) continue
+    const ts = new Date(u.upload_date).getTime()
+    const cur = activity_by_vault.get(vid) ?? 0
+    if (ts > cur) activity_by_vault.set(vid, ts)
+  }
+
+  const stale_threshold_ms = now.getTime() - ACTIVITY_WINDOW_DAYS * 24 * 60 * 60 * 1000
+  const is_stale = (vault_id: string, stage: string): boolean => {
+    if (stage === 'funded' || stage === 'declined') return false
+    const last = activity_by_vault.get(vault_id) ?? 0
+    return last < stale_threshold_ms
+  }
+
   // ─── Pipeline by stage (point-in-time snapshot) ────────────────────────
+  // The synthetic 'stale' bucket pulls clients OUT of their underlying stage so
+  // the column counts sum to the total in-scope vault count without double-
+  // counting. Funded / declined are terminal and never go stale.
   const pipeline_counts: Record<string, number> = {}
-  PIPELINE_STAGES.forEach((s) => (pipeline_counts[s] = 0))
+  SNAPSHOT_STAGES.forEach((s) => (pipeline_counts[s] = 0))
   const days_sum: Record<string, number> = {}
   const days_count: Record<string, number> = {}
-  PIPELINE_STAGES.forEach((s) => { days_sum[s] = 0; days_count[s] = 0 })
+  SNAPSHOT_STAGES.forEach((s) => { days_sum[s] = 0; days_count[s] = 0 })
 
   for (const v of vault_rows ?? []) {
     const latest = latest_by_client.get(v.id)
     const stage = latest?.status ?? 'created'
-    pipeline_counts[stage] = (pipeline_counts[stage] ?? 0) + 1
+    const bucket = is_stale(v.id, stage) ? 'stale' : stage
+    pipeline_counts[bucket] = (pipeline_counts[bucket] ?? 0) + 1
     if (latest?.created_at) {
       const days = (now.getTime() - new Date(latest.created_at).getTime()) / (1000 * 60 * 60 * 24)
-      days_sum[stage] += days
-      days_count[stage] += 1
+      days_sum[bucket] += days
+      days_count[bucket] += 1
     }
   }
   const avg_days_in_stage: Record<string, number> = {}
-  PIPELINE_STAGES.forEach((s) => {
+  SNAPSHOT_STAGES.forEach((s) => {
     avg_days_in_stage[s] = days_count[s] > 0 ? days_sum[s] / days_count[s] : 0
   })
+
+  // ─── Top-level point-in-time tiles ─────────────────────────────────────
+  let total_active = 0
+  let total_pipeline_amount = 0
+  for (const v of vault_rows ?? []) {
+    const last = activity_by_vault.get(v.id) ?? 0
+    if (last >= stale_threshold_ms) total_active += 1
+
+    const latest = latest_by_client.get(v.id)
+    const stage = latest?.status ?? 'created'
+    if (IN_FLIGHT_STAGES.has(stage) && !is_stale(v.id, stage)) {
+      total_pipeline_amount += Number(v.capital_requested) || 0
+    }
+  }
+
+  // "Ready to send to lender UW" — distinct clients across pending_review_rows,
+  // intersected with vault scope when advisor filter is on.
+  const pending_clients = new Set<string>()
+  for (const r of pending_review_rows ?? []) {
+    if (advisor_id && !in_scope(r.client_id)) continue
+    pending_clients.add(r.client_id)
+  }
+  const pending_lender_reviews = pending_clients.size
 
   // ─── Funded events (current + prior period) ────────────────────────────
   const range_from_ms = range.from.getTime()
@@ -215,26 +319,42 @@ async function load_metrics(range: ResolvedRange): Promise<DashboardMetrics> {
   const prev_from_ms = range.prev_from.getTime()
   const prev_to_ms = range.prev_to.getTime()
 
-  let funded_amount = 0
-  let funded_count = 0
-  let prior_funded_amount = 0
-  let prior_funded_count = 0
-  const funded_in_range: Array<{ client_id: string; ts: number; amount: number }> = []
+  // Dedupe per vault: until funding_deals lands, a client has at most one
+  // "funded" event from the dashboard's POV. Without this, duplicate funded
+  // rows in loan_status_history (e.g. from kanban re-drags into the Funded
+  // column) double-count the same vault.capital_requested. history_rows is
+  // ordered ascending, so Map.set keeps the latest transition per vault.
+  const latest_funded_in_range = new Map<string, { ts: number; amount: number }>()
+  const latest_funded_in_prior = new Map<string, { ts: number; amount: number }>()
 
   for (const r of history_rows ?? []) {
     if (r.status !== 'funded') continue
+    if (advisor_id && !in_scope(r.client_vault_id)) continue
     const ts = new Date(r.created_at).getTime()
     const v = vault_by_id.get(r.client_vault_id)
-    const amount = Number(v?.capital_requested) || 0
+    // Source of truth for "how much was funded" lives in compute_funded_amount
+    // — today reads vault.capital_requested, future swaps to funding_deals.
+    const amount = compute_funded_amount({ vault: v })
 
     if (ts >= range_from_ms && ts <= range_to_ms) {
-      funded_amount += amount
-      funded_count += 1
-      funded_in_range.push({ client_id: r.client_vault_id, ts, amount })
+      latest_funded_in_range.set(r.client_vault_id, { ts, amount })
     } else if (ts >= prev_from_ms && ts < prev_to_ms) {
-      prior_funded_amount += amount
-      prior_funded_count += 1
+      latest_funded_in_prior.set(r.client_vault_id, { ts, amount })
     }
+  }
+
+  let funded_amount = 0
+  const funded_count = latest_funded_in_range.size
+  const funded_in_range: Array<{ client_id: string; ts: number; amount: number }> = []
+  for (const [client_id, { ts, amount }] of latest_funded_in_range) {
+    funded_amount += amount
+    funded_in_range.push({ client_id, ts, amount })
+  }
+
+  let prior_funded_amount = 0
+  const prior_funded_count = latest_funded_in_prior.size
+  for (const { amount } of latest_funded_in_prior.values()) {
+    prior_funded_amount += amount
   }
 
   // ─── Signups (current + prior period) ──────────────────────────────────
@@ -353,8 +473,9 @@ async function load_metrics(range: ResolvedRange): Promise<DashboardMetrics> {
     .slice(0, 5)
 
   return {
-    total_active: total_active ?? 0,
-    pending_lender_reviews: pending_lender_reviews ?? 0,
+    total_active,
+    pending_lender_reviews,
+    total_pipeline_amount,
     pipeline_counts,
     avg_days_in_stage,
     funded_amount,
@@ -379,8 +500,7 @@ const uwTools = [
   { label: 'Lender Database', desc: 'Manage and configure lender guidelines and programs.', href: '/admin/uw/lender-guidelines', icon: Database, color: 'from-emerald-50 to-emerald-100/50', iconColor: 'text-emerald-500', border: 'border-emerald-100' },
 ]
 const advisorTools = [
-  { label: 'Advisor Dashboard', desc: 'View key metrics, recent activity and pipeline summary.', href: '/admin/advisor/dashboard', icon: BookCheck, color: 'from-blue-50 to-blue-100/50', iconColor: 'text-blue-500', border: 'border-blue-100' },
-  { label: 'Pipeline', desc: 'Drag-and-drop Kanban board to manage deals through all stages.', href: '/admin/advisor/pipeline', icon: LayoutGrid, color: 'from-blue-50 to-blue-100/50', iconColor: 'text-blue-500', border: 'border-blue-100' },
+  { label: 'Pipeline', desc: 'Drag-and-drop Kanban board to manage deals through all stages.', href: '/admin/pipeline', icon: LayoutGrid, color: 'from-blue-50 to-blue-100/50', iconColor: 'text-blue-500', border: 'border-blue-100' },
   { label: 'Prospects', desc: 'Active pipeline — files not yet funded.', href: '/admin/prospects', icon: Users, color: 'from-blue-50 to-blue-100/50', iconColor: 'text-blue-500', border: 'border-blue-100' },
   { label: 'Clients', desc: 'Funded customer book.', href: '/admin/clients', icon: Users, color: 'from-blue-50 to-blue-100/50', iconColor: 'text-blue-500', border: 'border-blue-100' },
   { label: 'New Funding', desc: 'Submit a new client vault for the funding pipeline.', href: '/admin/clients/new', icon: UserCog, color: 'from-blue-50 to-blue-100/50', iconColor: 'text-blue-500', border: 'border-blue-100' },
@@ -413,13 +533,29 @@ const fmt_compact_money = (v: number) => {
 }
 
 interface PageProps {
-  searchParams: Promise<{ range?: string; from?: string; to?: string }>
+  searchParams: Promise<{ range?: string; from?: string; to?: string; advisor?: string }>
 }
 
 export default async function AdminDashboardPage({ searchParams }: PageProps) {
   const params = await searchParams
   const range = resolve_range(params)
-  const m = await load_metrics(range)
+  const advisor_id = params.advisor && params.advisor.length > 0 ? params.advisor : null
+
+  const [m, advisors_list] = await Promise.all([
+    load_metrics(range, advisor_id),
+    supabase_admin
+      .from('advisors')
+      .select('id, first_name, last_name')
+      .eq('is_active', true)
+      .order('first_name', { ascending: true }),
+  ])
+
+  const advisor_options = (advisors_list.data ?? []).map((a) => ({
+    id: a.id as string,
+    name: `${a.first_name ?? ''} ${a.last_name ?? ''}`.trim() || 'Unknown',
+  }))
+  const selected_advisor = advisor_id ? advisor_options.find((a) => a.id === advisor_id) : null
+
   const max_pipeline = Math.max(1, ...Object.values(m.pipeline_counts))
 
   const funded_delta = compute_delta(m.funded_amount, m.prior_funded_amount)
@@ -439,29 +575,39 @@ export default async function AdminDashboardPage({ searchParams }: PageProps) {
               Admin Command Center
             </h1>
             <p className="text-slate-600 text-base leading-relaxed max-w-2xl">
-              Operational view of the funding pipeline. KPIs scoped to <span className="font-bold text-slate-900">{range.label.toLowerCase()}</span>; deltas compare to the prior {range.days}-day window.
+              Operational view of the funding pipeline. KPIs scoped to <span className="font-bold text-slate-900">{range.label.toLowerCase()}</span>{selected_advisor ? <> · advisor <span className="font-bold text-slate-900">{selected_advisor.name}</span></> : null}; deltas compare to the prior {range.days}-day window.
             </p>
           </div>
         </div>
 
-        <DateRangePicker />
+        <div className="flex items-center gap-2 flex-wrap">
+          <AdvisorFilter advisors={advisor_options} />
+          <DateRangePicker />
+        </div>
       </div>
 
       {/* Top metric tiles */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
         <MetricTile
           label="Active deals"
           value={String(m.total_active)}
           icon={TrendingUp}
           tone="emerald"
-          hint="point-in-time"
+          hint={`Activity in last ${ACTIVITY_WINDOW_DAYS} days`}
         />
         <MetricTile
           label="Pending lender reviews"
           value={String(m.pending_lender_reviews)}
           icon={Star}
           tone={m.pending_lender_reviews > 0 ? 'amber' : 'slate'}
-          hint={m.pending_lender_reviews > 0 ? 'Awaiting your decision' : 'All caught up'}
+          hint={m.pending_lender_reviews > 0 ? 'Ready to send to lender UW' : 'All caught up'}
+        />
+        <MetricTile
+          label="Pipeline $"
+          value={fmt_compact_money(m.total_pipeline_amount)}
+          icon={LayoutGrid}
+          tone="blue"
+          hint="In-flight, requested capital"
         />
         <MetricTile
           label="Funded in range"
@@ -539,20 +685,26 @@ export default async function AdminDashboardPage({ searchParams }: PageProps) {
               Open Kanban →
             </Link>
           </div>
-          <div className="grid grid-cols-4 gap-3">
-            {PIPELINE_STAGES.map((stage) => {
+          <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-2">
+            {SNAPSHOT_STAGES.map((stage) => {
               const count = m.pipeline_counts[stage] ?? 0
               const avg = m.avg_days_in_stage[stage] ?? 0
               const height_pct = (count / max_pipeline) * 100
+              const is_stale_col = stage === 'stale'
+              // Visually flag the stale bucket — it's derived, not a real stage.
+              const bar_gradient = is_stale_col
+                ? 'bg-gradient-to-t from-rose-500 to-rose-300'
+                : 'bg-gradient-to-t from-emerald-500 to-emerald-300'
+              const label_color = is_stale_col ? 'text-rose-500' : 'text-slate-400'
               return (
                 <div key={stage} className="flex flex-col items-center gap-2">
                   <div className="w-full h-16 bg-slate-50 rounded-xl flex items-end overflow-hidden">
                     <div
-                      className="w-full bg-gradient-to-t from-emerald-500 to-emerald-300 transition-all"
+                      className={`w-full ${bar_gradient} transition-all`}
                       style={{ height: `${Math.max(height_pct, count > 0 ? 6 : 0)}%` }}
                     />
                   </div>
-                  <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 text-center leading-tight">
+                  <p className={`text-[9px] font-black uppercase tracking-widest ${label_color} text-center leading-tight`}>
                     {STAGE_LABEL[stage]}
                   </p>
                   <p className="text-base font-black text-slate-900">{count}</p>
