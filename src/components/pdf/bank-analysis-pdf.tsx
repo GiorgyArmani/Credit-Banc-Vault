@@ -375,6 +375,20 @@ export default function BankAnalysisPDF({ data }: { data: BankAnalysisPDFData })
     const labelColWidth = "20%";
     const totalColWidth = "10%";
 
+    // Compact typography for high month counts. At 9+ months the default
+    // fontSize/padding spills $1M+ figures across cells (overlap on the
+    // Account Breakdown page). Scaling type + padding keeps everything in
+    // its column even at the 12-month lookback.
+    const denseMonths = activeMonths.length >= 9;
+    const cellFontSize = denseMonths ? 6.5 : 8;
+    const cellPaddingV = denseMonths ? 2 : 4;
+    const cellPaddingH = denseMonths ? 2 : 5;
+    const cellStyleOverride = {
+        fontSize: cellFontSize,
+        paddingVertical: cellPaddingV,
+        paddingHorizontal: cellPaddingH,
+    };
+
     const renderAccountTable = (account: BankAnalysisPDFAccount, idx: number) => {
         const activeData = activeMonthIndices.map((mi) => account.months[mi]);
 
@@ -388,13 +402,13 @@ export default function BankAnalysisPDF({ data }: { data: BankAnalysisPDFData })
                 <View style={styles.table}>
                     {/* Header row */}
                     <View style={styles.tr}>
-                        <Text style={[styles.th, { width: labelColWidth }]}>Field</Text>
+                        <Text style={[styles.th, cellStyleOverride, { width: labelColWidth }]}>Field</Text>
                         {activeMonths.map((m, i) => (
-                            <Text key={i} style={[styles.th, { width: monthColWidth, textAlign: "center" }]}>
+                            <Text key={i} style={[styles.th, cellStyleOverride, { width: monthColWidth, textAlign: "center" }]}>
                                 {m}
                             </Text>
                         ))}
-                        <Text style={[styles.th, { width: totalColWidth, textAlign: "center" }]}>Avg / Total</Text>
+                        <Text style={[styles.th, cellStyleOverride, { width: totalColWidth, textAlign: "center" }]}>Avg / Total</Text>
                     </View>
 
                     {/* Money rows */}
@@ -403,7 +417,7 @@ export default function BankAnalysisPDF({ data }: { data: BankAnalysisPDFData })
                         const avg = avgOfFilledMoney(vals);
                         return (
                             <View key={row.key} style={styles.tr}>
-                                <Text style={[styles.td, styles.tdLabel, { width: labelColWidth }]}>{row.label}</Text>
+                                <Text style={[styles.td, styles.tdLabel, cellStyleOverride, { width: labelColWidth }]}>{row.label}</Text>
                                 {vals.map((v, i) => {
                                     const n = parseMoneyRaw(v);
                                     const isNeg = Number.isFinite(n) && n < 0;
@@ -412,6 +426,7 @@ export default function BankAnalysisPDF({ data }: { data: BankAnalysisPDFData })
                                             key={i}
                                             style={[
                                                 styles.td,
+                                                cellStyleOverride,
                                                 { width: monthColWidth, textAlign: "right" },
                                                 isNeg ? styles.tdNegative : {},
                                             ]}
@@ -424,6 +439,7 @@ export default function BankAnalysisPDF({ data }: { data: BankAnalysisPDFData })
                                     style={[
                                         styles.td,
                                         styles.tdTotal,
+                                        cellStyleOverride,
                                         { width: totalColWidth, textAlign: "right" },
                                         Number.isFinite(avg) && avg < 0 ? styles.tdNegative : {},
                                     ]}
@@ -443,13 +459,13 @@ export default function BankAnalysisPDF({ data }: { data: BankAnalysisPDFData })
                             : avgOfIntegers(vals);
                         return (
                             <View key={row.key} style={styles.tr}>
-                                <Text style={[styles.td, styles.tdLabel, { width: labelColWidth }]}>{row.label}</Text>
+                                <Text style={[styles.td, styles.tdLabel, cellStyleOverride, { width: labelColWidth }]}>{row.label}</Text>
                                 {vals.map((v, i) => (
-                                    <Text key={i} style={[styles.td, { width: monthColWidth, textAlign: "right" }]}>
+                                    <Text key={i} style={[styles.td, cellStyleOverride, { width: monthColWidth, textAlign: "right" }]}>
                                         {v || "—"}
                                     </Text>
                                 ))}
-                                <Text style={[styles.td, styles.tdTotal, { width: totalColWidth, textAlign: "right" }]}>
+                                <Text style={[styles.td, styles.tdTotal, cellStyleOverride, { width: totalColWidth, textAlign: "right" }]}>
                                     {!Number.isFinite(total)
                                         ? "—"
                                         : isSum
@@ -582,8 +598,14 @@ export default function BankAnalysisPDF({ data }: { data: BankAnalysisPDFData })
                 </Text>
             </Page>
 
-            {/* One page per account (or batched if they fit) */}
-            <Page size="A4" style={styles.page}>
+            {/* One page per account (or batched if they fit). Landscape at
+                7+ months so the per-cell width stays generous enough for
+                $1M+ figures — portrait was overlapping cells at 9+ months. */}
+            <Page
+                size="A4"
+                orientation={activeMonths.length >= 7 ? "landscape" : "portrait"}
+                style={styles.page}
+            >
                 <Text style={styles.h1}>Account Breakdown</Text>
                 <Text style={styles.small}>
                     {accounts.length} account{accounts.length === 1 ? "" : "s"} · {monthRange}-month lookback

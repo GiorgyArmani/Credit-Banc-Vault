@@ -140,26 +140,54 @@ export default function UnderwritingDashboardPage() {
             const allVaultIds = vault_data.map(c => c.id);
             const pipelineMap = await getBulkLatestStatus(allVaultIds);
 
+            // Bulk-fetch doc data for every client in one shot, then bucket by
+            // user_id in memory. Doing this per-client inside the loop turned
+            // the queue load into 2×N sequential round-trips (minutes on real
+            // data); collapsing it to 2 queries total keeps load under a few
+            // seconds regardless of vault size.
+            const allUserIds = vault_data.map(c => c.user_id);
+
+            const { data: allDynamicDocs } = await supabase
+                .from("client_dynamic_documents")
+                .select("user_id, required_documents(code)")
+                .in("user_id", allUserIds)
+                .eq("is_active", true);
+
+            const { data: allUploadedDocs } = await supabase
+                .from("user_documents")
+                .select("user_id, category, doc_code")
+                .in("user_id", allUserIds);
+
+            // normalizeSupabaseJoin: SDK returns the embed as object or array.
+            // Without it the UW queue dashboard counts zero dynamic docs.
+            const dynamicByUser = new Map<string, string[]>();
+            for (const d of (allDynamicDocs as any[] | null) ?? []) {
+                const code = normalizeSupabaseJoin<{ code?: string }>(d.required_documents)?.code;
+                if (!code) continue;
+                const list = dynamicByUser.get(d.user_id);
+                if (list) list.push(code);
+                else dynamicByUser.set(d.user_id, [code]);
+            }
+
+            const uploadedByUser = new Map<string, Set<string>>();
+            for (const u of allUploadedDocs ?? []) {
+                let set = uploadedByUser.get(u.user_id);
+                if (!set) {
+                    set = new Set<string>();
+                    uploadedByUser.set(u.user_id, set);
+                }
+                if (u.category) set.add(u.category);
+                if (u.doc_code) set.add(u.doc_code);
+            }
+
             for (const client of vault_data) {
                 const sub = submission_map.get(client.user_id);
                 const advisor: any = client.advisors;
                 const pStatus = pipelineMap.get(client.id) ?? "created";
 
-                // Document stats calculation - Simplified view for dashboard
-                const { data: dynamicDocs } = await supabase.from("client_dynamic_documents").select("required_documents(code)").eq("user_id", client.user_id).eq("is_active", true);
-                // normalizeSupabaseJoin: SDK returns the embed as object or array.
-                // Without the normalize the UW queue dashboard counts zero
-                // dynamic docs for every client.
-                const dynamicCodes = (dynamicDocs as any[] | null)
-                    ?.map((d: any) => normalizeSupabaseJoin<{ code?: string }>(d.required_documents)?.code)
-                    .filter((c: string | undefined): c is string => !!c) || [];
+                const dynamicCodes = dynamicByUser.get(client.user_id) ?? [];
                 const allRequiredCodes = new Set([...coreCodes, ...dynamicCodes]);
-
-                const { data: uploadedDocs } = await supabase.from("user_documents").select("category, doc_code").eq("user_id", client.user_id);
-                const uploadedCodes = new Set([
-                    ...(uploadedDocs?.map(d => d.category).filter(Boolean) || []),
-                    ...(uploadedDocs?.map(d => d.doc_code).filter(Boolean) || [])
-                ]);
+                const uploadedCodes = uploadedByUser.get(client.user_id) ?? new Set<string>();
 
                 const satisfied = Array.from(allRequiredCodes).filter(code => uploadedCodes.has(code)).length;
                 const total = allRequiredCodes.size;
