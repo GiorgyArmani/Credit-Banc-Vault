@@ -41,7 +41,8 @@ const uwNavItems = [
 const advisorNavItems = [
   { label: 'Dashboard', href: '/admin/advisor/dashboard', icon: BookCheck },
   { label: 'Pipeline', href: '/admin/advisor/pipeline', icon: LayoutGrid },
-  { label: 'Clients', href: '/admin/advisor/clients', icon: Users },
+  { label: 'Prospects', href: '/admin/prospects', icon: Users },
+  { label: 'Clients', href: '/admin/clients', icon: ShieldCheck },
 ]
 
 export function Sidebar({
@@ -194,7 +195,7 @@ export function Sidebar({
             })}
             {/* New Funding shortcut */}
             {!collapsed && (
-              <Link href="/admin/advisor/clients/new" onClick={onMobileClose}>
+              <Link href="/admin/clients/new" onClick={onMobileClose}>
                 <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-500 hover:text-slate-900 hover:bg-slate-50 transition-all duration-200 cursor-pointer">
                   <span className="material-symbols-outlined text-[18px] text-emerald-500">add_circle</span>
                   <span className="text-sm font-medium">New Funding</span>

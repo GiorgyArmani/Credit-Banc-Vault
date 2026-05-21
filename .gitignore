@@ -63,3 +63,14 @@ src/components/_chat-message-display.tsx
 
 multi-business-refactor-plan.md
 .claude
+.cursor
+.trae
+.claudecode
+.github/agents
+.antigravity
+.taskmaster
+.gemini
+.ide
+.agents
+skills-lock.json
+*.md

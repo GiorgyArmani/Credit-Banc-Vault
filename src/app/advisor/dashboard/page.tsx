@@ -437,7 +437,7 @@ export default function AdvisorDashboard() {
               <Button
                 className="h-auto flex-col items-start p-6 bg-emerald-50/50 border-emerald-100 hover:bg-emerald-500 hover:text-white transition-all duration-500 rounded-[2rem] border-2 shadow-none group/btn"
                 variant="outline"
-                onClick={() => router.push(pathname.startsWith("/admin") ? "/admin/advisor/clients/new" : "/advisor/dashboard/clients/new")}
+                onClick={() => router.push(pathname.startsWith("/admin") ? "/admin/clients/new" : "/advisor/dashboard/clients/new")}
               >
                 <div className="p-3 bg-white rounded-2xl mb-4 group-hover/btn:bg-white/20 transition-colors">
                   <FileText className="h-6 w-6 text-emerald-500 group-hover/btn:text-white" />
@@ -449,13 +449,13 @@ export default function AdvisorDashboard() {
               <Button
                 className="h-auto flex-col items-start p-6 bg-emerald-50/50 border-emerald-100 hover:bg-emerald-500 hover:text-white transition-all duration-500 rounded-[2rem] border-2 shadow-none group/btn"
                 variant="outline"
-                onClick={() => router.push(pathname.startsWith("/admin") ? "/admin/advisor/clients" : "/advisor/dashboard/clients")}
+                onClick={() => router.push(pathname.startsWith("/admin") ? "/admin/prospects" : "/advisor/dashboard/prospects")}
               >
                 <div className="p-3 bg-white rounded-2xl mb-4 group-hover/btn:bg-white/20 transition-colors">
                   <Users className="h-6 w-6 text-emerald-500 group-hover/btn:text-white" />
                 </div>
-                <span className="font-black uppercase tracking-tighter text-lg mb-1">View Clients</span>
-                <span className="text-xs font-bold opacity-60 group-hover/btn:opacity-100">Manage your active client list</span>
+                <span className="font-black uppercase tracking-tighter text-lg mb-1">View Prospects</span>
+                <span className="text-xs font-bold opacity-60 group-hover/btn:opacity-100">Manage your active pipeline</span>
               </Button>
 
               <Button

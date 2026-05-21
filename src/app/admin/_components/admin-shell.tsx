@@ -40,7 +40,8 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
       '/admin/uw/lender-guidelines': 'Lender Database',
       '/admin/advisor/dashboard': 'Advisor Dashboard',
       '/admin/advisor/pipeline': 'Pipeline',
-      '/admin/advisor/clients': 'Clients',
+      '/admin/prospects': 'Prospects',
+      '/admin/clients': 'Clients',
     }
     const key = Object.keys(map).find(k => pathname?.startsWith(k))
     return key ? map[key] : 'Admin'

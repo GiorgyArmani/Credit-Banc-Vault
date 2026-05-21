@@ -643,11 +643,11 @@ export default function ClientSignupForm() {
                 Create Another
               </Button>
               <Button
-                onClick={() => router.push(pathname.startsWith('/admin') ? '/admin/advisor/clients' : '/advisor/dashboard/clients')}
+                onClick={() => router.push(pathname.startsWith('/admin') ? '/admin/prospects' : '/advisor/dashboard/prospects')}
                 variant="outline"
                 className="flex-1 h-14 border-2 border-emerald-100 text-emerald-950 font-black rounded-2xl hover:bg-emerald-50 transition-all active:scale-95"
               >
-                View Client List
+                View Prospect List
               </Button>
             </div>
           </div>

@@ -279,9 +279,8 @@ export default function AdvisorClientDetailsPage() {
     // detect that and rewrite back/prev/next links so admins don't get
     // bounced out into the advisor portal layout.
     const is_admin_path = pathname?.startsWith("/admin") ?? false;
-    const clients_list_path = is_admin_path ? "/admin/advisor/clients" : "/advisor/dashboard/clients";
     const client_detail_path = (id: string) =>
-        is_admin_path ? `/admin/advisor/clients/${id}` : `/advisor/dashboard/clients/${id}`;
+        is_admin_path ? `/admin/clients/${id}` : `/advisor/dashboard/clients/${id}`;
 
     // component-state: Single source of truth for component state
     const [component_state, set_component_state] = useState<ComponentState>(
@@ -383,6 +382,12 @@ export default function AdvisorClientDetailsPage() {
     // Pipeline state
     const [pipeline_history, set_pipeline_history] = useState<PipelineStatusEntry[]>([]);
     const [current_pipeline_status, set_current_pipeline_status] = useState<LoanStatus>("created");
+
+    // Route the back-to-list button based on the file's status: funded files go
+    // to the Clients book, everything else to the Prospects pipeline.
+    const clients_list_path = current_pipeline_status === "funded"
+        ? (is_admin_path ? "/admin/clients" : "/advisor/dashboard/clients")
+        : (is_admin_path ? "/admin/prospects" : "/advisor/dashboard/prospects");
 
     // Rejection state
     const [is_reject_modal_open, set_is_reject_modal_open] = useState(false);

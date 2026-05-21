@@ -169,11 +169,11 @@ export default function UnderwritingClientDetailsPage() {
     const pathname = usePathname();
     const client_id = params.id as string;
 
-    // Detect which portal/namespace we're rendering under so prev/next and the
-    // Back button stay coherent. This page is re-exported from three places:
-    //   /underwriting/dashboard/clients/[id]      → UW portal
-    //   /admin/uw/dashboard/clients/[id]          → admin portal, UW review queue context
-    //   /admin/clients/[id]                       → admin portal, unified client view
+    // This page now only mounts under /underwriting/dashboard/clients/[id].
+    // Admin routes (/admin/uw/dashboard/clients/[id], /admin/advisor/clients/[id])
+    // redirect to /admin/clients/[id], which renders the advisor page instead.
+    // The is_admin_* flags below are kept as a safety net in case the route is
+    // remounted under /admin/* in the future, but they currently never fire.
     const is_admin_uw_route = pathname?.startsWith("/admin/uw") ?? false;
     const is_admin_unified_route = pathname?.startsWith("/admin/clients") ?? false;
     const is_admin_route = is_admin_uw_route || is_admin_unified_route;

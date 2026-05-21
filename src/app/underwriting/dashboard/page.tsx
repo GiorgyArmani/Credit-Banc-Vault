@@ -205,7 +205,7 @@ export default function UnderwritingDashboardPage() {
             <Card
                 key={client.id}
                 className="group relative bg-white rounded-[2.5rem] border-slate-200 shadow-sm hover:shadow-2xl transition-all duration-500 cursor-pointer overflow-hidden border"
-                onClick={() => router.push((pathname.startsWith("/admin") ? "/admin/uw/dashboard/clients/" : "/underwriting/dashboard/clients/") + client.id)}
+                onClick={() => router.push((pathname.startsWith("/admin") ? "/admin/clients/" : "/underwriting/dashboard/clients/") + client.id)}
             >
                 <div className={clsx(
                     "absolute top-0 right-0 w-24 h-24 rounded-full blur-3xl -mr-12 -mt-12 transition-colors",

@@ -1,7 +1,9 @@
 // src/app/admin/dashboard/page.tsx
 //
 // Server component — fetches operational metrics in parallel and renders
-// the admin "command center" with real numbers + the existing tool cards.
+// the admin "command center". All time-bounded KPIs are scoped to a date
+// range read from search params; prior-period equivalents power the
+// vs-prior deltas on each tile.
 
 import Link from 'next/link'
 import { createClient } from '@supabase/supabase-js'
@@ -18,9 +20,16 @@ import {
   UserCog,
   Star,
   TrendingUp,
+  TrendingDown,
   Clock,
+  Minus,
+  Timer,
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
+import { resolve_range, compute_delta, type ResolvedRange } from './_lib/range'
+import { DateRangePicker } from './_components/date-range-picker'
+import { FundedSparkline } from './_components/funded-sparkline'
+import { ConversionFunnel } from './_components/conversion-funnel'
 
 export const dynamic = 'force-dynamic'
 
@@ -41,6 +50,16 @@ const PIPELINE_STAGES = [
   'declined',
 ] as const
 
+const FUNNEL_STAGES = [
+  'created',
+  'onboarding',
+  'documents_requested',
+  'documents_received',
+  'under_review',
+  'lender_matched',
+  'funded',
+] as const
+
 const STAGE_LABEL: Record<string, string> = {
   created: 'Created',
   onboarding: 'Onboarding',
@@ -53,12 +72,32 @@ const STAGE_LABEL: Record<string, string> = {
 }
 
 interface DashboardMetrics {
+  // Point-in-time
   total_active: number
   pending_lender_reviews: number
-  funded_amount_this_month: number
-  signups_this_month: number
   pipeline_counts: Record<string, number>
   avg_days_in_stage: Record<string, number>
+
+  // Range-scoped current period
+  funded_amount: number
+  funded_count: number
+  signups: number
+
+  // Prior-period equivalents (same length, immediately before)
+  prior_funded_amount: number
+  prior_funded_count: number
+  prior_signups: number
+
+  // Funnel — clients created in range, % that ever reached each stage
+  funnel: Array<{ stage: string; label: string; count: number; pct_of_top: number; pct_step: number | null }>
+
+  // Daily series of funded $ within range (for sparkline)
+  funded_series: Array<{ date: string; amount: number; count: number }>
+
+  // Time-to-fund stats — in days, for funded events within range
+  time_to_fund: { median: number; p90: number; samples: number }
+
+  // Recent + leaderboard scoped to range
   recent_signups: Array<{
     id: string
     client_name: string
@@ -69,26 +108,38 @@ interface DashboardMetrics {
   advisor_leaderboard: Array<{
     advisor_id: string
     advisor_name: string
-    new_clients_30d: number
-    funded_30d: number
+    new_clients: number
+    funded: number
   }>
 }
 
-async function load_metrics(): Promise<DashboardMetrics> {
-  const now = new Date()
-  const month_start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
-  const thirty_days_ago = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString()
+function percentile(sorted: number[], p: number): number {
+  if (!sorted.length) return 0
+  const idx = (sorted.length - 1) * p
+  const lo = Math.floor(idx)
+  const hi = Math.ceil(idx)
+  if (lo === hi) return sorted[lo]
+  return sorted[lo] * (hi - idx) + sorted[hi] * (idx - lo)
+}
 
-  // Fan out the queries in parallel — server-side, single round-trip.
+function date_key(d: Date | string): string {
+  const dt = typeof d === 'string' ? new Date(d) : d
+  return dt.toISOString().slice(0, 10)
+}
+
+async function load_metrics(range: ResolvedRange): Promise<DashboardMetrics> {
+  const now = new Date()
+  const range_from = range.from.toISOString()
+  const range_to = range.to.toISOString()
+  const prev_from = range.prev_from.toISOString()
+  const prev_to = range.prev_to.toISOString()
+
   const [
     { count: total_active },
     { count: pending_lender_reviews },
-    { data: funded_rows },
-    { count: signups_this_month },
     { data: history_rows },
     { data: vault_rows },
     { data: recent_signup_rows },
-    { data: advisor_30d_rows },
   ] = await Promise.all([
     supabase_admin
       .from('client_data_vault')
@@ -104,60 +155,44 @@ async function load_metrics(): Promise<DashboardMetrics> {
     supabase_admin
       .from('loan_status_history')
       .select('client_vault_id, status, created_at')
-      .eq('status', 'funded')
-      .gte('created_at', month_start),
-
-    supabase_admin
-      .from('client_data_vault')
-      .select('id', { count: 'exact', head: true })
-      .gte('created_at', month_start),
-
-    supabase_admin
-      .from('loan_status_history')
-      .select('client_vault_id, status, created_at')
       .order('created_at', { ascending: true }),
 
     supabase_admin
       .from('client_data_vault')
-      .select('id, capital_requested, advisor_id, advisor_name'),
+      .select('id, client_name, company_name, capital_requested, advisor_id, advisor_name, created_at'),
 
     supabase_admin
       .from('client_data_vault')
       .select('id, client_name, company_name, advisor_name, created_at')
+      .gte('created_at', range_from)
+      .lte('created_at', range_to)
       .order('created_at', { ascending: false })
       .limit(8),
-
-    supabase_admin
-      .from('client_data_vault')
-      .select('id, advisor_id, advisor_name, created_at')
-      .gte('created_at', thirty_days_ago),
   ])
 
-  // Compute funded $ this month — sum capital_requested for the funded clients.
-  const funded_client_ids = new Set((funded_rows ?? []).map((r: any) => r.client_vault_id))
-  const funded_amount_this_month = (vault_rows ?? [])
-    .filter((v: any) => funded_client_ids.has(v.id))
-    .reduce((s: number, v: any) => s + (Number(v.capital_requested) || 0), 0)
+  // ─── Index helpers ─────────────────────────────────────────────────────
+  const vault_by_id = new Map<string, any>()
+  for (const v of vault_rows ?? []) vault_by_id.set(v.id, v)
 
-  // Compute current pipeline status per client + days in stage.
-  // Take the latest history row per client; if none, fall back to "created".
-  const latest_by_client = new Map<string, { status: string; created_at: string }>()
-  for (const row of history_rows ?? []) {
-    latest_by_client.set(row.client_vault_id, {
-      status: row.status,
-      created_at: row.created_at,
-    })
+  const history_by_client = new Map<string, Array<{ status: string; created_at: string }>>()
+  for (const r of history_rows ?? []) {
+    const arr = history_by_client.get(r.client_vault_id) ?? []
+    arr.push({ status: r.status, created_at: r.created_at })
+    history_by_client.set(r.client_vault_id, arr)
   }
 
+  // Latest status per client (point-in-time pipeline snapshot)
+  const latest_by_client = new Map<string, { status: string; created_at: string }>()
+  for (const [id, arr] of history_by_client) {
+    latest_by_client.set(id, arr[arr.length - 1])
+  }
+
+  // ─── Pipeline by stage (point-in-time snapshot) ────────────────────────
   const pipeline_counts: Record<string, number> = {}
   PIPELINE_STAGES.forEach((s) => (pipeline_counts[s] = 0))
-  // Days-in-stage running totals.
   const days_sum: Record<string, number> = {}
   const days_count: Record<string, number> = {}
-  PIPELINE_STAGES.forEach((s) => {
-    days_sum[s] = 0
-    days_count[s] = 0
-  })
+  PIPELINE_STAGES.forEach((s) => { days_sum[s] = 0; days_count[s] = 0 })
 
   for (const v of vault_rows ?? []) {
     const latest = latest_by_client.get(v.id)
@@ -169,59 +204,174 @@ async function load_metrics(): Promise<DashboardMetrics> {
       days_count[stage] += 1
     }
   }
-
   const avg_days_in_stage: Record<string, number> = {}
   PIPELINE_STAGES.forEach((s) => {
     avg_days_in_stage[s] = days_count[s] > 0 ? days_sum[s] / days_count[s] : 0
   })
 
-  // Advisor leaderboard — new clients in the last 30 days (and funded count).
-  const advisor_map = new Map<
-    string,
-    { advisor_id: string; advisor_name: string; new_clients_30d: number; funded_30d: number }
-  >()
-  for (const r of advisor_30d_rows ?? []) {
-    if (!r.advisor_id) continue
-    const existing = advisor_map.get(r.advisor_id)
-    if (existing) {
-      existing.new_clients_30d += 1
-    } else {
-      advisor_map.set(r.advisor_id, {
-        advisor_id: r.advisor_id,
-        advisor_name: r.advisor_name || 'Unknown',
-        new_clients_30d: 1,
-        funded_30d: 0,
-      })
+  // ─── Funded events (current + prior period) ────────────────────────────
+  const range_from_ms = range.from.getTime()
+  const range_to_ms = range.to.getTime()
+  const prev_from_ms = range.prev_from.getTime()
+  const prev_to_ms = range.prev_to.getTime()
+
+  let funded_amount = 0
+  let funded_count = 0
+  let prior_funded_amount = 0
+  let prior_funded_count = 0
+  const funded_in_range: Array<{ client_id: string; ts: number; amount: number }> = []
+
+  for (const r of history_rows ?? []) {
+    if (r.status !== 'funded') continue
+    const ts = new Date(r.created_at).getTime()
+    const v = vault_by_id.get(r.client_vault_id)
+    const amount = Number(v?.capital_requested) || 0
+
+    if (ts >= range_from_ms && ts <= range_to_ms) {
+      funded_amount += amount
+      funded_count += 1
+      funded_in_range.push({ client_id: r.client_vault_id, ts, amount })
+    } else if (ts >= prev_from_ms && ts < prev_to_ms) {
+      prior_funded_amount += amount
+      prior_funded_count += 1
     }
   }
-  // Funded counts in the last 30 days, joined back to advisor.
-  const funded_30d_history = (history_rows ?? []).filter(
-    (h: any) => h.status === 'funded' && new Date(h.created_at).getTime() >= new Date(thirty_days_ago).getTime()
-  )
-  const funded_30d_client_ids = new Set(funded_30d_history.map((h: any) => h.client_vault_id))
+
+  // ─── Signups (current + prior period) ──────────────────────────────────
+  let signups = 0
+  let prior_signups = 0
   for (const v of vault_rows ?? []) {
-    if (!v.advisor_id || !funded_30d_client_ids.has(v.id)) continue
-    const existing = advisor_map.get(v.advisor_id)
-    if (existing) existing.funded_30d += 1
+    const ts = new Date(v.created_at).getTime()
+    if (ts >= range_from_ms && ts <= range_to_ms) signups += 1
+    else if (ts >= prev_from_ms && ts < prev_to_ms) prior_signups += 1
   }
 
+  // ─── Funnel — of clients created in range, who reached each stage ──────
+  const cohort_ids = new Set(
+    (vault_rows ?? [])
+      .filter((v: any) => {
+        const ts = new Date(v.created_at).getTime()
+        return ts >= range_from_ms && ts <= range_to_ms
+      })
+      .map((v: any) => v.id)
+  )
+
+  const reached_by_stage: Record<string, Set<string>> = {}
+  FUNNEL_STAGES.forEach((s) => (reached_by_stage[s] = new Set<string>()))
+  // Created cohort always "reached" the created stage by definition.
+  cohort_ids.forEach((id) => reached_by_stage['created'].add(id))
+
+  for (const cid of cohort_ids) {
+    const arr = history_by_client.get(cid) ?? []
+    for (const h of arr) {
+      if (FUNNEL_STAGES.includes(h.status as any)) {
+        reached_by_stage[h.status].add(cid)
+      }
+    }
+  }
+
+  const top_count = reached_by_stage['created'].size
+  let prev_count: number | null = null
+  const funnel = FUNNEL_STAGES.map((s) => {
+    const count = reached_by_stage[s].size
+    const pct_of_top = top_count > 0 ? (count / top_count) * 100 : 0
+    const pct_step = prev_count === null ? null : (prev_count > 0 ? (count / prev_count) * 100 : 0)
+    prev_count = count
+    return {
+      stage: s,
+      label: STAGE_LABEL[s],
+      count,
+      pct_of_top,
+      pct_step,
+    }
+  })
+
+  // ─── Funded daily series ───────────────────────────────────────────────
+  const series_map = new Map<string, { amount: number; count: number }>()
+  // Pre-fill keys for every day in range so the chart doesn't have gaps.
+  for (let t = range_from_ms; t <= range_to_ms; t += 24 * 60 * 60 * 1000) {
+    series_map.set(date_key(new Date(t)), { amount: 0, count: 0 })
+  }
+  for (const f of funded_in_range) {
+    const key = date_key(new Date(f.ts))
+    const cur = series_map.get(key) ?? { amount: 0, count: 0 }
+    cur.amount += f.amount
+    cur.count += 1
+    series_map.set(key, cur)
+  }
+  const funded_series = Array.from(series_map.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([date, v]) => ({ date: date.slice(5), amount: v.amount, count: v.count })) // MM-DD
+
+  // ─── Time-to-fund (days from vault creation to funded event in range) ──
+  const ttf_days: number[] = []
+  for (const f of funded_in_range) {
+    const v = vault_by_id.get(f.client_id)
+    if (!v?.created_at) continue
+    const days = (f.ts - new Date(v.created_at).getTime()) / (1000 * 60 * 60 * 24)
+    if (days >= 0) ttf_days.push(days)
+  }
+  ttf_days.sort((a, b) => a - b)
+  const time_to_fund = {
+    median: percentile(ttf_days, 0.5),
+    p90: percentile(ttf_days, 0.9),
+    samples: ttf_days.length,
+  }
+
+  // ─── Advisor leaderboard scoped to range ───────────────────────────────
+  const advisor_map = new Map<
+    string,
+    { advisor_id: string; advisor_name: string; new_clients: number; funded: number }
+  >()
+  for (const v of vault_rows ?? []) {
+    if (!v.advisor_id) continue
+    const ts = new Date(v.created_at).getTime()
+    if (ts < range_from_ms || ts > range_to_ms) continue
+    const existing = advisor_map.get(v.advisor_id)
+    if (existing) existing.new_clients += 1
+    else advisor_map.set(v.advisor_id, {
+      advisor_id: v.advisor_id,
+      advisor_name: v.advisor_name || 'Unknown',
+      new_clients: 1,
+      funded: 0,
+    })
+  }
+  const funded_in_range_ids = new Set(funded_in_range.map((f) => f.client_id))
+  for (const v of vault_rows ?? []) {
+    if (!v.advisor_id || !funded_in_range_ids.has(v.id)) continue
+    const existing = advisor_map.get(v.advisor_id)
+    if (existing) existing.funded += 1
+    else advisor_map.set(v.advisor_id, {
+      advisor_id: v.advisor_id,
+      advisor_name: v.advisor_name || 'Unknown',
+      new_clients: 0,
+      funded: 1,
+    })
+  }
   const advisor_leaderboard = Array.from(advisor_map.values())
-    .sort((a, b) => b.new_clients_30d - a.new_clients_30d)
+    .sort((a, b) => (b.new_clients + b.funded) - (a.new_clients + a.funded))
     .slice(0, 5)
 
   return {
     total_active: total_active ?? 0,
     pending_lender_reviews: pending_lender_reviews ?? 0,
-    funded_amount_this_month,
-    signups_this_month: signups_this_month ?? 0,
     pipeline_counts,
     avg_days_in_stage,
+    funded_amount,
+    funded_count,
+    signups,
+    prior_funded_amount,
+    prior_funded_count,
+    prior_signups,
+    funnel,
+    funded_series,
+    time_to_fund,
     recent_signups: (recent_signup_rows ?? []) as DashboardMetrics['recent_signups'],
     advisor_leaderboard,
   }
 }
 
-// ─── Tool card data (same as before) ──────────────────────────────────────────
+// ─── Tool card data ───────────────────────────────────────────────────────
 const uwTools = [
   { label: 'Review Queue', desc: 'Review and process client files submitted for underwriting.', href: '/admin/uw/dashboard', icon: LayoutDashboard, color: 'from-emerald-50 to-emerald-100/50', iconColor: 'text-emerald-500', border: 'border-emerald-100' },
   { label: 'Bank Analysis', desc: 'Run detailed bank statement analysis on client accounts.', href: '/admin/uw/bank-analysis', icon: BarChart3, color: 'from-emerald-50 to-emerald-100/50', iconColor: 'text-emerald-500', border: 'border-emerald-100' },
@@ -231,8 +381,9 @@ const uwTools = [
 const advisorTools = [
   { label: 'Advisor Dashboard', desc: 'View key metrics, recent activity and pipeline summary.', href: '/admin/advisor/dashboard', icon: BookCheck, color: 'from-blue-50 to-blue-100/50', iconColor: 'text-blue-500', border: 'border-blue-100' },
   { label: 'Pipeline', desc: 'Drag-and-drop Kanban board to manage deals through all stages.', href: '/admin/advisor/pipeline', icon: LayoutGrid, color: 'from-blue-50 to-blue-100/50', iconColor: 'text-blue-500', border: 'border-blue-100' },
-  { label: 'Clients', desc: 'Browse, manage and onboard all funding clients.', href: '/admin/advisor/clients', icon: Users, color: 'from-blue-50 to-blue-100/50', iconColor: 'text-blue-500', border: 'border-blue-100' },
-  { label: 'New Funding', desc: 'Submit a new client vault for the funding pipeline.', href: '/admin/advisor/clients/new', icon: UserCog, color: 'from-blue-50 to-blue-100/50', iconColor: 'text-blue-500', border: 'border-blue-100' },
+  { label: 'Prospects', desc: 'Active pipeline — files not yet funded.', href: '/admin/prospects', icon: Users, color: 'from-blue-50 to-blue-100/50', iconColor: 'text-blue-500', border: 'border-blue-100' },
+  { label: 'Clients', desc: 'Funded customer book.', href: '/admin/clients', icon: Users, color: 'from-blue-50 to-blue-100/50', iconColor: 'text-blue-500', border: 'border-blue-100' },
+  { label: 'New Funding', desc: 'Submit a new client vault for the funding pipeline.', href: '/admin/clients/new', icon: UserCog, color: 'from-blue-50 to-blue-100/50', iconColor: 'text-blue-500', border: 'border-blue-100' },
 ]
 
 function ToolCard({ label, desc, href, icon: Icon, color, iconColor, border }: (typeof uwTools)[0]) {
@@ -255,26 +406,45 @@ function ToolCard({ label, desc, href, icon: Icon, color, iconColor, border }: (
 }
 
 const fmt_money = (v: number) => `$${Math.round(v).toLocaleString()}`
+const fmt_compact_money = (v: number) => {
+  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`
+  if (v >= 1_000) return `$${(v / 1_000).toFixed(1)}K`
+  return `$${Math.round(v)}`
+}
 
-export default async function AdminDashboardPage() {
-  const m = await load_metrics()
+interface PageProps {
+  searchParams: Promise<{ range?: string; from?: string; to?: string }>
+}
+
+export default async function AdminDashboardPage({ searchParams }: PageProps) {
+  const params = await searchParams
+  const range = resolve_range(params)
+  const m = await load_metrics(range)
   const max_pipeline = Math.max(1, ...Object.values(m.pipeline_counts))
+
+  const funded_delta = compute_delta(m.funded_amount, m.prior_funded_amount)
+  const funded_count_delta = compute_delta(m.funded_count, m.prior_funded_count)
+  const signups_delta = compute_delta(m.signups, m.prior_signups)
 
   return (
     <div className="space-y-12">
       {/* Hero */}
-      <div className="flex items-start gap-5">
-        <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center shadow-xl shadow-emerald-500/20 shrink-0">
-          <ShieldCheck className="h-7 w-7 text-white" />
+      <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-5">
+        <div className="flex items-start gap-5">
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center shadow-xl shadow-emerald-500/20 shrink-0">
+            <ShieldCheck className="h-7 w-7 text-white" />
+          </div>
+          <div>
+            <h1 className="text-3xl font-black text-slate-900 tracking-tight leading-none mb-2">
+              Admin Command Center
+            </h1>
+            <p className="text-slate-600 text-base leading-relaxed max-w-2xl">
+              Operational view of the funding pipeline. KPIs scoped to <span className="font-bold text-slate-900">{range.label.toLowerCase()}</span>; deltas compare to the prior {range.days}-day window.
+            </p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-3xl font-black text-slate-900 tracking-tight leading-none mb-2">
-            Admin Command Center
-          </h1>
-          <p className="text-slate-600 text-base leading-relaxed max-w-2xl">
-            Operational view of the funding pipeline. Lender reviews waiting on you, money funded this month, and how the team is moving deals.
-          </p>
-        </div>
+
+        <DateRangePicker />
       </div>
 
       {/* Top metric tiles */}
@@ -284,79 +454,130 @@ export default async function AdminDashboardPage() {
           value={String(m.total_active)}
           icon={TrendingUp}
           tone="emerald"
+          hint="point-in-time"
         />
         <MetricTile
           label="Pending lender reviews"
           value={String(m.pending_lender_reviews)}
           icon={Star}
           tone={m.pending_lender_reviews > 0 ? 'amber' : 'slate'}
-          href="/admin/dashboard"
           hint={m.pending_lender_reviews > 0 ? 'Awaiting your decision' : 'All caught up'}
         />
         <MetricTile
-          label="Funded this month"
-          value={fmt_money(m.funded_amount_this_month)}
+          label="Funded in range"
+          value={fmt_compact_money(m.funded_amount)}
           icon={ShieldCheck}
           tone="emerald"
+          delta={funded_delta}
+          hint={`${m.funded_count} ${m.funded_count === 1 ? 'deal' : 'deals'}${funded_count_delta.abs !== 0 ? ` · ${funded_count_delta.abs > 0 ? '+' : ''}${funded_count_delta.abs} vs prior` : ''}`}
         />
         <MetricTile
-          label="New signups this month"
-          value={String(m.signups_this_month)}
+          label="New signups"
+          value={String(m.signups)}
           icon={Users}
           tone="blue"
+          delta={signups_delta}
         />
       </div>
 
-      {/* Pipeline by stage */}
-      <section className="bg-white border border-slate-200 rounded-3xl p-6">
-        <div className="flex items-center justify-between mb-5">
-          <div>
-            <h2 className="text-base font-black text-slate-900">Pipeline by stage</h2>
-            <p className="text-xs text-slate-500 mt-0.5">Current count per stage · avg days in stage shown below</p>
+      {/* Charts row: funded over time + time-to-fund stats */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <section className="lg:col-span-2 bg-white border border-slate-200 rounded-3xl p-6">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h2 className="text-base font-black text-slate-900">Funded over time</h2>
+              <p className="text-xs text-slate-500 mt-0.5">Total {fmt_money(m.funded_amount)} across {range.days} {range.days === 1 ? 'day' : 'days'}</p>
+            </div>
           </div>
-          <Link href="/admin/advisor/pipeline" className="text-xs font-bold text-emerald-600 hover:text-emerald-700">
-            Open Kanban →
-          </Link>
-        </div>
-        <div className="grid grid-cols-4 md:grid-cols-8 gap-3">
-          {PIPELINE_STAGES.map((stage) => {
-            const count = m.pipeline_counts[stage] ?? 0
-            const avg = m.avg_days_in_stage[stage] ?? 0
-            const height_pct = (count / max_pipeline) * 100
-            return (
-              <div key={stage} className="flex flex-col items-center gap-2">
-                <div className="w-full h-24 bg-slate-50 rounded-xl flex items-end overflow-hidden">
-                  <div
-                    className="w-full bg-gradient-to-t from-emerald-500 to-emerald-300 transition-all"
-                    style={{ height: `${Math.max(height_pct, count > 0 ? 6 : 0)}%` }}
-                  />
-                </div>
-                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 text-center leading-tight">
-                  {STAGE_LABEL[stage]}
-                </p>
-                <p className="text-base font-black text-slate-900">{count}</p>
-                <p className="text-[10px] font-bold text-slate-400">
-                  <Clock className="inline h-2.5 w-2.5 mr-0.5" />
-                  {avg > 0 ? `${avg.toFixed(0)}d avg` : '—'}
-                </p>
+          <FundedSparkline data={m.funded_series} />
+        </section>
+
+        <section className="bg-white border border-slate-200 rounded-3xl p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Timer className="h-4 w-4 text-slate-400" />
+              <h2 className="text-base font-black text-slate-900">Time to fund</h2>
+            </div>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{m.time_to_fund.samples} {m.time_to_fund.samples === 1 ? 'deal' : 'deals'}</span>
+          </div>
+          {m.time_to_fund.samples === 0 ? (
+            <p className="text-sm text-slate-400 italic py-8 text-center">No funding events in range.</p>
+          ) : (
+            <div className="space-y-4 pt-2">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Median</p>
+                <p className="text-3xl font-black text-emerald-600 leading-none">{m.time_to_fund.median.toFixed(0)}<span className="text-base text-slate-400 ml-1">days</span></p>
               </div>
-            )
-          })}
-        </div>
-      </section>
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">P90 (slowest 10%)</p>
+                <p className="text-3xl font-black text-slate-900 leading-none">{m.time_to_fund.p90.toFixed(0)}<span className="text-base text-slate-400 ml-1">days</span></p>
+              </div>
+            </div>
+          )}
+        </section>
+      </div>
+
+      {/* Funnel + Pipeline snapshot */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <section className="bg-white border border-slate-200 rounded-3xl p-6">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h2 className="text-base font-black text-slate-900">Conversion funnel</h2>
+              <p className="text-xs text-slate-500 mt-0.5">Of {m.funnel[0]?.count ?? 0} clients created in range, how many reached each stage</p>
+            </div>
+          </div>
+          <ConversionFunnel data={m.funnel} />
+        </section>
+
+        <section className="bg-white border border-slate-200 rounded-3xl p-6">
+          <div className="flex items-center justify-between mb-5">
+            <div>
+              <h2 className="text-base font-black text-slate-900">Pipeline snapshot</h2>
+              <p className="text-xs text-slate-500 mt-0.5">Current count per stage · avg days in stage</p>
+            </div>
+            <Link href="/admin/advisor/pipeline" className="text-xs font-bold text-emerald-600 hover:text-emerald-700">
+              Open Kanban →
+            </Link>
+          </div>
+          <div className="grid grid-cols-4 gap-3">
+            {PIPELINE_STAGES.map((stage) => {
+              const count = m.pipeline_counts[stage] ?? 0
+              const avg = m.avg_days_in_stage[stage] ?? 0
+              const height_pct = (count / max_pipeline) * 100
+              return (
+                <div key={stage} className="flex flex-col items-center gap-2">
+                  <div className="w-full h-16 bg-slate-50 rounded-xl flex items-end overflow-hidden">
+                    <div
+                      className="w-full bg-gradient-to-t from-emerald-500 to-emerald-300 transition-all"
+                      style={{ height: `${Math.max(height_pct, count > 0 ? 6 : 0)}%` }}
+                    />
+                  </div>
+                  <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 text-center leading-tight">
+                    {STAGE_LABEL[stage]}
+                  </p>
+                  <p className="text-base font-black text-slate-900">{count}</p>
+                  <p className="text-[10px] font-bold text-slate-400">
+                    <Clock className="inline h-2.5 w-2.5 mr-0.5" />
+                    {avg > 0 ? `${avg.toFixed(0)}d` : '—'}
+                  </p>
+                </div>
+              )
+            })}
+          </div>
+        </section>
+      </div>
 
       {/* Two-column: recent signups + advisor leaderboard */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Recent signups */}
         <section className="bg-white border border-slate-200 rounded-3xl p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-base font-black text-slate-900">Recent signups</h2>
-            <Link href="/admin/advisor/clients" className="text-xs font-bold text-emerald-600 hover:text-emerald-700">
+            <Link href="/admin/prospects" className="text-xs font-bold text-emerald-600 hover:text-emerald-700">
               View all →
             </Link>
           </div>
           {m.recent_signups.length === 0 ? (
-            <p className="text-sm text-slate-400 italic">No clients yet.</p>
+            <p className="text-sm text-slate-400 italic">No signups in this range.</p>
           ) : (
             <div className="divide-y divide-slate-100">
               {m.recent_signups.map((c) => (
@@ -381,14 +602,13 @@ export default async function AdminDashboardPage() {
           )}
         </section>
 
-        {/* Advisor leaderboard */}
         <section className="bg-white border border-slate-200 rounded-3xl p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-base font-black text-slate-900">Advisor leaderboard</h2>
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Last 30 days</span>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{range.label}</span>
           </div>
           {m.advisor_leaderboard.length === 0 ? (
-            <p className="text-sm text-slate-400 italic">No activity yet.</p>
+            <p className="text-sm text-slate-400 italic">No activity in this range.</p>
           ) : (
             <div className="space-y-3">
               {m.advisor_leaderboard.map((a, idx) => (
@@ -399,11 +619,11 @@ export default async function AdminDashboardPage() {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-bold text-slate-900 truncate">{a.advisor_name}</p>
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                      {a.new_clients_30d} new · {a.funded_30d} funded
+                      {a.new_clients} new · {a.funded} funded
                     </p>
                   </div>
                   <div className="text-right shrink-0">
-                    <p className="text-base font-black text-emerald-600">{a.new_clients_30d}</p>
+                    <p className="text-base font-black text-emerald-600">{a.new_clients}</p>
                   </div>
                 </div>
               ))}
@@ -449,14 +669,14 @@ function MetricTile({
   icon: Icon,
   tone,
   hint,
-  href,
+  delta,
 }: {
   label: string
   value: string
   icon: any
   tone: 'emerald' | 'blue' | 'amber' | 'slate'
   hint?: string
-  href?: string
+  delta?: { abs: number; pct: number | null }
 }) {
   const tone_classes = {
     emerald: { bg: 'bg-emerald-50', text: 'text-emerald-600', border: 'border-emerald-100' },
@@ -465,20 +685,40 @@ function MetricTile({
     slate: { bg: 'bg-slate-50', text: 'text-slate-600', border: 'border-slate-200' },
   }[tone]
 
-  const inner = (
-    <div className={`bg-white border ${tone_classes.border} shadow-sm rounded-2xl p-5 transition-all hover:shadow-md ${href ? 'cursor-pointer' : ''}`}>
+  let delta_node: React.ReactNode = null
+  if (delta) {
+    const positive = delta.abs > 0
+    const negative = delta.abs < 0
+    const flat = delta.abs === 0
+    const DeltaIcon = positive ? TrendingUp : negative ? TrendingDown : Minus
+    const delta_color = positive ? 'text-emerald-600 bg-emerald-50' : negative ? 'text-rose-600 bg-rose-50' : 'text-slate-500 bg-slate-100'
+    const pct_text =
+      delta.pct === null
+        ? '—'
+        : `${flat ? '' : delta.pct > 0 ? '+' : ''}${delta.pct.toFixed(0)}%`
+    delta_node = (
+      <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${delta_color}`}>
+        <DeltaIcon className="h-2.5 w-2.5" />
+        {pct_text}
+      </span>
+    )
+  }
+
+  return (
+    <div className={`bg-white border ${tone_classes.border} shadow-sm rounded-2xl p-5 transition-all hover:shadow-md`}>
       <div className="flex items-start justify-between gap-3 mb-3">
         <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</p>
         <div className={`w-8 h-8 rounded-lg ${tone_classes.bg} flex items-center justify-center shrink-0`}>
           <Icon className={`h-4 w-4 ${tone_classes.text}`} />
         </div>
       </div>
-      <p className={`text-3xl font-black ${tone_classes.text} leading-none mb-1.5`}>{value}</p>
+      <div className="flex items-baseline gap-2 mb-1.5">
+        <p className={`text-3xl font-black ${tone_classes.text} leading-none`}>{value}</p>
+        {delta_node}
+      </div>
       {hint && (
         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{hint}</p>
       )}
     </div>
   )
-
-  return href ? <Link href={href}>{inner}</Link> : inner
 }

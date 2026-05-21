@@ -812,7 +812,6 @@ export async function reassignClientAdvisor(clientId: string, newAdvisorId: stri
         const previous_advisor_name = existing?.advisor_name ?? null;
 
         revalidatePath(`/admin/clients/${clientId}`);
-        revalidatePath(`/admin/advisor/clients/${clientId}`);
         revalidatePath(`/advisor/dashboard/clients/${clientId}`);
 
         return {

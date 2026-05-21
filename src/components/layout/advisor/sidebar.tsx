@@ -57,6 +57,7 @@ export function Sidebar({
   const navItems = [
     { label: 'Dashboard', href: '/advisor/dashboard', icon: BookCheck },
     { label: 'Pipeline', href: '/advisor/dashboard/pipeline', icon: LayoutGrid },
+    { label: 'Prospects', href: '/advisor/dashboard/prospects', icon: Users },
     { label: 'Clients', href: '/advisor/dashboard/clients', icon: Users },
   ]
 
@@ -101,7 +102,12 @@ export function Sidebar({
         <nav className="flex-1 space-y-1 px-3">
           {navItems.map(({ href, label, icon: Icon }) => {
             const active = pathname === href
-            const iconName = label === 'Dashboard' ? 'dashboard' : label === 'Pipeline' ? 'account_tree' : 'group'
+            const iconName =
+              label === 'Dashboard' ? 'dashboard'
+              : label === 'Pipeline' ? 'account_tree'
+              : label === 'Prospects' ? 'person_search'
+              : label === 'Clients' ? 'verified_user'
+              : 'group'
 
             return (
               <Link href={href} key={href} onClick={onMobileClose} title={collapsed ? label : undefined}>
