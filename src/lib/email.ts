@@ -1591,6 +1591,148 @@ export async function send_lender_review_approved_notification(
 }
 
 /**
+ * Interface for the "UW saved lender match — admins please review" email.
+ * Sent to all admins when underwriting recommends lenders for a client.
+ */
+export interface LenderMatchReadyNotificationData {
+  /** Every admin recipient. The email goes to all of them at once. */
+  admin_emails: string[];
+  client_name: string;
+  company_name?: string;
+  /** Recommended lender display names (optionally "Name (specialty)"). */
+  recommended_lenders: string[];
+  /** Deep link to the admin client file (Lender Match — Admin Review card). */
+  client_profile_url: string;
+}
+
+/**
+ * HTML for the "lender match ready for review" admin notification.
+ */
+export function generate_lender_match_ready_html(data: LenderMatchReadyNotificationData): string {
+  const { client_name, company_name, recommended_lenders, client_profile_url } = data;
+
+  const count = recommended_lenders.length;
+  const count_label = count === 0
+    ? 'No lenders recommended'
+    : `${count} lender${count === 1 ? '' : 's'} recommended`;
+
+  const lender_rows = recommended_lenders
+    .map((name) => `
+        <li style="margin: 0 0 10px; padding: 12px 16px; background-color: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; list-style: none;">
+          <p style="margin: 0; color: #1e3a8a; font-size: 15px; font-weight: 600;">${name}</p>
+        </li>`)
+    .join('');
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lender Match Ready for Review: ${client_name}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f6f9fc;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse;">
+    <tr>
+      <td align="center" style="padding: 40px 0;">
+        <table role="presentation" style="width: 600px; max-width: 100%; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+
+          <!-- Header -->
+          <tr>
+            <td style="padding: 40px 40px 20px; text-align: center; background-color: #1d4ed8;">
+              <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 700;">Lender Match Ready for Review</h1>
+              <p style="margin: 8px 0 0; color: #bfdbfe; font-size: 13px; font-weight: 500;">${count_label}</p>
+            </td>
+          </tr>
+
+          <!-- Message -->
+          <tr>
+            <td style="padding: 40px 40px 20px;">
+              <p style="margin: 0 0 16px; color: #475569; font-size: 16px; line-height: 1.6;">
+                Underwriting has finished a lender match for <strong>${client_name}</strong>${company_name ? ` (${company_name})` : ''} and needs an admin to review and approve which lenders to contact.
+              </p>
+
+              ${count > 0 ? `
+              <h3 style="margin: 0 0 12px; color: #1e293b; font-size: 15px; font-weight: 600;">Recommended lenders</h3>
+              <ul style="margin: 0 0 24px; padding: 0;">
+                ${lender_rows}
+              </ul>
+              ` : `
+              <p style="margin: 0 0 24px; color: #475569; font-size: 16px; line-height: 1.6;">
+                Underwriting cleared the prior recommendations for this client.
+              </p>
+              `}
+
+              <p style="margin: 0 0 24px; color: #475569; font-size: 16px; line-height: 1.6;">
+                Open the client file and use the <strong>Lender Match — Admin Review</strong> card to approve or skip each lender.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Action Button -->
+          <tr>
+            <td style="padding: 0 40px 40px;" align="center">
+              <a href="${client_profile_url}" style="display: inline-block; background-color: #1d4ed8; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-size: 16px; font-weight: 600;">
+                Review Lender Match
+              </a>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding: 40px; text-align: center; color: #94a3b8; font-size: 13px; line-height: 1.6; border-top: 1px solid #f1f5f9;">
+              <p style="margin: 0;">© ${new Date().getFullYear()} Credit Banc Vault. Confidential Internal Use Only.</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `;
+}
+
+/**
+ * Sends the "lender match ready for review" notification to all admins at once.
+ * Mirrors send_lender_review_approved_notification: logs, rethrows on SMTP error
+ * so the caller can record the failure instead of silently swallowing it.
+ */
+export async function send_lender_match_ready_notification(data: LenderMatchReadyNotificationData) {
+  if (!data.admin_emails || data.admin_emails.length === 0) {
+    console.warn('send_lender_match_ready_notification: no admin emails to send to');
+    return null;
+  }
+
+  const transporter = create_smtp_transporter();
+
+  const from_email = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  const from_name = process.env.SMTP_FROM_NAME || 'Credit Banc Vault';
+  const to = data.admin_emails.join(', ');
+
+  const html_content = generate_lender_match_ready_html(data);
+
+  const mail_options = {
+    from: `${from_name} <${from_email}>`,
+    to,
+    subject: `Lender match ready for review: ${data.client_name} (${data.recommended_lenders.length})`,
+    html: html_content,
+  };
+
+  console.log(`📧 Attempting to send lender-match-ready email to: ${to}`);
+
+  try {
+    const result = await transporter.sendMail(mail_options);
+    console.log(`✅ SMTP Result for ${data.client_name} lender-match-ready:`, result.messageId);
+    return result;
+  } catch (error) {
+    console.error(`❌ SMTP Error sending lender-match-ready email to ${to}:`, error);
+    throw error;
+  }
+}
+
+/**
  * ============================================================================
  * LOAN FUNDED NOTIFICATION FUNCTIONS
  * ============================================================================

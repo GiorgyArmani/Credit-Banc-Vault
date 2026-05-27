@@ -496,16 +496,18 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
     // Admins land on /admin/dashboard's "Pending lender reviews" tile and the
     // notification bell next to a deep-link to the unified client view.
     try {
-      const { notified } = await notifyAdminsOfLenderMatchSaved(
+      const { notified, emailed, admins } = await notifyAdminsOfLenderMatchSaved(
         selectedClientId,
         rows.map((r) => ({ lender_name: r.lender_name, specialty: r.specialty }))
       );
-      if (rows.length > 0 && notified > 0) {
-        toast.success(`Saved · ${notified} admin${notified > 1 ? "s" : ""} notified`);
-      } else if (rows.length > 0) {
-        toast.success("Saved");
-      } else {
+      if (rows.length === 0) {
         toast.success("Cleared recommendations");
+      } else if (admins === 0) {
+        toast.warning("Saved, but no admins are configured to notify");
+      } else {
+        toast.success(
+          `Saved · ${notified}/${admins} admin${admins > 1 ? "s" : ""} notified${emailed > 0 ? `, ${emailed} emailed` : ""}`
+        );
       }
     } catch (err) {
       console.error("admin notify failed (non-fatal):", err);
