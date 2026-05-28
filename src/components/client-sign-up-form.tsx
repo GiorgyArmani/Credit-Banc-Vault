@@ -29,6 +29,7 @@ import {
   Trash2
 } from "lucide-react";
 import { addManualFundingApplication } from "@/app/advisor/dashboard/clients/[id]/actions";
+import { useErrorDialog } from "@/components/error-dialog";
 import { FollowersPicker } from "@/components/followers-picker";
 import { FUNDING_OPTIONS, LOAN_TYPES } from "@/data/loan-types";
 
@@ -133,7 +134,7 @@ export default function ClientSignupForm() {
   const supabase = createClient();
   const [step, set_step] = useState(1);
   const [submitting, set_submitting] = useState(false);
-  const [error, set_error] = useState("");
+  const { showError } = useErrorDialog();
 
   // Advisors
   const [advisors, set_advisors] = useState<Advisor[]>([]);
@@ -525,9 +526,15 @@ export default function ClientSignupForm() {
   // Handle submit
   const handle_submit = async () => {
     set_submitting(true);
-    set_error("");
 
     try {
+      // Require at least one requested document. Creating a vault with an empty
+      // request leaves the client with nothing to upload and produces the
+      // "empty doc request" clients — block it at the source.
+      if (documents_requested.length === 0) {
+        throw new Error("Select at least one document to request before creating the client.");
+      }
+
       // Validar ownership percentages
       if (!validate_ownership()) {
         throw new Error("Ownership percentages must sum to 100%");
@@ -685,7 +692,7 @@ export default function ClientSignupForm() {
         router.push(`/auth/sign-up-success?email=${encodeURIComponent(client_email)}`);
       }
     } catch (err: any) {
-      set_error(err.message || "Error submitting form");
+      showError(err, { context: "Creating the client" });
     } finally {
       set_submitting(false);
     }
@@ -804,15 +811,6 @@ export default function ClientSignupForm() {
                 </div>
               ))}
             </div>
-
-            {error && (
-              <div className="mb-8 p-6 bg-red-50 border border-red-100 rounded-[2rem] animate-shake">
-                <div className="flex items-center gap-3">
-                  <AlertCircle className="w-6 h-6 text-red-500" />
-                  <p className="text-red-900 text-sm font-black uppercase tracking-tight">{error}</p>
-                </div>
-              </div>
-            )}
 
             <div className="w-full">
               {/* STEP 1: Contact Info */}
@@ -1973,11 +1971,19 @@ export default function ClientSignupForm() {
                       ))}
                     </div>
 
-                    {/* Show selected documents count */}
-                    {documents_requested.length > 0 && (
+                    {/* Selected count, or a required-warning when none are picked.
+                        At least one document is mandatory — handle_submit blocks
+                        creation otherwise, so surface the requirement here too. */}
+                    {documents_requested.length > 0 ? (
                       <div className="bg-emerald-500 rounded-2xl p-4 text-center">
                         <p className="text-sm font-black uppercase tracking-widest text-white">
                           {documents_requested.length} document{documents_requested.length !== 1 ? 's' : ''} requested
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="bg-red-50 border border-red-200 rounded-2xl p-4 text-center">
+                        <p className="text-sm font-black uppercase tracking-widest text-red-900">
+                          Select at least one document — required to create the client
                         </p>
                       </div>
                     )}

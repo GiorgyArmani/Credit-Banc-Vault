@@ -2,6 +2,7 @@ import './globals.css';
 import type { Metadata } from 'next'
 import { ThemeProvider } from 'next-themes'
 import { FloatingSupport } from '@/components/floating-support'
+import { ErrorDialogProvider } from '@/components/error-dialog'
 
 export const metadata: Metadata = {
   title: 'Credit Banc Vault',
@@ -20,8 +21,10 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       </head>
       <body className="bg-background text-foreground">
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
-          {children}
-          <FloatingSupport />
+          <ErrorDialogProvider>
+            {children}
+            <FloatingSupport />
+          </ErrorDialogProvider>
         </ThemeProvider>
       </body>
     </html>
