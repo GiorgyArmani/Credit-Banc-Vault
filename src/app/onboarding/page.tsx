@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { DataVaultForm } from "@/components/onboarding/data-vault-form";
 import { ContractCheckStep } from "@/components/onboarding/contract-check-step";
+import { SetPasswordStep } from "@/components/onboarding/set-password-step";
 import { useOnboardingStatus } from "@/components/onboarding/use-onboarding-status";
 import { PremiumLoader } from "@/components/ui/premium-loader";
 import { motion, AnimatePresence } from "framer-motion";
@@ -11,7 +12,7 @@ import { motion, AnimatePresence } from "framer-motion";
 export default function OnboardingPage() {
   const router = useRouter();
   const { needsOnboarding, dataVaultCompleted, contractCompleted, loading, refetch } = useOnboardingStatus();
-  const [step, setStep] = useState<"form" | "contract_check">("form");
+  const [step, setStep] = useState<"form" | "contract_check" | "set_password">("form");
   const [signWellActive, setSignWellActive] = useState(false);
   const [isFinishing, setIsFinishing] = useState(false);
 
@@ -53,7 +54,9 @@ export default function OnboardingPage() {
 
   const handleContractComplete = () => {
     setSignWellActive(false);
-    handleOnboardingComplete();
+    // Contract signed → final step: the client creates their own password
+    // (replacing the temporary one the magic link logged them in with).
+    setStep("set_password");
   };
 
   if (loading || isFinishing) {
@@ -97,18 +100,25 @@ export default function OnboardingPage() {
           {/* Header */}
           <div className="p-10 md:p-14 border-b border-emerald-50 bg-white">
             <h1 className="text-4xl md:text-5xl font-black tracking-tighter text-emerald-950 uppercase">
-              {step === "form" ? "Business Profile" : "Contract Signing"}
+              {step === "form"
+                ? "Business Profile"
+                : step === "contract_check"
+                  ? "Contract Signing"
+                  : "Create Your Password"}
             </h1>
             <p className="text-emerald-900/40 mt-4 text-xl font-bold">
               {step === "form"
                 ? "Let's start by getting some details about your business."
-                : "Almost there! Please review and sign your service agreement."}
+                : step === "contract_check"
+                  ? "Almost there! Please review and sign your service agreement."
+                  : "Last step — secure your account with a password of your own."}
             </p>
 
             {/* Progress indicator */}
             <div className="flex gap-3 mt-10">
               <div className={`h-2 flex-1 rounded-full transition-all duration-700 ${step === "form" ? "bg-emerald-500 shadow-lg shadow-emerald-500/20" : "bg-emerald-500/20"}`} />
-              <div className={`h-2 flex-1 rounded-full transition-all duration-700 ${step === "contract_check" ? "bg-emerald-500 shadow-lg shadow-emerald-500/20" : "bg-emerald-100"}`} />
+              <div className={`h-2 flex-1 rounded-full transition-all duration-700 ${step === "contract_check" ? "bg-emerald-500 shadow-lg shadow-emerald-500/20" : step === "set_password" ? "bg-emerald-500/20" : "bg-emerald-100"}`} />
+              <div className={`h-2 flex-1 rounded-full transition-all duration-700 ${step === "set_password" ? "bg-emerald-500 shadow-lg shadow-emerald-500/20" : "bg-emerald-100"}`} />
             </div>
           </div>
 
@@ -126,6 +136,10 @@ export default function OnboardingPage() {
                   onSignWellClose={() => setSignWellActive(false)}
                 />
               </div>
+            )}
+
+            {step === "set_password" && (
+              <SetPasswordStep onComplete={handleOnboardingComplete} />
             )}
           </div>
         </motion.div>

@@ -6,6 +6,7 @@ import { send_client_welcome_email } from '@/lib/email';
 import { syncOutstandingDocuments } from '@/lib/outstanding-documents';
 import { syncUnifiedClientData, generateSecurePassword } from '@/lib/user-management';
 import { ghlSearchContacts, ghlUpdateContact, ghlAddContactFollowers, ghlAddTags } from '@/lib/ghl-api';
+import { generateOnboardingMagicLink, pushMagicLinkToGhl } from '@/lib/magic-link';
 
 /**
  * Supabase admin client with elevated privileges
@@ -933,6 +934,18 @@ export async function POST(request: Request) {
     await ghl_add_tags(ghl_contact_id, tags_to_apply);
     console.log(`✅ Tags applied successfully to GHL contact: ${ghl_contact_id}`);
 
+    // ========== STEP 6.6: GENERATE PASSWORDLESS MAGIC LINK ==========
+    // Passwordless entry: write the magic link to the GHL custom field (+ the
+    // `send-magic-link` tag so a GHL workflow fires the SMS) and reuse the same
+    // link in the welcome email. The client never sees the temp password — they
+    // create their own during onboarding Step 3.
+    const magic_link = await generateOnboardingMagicLink(body.client_email.toLowerCase());
+    if (magic_link) {
+      await pushMagicLinkToGhl(ghl_contact_id, magic_link);
+    } else {
+      console.error('⚠️ Magic link generation failed — welcome email will fall back to the login URL');
+    }
+
     // ========== STEP 6.4: SAVE FOLLOWERS (additional advisors that should get all client emails) ==========
     // Excludes the primary advisor and de-dupes the requested ids.
     const requested_follower_ids: string[] = Array.isArray(body.follower_advisor_ids)
@@ -1012,7 +1025,7 @@ export async function POST(request: Request) {
       await send_client_welcome_email({
         client_name: body.client_name,
         client_email: body.client_email.toLowerCase(),
-        client_password: temporary_password,
+        magic_link: magic_link || undefined,
         advisor_name: body.advisor_name || 'Your Advisor',
         advisor_email: advisor_email || 'support@creditbanc.io',
         advisor_phone: advisor_phone || undefined,
@@ -1050,7 +1063,7 @@ export async function POST(request: Request) {
       },
       credentials: {
         email: body.client_email.toLowerCase(),
-        password: temporary_password,
+        magic_link: magic_link || null,
         login_url: `${process.env.NEXT_PUBLIC_APP_URL}/auth/login`
       },
       message: 'Client registered successfully'

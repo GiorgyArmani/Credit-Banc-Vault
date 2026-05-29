@@ -85,6 +85,7 @@ export const REFERRAL_PARTNERS: readonly string[] = [
     "Tammy Cook",
     "Tanya Akimenko",
     "Tersea Wagonseller",
+    "Javier Silva",
     "Thomas Huston",
     "Timothy Schwan",
     "Tom Ferry",

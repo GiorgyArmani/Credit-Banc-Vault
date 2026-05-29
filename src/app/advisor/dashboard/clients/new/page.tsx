@@ -1,4 +1,4 @@
-import ClientSignUpForm from "@/components/client-sign-up-form";
+import ClientSignUpForm from "../../../../../components/client-sign-up-form";
 
 /**
  * Advisor-Only Client Creation Page
