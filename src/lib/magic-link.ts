@@ -16,7 +16,21 @@ import { ghlUpdateContact, ghlAddTags } from "@/lib/ghl-api";
 
 /**
  * Generates a magic (passwordless) login link that lands the client in the
- * onboarding flow. Returns the full action_link, or null if generation failed.
+ * onboarding flow. Returns a link to OUR /auth/confirm route, or null if
+ * generation failed.
+ *
+ * We deliberately do NOT return Supabase's `action_link`. That link points at
+ * Supabase's /auth/v1/verify endpoint and, after verifying, redirects to the
+ * link's `redirect_to` using the IMPLICIT flow (tokens in a `#hash`). Two
+ * problems with that for us:
+ *   1. `redirect_to` must be in the project's allowed Redirect URLs or Supabase
+ *      silently falls back to the Site URL (prod) — so localhost never works.
+ *   2. The hash-token landing doesn't flow through our PKCE `/auth/callback`.
+ *
+ * Instead we build our own link using `properties.hashed_token` and point it at
+ * the SSR `/auth/confirm` route (which calls verifyOtp server-side, sets the
+ * session cookie, then redirects to `next`). The domain comes from
+ * NEXT_PUBLIC_APP_URL, so it honors localhost in dev with no Supabase config.
  */
 export async function generateOnboardingMagicLink(email: string): Promise<string | null> {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://vault.creditbanc.io";
@@ -26,9 +40,6 @@ export async function generateOnboardingMagicLink(email: string): Promise<string
     const { data, error } = await supabaseAdmin.auth.admin.generateLink({
       type: "magiclink",
       email: email.toLowerCase(),
-      options: {
-        redirectTo: `${appUrl}/auth/callback?next=/onboarding`,
-      },
     });
 
     if (error) {
@@ -36,7 +47,14 @@ export async function generateOnboardingMagicLink(email: string): Promise<string
       return null;
     }
 
-    return data?.properties?.action_link ?? null;
+    const tokenHash = data?.properties?.hashed_token;
+    if (!tokenHash) {
+      console.error("❌ Magic link generation returned no hashed_token");
+      return null;
+    }
+
+    const next = encodeURIComponent("/onboarding");
+    return `${appUrl}/auth/confirm?token_hash=${tokenHash}&type=magiclink&next=${next}`;
   } catch (err) {
     console.error("❌ Magic link generation threw:", err);
     return null;
