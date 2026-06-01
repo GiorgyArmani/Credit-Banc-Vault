@@ -22,7 +22,7 @@ import { SignContractDialog } from "./sign-contract-dialog";
  */
 export function PendingContractsBanner({ clientVaultId }: { clientVaultId: string | null }) {
   const [refreshKey, setRefreshKey] = useState(0);
-  const { pending, loaded } = usePendingContracts(clientVaultId, refreshKey);
+  const { pending, loaded, markSigned } = usePendingContracts(clientVaultId, refreshKey);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [startIndex, setStartIndex] = useState(0);
 
@@ -78,6 +78,7 @@ export function PendingContractsBanner({ clientVaultId }: { clientVaultId: strin
         pending={pending}
         initialIndex={startIndex}
         onRefresh={() => setRefreshKey(k => k + 1)}
+        onCompleted={markSigned}
       />
     </>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
 export interface PendingContract {
@@ -24,6 +24,21 @@ export interface PendingContract {
 export function usePendingContracts(clientVaultId: string | null, refreshKey: number = 0) {
   const [pending, setPending] = useState<PendingContract[]>([]);
   const [loaded, setLoaded] = useState(false);
+  // Optimistically-signed deals. Setting funding_deals.contract_completed is
+  // async (in-app sync OR the Signwell webhook), so a re-fetch right after
+  // signing can still read the row as pending — which left the "Contract Ready
+  // to Sign" banner stuck after a successful sign. The signing surface calls
+  // markSigned() on the embed's `completed` event; we hide those immediately
+  // and keep them hidden across re-fetches (harmless once the DB catches up and
+  // stops returning them).
+  const [signedIds, setSignedIds] = useState<Set<string>>(new Set());
+  const markSigned = useCallback((fundingDealId: string) => {
+    setSignedIds((prev) => {
+      const next = new Set(prev);
+      next.add(fundingDealId);
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     if (!clientVaultId) {
@@ -76,5 +91,6 @@ export function usePendingContracts(clientVaultId: string | null, refreshKey: nu
     return () => { cancelled = true; };
   }, [clientVaultId, refreshKey]);
 
-  return { pending, loaded };
+  const visible = pending.filter((p) => !signedIds.has(p.funding_deal_id));
+  return { pending: visible, loaded, markSigned };
 }

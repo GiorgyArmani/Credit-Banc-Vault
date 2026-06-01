@@ -1880,12 +1880,16 @@ export default function AdvisorClientDetailsPage() {
                     client_vault_id={client_id}
                     open={is_add_business_open}
                     on_close={() => set_is_add_business_open(false)}
-                    on_created={(b) => {
-                        // Carry every field the API returned so the new tab
-                        // shows the correct profile data immediately on switch
-                        // (otherwise the fallback to client_data_vault would
-                        // show the primary's info on the new business's tab).
-                        set_businesses((prev) => [...prev, { ...b, is_primary: false }]);
+                    on_created={async (b) => {
+                        // Refetch the whole client so the new business loads with
+                        // its funding deal flattened in, its requested docs, and
+                        // any other scoped state — then land on its tab. We can't
+                        // just append the API's `business` object: it lacks the
+                        // flattened funding ask (capital_requested, loan type, …)
+                        // and the doc requests created server-side aren't in state
+                        // yet. fetch_client_details only auto-selects a tab when
+                        // none is set, so setting active afterward sticks.
+                        await fetch_client_details();
                         set_active_business_id(b.id);
                     }}
                 />

@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
-import { FileSignature, ChevronRight, ChevronLeft, X, ExternalLink, RefreshCw } from "lucide-react";
+import { useEffect, useRef } from "react";
+import { FileSignature, X, ExternalLink } from "lucide-react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 import type { PendingContract } from "./use-pending-contracts";
 
 interface SignContractDialogProps {
@@ -12,14 +13,48 @@ interface SignContractDialogProps {
   pending: PendingContract[];
   initialIndex?: number;
   onRefresh?: () => void;
+  /** Called with the funding_deal id the moment a contract is signed, so the
+   *  caller can hide it immediately (DB completion flag is async). */
+  onCompleted?: (fundingDealId: string) => void;
+}
+
+declare global {
+  interface Window {
+    SignWellEmbed: any;
+  }
+}
+
+// The SDK renders into this element when given `containerId`, so the signing
+// experience sits inside our styled dialog instead of Signwell's full-page
+// overlay. Still NOT a raw <iframe src> — the SDK manages the embed, so the
+// hosted page's X-Frame-Options never applies.
+const EMBED_CONTAINER_ID = "signwell-embed-host";
+
+let signwellScriptPromise: Promise<void> | null = null;
+function loadSignwellScript(): Promise<void> {
+  if (typeof window === "undefined") return Promise.resolve();
+  if (window.SignWellEmbed) return Promise.resolve();
+  if (signwellScriptPromise) return signwellScriptPromise;
+  signwellScriptPromise = new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = "https://static.signwell.com/assets/embedded.js";
+    s.async = true;
+    s.onload = () => resolve();
+    s.onerror = () => {
+      signwellScriptPromise = null;
+      reject(new Error("Failed to load SignWell embed script"));
+    };
+    document.body.appendChild(s);
+  });
+  return signwellScriptPromise;
 }
 
 /**
- * Shared in-house Signwell signing surface. Embeds the signing iframe
- * directly so the client never leaves the app. Used by both the auto-open
- * PendingContractsModal (on dashboard mount) and the explicit "Sign Contract"
- * button on PendingContractsBanner — keeping a single implementation prevents
- * the two paths from drifting.
+ * Signing surface for an ADDITIONAL business's contract. Renders a styled
+ * dialog and hosts the Signwell Embed SDK inside it (via containerId).
+ * Completion is recorded in-app via /api/onboarding/sync-business-contract
+ * (webhook is the prod backstop); on completed/closed we refresh the pending
+ * list so a signed business drops out.
  */
 export function SignContractDialog({
   open,
@@ -27,27 +62,88 @@ export function SignContractDialog({
   pending,
   initialIndex = 0,
   onRefresh,
+  onCompleted,
 }: SignContractDialogProps) {
-  const [index, setIndex] = useState(initialIndex);
-  const [iframeKey, setIframeKey] = useState(0);
+  const embedRef = useRef<any>(null);
+  const current = pending[Math.min(initialIndex, pending.length - 1)] ?? null;
 
-  if (pending.length === 0) return null;
-  const safeIndex = Math.min(index, pending.length - 1);
-  const current = pending[safeIndex];
+  useEffect(() => {
+    if (!open || !current?.contract_url) return;
+    let cancelled = false;
+    const url = current.contract_url;
+    const dealId = current.funding_deal_id;
+
+    loadSignwellScript()
+      .then(() => {
+        if (cancelled) return;
+        // Wait a tick so the dialog's container div is in the DOM.
+        const host = document.getElementById(EMBED_CONTAINER_ID);
+        if (!window.SignWellEmbed || !host) {
+          window.open(url, "_blank");
+          onOpenChange(false);
+          return;
+        }
+        const embed = new window.SignWellEmbed({
+          url,
+          containerId: EMBED_CONTAINER_ID,
+          events: {
+            completed: async () => {
+              // Record completion in-app (PDF download + business-scoped doc +
+              // funding_deal flag) so it doesn't depend on the webhook.
+              const docId = new URLSearchParams(url.split("?")[1] ?? "").get("doc_id");
+              if (docId) {
+                try {
+                  await fetch("/api/onboarding/sync-business-contract", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ documentId: docId }),
+                  });
+                } catch (err) {
+                  console.error("business-contract sync failed (webhook will backstop):", err);
+                }
+              }
+              try { embedRef.current?.close(); } catch { /* noop */ }
+              embedRef.current = null;
+              onCompleted?.(dealId); // hide immediately — DB flag is async
+              onRefresh?.();
+              onOpenChange(false);
+            },
+            closed: () => {
+              embedRef.current = null;
+              onRefresh?.();
+              onOpenChange(false);
+            },
+            error: (e: any) => {
+              console.error("❌ SignWell embed error:", e);
+              toast.error("There was an error loading the contract. Try 'Open in new tab'.");
+            },
+          },
+        });
+        embedRef.current = embed;
+        embed.open();
+      })
+      .catch((err) => {
+        console.error(err);
+        window.open(url, "_blank");
+        onOpenChange(false);
+      });
+
+    return () => {
+      cancelled = true;
+      if (embedRef.current) {
+        try { embedRef.current.close(); } catch { /* noop */ }
+        embedRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, initialIndex]);
+
   if (!current) return null;
-
-  const goPrev = () => {
-    setIndex(i => Math.max(0, i - 1));
-    setIframeKey(k => k + 1);
-  };
-  const goNext = () => {
-    setIndex(i => Math.min(pending.length - 1, i + 1));
-    setIframeKey(k => k + 1);
-  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-5xl p-0 overflow-hidden rounded-3xl">
+      <DialogContent className="sm:max-w-5xl p-0 overflow-hidden rounded-3xl gap-0">
+        {/* Header */}
         <div className="bg-gradient-to-r from-amber-50 to-orange-50 border-b border-amber-200 px-6 py-5 flex items-start justify-between gap-4">
           <div className="flex items-start gap-4 min-w-0">
             <div className="w-12 h-12 rounded-2xl bg-amber-500 text-white flex items-center justify-center flex-shrink-0">
@@ -59,12 +155,6 @@ export function SignContractDialog({
               </h2>
               <p className="text-sm text-amber-900/70 font-bold mt-0.5">
                 Your advisor added this business to your file. Sign below to continue.
-                {pending.length > 1 && (
-                  <span className="ml-2 inline-flex items-center gap-1 text-amber-700">
-                    <span className="opacity-70">·</span>
-                    <span>{safeIndex + 1} of {pending.length}</span>
-                  </span>
-                )}
               </p>
             </div>
           </div>
@@ -78,72 +168,32 @@ export function SignContractDialog({
           </button>
         </div>
 
-        <div className="relative bg-slate-50" style={{ height: "min(70vh, 680px)" }}>
-          <iframe
-            key={iframeKey}
-            src={current.contract_url}
-            title={`Signwell contract — ${current.business_name}`}
-            className="absolute inset-0 w-full h-full border-0"
-            allow="camera; microphone; clipboard-write"
-          />
-        </div>
+        {/* Embed host — the Signwell SDK injects the signing UI here */}
+        <div
+          id={EMBED_CONTAINER_ID}
+          className="bg-slate-50 w-full"
+          style={{ height: "min(74vh, 700px)" }}
+        />
 
-        <div className="bg-white border-t border-slate-200 px-6 py-3 flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-2">
-            {pending.length > 1 && (
-              <>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={goPrev}
-                  disabled={safeIndex === 0}
-                  className="text-xs font-bold uppercase tracking-widest"
-                >
-                  <ChevronLeft className="h-4 w-4 mr-1" /> Prev
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={goNext}
-                  disabled={safeIndex >= pending.length - 1}
-                  className="text-xs font-bold uppercase tracking-widest"
-                >
-                  Next <ChevronRight className="h-4 w-4 ml-1" />
-                </Button>
-              </>
-            )}
-            {onRefresh && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={onRefresh}
-                title="Refresh status — use after signing if the dialog doesn't close on its own"
-                className="text-xs font-bold uppercase tracking-widest"
-              >
-                <RefreshCw className="h-4 w-4 mr-1" /> Refresh
-              </Button>
-            )}
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => onOpenChange(false)}
-              className="text-xs font-bold uppercase tracking-widest text-slate-600"
-            >
-              I'll sign later
-            </Button>
-            <Button
-              asChild
-              size="sm"
-              className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold uppercase tracking-widest"
-            >
-              <a href={current.contract_url} target="_blank" rel="noopener noreferrer">
-                Open in new tab <ExternalLink className="h-3.5 w-3.5 ml-1" />
-              </a>
-            </Button>
-          </div>
+        {/* Footer */}
+        <div className="bg-white border-t border-slate-200 px-6 py-3 flex items-center justify-end gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onOpenChange(false)}
+            className="text-xs font-bold uppercase tracking-widest text-slate-600"
+          >
+            I'll sign later
+          </Button>
+          <Button
+            asChild
+            size="sm"
+            className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold uppercase tracking-widest"
+          >
+            <a href={current.contract_url} target="_blank" rel="noopener noreferrer">
+              Open in new tab <ExternalLink className="h-3.5 w-3.5 ml-1" />
+            </a>
+          </Button>
         </div>
       </DialogContent>
     </Dialog>

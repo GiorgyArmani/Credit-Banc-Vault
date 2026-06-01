@@ -21,7 +21,7 @@ const DISMISS_KEY = "pending_contracts_modal_dismissed";
 
 export function PendingContractsModal({ clientVaultId }: { clientVaultId: string | null }) {
   const [refreshKey, setRefreshKey] = useState(0);
-  const { pending, loaded } = usePendingContracts(clientVaultId, refreshKey);
+  const { pending, loaded, markSigned } = usePendingContracts(clientVaultId, refreshKey);
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -46,6 +46,7 @@ export function PendingContractsModal({ clientVaultId }: { clientVaultId: string
       }}
       pending={pending}
       onRefresh={() => setRefreshKey(k => k + 1)}
+      onCompleted={markSigned}
     />
   );
 }
