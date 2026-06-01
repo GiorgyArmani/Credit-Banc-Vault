@@ -270,6 +270,26 @@ export async function POST(request: NextRequest) {
 
                 console.log(`✅ Uploaded PDF to storage: ${filePath}`);
 
+                // Scope the signed funding application to a business. The
+                // advisor / admin / UW client views and the client's own vault
+                // all filter documents by the active business tab
+                // (matchesActiveBusiness), and funding_application is NOT a
+                // client-scoped code — so a NULL business_profile_id row matches
+                // no tab and stays invisible even though the PDF exists. Prefer
+                // the business resolved from the matched funding_deal (multi-
+                // business contracts); fall back to the client's primary
+                // business. Mirrors addManualFundingApplication's scoping.
+                let docBusinessProfileId = matchedBusinessProfileId;
+                if (!docBusinessProfileId) {
+                    const { data: primaryBiz } = await supabase
+                        .from('business_profiles')
+                        .select('id')
+                        .eq('client_vault_id', client_data.id)
+                        .eq('is_primary', true)
+                        .maybeSingle();
+                    docBusinessProfileId = primaryBiz?.id ?? null;
+                }
+
                 // Create database record in user_documents
                 const { data: docRecord, error: dbError } = await supabase
                     .from('user_documents')
@@ -281,6 +301,8 @@ export async function POST(request: NextRequest) {
                         storage_path: filePath,
                         category: 'funding_application',
                         doc_code: 'funding_application',
+                        business_profile_id: docBusinessProfileId,
+                        funding_deal_id: matchedFundingDealId,
                         custom_label: `Funding Application - ${client_data.client_name}`,
                         metadata: {
                             tags: ['funding_application', 'signwell', 'auto-uploaded'],

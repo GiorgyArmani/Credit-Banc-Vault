@@ -16,6 +16,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { requireStaff } from '@/lib/auth/require-staff';
+import { slackPostMessage } from '@/lib/slack-api';
 
 const supabase_admin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -38,7 +39,7 @@ export async function PATCH(
 
     const { data: existing, error: fetch_error } = await supabase_admin
       .from('client_lender_assignments')
-      .select('id, decision, admin_review, status')
+      .select('id, client_id, lender_name, decision, admin_review, status')
       .eq('id', id)
       .maybeSingle();
 
@@ -79,6 +80,43 @@ export async function PATCH(
     if (update_error) {
       console.error('lender-assignment submit update error:', update_error);
       return NextResponse.json({ error: update_error.message }, { status: 500 });
+    }
+
+    // Trigger #2: if EVERY admin-approved lender for this client is now out the
+    // door (status submitted / approved_by_lender / funded), post a Slack
+    // summary into the deal channel. Fire-and-forget, only if a channel exists.
+    try {
+      const client_id = (existing as any).client_id as string | null;
+      if (client_id) {
+        const { data: all_approved } = await supabase_admin
+          .from('client_lender_assignments')
+          .select('lender_name, status')
+          .eq('client_id', client_id)
+          .eq('admin_review', 'approved');
+
+        const rows = all_approved ?? [];
+        const OUT = new Set(['submitted', 'approved_by_lender', 'funded']);
+        const all_out = rows.length > 0 && rows.every((r: any) => OUT.has(r.status));
+
+        if (all_out) {
+          const { data: vault } = await supabase_admin
+            .from('client_data_vault')
+            .select('slack_channel_id, company_name')
+            .eq('id', client_id)
+            .maybeSingle();
+
+          const channel_id = (vault as any)?.slack_channel_id as string | null;
+          if (channel_id) {
+            const lender_list = rows.map((r: any) => `• ${r.lender_name}`).join('\n');
+            const text =
+              `✅ This file has been submitted to all approved lenders` +
+              `${(vault as any)?.company_name ? ` for ${(vault as any).company_name}` : ''}.\n${lender_list}`;
+            await slackPostMessage(channel_id, text);
+          }
+        }
+      }
+    } catch (slack_err) {
+      console.error('lender-assignment submit Slack notify error (non-fatal):', slack_err);
     }
 
     return NextResponse.json({ success: true, assignment: updated });

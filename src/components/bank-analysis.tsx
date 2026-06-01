@@ -137,6 +137,81 @@ const parseMoney = (v: string): number => {
   return Number.isFinite(n) ? n : NaN;
 };
 
+// Excel-style arithmetic for a single field: "5300+2500-3000" -> 4800,
+// "(1000+200)*1.5" -> 1800. Supports + - * / and parentheses for grouping.
+// Returns null when `raw` is NOT a formula, so plain numbers, "$1,200", and the
+// accounting single-paren negative "(500)" fall through to parseMoney untouched.
+// Safe by construction: tokenizes to numbers/operators/parens only (no eval, no
+// identifiers), evaluates via shunting-yard.
+function evaluateExpression(raw: string): number | null {
+  const cleaned = (raw ?? "").replace(/[\s$,]/g, "");
+  if (!cleaned) return null;
+  // Only treat as a formula when an operator actually joins operands. A bare
+  // number, a leading-sign number ("-300"), or a lone "(500)" accounting
+  // negative is NOT a formula.
+  const hasOperator =
+    /[+*/]/.test(cleaned) || /\d-/.test(cleaned) || /\)[-+*/]/.test(cleaned);
+  if (!hasOperator) return null;
+  if (!/^[0-9.+\-*/()]+$/.test(cleaned)) return null;
+
+  const tokens = cleaned.match(/(\d+\.?\d*|\.\d+|[+\-*/()])/g);
+  if (!tokens || tokens.join("") !== cleaned) return null;
+
+  const prec: Record<string, number> = { "+": 1, "-": 1, "*": 2, "/": 2 };
+  const output: (number | string)[] = [];
+  const ops: string[] = [];
+  let prev: "num" | "op" | "open" | null = null;
+
+  for (const t of tokens) {
+    if (/^[0-9.]/.test(t)) {
+      output.push(parseFloat(t));
+      prev = "num";
+    } else if (t === "(") {
+      ops.push(t);
+      prev = "open";
+    } else if (t === ")") {
+      while (ops.length && ops[ops.length - 1] !== "(") output.push(ops.pop()!);
+      if (!ops.length) return null;
+      ops.pop();
+      prev = "num";
+    } else {
+      // Unary +/- (start, after another operator, or after "(") → "0 <op> x".
+      if ((t === "-" || t === "+") && (prev === null || prev === "op" || prev === "open")) {
+        output.push(0);
+      }
+      while (
+        ops.length &&
+        ops[ops.length - 1] !== "(" &&
+        prec[ops[ops.length - 1]] >= prec[t]
+      ) {
+        output.push(ops.pop()!);
+      }
+      ops.push(t);
+      prev = "op";
+    }
+  }
+  while (ops.length) {
+    const o = ops.pop()!;
+    if (o === "(") return null;
+    output.push(o);
+  }
+
+  const stack: number[] = [];
+  for (const tok of output) {
+    if (typeof tok === "number") {
+      stack.push(tok);
+    } else {
+      const b = stack.pop();
+      const a = stack.pop();
+      if (a === undefined || b === undefined) return null;
+      stack.push(tok === "+" ? a + b : tok === "-" ? a - b : tok === "*" ? a * b : a / b);
+    }
+  }
+  if (stack.length !== 1 || !Number.isFinite(stack[0])) return null;
+  // Round to 2 decimals to avoid float noise (e.g. 0.1+0.2).
+  return Math.round(stack[0] * 100) / 100;
+}
+
 const formatMoney = (v: number) => {
   if (!Number.isFinite(v) || v === 0) return "—";
   const abs = Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
@@ -267,12 +342,29 @@ function CurrencyInput({
   placeholder?: string;
   className?: string;
 }) {
+  // Excel-style: typing "5300+2500-3000" and blurring (or pressing Enter)
+  // replaces the field with the computed result. Non-formula input is left as-is.
+  const evaluate = () => {
+    const result = evaluateExpression(value);
+    if (result !== null) {
+      const normalized = String(result);
+      if (normalized !== value.trim()) onChange(normalized);
+    }
+  };
   return (
     <input
       type="text"
       value={value}
       onChange={(e) => onChange(e.target.value)}
+      onBlur={evaluate}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          e.currentTarget.blur();
+        }
+      }}
       placeholder={placeholder}
+      title="Supports math: type e.g. 5300+2500-3000 and press Enter"
       className={`w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 text-right text-sm font-mono text-slate-900 placeholder-slate-400 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors ${className}`}
     />
   );

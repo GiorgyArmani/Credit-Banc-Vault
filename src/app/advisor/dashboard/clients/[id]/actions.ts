@@ -610,6 +610,162 @@ export async function updateClientProfile(clientId: string, data: any) {
 }
 
 /**
+ * updateBusinessProfile
+ *
+ * Per-business edit. Used when the advisor edits a NON-PRIMARY business tab.
+ * Business + funding-ask fields are written to that business's own rows
+ * (business_profiles + funding_deals), NOT to client_data_vault — so editing
+ * "Business B" never clobbers "Business A" / the primary's figures. Shared
+ * client identity (name / email / phone / credit score) still lives on the
+ * client and is updated on client_data_vault (with auth + GHL sync) since it's
+ * the same human across every business.
+ *
+ * The PRIMARY business keeps using updateClientProfile (the legacy fat
+ * client_data_vault row is its source of truth).
+ */
+export async function updateBusinessProfile(clientId: string, businessProfileId: string, data: any) {
+    try {
+        const supabase = await createClient();
+
+        const { data: { user: advisorUser } } = await supabase.auth.getUser();
+        if (!advisorUser) throw new Error("Unauthorized");
+
+        const { data: client, error: clientError } = await supabase
+            .from("client_data_vault")
+            .select("user_id, ghl_contact_id, advisor_id")
+            .eq("id", clientId)
+            .single();
+        if (clientError || !client) throw new Error("Client not found");
+
+        // Access: admin bypasses (hasClientAccess), advisors must own/follow.
+        const { data: advisorData } = await supabase
+            .from("advisors").select("id").eq("user_id", advisorUser.id).maybeSingle();
+        if (!(await hasClientAccess(supabase, advisorData?.id ?? "", clientId, client.advisor_id))) {
+            throw new Error("Access denied: You do not have access to this client");
+        }
+
+        const supabaseAdmin = createAdminClient();
+
+        // Guard: the business must belong to THIS client (no cross-client writes).
+        const { data: biz, error: bizErr } = await supabaseAdmin
+            .from("business_profiles")
+            .select("id, is_primary")
+            .eq("id", businessProfileId)
+            .eq("client_vault_id", clientId)
+            .maybeSingle();
+        if (bizErr || !biz) throw new Error("Business not found for this client");
+
+        const num = (v: any): number | null => {
+            if (v === null || v === undefined || v === "") return null;
+            const n = Number(v);
+            return Number.isFinite(n) ? n : null;
+        };
+
+        // 1. Business-scoped fields → business_profiles.
+        const { error: bpErr } = await supabaseAdmin
+            .from("business_profiles")
+            .update({
+                company_name: data.company_name,
+                business_name: data.company_name,
+                company_city: data.company_city || null,
+                company_state: data.company_state || null,
+                company_zip_code: data.company_zip_code || null,
+                legal_entity_type: data.legal_entity_type || null,
+                business_start_date: data.business_start_date || null,
+                avg_monthly_deposits: num(data.avg_monthly_deposits),
+                avg_annual_revenue: num(data.avg_annual_revenue),
+                employees_count: num(data.employees_count),
+                is_home_based: data.is_home_based ?? false,
+                // Legacy mirror columns.
+                city: data.company_city || null,
+                state: data.company_state || null,
+                zip: data.company_zip_code || null,
+                updated_at: new Date().toISOString(),
+            })
+            .eq("id", businessProfileId);
+        if (bpErr) throw new Error(`Failed to update business: ${bpErr.message}`);
+
+        // 2. Funding-ask fields → the business's funding_deals row (lowest
+        //    display_order). Create one if missing so the ask always has a home.
+        const dealPayload = {
+            capital_requested: num(data.capital_requested),
+            proposed_loan_type: data.proposed_loan_type || null,
+            loan_purpose: data.loan_purpose || null,
+            funding_eta: data.funding_eta || null,
+        };
+        const { data: deals } = await supabaseAdmin
+            .from("funding_deals")
+            .select("id")
+            .eq("business_profile_id", businessProfileId)
+            .order("display_order", { ascending: true })
+            .limit(1);
+        if (deals && deals.length > 0) {
+            const { error: dealErr } = await supabaseAdmin
+                .from("funding_deals").update(dealPayload).eq("id", deals[0].id);
+            if (dealErr) throw new Error(`Failed to update funding deal: ${dealErr.message}`);
+        } else {
+            const { error: dealErr } = await supabaseAdmin
+                .from("funding_deals")
+                .insert({ business_profile_id: businessProfileId, display_order: 0, ...dealPayload });
+            if (dealErr) throw new Error(`Failed to create funding deal: ${dealErr.message}`);
+        }
+
+        // 3. Shared client identity → client_data_vault. Email change is
+        //    conflict-checked + synced to auth, mirroring updateClientProfile.
+        const newEmail = (data.client_email || "").trim().toLowerCase();
+        const identityUpdate: any = {
+            client_name: data.client_name,
+            client_phone: data.client_phone,
+            credit_score: data.credit_score,
+            updated_at: new Date().toISOString(),
+        };
+        let emailChanged = false;
+        if (newEmail) {
+            const { data: vaultRow } = await supabaseAdmin
+                .from("client_data_vault").select("client_email").eq("id", clientId).maybeSingle();
+            if (vaultRow && (vaultRow.client_email || "").toLowerCase() !== newEmail) {
+                const { data: existingAuthUsers } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 });
+                const conflict = existingAuthUsers?.users?.find(
+                    (u) => u.email?.toLowerCase() === newEmail && u.id !== client.user_id
+                );
+                if (conflict) throw new Error(`The email "${newEmail}" is already registered to another account.`);
+                identityUpdate.client_email = newEmail;
+                emailChanged = true;
+            }
+        }
+        const { error: idErr } = await supabaseAdmin
+            .from("client_data_vault").update(identityUpdate).eq("id", clientId);
+        if (idErr) throw new Error(`Failed to update client: ${idErr.message}`);
+
+        if (emailChanged) {
+            const { error: authErr } = await supabaseAdmin.auth.admin.updateUserById(client.user_id, { email: newEmail });
+            if (authErr) throw new Error(`Profile saved, but auth login email could not be updated: ${authErr.message}. Please contact support.`);
+        }
+
+        // GHL: sync client identity ONLY. The GHL contact is per-client — never
+        // overwrite its company/location with a secondary business's fields.
+        if (client.ghl_contact_id) {
+            try {
+                await ghlUpdateContact(client.ghl_contact_id, {
+                    firstName: (data.client_name || "").split(" ")[0],
+                    lastName: (data.client_name || "").split(" ").slice(1).join(" ") || "",
+                    ...(emailChanged ? { email: newEmail } : {}),
+                    phone: data.client_phone,
+                });
+            } catch (ghlError) {
+                console.error("GHL identity sync (non-fatal):", ghlError);
+            }
+        }
+
+        revalidatePath(`/advisor/dashboard/clients/${clientId}`);
+        return { success: true };
+    } catch (error: any) {
+        console.error("Exception in updateBusinessProfile:", error);
+        return { success: false, error: error.message || "An unexpected error occurred" };
+    }
+}
+
+/**
  * deleteClientFile
  * 
  * Allows an advisor to delete a document uploaded by a client.

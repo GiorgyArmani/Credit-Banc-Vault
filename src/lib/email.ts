@@ -56,8 +56,10 @@ export interface AdvisorDocumentNotificationData {
   advisor_email: string;
   advisor_cc_emails?: string[]; // CC follower advisors
   client_name: string;
-  requested_documents: string[];
+  missing_documents?: string[];    // Required items the client still owes
+  additional_documents?: string[]; // Extra documents underwriting is requesting
   login_url: string;
+  custom_message?: string; // Internal note from underwriting to include in the email
 }
 
 /**
@@ -969,7 +971,23 @@ export async function send_underwriting_welcome_email(data: UnderwritingWelcomeE
  * Generates HTML for advisor document notification email
  */
 export function generate_advisor_document_notification_html(data: AdvisorDocumentNotificationData): string {
-  const { advisor_name, client_name, requested_documents, login_url } = data;
+  const { advisor_name, client_name, missing_documents = [], additional_documents = [], login_url, custom_message } = data;
+
+  const doc_list_html = (
+    heading: string,
+    docs: string[],
+    theme: { bg: string; border: string; heading: string; text: string }
+  ) => docs.length === 0 ? '' : `
+              <div style="background-color: ${theme.bg}; border: 1px solid ${theme.border}; border-radius: 8px; padding: 20px; margin-bottom: 16px;">
+                <h3 style="margin: 0 0 12px; color: ${theme.heading}; font-size: 16px; font-weight: 700;">${heading}</h3>
+                <ul style="margin: 0; padding-left: 20px; color: ${theme.text}; font-size: 15px; line-height: 1.6;">
+                  ${docs.map(doc => `<li style="margin-bottom: 8px;">${doc}</li>`).join('')}
+                </ul>
+              </div>`;
+
+  // Missing required items are urgent (red); additional requests are informational (amber)
+  const missing_theme = { bg: '#fef2f2', border: '#fee2e2', heading: '#991b1b', text: '#b91c1c' };
+  const additional_theme = { bg: '#fffbeb', border: '#fef3c7', heading: '#92400e', text: '#b45309' };
 
   return `
 <!DOCTYPE html>
@@ -999,12 +1017,14 @@ export function generate_advisor_document_notification_html(data: AdvisorDocumen
               <p style="margin: 0 0 16px; color: #475569; font-size: 16px; line-height: 1.6;">
                 Our underwriting team has reviewed the file for <strong>${client_name}</strong> and requires additional documentation to proceed.
               </p>
-              <div style="background-color: #fef2f2; border: 1px solid #fee2e2; border-radius: 8px; padding: 20px; margin-bottom: 24px;">
-                <h3 style="margin: 0 0 12px; color: #991b1b; font-size: 16px; font-weight: 700;">Requested Documents:</h3>
-                <ul style="margin: 0; padding-left: 20px; color: #b91c1c; font-size: 15px; line-height: 1.6;">
-                  ${requested_documents.map(doc => `<li style="margin-bottom: 8px;">${doc}</li>`).join('')}
-                </ul>
+              ${doc_list_html('Missing Required Items:', missing_documents, missing_theme)}
+              ${doc_list_html('Additional Documents Requested:', additional_documents, additional_theme)}
+              ${custom_message ? `
+              <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid #ef4444; border-radius: 8px; padding: 20px; margin-bottom: 24px;">
+                <h3 style="margin: 0 0 12px; color: #1e293b; font-size: 16px; font-weight: 700;">Note from Underwriting:</h3>
+                <p style="margin: 0; color: #475569; font-size: 15px; line-height: 1.6; white-space: pre-wrap;">${custom_message}</p>
               </div>
+              ` : ''}
               <p style="margin: 0 0 24px; color: #475569; font-size: 16px; line-height: 1.6;">
                 Please contact the client and request these documents through your advisor portal.
               </p>

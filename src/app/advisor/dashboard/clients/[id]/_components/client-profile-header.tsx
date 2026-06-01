@@ -20,6 +20,8 @@ interface ClientProfile {
     legal_entity_type: string;
     business_start_date: string;
     avg_monthly_deposits: number;
+    proposed_loan_type?: string;
+    industry?: string;
     credit_score: string;
     created_at: string;
     data_vault_submitted_at: string | null;
@@ -274,6 +276,11 @@ export function ClientProfileHeader({
                         <p className="text-sm text-slate-500 mt-0.5">
                             Rev: {format_currency(client_profile.avg_monthly_deposits)} / mo
                         </p>
+                        {client_profile.proposed_loan_type && (
+                            <p className="text-[11px] text-slate-400 mt-2 truncate" title={client_profile.proposed_loan_type}>
+                                {client_profile.proposed_loan_type}
+                            </p>
+                        )}
                     </div>
 
                     {/* Credit Score */}

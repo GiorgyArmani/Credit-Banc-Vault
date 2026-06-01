@@ -193,8 +193,8 @@ export function Sidebar({
           localStorage.setItem('sidebar_collapsed', next ? '1' : '0')
         }}
         aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        className="hidden md:flex fixed left-5 z-[60] h-10 w-10 items-center justify-center rounded-2xl bg-emerald-500 text-white shadow-xl shadow-emerald-500/20 hover:bg-emerald-600 transition-all active:scale-90"
-        style={{ bottom: 100 }}
+        className="hidden md:flex fixed z-[60] h-10 w-10 items-center justify-center rounded-2xl bg-emerald-500 text-white shadow-xl shadow-emerald-500/20 hover:bg-emerald-600 transition-all duration-300 ease-in-out active:scale-90"
+        style={{ bottom: 100, left: collapsed ? 60 : 268 }}
         title={collapsed ? 'Expand' : 'Collapse'}
       >
         {collapsed ? <ChevronsRight className="h-5 w-5" /> : <ChevronsLeft className="h-5 w-5" />}

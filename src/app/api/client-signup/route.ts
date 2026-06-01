@@ -355,6 +355,54 @@ export async function POST(request: Request) {
 
     let user_id = existing_user?.id;
 
+    // ========== STEP 2.0: DUPLICATE-CLIENT GUARD ==========
+    // One client = one profile. If the person already has a client_data_vault,
+    // the advisor must use "Add Another Business" on that profile rather than
+    // creating a second account. We block here, before anything is created, on
+    // two signals:
+    //   (a) the email already belongs to a client, or
+    //   (b) the phone matches an existing client under a different email
+    //       (the case that produced the duplicate account: same person, new email).
+    // No silent re-onboard — re-sending onboarding is done from the client page.
+    {
+      // (a) Email already maps to a client vault.
+      if (existing_user) {
+        const { data: emailDup } = await supabase_admin
+          .from('client_data_vault')
+          .select('id, client_name')
+          .eq('user_id', existing_user.id)
+          .maybeSingle();
+        if (emailDup) {
+          console.warn(`🚫 Duplicate client blocked (email): ${body.client_email} already belongs to ${emailDup.client_name} (${emailDup.id})`);
+          return NextResponse.json({
+            success: false,
+            error: `A client already exists with this email — ${emailDup.client_name}. To add another business for them, open their profile and use “Add Another Business” instead of creating a new client.`,
+            duplicate: { client_vault_id: emailDup.id, client_name: emailDup.client_name, matched_on: 'email' },
+          }, { status: 409 });
+        }
+      }
+
+      // (b) Phone matches an existing client (different email → would be a 2nd account).
+      const normalizedPhone = (body.client_phone || '').replace(/\D/g, '');
+      if (normalizedPhone.length >= 10) {
+        const { data: phoneCandidates } = await supabase_admin
+          .from('client_data_vault')
+          .select('id, client_name, client_phone, user_id');
+        const phoneDup = (phoneCandidates || []).find(
+          (v: { client_phone: string | null; user_id: string | null }) =>
+            (v.client_phone || '').replace(/\D/g, '') === normalizedPhone && v.user_id !== user_id
+        );
+        if (phoneDup) {
+          console.warn(`🚫 Duplicate client blocked (phone): ${body.client_phone} already belongs to ${phoneDup.client_name} (${phoneDup.id})`);
+          return NextResponse.json({
+            success: false,
+            error: `A client already exists with this phone number — ${phoneDup.client_name}. To add another business for them, open their profile and use “Add Another Business” instead of creating a new client.`,
+            duplicate: { client_vault_id: phoneDup.id, client_name: phoneDup.client_name, matched_on: 'phone' },
+          }, { status: 409 });
+        }
+      }
+    }
+
     // Generar password temporal seguro para este cliente
     const temporary_password = generateSecurePassword();
 
@@ -853,7 +901,20 @@ export async function POST(request: Request) {
       .map((tag: string) => tag.replace('requested_', ''));
 
     // Combine requested from form and tags, ensuring uniqueness
-    const allRequestedCodes = Array.from(new Set([...requestedFromForm, ...requestedDocTags]));
+    let allRequestedCodes = Array.from(new Set([...requestedFromForm, ...requestedDocTags]));
+
+    // Safety net: a client must never be created with zero document requests
+    // (it leaves the vault empty and the deal dead-on-arrival). When neither the
+    // form nor the GHL tags asked for anything, fall back to the canonical core
+    // doc set (required_documents.is_core) so every client gets the baseline.
+    if (allRequestedCodes.length === 0) {
+      const { data: coreDocs } = await supabase_admin
+        .from('required_documents')
+        .select('code')
+        .eq('is_core', true);
+      allRequestedCodes = (coreDocs || []).map((d: { code: string }) => d.code);
+      console.warn(`⚠️ No documents requested from form or tags — falling back to ${allRequestedCodes.length} core docs`);
+    }
 
     console.log(`📋 Total documents to request: ${allRequestedCodes.length} (${requestedFromForm.length} from form, ${requestedDocTags.length} dynamic)`);
 

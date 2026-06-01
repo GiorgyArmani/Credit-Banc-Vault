@@ -35,7 +35,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Loader2, UserCog, Building2, DollarSign, MapPin, CreditCard, Clock } from "lucide-react";
-import { updateClientProfile } from "./actions";
+import { updateClientProfile, updateBusinessProfile } from "./actions";
 import { toast } from "sonner";
 
 // Constants from signup form for consistency
@@ -85,6 +85,14 @@ interface EditProfileModalProps {
     isOpen: boolean;
     onClose: () => void;
     onSuccess?: () => void;
+    /**
+     * When editing a NON-PRIMARY business tab, pass that business's id +
+     * isPrimary=false. The save then targets business_profiles + funding_deals
+     * for that business (shared client identity still goes to the client).
+     * Omitted / isPrimary=true → legacy client_data_vault edit (primary).
+     */
+    businessProfileId?: string | null;
+    isPrimary?: boolean;
     clientData: {
         id: string;
         client_name: string;
@@ -108,9 +116,10 @@ interface EditProfileModalProps {
     };
 }
 
-export function EditProfileModal({ isOpen, onClose, onSuccess, clientData }: EditProfileModalProps) {
+export function EditProfileModal({ isOpen, onClose, onSuccess, clientData, businessProfileId, isPrimary = true }: EditProfileModalProps) {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const router = useRouter();
+    const editingBusiness = !isPrimary && !!businessProfileId;
 
     const form = useForm<FormValues>({
         resolver: zodResolver(formSchema) as Resolver<FormValues>,
@@ -147,9 +156,11 @@ export function EditProfileModal({ isOpen, onClose, onSuccess, clientData }: Edi
                 proposed_loan_type: values.proposed_loan_types.join(", ")
             };
             
-            const result = await updateClientProfile(clientData.id, submissionValues);
+            const result = editingBusiness
+                ? await updateBusinessProfile(clientData.id, businessProfileId!, submissionValues)
+                : await updateClientProfile(clientData.id, submissionValues);
             if (result.success) {
-                toast.success("Client profile updated successfully");
+                toast.success(editingBusiness ? "Business updated successfully" : "Client profile updated successfully");
                 if (onSuccess) onSuccess();
                 router.refresh();
                 onClose();
@@ -169,10 +180,12 @@ export function EditProfileModal({ isOpen, onClose, onSuccess, clientData }: Edi
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2 text-2xl font-black uppercase tracking-tighter text-emerald-950">
                         <UserCog className="h-6 w-6 text-emerald-500" />
-                        Edit Client Profile
+                        {editingBusiness ? "Edit Business" : "Edit Client Profile"}
                     </DialogTitle>
                     <DialogDescription className="text-emerald-900/40 font-bold">
-                        Update the client's information. Changes will be synced to GoHighLevel and internal systems.
+                        {editingBusiness
+                            ? "Update this business's details and funding ask. Client identity (name, email, phone) is shared across all of this client's businesses."
+                            : "Update the client's information. Changes will be synced to GoHighLevel and internal systems."}
                     </DialogDescription>
                 </DialogHeader>
 

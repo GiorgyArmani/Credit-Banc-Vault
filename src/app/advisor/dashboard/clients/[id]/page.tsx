@@ -476,6 +476,37 @@ export default function AdvisorClientDetailsPage() {
         return out;
     }, [required_docs, scoped_documents, all_doc_types, active_business_id]);
 
+    // Profile rescoped to the active business tab. For the primary tab we show
+    // the client_data_vault row as-is. For a non-primary business we override
+    // every per-business field — including the funding ask (capital_requested,
+    // proposed_loan_type, loan_purpose, funding_eta) which lives on that
+    // business's funding_deals row, flattened onto the tab earlier. Without
+    // this, a non-primary tab silently shows the PRIMARY business's figures.
+    const displayed_profile = useMemo(() => {
+        if (!client_profile) return client_profile;
+        const active_business = businesses.find((b) => b.id === active_business_id);
+        if (!active_business || active_business.is_primary) return client_profile;
+        return {
+            ...client_profile,
+            company_name: active_business.company_name || "—",
+            company_city: active_business.company_city || "",
+            company_state: active_business.company_state || "",
+            company_zip_code: active_business.company_zip_code ?? client_profile.company_zip_code,
+            legal_entity_type: active_business.legal_entity_type || "—",
+            business_start_date: active_business.business_start_date || "",
+            industry: active_business.industry ?? undefined,
+            is_home_based: active_business.is_home_based ?? null,
+            employees_count: active_business.employees_count ?? undefined,
+            avg_monthly_deposits: active_business.avg_monthly_deposits ?? 0,
+            avg_annual_revenue: active_business.avg_annual_revenue ?? undefined,
+            // Funding ask — from this business's funding_deals row.
+            capital_requested: active_business.capital_requested ?? 0,
+            proposed_loan_type: active_business.proposed_loan_type ?? undefined,
+            loan_purpose: active_business.loan_purpose ?? undefined,
+            funding_eta: active_business.funding_eta ?? undefined,
+        } as ClientProfile;
+    }, [client_profile, businesses, active_business_id]);
+
     const [expanded_categories, set_expanded_categories] = useState<Set<string>>(new Set());
     const [preview_modal, set_preview_modal] = useState<{ isOpen: boolean; doc: UserDocument | null }>({
         isOpen: false,
@@ -744,7 +775,7 @@ export default function AdvisorClientDetailsPage() {
                 getBulkClientActivity([client_id]),
                 supabase
                     .from("business_profiles")
-                    .select("id, company_name, is_primary, display_order, legal_entity_type, business_start_date, company_city, company_state, company_zip_code, avg_monthly_deposits, avg_annual_revenue, employees_count, is_home_based, industry")
+                    .select("id, company_name, is_primary, display_order, legal_entity_type, business_start_date, company_city, company_state, company_zip_code, avg_monthly_deposits, avg_annual_revenue, employees_count, is_home_based, industry, funding_deals (capital_requested, proposed_loan_type, loan_purpose, funding_eta, display_order)")
                     .eq("client_vault_id", client_id)
                     .order("is_primary", { ascending: false })
                     .order("display_order", { ascending: true })
@@ -831,7 +862,24 @@ export default function AdvisorClientDetailsPage() {
             if (businesses_result.error) {
                 console.error("❌ Error fetching businesses:", businesses_result.error);
             } else {
-                const rows = (businesses_result.data || []) as BusinessTab[];
+                // Flatten each business's funding ask (lives on funding_deals,
+                // not business_profiles) onto the tab row so switching tabs can
+                // rescope the funding figures. Pick the lowest-display_order deal
+                // as the business's primary ask.
+                const rows = (businesses_result.data || []).map((b: any): BusinessTab => {
+                    const deals = Array.isArray(b.funding_deals) ? b.funding_deals : [];
+                    const deal = deals
+                        .slice()
+                        .sort((x: any, y: any) => (x.display_order ?? 0) - (y.display_order ?? 0))[0] ?? null;
+                    const { funding_deals: _drop, ...rest } = b;
+                    return {
+                        ...rest,
+                        capital_requested: deal?.capital_requested ?? null,
+                        proposed_loan_type: deal?.proposed_loan_type ?? null,
+                        loan_purpose: deal?.loan_purpose ?? null,
+                        funding_eta: deal?.funding_eta ?? null,
+                    };
+                });
                 set_businesses(rows);
                 // Default the active tab to the primary business (or the first row if none flagged).
                 const primary = rows.find((b) => b.is_primary) || rows[0];
@@ -1900,22 +1948,7 @@ export default function AdvisorClientDetailsPage() {
                     the advisor can see what's actually on each business
                     instead of accidentally showing primary's data. */}
                 {(() => {
-                    const active_business = businesses.find((b) => b.id === active_business_id);
-                    const use_business = active_business && !active_business.is_primary;
-                    const displayed_profile = use_business
-                        ? {
-                            ...client_profile,
-                            // Per-business fields — strictly from business_profiles.
-                            // null/empty surfaces as "—" in the header (already
-                            // handled by format_date / fallback strings there).
-                            company_name: active_business!.company_name || "—",
-                            company_city: active_business!.company_city || "",
-                            company_state: active_business!.company_state || "",
-                            legal_entity_type: active_business!.legal_entity_type || "—",
-                            business_start_date: active_business!.business_start_date || "",
-                            avg_monthly_deposits: active_business!.avg_monthly_deposits ?? 0,
-                        }
-                        : client_profile;
+                    if (!displayed_profile) return null;
                     return (
                 <ClientProfileHeader
                     client_profile={displayed_profile}
@@ -1968,8 +2001,8 @@ export default function AdvisorClientDetailsPage() {
                     defaultOpen
                 >
                     <ClientNotesCard
-                        loan_purpose={client_profile.loan_purpose || ""}
-                        additional_notes={client_profile.additional_notes || ""}
+                        loan_purpose={displayed_profile?.loan_purpose || ""}
+                        additional_notes={displayed_profile?.additional_notes || ""}
                         file_notes={file_notes}
                         new_file_note={new_file_note}
                         is_adding_file_note={is_adding_file_note}
@@ -2485,15 +2518,45 @@ export default function AdvisorClientDetailsPage() {
                     </DialogContent>
                 </Dialog>
 
-                {/* Edit Profile Modal */}
-                {client_profile && (
+                {/* Edit Profile Modal — gated on open so defaultValues refresh
+                    each time (and when switching business tabs). On a non-primary
+                    tab it edits THAT business (business_profiles + funding_deals);
+                    on the primary tab it edits the client_data_vault row. */}
+                {client_profile && is_edit_modal_open && (() => {
+                    const active_business = businesses.find((b) => b.id === active_business_id);
+                    const on_business = !!active_business && !active_business.is_primary;
+                    // Raw (non-"—") business values for editing; client identity
+                    // fields stay from client_profile (shared across businesses).
+                    const edit_data = on_business
+                        ? {
+                            ...client_profile,
+                            company_name: active_business!.company_name || "",
+                            company_city: active_business!.company_city || "",
+                            company_state: active_business!.company_state || "",
+                            company_zip_code: active_business!.company_zip_code || "",
+                            legal_entity_type: active_business!.legal_entity_type || "",
+                            business_start_date: active_business!.business_start_date || "",
+                            avg_monthly_deposits: active_business!.avg_monthly_deposits ?? 0,
+                            avg_annual_revenue: active_business!.avg_annual_revenue ?? 0,
+                            employees_count: active_business!.employees_count ?? 0,
+                            is_home_based: active_business!.is_home_based ?? false,
+                            capital_requested: active_business!.capital_requested ?? 0,
+                            proposed_loan_type: active_business!.proposed_loan_type ?? "",
+                            loan_purpose: active_business!.loan_purpose ?? "",
+                            funding_eta: active_business!.funding_eta ?? "",
+                        }
+                        : client_profile;
+                    return (
                     <EditProfileModal
                         isOpen={is_edit_modal_open}
                         onClose={() => set_is_edit_modal_open(false)}
                         onSuccess={fetch_client_details}
-                        clientData={client_profile}
+                        clientData={edit_data}
+                        businessProfileId={on_business ? active_business!.id : null}
+                        isPrimary={!on_business}
                     />
-                )}
+                    );
+                })()}
 
                 {/* Reassign Advisor Modal (admin-only) */}
                 {is_admin_path && (

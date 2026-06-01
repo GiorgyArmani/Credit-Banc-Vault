@@ -2,6 +2,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { send_lender_match_ready_notification } from "@/lib/email";
+import { slackPostMessage, getApproverUserIds, resolveAdvisorSlackId, formatMentions } from "@/lib/slack-api";
 
 const supabase_admin = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -35,17 +36,22 @@ export async function notifyAdminsOfLenderMatchSaved(
     let admin_users: { id: string; email: string }[] = [];
     let client_name = "a client";
     let company_name: string | undefined;
+    let slack_channel_id: string | null = null;
+    let advisor_email: string | null = null;
 
     try {
         // Pull all admin users + the client name for the message body.
         const [{ data: admins }, { data: client_row }] = await Promise.all([
             supabase_admin.from("users").select("id, email").eq("role", "admin"),
-            supabase_admin.from("client_data_vault").select("client_name, company_name").eq("id", clientId).maybeSingle(),
+            supabase_admin.from("client_data_vault").select("client_name, company_name, slack_channel_id, advisors(email)").eq("id", clientId).maybeSingle(),
         ]);
 
         admin_users = (admins ?? []) as { id: string; email: string }[];
         client_name = client_row?.client_name || client_row?.company_name || "a client";
         company_name = client_row?.company_name ?? undefined;
+        slack_channel_id = (client_row as any)?.slack_channel_id ?? null;
+        const adv: any = Array.isArray((client_row as any)?.advisors) ? (client_row as any).advisors[0] : (client_row as any)?.advisors;
+        advisor_email = adv?.email ?? null;
 
         // Log exactly who we found — this is how a missed admin becomes visible
         // instead of silently dropped.
@@ -121,6 +127,22 @@ export async function notifyAdminsOfLenderMatchSaved(
         }
     } catch (err: any) {
         console.error("notifyAdminsOfLenderMatchSaved email error (non-fatal):", err);
+    }
+
+    // ── Slack: post into the deal channel (if one exists) so Matt/Luigi + the
+    //    advisor are pinged to review and approve the lender selection. ─────────
+    try {
+        if (slack_channel_id) {
+            const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "https://vault.creditbanc.io";
+            const mentions = formatMentions([...getApproverUserIds(), resolveAdvisorSlackId(advisor_email)]);
+            const text =
+                `${mentions ? mentions + " " : ""}Underwriting has finished the lender selection for this file. ` +
+                `Please visit their profile under your admin portal to review and approve the lenders for this file.\n` +
+                `${baseUrl}/admin/clients/${clientId}`;
+            await slackPostMessage(slack_channel_id, text);
+        }
+    } catch (err: any) {
+        console.error("notifyAdminsOfLenderMatchSaved Slack error (non-fatal):", err);
     }
 
     return { notified, emailed, admins: admin_users.length };

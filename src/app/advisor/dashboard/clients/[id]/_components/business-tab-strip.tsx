@@ -19,6 +19,13 @@ export interface BusinessTab {
   employees_count?: number | null;
   is_home_based?: boolean | null;
   industry?: string | null;
+  // Funding ask — sourced from this business's funding_deals row (not
+  // business_profiles). Flattened in by the detail page so switching tabs
+  // rescopes the funding figures shown in the header / notes.
+  capital_requested?: number | null;
+  proposed_loan_type?: string | null;
+  loan_purpose?: string | null;
+  funding_eta?: string | null;
 }
 
 interface BusinessTabStripProps {

@@ -20,7 +20,8 @@ function revalidateClientSurfaces(clientId: string) {
     revalidatePath(`/admin/clients/${clientId}`);
 }
 
-export async function notifyAdvisor(clientId: string, requestedDocs: string[], customNote?: string) {
+export async function notifyAdvisor(clientId: string, missingDocs: string[], additionalDocs: string[], customNote?: string) {
+    const requestedDocs = [...missingDocs, ...additionalDocs];
     const supabaseAdmin = createAdminClient();
     const supabase = await createClient();
 
@@ -55,9 +56,13 @@ export async function notifyAdvisor(clientId: string, requestedDocs: string[], c
             return { success: false, error: "Advisor contact info missing" };
         }
 
+        // Normalize the advisor-facing note (may be empty)
+        const advisorNote = customNote?.trim() || "";
+
         // 2. Insert In-App Notification for the Advisor
+        const docCount = requestedDocs.length;
         const notificationTitle = `Action Required: Documents for ${client.client_name}`;
-        const notificationMessage = `Underwriting has requested missing or additional documents. ${customNote ? 'Note attached.' : ''}`;
+        const notificationMessage = `Underwriting requested ${docCount} ${docCount === 1 ? 'document' : 'documents'}${advisorNote ? ` — ${advisorNote}` : '.'}`;
 
         await supabaseAdmin.from("in_app_notifications").insert({
             user_id: advisor.user_id,
@@ -67,8 +72,8 @@ export async function notifyAdvisor(clientId: string, requestedDocs: string[], c
             is_read: false
         });
 
-        // 3. Insert Internal Note if provided
-        if (customNote) {
+        // 3. Insert a clean internal note for the audit trail
+        {
             // Fetch underwriter profile to get name
             const { data: profile } = await supabaseAdmin
                 .from("users")
@@ -78,12 +83,24 @@ export async function notifyAdvisor(clientId: string, requestedDocs: string[], c
 
             const authorName = profile ? `${profile.first_name} ${profile.last_name || ''}`.trim() : "Underwriter";
 
+            const sections: string[] = [];
+            if (missingDocs.length > 0) {
+                sections.push(`Missing required items:\n${missingDocs.map(doc => `• ${doc}`).join("\n")}`);
+            }
+            if (additionalDocs.length > 0) {
+                sections.push(`Additional documents requested:\n${additionalDocs.map(doc => `• ${doc}`).join("\n")}`);
+            }
+            if (advisorNote) {
+                sections.push(advisorNote);
+            }
+            const noteContent = sections.join("\n\n").trim();
+
             await supabaseAdmin.from("client_internal_notes").insert({
                 client_id: clientId,
                 author_id: currentUser.id,
                 author_role: "underwriting",
                 author_name: authorName,
-                content: customNote
+                content: noteContent
             });
         }
 
@@ -107,7 +124,9 @@ export async function notifyAdvisor(clientId: string, requestedDocs: string[], c
             advisor_email: advisor.email,
             advisor_cc_emails: follower_emails,
             client_name: client.client_name,
-            requested_documents: requestedDocs,
+            missing_documents: missingDocs,
+            additional_documents: additionalDocs,
+            custom_message: advisorNote || undefined,
             login_url: `${process.env.NEXT_PUBLIC_APP_URL || 'https://vault.creditbanc.io'}/auth/login`
         });
 

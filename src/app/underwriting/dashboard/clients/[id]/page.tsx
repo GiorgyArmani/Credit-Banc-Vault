@@ -33,7 +33,8 @@ import {
     Trash2,
     Pencil,
     UploadCloud,
-    BarChart3
+    BarChart3,
+    Slack
 } from "lucide-react";
 import DocumentPreviewModal from "@/components/pdf/pdf-viewer";
 import {
@@ -71,6 +72,10 @@ import { BankAnalysisViewer } from "@/components/admin/bank-analysis-viewer";
 import { BusinessTabStrip, type BusinessTab } from "@/app/advisor/dashboard/clients/[id]/_components/business-tab-strip";
 import { CollapsibleSection, broadcast_toggle_all } from "@/app/advisor/dashboard/clients/[id]/_components/collapsible-section";
 import { isClientScopedDoc, matchesActiveBusiness, normalizeSupabaseJoin } from "@/lib/document-scope";
+
+// Slack deal-channel integration is built but not yet tested end-to-end.
+// Flip to `true` to re-enable the "Create / Open Slack Channel" button.
+const SLACK_FEATURE_ENABLED = false;
 
 enum ComponentState {
     LOADING = "LOADING",
@@ -259,6 +264,31 @@ export default function UnderwritingClientDetailsPage() {
         }
     }
 
+    // Create (or reuse) the dedicated Slack channel for this deal. Gated in the
+    // UI behind is_docs_approved; idempotent server-side.
+    async function create_slack_channel() {
+        set_is_creating_slack_channel(true);
+        try {
+            const res = await fetch('/api/slack/create-channel', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ client_id }),
+            });
+            const result = await res.json();
+            if (!res.ok || !result?.success) {
+                toast.error(result?.error || 'Failed to create Slack channel');
+                return;
+            }
+            set_slack_channel({ id: result.channel_id, name: result.channel_name });
+            toast.success(result.already_existed ? 'Slack channel already exists' : 'Slack channel created');
+        } catch (err: any) {
+            console.error('create_slack_channel error:', err);
+            toast.error('An unexpected error occurred');
+        } finally {
+            set_is_creating_slack_channel(false);
+        }
+    }
+
     // Pending per-row admin review changes (assignment_id -> { decision, notes }).
     // Buffered locally so the admin can mark several lenders before submitting in one batch.
     const [pending_admin_reviews, set_pending_admin_reviews] = useState<
@@ -345,6 +375,16 @@ export default function UnderwritingClientDetailsPage() {
         return out;
     }, [required_docs, active_business_id]);
 
+    // "Full documentation approved" for the active business tab: every required
+    // doc has both an uploaded file and a category approval. Mirrors the
+    // outstanding-banner logic and gates the "Create Slack Channel" button.
+    const is_docs_approved = useMemo<boolean>(() => {
+        if (scoped_required_docs.length === 0) return false;
+        return scoped_required_docs.every(
+            (r) => approvals.has(r.code) && scoped_documents.some((d) => (d as any).category === r.code)
+        );
+    }, [scoped_required_docs, approvals, scoped_documents]);
+
     const [expanded_categories, set_expanded_categories] = useState<Set<string>>(new Set());
     const [preview_modal, set_preview_modal] = useState<{ isOpen: boolean; doc: UserDocument | null }>({
         isOpen: false,
@@ -355,6 +395,10 @@ export default function UnderwritingClientDetailsPage() {
     const [current_pipeline_status, set_current_pipeline_status] = useState<LoanStatus>("created");
     const [pipeline_history, set_pipeline_history] = useState<PipelineStatusEntry[]>([]);
     const [is_advancing_status, set_is_advancing_status] = useState(false);
+
+    // Slack deal-channel state (created from the docs-approved gate).
+    const [slack_channel, set_slack_channel] = useState<{ id: string | null; name: string | null }>({ id: null, name: null });
+    const [is_creating_slack_channel, set_is_creating_slack_channel] = useState(false);
 
     // Renaming state
     const [renaming_file, set_renaming_file] = useState<{ id: string; label: string } | null>(null);
@@ -413,6 +457,7 @@ export default function UnderwritingClientDetailsPage() {
                     number_of_owners, owner_1_name, owner_1_ownership_pct,
                     owner_2_name, owner_2_ownership_pct, owner_3_name, owner_3_ownership_pct,
                     owner_4_name, owner_4_ownership_pct, owner_5_name, owner_5_ownership_pct,
+                    slack_channel_id, slack_channel_name,
                     advisors (
                         first_name, last_name, email
                     )
@@ -431,6 +476,10 @@ export default function UnderwritingClientDetailsPage() {
                     email: advisor?.email || ""
                 }
             } as any);
+            set_slack_channel({
+                id: (client as any).slack_channel_id ?? null,
+                name: (client as any).slack_channel_name ?? null,
+            });
 
             // 2. Fetch all documents for this client
             const { data: docs } = await supabase
@@ -505,12 +554,27 @@ export default function UnderwritingClientDetailsPage() {
             //    primary so single-business clients see identical UI.
             const { data: businessRows } = await supabase
                 .from("business_profiles")
-                .select("id, company_name, is_primary, display_order, legal_entity_type, business_start_date, company_city, company_state, company_zip_code, avg_monthly_deposits, avg_annual_revenue, employees_count, is_home_based, industry")
+                .select("id, company_name, is_primary, display_order, legal_entity_type, business_start_date, company_city, company_state, company_zip_code, avg_monthly_deposits, avg_annual_revenue, employees_count, is_home_based, industry, funding_deals (capital_requested, proposed_loan_type, loan_purpose, funding_eta, display_order)")
                 .eq("client_vault_id", client_id)
                 .order("is_primary", { ascending: false })
                 .order("display_order", { ascending: true })
                 .order("created_at", { ascending: true });
-            const rows = (businessRows || []) as BusinessTab[];
+            // Flatten each business's funding ask (lives on funding_deals) onto
+            // the tab row so the header amount rescopes per active business.
+            const rows = (businessRows || []).map((b: any): BusinessTab => {
+                const deals = Array.isArray(b.funding_deals) ? b.funding_deals : [];
+                const deal = deals
+                    .slice()
+                    .sort((x: any, y: any) => (x.display_order ?? 0) - (y.display_order ?? 0))[0] ?? null;
+                const { funding_deals: _drop, ...rest } = b;
+                return {
+                    ...rest,
+                    capital_requested: deal?.capital_requested ?? null,
+                    proposed_loan_type: deal?.proposed_loan_type ?? null,
+                    loan_purpose: deal?.loan_purpose ?? null,
+                    funding_eta: deal?.funding_eta ?? null,
+                };
+            });
             set_businesses(rows);
             const primary = rows.find((b) => b.is_primary) || rows[0];
             if (primary && !active_business_id) {
@@ -613,26 +677,9 @@ export default function UnderwritingClientDetailsPage() {
 
         set_is_notifying(true);
         try {
-            // Construct the final note content with ALL requested items
-            let items_summary = "";
-            if (selected_missing_docs.length > 0) {
-                items_summary += `MISSING REQUIRED ITEMS:\n- ${selected_missing_docs.join("\n- ")}\n\n`;
-            }
-            if (selected_extra_docs.length > 0) {
-                items_summary += `ADDITIONAL DOCUMENTS REQUESTED:\n- ${selected_extra_docs.join("\n- ")}\n\n`;
-            }
-
-            let final_note = custom_note;
-            if (items_summary) {
-                final_note = final_note
-                    ? `${items_summary}--- NOTES ---\n${final_note}`
-                    : items_summary.trim();
-            }
-
-            // Consolidate labels for the email notification
-            const all_labels = [...selected_missing_docs, ...selected_extra_docs];
-
-            const res = await notifyAdvisor(client_id, all_labels, final_note);
+            // Pass missing + additional docs as separate categories; the action
+            // builds the audit-trail internal note and the email from them.
+            const res = await notifyAdvisor(client_id, selected_missing_docs, selected_extra_docs, custom_note.trim());
             if (res.success) {
                 toast.success("Advisor notified successfully!");
                 set_is_notify_modal_open(false);
@@ -1878,11 +1925,61 @@ export default function UnderwritingClientDetailsPage() {
                                 return useBiz ? active!.company_name : client_profile.company_name;
                             })()}
                         </h2>
+                        {(() => {
+                            // Rescope the funding figures to the active business.
+                            // Non-primary businesses carry their ask on funding_deals
+                            // (flattened onto the tab); primary falls back to the
+                            // client_data_vault row.
+                            const active = businesses.find((b) => b.id === active_business_id);
+                            const useBiz = active && !active.is_primary;
+                            const amount = useBiz ? (active!.capital_requested ?? 0) : client_profile.capital_requested;
+                            const loanType = useBiz ? active!.proposed_loan_type : client_profile.proposed_loan_type;
+                            return (
                         <div className="flex flex-wrap items-center justify-center md:justify-start gap-6 text-slate-400 font-bold">
                             <span className="flex items-center gap-2"><Building2 className="w-4 h-4" /> {client_profile.client_name}</span>
-                            <span className="flex items-center gap-2 text-emerald-400"><DollarSign className="w-4 h-4" /> {client_profile.capital_requested.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</span>
+                            <span className="flex items-center gap-2 text-emerald-400"><DollarSign className="w-4 h-4" /> {(amount ?? 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</span>
+                            {loanType && <span className="flex items-center gap-2">{loanType}</span>}
                         </div>
+                            );
+                        })()}
                     </div>
+
+                    {/* Deal Slack channel — enabled once documentation is fully approved */}
+                    {SLACK_FEATURE_ENABLED && (
+                    <div className="flex flex-col items-center md:items-end gap-2 shrink-0">
+                        {slack_channel.id ? (
+                            <a
+                                href={`https://slack.com/app_redirect?channel=${slack_channel.id}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-2 h-11 px-5 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/20 text-white font-black uppercase tracking-widest text-[10px] transition-all"
+                            >
+                                <Slack className="w-4 h-4 text-emerald-400" />
+                                Open Slack Channel
+                                <ExternalLink className="w-3 h-3 opacity-60" />
+                            </a>
+                        ) : (
+                            <>
+                                <Button
+                                    onClick={create_slack_channel}
+                                    disabled={!is_docs_approved || is_creating_slack_channel}
+                                    className="h-11 px-5 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-black uppercase tracking-widest text-[10px] shadow-lg shadow-emerald-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
+                                >
+                                    {is_creating_slack_channel ? (
+                                        <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Creating…</>
+                                    ) : (
+                                        <><Slack className="w-4 h-4 mr-2" /> Create Slack Channel</>
+                                    )}
+                                </Button>
+                                {!is_docs_approved && (
+                                    <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest max-w-[12rem] text-center md:text-right">
+                                        Available once all documents are approved
+                                    </p>
+                                )}
+                            </>
+                        )}
+                    </div>
+                    )}
                 </CardContent>
             </Card>
 
