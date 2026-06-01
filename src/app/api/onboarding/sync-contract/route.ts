@@ -47,6 +47,29 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: 'Forbidden: Document ID mismatch' }, { status: 403 });
         }
 
+        // 1.5 Dedupe guard. This route gets called more than once for the same
+        //      signed contract (the onboarding contract-check step polls + the
+        //      Signwell webhook can also fire), which previously produced two
+        //      identical funding_application rows. If we've already synced THIS
+        //      Signwell document for THIS user, skip the re-download + re-insert
+        //      and just confirm completion. Keyed on metadata.document_id so a
+        //      different contract (e.g. a new business) is NOT deduped.
+        const { data: alreadySynced } = await supabase
+            .from('user_documents')
+            .select('id')
+            .eq('user_id', user.id)
+            .eq('doc_code', 'funding_application')
+            .contains('metadata', { document_id: documentId })
+            .limit(1);
+        if (alreadySynced && alreadySynced.length > 0) {
+            console.log(`⏩ Funding application for document ${documentId} already synced — skipping duplicate.`);
+            await supabase
+                .from('client_data_vault')
+                .update({ contract_completed: true, updated_at: new Date().toISOString() })
+                .eq('user_id', user.id);
+            return NextResponse.json({ success: true, message: 'Already synced', already_synced: true });
+        }
+
         // 2. Download the completed PDF from SignWell
         // We use urlOnly: false to get the binary data
         // We implement a retry loop because SignWell might take a few seconds to generate the PDF
@@ -94,6 +117,35 @@ export async function POST(request: Request) {
             throw storageError;
         }
 
+        // 3.5 Resolve the business this contract belongs to. funding_application
+        //      is NOT a client-scoped code, so a NULL business_profile_id row
+        //      matches no business tab (matchesActiveBusiness) and stays INVISIBLE
+        //      on the advisor / admin / UW views AND the client's per-business
+        //      vault — even though the PDF uploaded fine. Prefer the business off
+        //      the matched funding_deal (multi-business contracts); fall back to
+        //      the client's primary business. Mirrors the signwell webhook +
+        //      addManualFundingApplication scoping. See [[user_documents_must_be_business_scoped]].
+        let docBusinessProfileId: string | null = null;
+        let docFundingDealId: string | null = null;
+        const { data: matchedDeal } = await supabase
+            .from('funding_deals')
+            .select('id, business_profile_id')
+            .eq('signwell_envelope_id', documentId)
+            .maybeSingle();
+        if (matchedDeal) {
+            docFundingDealId = matchedDeal.id;
+            docBusinessProfileId = matchedDeal.business_profile_id;
+        }
+        if (!docBusinessProfileId) {
+            const { data: primaryBiz } = await supabase
+                .from('business_profiles')
+                .select('id')
+                .eq('client_vault_id', client_data.id)
+                .eq('is_primary', true)
+                .maybeSingle();
+            docBusinessProfileId = primaryBiz?.id ?? null;
+        }
+
         // 4. Create record in user_documents
         const { data: docRecord, error: dbError } = await supabase
             .from('user_documents')
@@ -105,6 +157,8 @@ export async function POST(request: Request) {
                 storage_path: filePath,
                 category: 'funding_application',
                 doc_code: 'funding_application',
+                business_profile_id: docBusinessProfileId,
+                funding_deal_id: docFundingDealId,
                 custom_label: `Funding Application - ${client_data.client_name}`,
                 metadata: {
                     tags: ['funding_application', 'signwell', 'manual-sync'],

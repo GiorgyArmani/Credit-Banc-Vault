@@ -351,15 +351,18 @@ export default function UnderwritingClientDetailsPage() {
     // the requested-doc list by code so a client-scoped doc requested under
     // multiple businesses still renders as a single card.
     const scoped_documents = useMemo<UserDocument[]>(() => {
+        const active_is_primary = businesses.find((b) => b.id === active_business_id)?.is_primary ?? false;
         return documents.filter((d) => {
             const code = (d as any).doc_code ?? (d as any).category ?? null;
-            return matchesActiveBusiness(
-                (d as any).business_profile_id ?? null,
-                active_business_id,
-                code
-            );
+            const bpid = (d as any).business_profile_id ?? null;
+            if (matchesActiveBusiness(bpid, active_business_id, code)) return true;
+            // Resilience: a legacy/unscoped upload (business_profile_id = null,
+            // e.g. a funding application e-signed before per-business scoping)
+            // surfaces on the PRIMARY tab so it's never silently lost.
+            if (bpid === null && active_is_primary) return true;
+            return false;
         });
-    }, [documents, active_business_id]);
+    }, [documents, active_business_id, businesses]);
 
     const scoped_required_docs = useMemo(() => {
         const filtered = required_docs.filter((d) =>

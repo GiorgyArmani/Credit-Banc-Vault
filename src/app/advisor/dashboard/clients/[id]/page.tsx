@@ -443,11 +443,20 @@ export default function AdvisorClientDetailsPage() {
     // tab, since they describe the person and shouldn't be re-collected per
     // business.
     const scoped_documents = useMemo(() => {
+        const active_is_primary = businesses.find((b) => b.id === active_business_id)?.is_primary ?? false;
         return documents.filter((d) => {
             const code = (d as any).doc_code ?? (d as any).category ?? null;
-            return matchesActiveBusiness((d as any).business_profile_id ?? null, active_business_id, code);
+            const bpid = (d as any).business_profile_id ?? null;
+            if (matchesActiveBusiness(bpid, active_business_id, code)) return true;
+            // Resilience: a legacy/unscoped upload (business_profile_id = null,
+            // e.g. a funding application e-signed before per-business scoping)
+            // matches no tab and would silently vanish. Surface it on the PRIMARY
+            // tab — the client's main business — so it's never lost. New uploads
+            // always carry a business_profile_id, so only legacy nulls are caught.
+            if (bpid === null && active_is_primary) return true;
+            return false;
         });
-    }, [documents, active_business_id]);
+    }, [documents, active_business_id, businesses]);
 
     // Categories to render in the doc-status accordion = (active dynamic
     // requests for the business, deduped by code) ∪ (categories of uploaded
