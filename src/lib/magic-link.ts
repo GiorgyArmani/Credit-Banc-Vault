@@ -11,50 +11,85 @@
 // /auth/callback PKCE exchange. The client never sees the temporary password
 // the auth user was created with — they set their own during onboarding Step 3.
 
-import { createAdminClient } from "@/lib/supabase/admin";
+import crypto from "crypto"; // Node built-in — HMAC signing for our own long-lived tokens
 import { ghlUpdateContact, ghlAddTags } from "@/lib/ghl-api";
+
+// How long a magic link stays clickable. Supabase's own OTP tokens are capped
+// at 24h (Email OTP expiry setting), which is why we DON'T embed one in the
+// link anymore — clients routinely sit on the SMS/email for days. Instead the
+// link carries our own HMAC-signed token (below); /auth/magic exchanges it for
+// a fresh Supabase OTP at click time, so the Supabase token only has to
+// survive a few milliseconds.
+const MAGIC_LINK_TTL_DAYS = Number(process.env.MAGIC_LINK_TTL_DAYS || 30);
+
+function signingSecret(): string {
+  const secret = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!secret) throw new Error("SUPABASE_SERVICE_ROLE_KEY missing — cannot sign magic-link tokens");
+  return secret;
+}
+
+function b64url(buf: Buffer): string {
+  return buf.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function hmac(payload: string): string {
+  return b64url(crypto.createHmac("sha256", signingSecret()).update(payload).digest());
+}
+
+/**
+ * Long-lived, stateless magic-link token: base64url(JSON{e: email, x: expiry
+ * epoch-seconds}) + "." + HMAC-SHA256 signature. Stateless = no DB row and no
+ * migration; verification is pure crypto in /auth/magic.
+ */
+export function signMagicToken(email: string): string {
+  const payload = b64url(Buffer.from(JSON.stringify({
+    e: email.toLowerCase(),
+    x: Math.floor(Date.now() / 1000) + MAGIC_LINK_TTL_DAYS * 86400,
+  })));
+  return `${payload}.${hmac(payload)}`;
+}
+
+/** Returns the email if the token is authentic and unexpired, else null. */
+export function verifyMagicToken(token: string): { email: string } | null {
+  const [payload, sig] = token.split(".");
+  if (!payload || !sig) return null;
+
+  const expected = hmac(payload);
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+
+  try {
+    const { e, x } = JSON.parse(Buffer.from(payload.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString());
+    if (typeof e !== "string" || typeof x !== "number") return null;
+    if (Math.floor(Date.now() / 1000) > x) return null;
+    return { email: e };
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Generates a magic (passwordless) login link that lands the client in the
- * onboarding flow. Returns a link to OUR /auth/confirm route, or null if
+ * onboarding flow. Returns a link to OUR /auth/magic route, or null if
  * generation failed.
  *
- * We deliberately do NOT return Supabase's `action_link`. That link points at
- * Supabase's /auth/v1/verify endpoint and, after verifying, redirects to the
- * link's `redirect_to` using the IMPLICIT flow (tokens in a `#hash`). Two
- * problems with that for us:
- *   1. `redirect_to` must be in the project's allowed Redirect URLs or Supabase
- *      silently falls back to the Site URL (prod) — so localhost never works.
- *   2. The hash-token landing doesn't flow through our PKCE `/auth/callback`.
- *
- * Instead we build our own link using `properties.hashed_token` and point it at
- * the SSR `/auth/confirm` route (which calls verifyOtp server-side, sets the
- * session cookie, then redirects to `next`). The domain comes from
- * NEXT_PUBLIC_APP_URL, so it honors localhost in dev with no Supabase config.
+ * History: this used to embed Supabase's `hashed_token` (pointing at
+ * /auth/confirm), but those tokens expire with the project's Email OTP setting
+ * — 1h by default, 24h hard max — and clients often click days later. Now the
+ * link carries our own MAGIC_LINK_TTL_DAYS-day signed token; /auth/magic mints
+ * and verifies a fresh Supabase OTP server-side at click time. The domain
+ * comes from NEXT_PUBLIC_APP_URL, so it honors localhost in dev with no
+ * Supabase config. (We still deliberately avoid Supabase's `action_link`: its
+ * redirect_to must be whitelisted and it lands tokens in a #hash outside our
+ * PKCE /auth/callback.)
  */
 export async function generateOnboardingMagicLink(email: string): Promise<string | null> {
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://vault.creditbanc.io";
-
   try {
-    const supabaseAdmin = createAdminClient();
-    const { data, error } = await supabaseAdmin.auth.admin.generateLink({
-      type: "magiclink",
-      email: email.toLowerCase(),
-    });
-
-    if (error) {
-      console.error("❌ Magic link generation error:", error.message);
-      return null;
-    }
-
-    const tokenHash = data?.properties?.hashed_token;
-    if (!tokenHash) {
-      console.error("❌ Magic link generation returned no hashed_token");
-      return null;
-    }
-
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://vault.creditbanc.io";
+    const token = signMagicToken(email);
     const next = encodeURIComponent("/onboarding");
-    return `${appUrl}/auth/confirm?token_hash=${tokenHash}&type=magiclink&next=${next}`;
+    return `${appUrl}/auth/magic?token=${token}&next=${next}`;
   } catch (err) {
     console.error("❌ Magic link generation threw:", err);
     return null;
