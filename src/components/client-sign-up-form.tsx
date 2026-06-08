@@ -32,6 +32,7 @@ import { addManualFundingApplication } from "@/app/advisor/dashboard/clients/[id
 import { useErrorDialog } from "@/components/error-dialog";
 import { FollowersPicker } from "@/components/followers-picker";
 import { FUNDING_OPTIONS, LOAN_TYPES } from "@/data/loan-types";
+import { BANK_STATEMENT_MONTH_OPTIONS, DEFAULT_BANK_STATEMENT_MONTHS } from "@/lib/document-scope";
 
 
 // Estados de EE.UU.
@@ -357,6 +358,13 @@ export default function ClientSignupForm() {
   // Each selected document will generate a "requested_{doc}" tag in GHL
   const [documents_requested, set_documents_requested] = useState<string[]>([]);
 
+  // How many months of bank statements to request. Most loan products need 12,
+  // so that's the default; advisors pick from a fixed set. Only sent when
+  // "Business Bank Statements" is one of the requested documents.
+  const [bank_statement_months, set_bank_statement_months] = useState<number>(
+    DEFAULT_BANK_STATEMENT_MONTHS
+  );
+
   // ===== Advisor Context & Success State =====
   // Detects if form is being used by an advisor (vs public client signup)
   // This determines success flow: advisor stays on page, client redirects to login
@@ -644,6 +652,12 @@ export default function ClientSignupForm() {
         // ===== Documents Requested =====
         // List of documents that need to be collected from the client
         documents_requested,
+
+        // Precise bank-statement period (months). Only meaningful when
+        // "Business Bank Statements" is requested; the API ignores it otherwise.
+        bank_statement_months: documents_requested.includes("Business Bank Statements")
+          ? bank_statement_months
+          : null,
 
         // ===== GHL Tags =====
         // These tags will be sent to Go High Level for contact categorization
@@ -1961,12 +1975,37 @@ export default function ClientSignupForm() {
                             onCheckedChange={() => toggle_document(doc)}
                             className="mt-1"
                           />
-                          <Label
-                            htmlFor={`doc-${doc}`}
-                            className="text-sm text-emerald-950 cursor-pointer leading-tight font-bold"
-                          >
-                            {doc}
-                          </Label>
+                          <div className="flex-1 space-y-2">
+                            <Label
+                              htmlFor={`doc-${doc}`}
+                              className="text-sm text-emerald-950 cursor-pointer leading-tight font-bold"
+                            >
+                              {doc}
+                            </Label>
+
+                            {/* Bank statements need a precise period — the
+                                shared "(last 6 months)" default confuses clients
+                                when a product really needs 12. Only shown once
+                                the doc is selected. */}
+                            {doc === "Business Bank Statements" &&
+                              documents_requested.includes(doc) && (
+                                <Select
+                                  value={String(bank_statement_months)}
+                                  onValueChange={(v) => set_bank_statement_months(Number(v))}
+                                >
+                                  <SelectTrigger className="h-9 text-xs font-bold border-emerald-200 bg-white">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {BANK_STATEMENT_MONTH_OPTIONS.map((m) => (
+                                      <SelectItem key={m} value={String(m)}>
+                                        Last {m} months
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              )}
+                          </div>
                         </div>
                       ))}
                     </div>

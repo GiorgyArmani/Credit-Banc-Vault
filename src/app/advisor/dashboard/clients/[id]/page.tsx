@@ -76,7 +76,7 @@ import { ClientFollowersCard } from "./_components/client-followers-card";
 import { ClientNotesCard, type FileNote } from "./_components/client-notes-card";
 import { AdminLenderReviewCard } from "@/components/admin/admin-lender-review-card";
 import { CollapsibleSection, broadcast_toggle_all } from "./_components/collapsible-section";
-import { isClientScopedDoc, matchesActiveBusiness, normalizeSupabaseJoin } from "@/lib/document-scope";
+import { isClientScopedDoc, matchesActiveBusiness, normalizeSupabaseJoin, formatRequirementLabel, BANK_STATEMENTS_DOC_CODE, BANK_STATEMENT_MONTH_OPTIONS, DEFAULT_BANK_STATEMENT_MONTHS } from "@/lib/document-scope";
 
 /**
  * ============================================================================
@@ -339,6 +339,9 @@ export default function AdvisorClientDetailsPage() {
     const [is_request_modal_open, set_is_request_modal_open] = useState(false);
     const [selected_doc_ids, set_selected_doc_ids] = useState<string[]>([]);
     const [request_search_query, set_request_search_query] = useState("");
+    // Bank-statement period (months) for the request modal. Defaults to 12 since
+    // most products need it; only sent when bank statements is among the picks.
+    const [request_bank_statement_months, set_request_bank_statement_months] = useState<number>(DEFAULT_BANK_STATEMENT_MONTHS);
     const [is_requesting, set_is_requesting] = useState(false);
 
     // resend-credentials-state: Tracks loading state for credential resend
@@ -765,7 +768,7 @@ export default function AdvisorClientDetailsPage() {
                     .order("upload_date", { ascending: false }),
                 supabase
                     .from("client_dynamic_documents")
-                    .select(`business_profile_id, required_documents!inner (code, label)`)
+                    .select(`business_profile_id, statement_months, required_documents!inner (code, label)`)
                     .eq("user_id", client_data.user_id)
                     .eq("is_active", true),
                 all_doc_types_promise,
@@ -811,10 +814,15 @@ export default function AdvisorClientDetailsPage() {
                 // normalizeSupabaseJoin handles SDK array-vs-object variance
                 // for the embedded required_documents row. See document-scope.ts.
                 const formatted_reqs = (dynamic_reqs_result.data || [])
-                    .map((item: any) => ({
-                        ...(normalizeSupabaseJoin(item.required_documents) || {}),
-                        business_profile_id: item.business_profile_id ?? null,
-                    }))
+                    .map((item: any) => {
+                        const def = normalizeSupabaseJoin(item.required_documents) || {};
+                        return {
+                            ...def,
+                            // Reflect the precise bank-statement period in the label.
+                            label: formatRequirementLabel((def as any).code, (def as any).label, item.statement_months),
+                            business_profile_id: item.business_profile_id ?? null,
+                        };
+                    })
                     .filter((doc: any) => doc.code && doc.code !== "funding_application");
                 set_required_docs(formatted_reqs);
             }
@@ -1367,8 +1375,8 @@ export default function AdvisorClientDetailsPage() {
     }
 
     /**
-     * handle-resend-credentials: Calls the API to reset the client's password
-     * and resend their login credentials via email
+     * handle-resend-credentials: Re-sends the client their passwordless magic
+     * link (same as the welcome email). Does NOT reset their password.
      */
     async function handle_resend_credentials() {
         set_is_resending(true);
@@ -1382,9 +1390,9 @@ export default function AdvisorClientDetailsPage() {
             const result = await response.json();
 
             if (result.success) {
-                toast.success('Login credentials sent! Check the client\'s inbox.');
+                toast.success('Login link sent! Check the client\'s inbox.');
             } else {
-                toast.error(result.error || 'Failed to resend credentials');
+                toast.error(result.error || 'Failed to resend login link');
             }
         } catch (err: any) {
             console.error('❌ Resend error:', err);
@@ -1521,7 +1529,7 @@ export default function AdvisorClientDetailsPage() {
 
         set_is_requesting(true);
         try {
-            const result = await requestDocuments(client_id, selected_doc_ids, active_business_id);
+            const result = await requestDocuments(client_id, selected_doc_ids, active_business_id, request_bank_statement_months);
 
             if (result.success) {
                 toast.success(`${selected_doc_ids.length} document(s) requested successfully!`);
@@ -2470,6 +2478,18 @@ export default function AdvisorClientDetailsPage() {
                                                 >
                                                     {type.label}
                                                 </label>
+                                                {/* Precise bank-statement period — only when this row is picked. */}
+                                                {type.code === BANK_STATEMENTS_DOC_CODE && selected_doc_ids.includes(type.id) && (
+                                                    <select
+                                                        value={request_bank_statement_months}
+                                                        onChange={(e) => set_request_bank_statement_months(Number(e.target.value))}
+                                                        className="text-xs font-semibold border border-emerald-200 rounded-md px-2 py-1 bg-white text-emerald-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                                                    >
+                                                        {BANK_STATEMENT_MONTH_OPTIONS.map((m) => (
+                                                            <option key={m} value={m}>Last {m} months</option>
+                                                        ))}
+                                                    </select>
+                                                )}
                                             </div>
                                         ))
                                     }

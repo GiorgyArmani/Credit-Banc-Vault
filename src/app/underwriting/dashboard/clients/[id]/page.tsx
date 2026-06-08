@@ -71,7 +71,7 @@ import {
 import { BankAnalysisViewer } from "@/components/admin/bank-analysis-viewer";
 import { BusinessTabStrip, type BusinessTab } from "@/app/advisor/dashboard/clients/[id]/_components/business-tab-strip";
 import { CollapsibleSection, broadcast_toggle_all } from "@/app/advisor/dashboard/clients/[id]/_components/collapsible-section";
-import { isClientScopedDoc, matchesActiveBusiness, normalizeSupabaseJoin } from "@/lib/document-scope";
+import { isClientScopedDoc, matchesActiveBusiness, normalizeSupabaseJoin, formatRequirementLabel } from "@/lib/document-scope";
 
 // Slack deal-channel integration is built but not yet tested end-to-end.
 // Flip to `true` to re-enable the "Create / Open Slack Channel" button.
@@ -505,17 +505,22 @@ export default function UnderwritingClientDetailsPage() {
             //    business linkage so the UI can rescope per active tab).
             const { data: dynamicDocs } = await supabase
                 .from("client_dynamic_documents")
-                .select("business_profile_id, required_documents(code, label)")
+                .select("business_profile_id, statement_months, required_documents(code, label)")
                 .eq("user_id", client.user_id)
                 .eq("is_active", true);
 
             // normalizeSupabaseJoin handles SDK array-vs-object variance on
             // the embedded required_documents row. See document-scope.ts.
             const dynamicReqs = (dynamicDocs || [])
-                .map((d: any) => ({
-                    ...(normalizeSupabaseJoin(d.required_documents) || {}),
-                    business_profile_id: d.business_profile_id ?? null,
-                }))
+                .map((d: any) => {
+                    const def = normalizeSupabaseJoin(d.required_documents) || {};
+                    return {
+                        ...def,
+                        // Reflect the precise bank-statement period in the label.
+                        label: formatRequirementLabel((def as any).code, (def as any).label, d.statement_months),
+                        business_profile_id: d.business_profile_id ?? null,
+                    };
+                })
                 .filter((d: any) => d.code);
             set_required_docs(dynamicReqs);
 

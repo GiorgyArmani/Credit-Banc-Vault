@@ -1,6 +1,6 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { isClientScopedDoc } from "@/lib/document-scope";
+import { isClientScopedDoc, formatRequirementLabel } from "@/lib/document-scope";
 
 // Map for GHL Custom Field ID
 const GHL_CF_OUTSTANDING_DOCUMENTS = process.env.GHL_CF_OUTSTANDING_DOCUMENTS;
@@ -72,6 +72,7 @@ export async function calculateOutstandingDocumentsByBusiness(userId: string): P
         .from("client_dynamic_documents")
         .select(`
             business_profile_id,
+            statement_months,
             required_documents ( code, label )
         `)
         .eq("user_id", userId)
@@ -118,11 +119,14 @@ export async function calculateOutstandingDocumentsByBusiness(userId: string): P
     (dynamicDocs ?? []).forEach((row: any) => {
         const def = Array.isArray(row.required_documents) ? row.required_documents[0] : row.required_documents;
         if (!def?.code) return;
+        // Bank statements carry a per-request period — surface it in the label
+        // shown in the reminder email and the GHL outstanding-docs field.
+        const label = formatRequirementLabel(def.code, def.label, row.statement_months);
         const bid: string | null = row.business_profile_id ?? null;
         if (isClientScopedDoc(def.code)) {
             // Always bucket as client-scoped, regardless of which business the
             // request row was tied to. De-duped by code below.
-            clientScopedRequested.set(def.code, def.label);
+            clientScopedRequested.set(def.code, label);
             return;
         }
         // Default unbound rows to the primary business so legacy single-
@@ -130,7 +134,7 @@ export async function calculateOutstandingDocumentsByBusiness(userId: string): P
         const effectiveBid = bid ?? primaryId;
         if (!effectiveBid) return; // no business resolvable — drop.
         if (!perBusinessRequested.has(effectiveBid)) perBusinessRequested.set(effectiveBid, new Map());
-        perBusinessRequested.get(effectiveBid)!.set(def.code, def.label);
+        perBusinessRequested.get(effectiveBid)!.set(def.code, label);
     });
 
     // 5. Build groups.

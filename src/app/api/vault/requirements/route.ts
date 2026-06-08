@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { CLIENT_SCOPED_DOC_CODES, normalizeSupabaseJoin } from "@/lib/document-scope";
+import { CLIENT_SCOPED_DOC_CODES, normalizeSupabaseJoin, formatRequirementLabel } from "@/lib/document-scope";
 
 export const dynamic = 'force-dynamic';
 
@@ -38,6 +38,7 @@ export async function GET(req: Request) {
             .from("client_dynamic_documents")
             .select(`
                 business_profile_id,
+                statement_months,
                 required_documents!inner (
                     id,
                     code,
@@ -81,14 +82,16 @@ export async function GET(req: Request) {
             if (!doc) continue;
             if (seenCodes.has(doc.code)) continue;
             seenCodes.add(doc.code);
-            dynamicDocs.push(doc);
+            // Carry the per-request bank-statement period through so the label
+            // can reflect the precise number of months the advisor asked for.
+            dynamicDocs.push({ ...doc, statement_months: item.statement_months ?? null });
         }
 
         const allRequirements = dynamicDocs
             .filter((doc: any) => doc.code !== 'funding_application') // Filter out auto-uploaded app
             .map((doc: any) => ({
                 code: doc.code,
-                label: doc.label,
+                label: formatRequirementLabel(doc.code, doc.label, doc.statement_months),
                 description: doc.description,
                 multiple: doc.is_multiple,
                 minFiles: doc.min_files,

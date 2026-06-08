@@ -20,6 +20,43 @@ export const CLIENT_SCOPED_DOC_CODES = [
 
 export type ClientScopedDocCode = (typeof CLIENT_SCOPED_DOC_CODES)[number];
 
+/**
+ * Bank-statement period configuration.
+ *
+ * Bank statements are the one document whose required quantity changes per deal
+ * (most products need 12 months; some 6 or 24). The month count lives on each
+ * client_dynamic_documents row (statement_months) rather than the shared
+ * required_documents.label, so two deals can ask the same client for different
+ * periods. Advisors pick from a fixed set; 12 is the default since most products
+ * require it.
+ */
+export const BANK_STATEMENTS_DOC_CODE = "business_bank_statements";
+export const BANK_STATEMENT_MONTH_OPTIONS = [3, 6, 12, 24] as const;
+export const DEFAULT_BANK_STATEMENT_MONTHS = 12;
+
+/**
+ * formatRequirementLabel — single source of truth for the label a client sees.
+ * For bank statements with a per-request month count, strips any "(last N
+ * months)" baked into the static label and appends the precise requested
+ * period. Every other doc (or a null month count) returns the base label
+ * unchanged, so existing requests are unaffected.
+ */
+export function formatRequirementLabel(
+  code: string | null | undefined,
+  baseLabel: string,
+  statementMonths?: number | null,
+): string {
+  if (
+    code === BANK_STATEMENTS_DOC_CODE &&
+    typeof statementMonths === "number" &&
+    statementMonths > 0
+  ) {
+    const stripped = baseLabel.replace(/\s*\((?:last\s+)?\d+\s*months?\)\s*$/i, "").trim();
+    return `${stripped} (last ${statementMonths} months)`;
+  }
+  return baseLabel;
+}
+
 const _set: Set<string> = new Set(CLIENT_SCOPED_DOC_CODES);
 
 /** True when the given doc code identifies the client/owner, not a business. */
