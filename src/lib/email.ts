@@ -429,6 +429,243 @@ export async function send_client_welcome_email(data: ClientWelcomeEmailData) {
 
 /**
  * ============================================================================
+ * SPEED-FORM DOCUMENT REQUEST EMAIL
+ * ============================================================================
+ * Sent the moment a speed-form client signs their pre-filled funding
+ * application (SignWell webhook). Unlike the welcome email, this is a complete
+ * document request: it names the proposed loan type and funding amount so the
+ * client understands exactly what the documents are for.
+ */
+
+export interface SpeedDocRequestEmailData {
+  client_name: string;
+  client_email: string;
+  company_name: string;
+  proposed_loan_type: string;
+  capital_requested: number;
+  requested_documents: string[]; // human labels
+  magic_link?: string;           // doc-upload magic link (falls back to login_url)
+  login_url: string;
+  advisor_name: string;
+  advisor_email: string;
+  advisor_phone?: string;
+  advisor_cc_email?: string;
+  advisor_cc_emails?: string[];
+}
+
+function format_usd(amount: number): string {
+  if (!Number.isFinite(amount)) return '';
+  return amount.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+}
+
+export function generate_speed_doc_request_email_html(data: SpeedDocRequestEmailData): string {
+  const {
+    client_name,
+    company_name,
+    proposed_loan_type,
+    capital_requested,
+    requested_documents,
+    magic_link,
+    login_url,
+    advisor_name,
+    advisor_email,
+    advisor_phone,
+  } = data;
+
+  const access_url = magic_link || login_url;
+  const amount = format_usd(capital_requested);
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Documents Needed for Your Funding Request</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f6f9fc;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse;">
+    <tr>
+      <td align="center" style="padding: 40px 0;">
+        <table role="presentation" style="width: 600px; max-width: 100%; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+
+          <!-- Header Section -->
+          <tr>
+            <td style="background-color: #10b981; padding: 20px; text-align: center;">
+              <img src="cid:cb_logo_white" alt="Credit Banc" style="height: 48px; width: auto; display: block; margin: 0 auto;">
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #10b981; padding: 0 40px 32px; text-align: center;">
+              <h1 style="margin: 0; color: #ffffff; font-size: 26px; font-weight: 700; line-height: 1.2;">Application signed — let's get you funded! 🚀</h1>
+            </td>
+          </tr>
+
+          <!-- Message -->
+          <tr>
+            <td style="padding: 40px 40px 8px;">
+              <p style="margin: 0 0 16px; color: #475569; font-size: 16px; line-height: 1.6;">
+                Hi <strong>${client_name}</strong>,
+              </p>
+              <p style="margin: 0 0 16px; color: #475569; font-size: 16px; line-height: 1.6;">
+                Thank you for signing your funding application for <strong>${company_name}</strong>.
+                To move your request to underwriting, we now need a few documents from you.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Funding Summary -->
+          <tr>
+            <td style="padding: 12px 40px;">
+              <table role="presentation" style="width: 100%; background-color: #f0fdf4; border: 1px solid #dcfce7; border-radius: 12px;">
+                <tr>
+                  <td style="padding: 24px;">
+                    <h3 style="margin: 0 0 12px; color: #166534; font-size: 16px; font-weight: 700;">📌 Your Funding Request</h3>
+                    ${proposed_loan_type ? `<p style="margin: 0 0 8px; color: #166534; font-size: 15px;"><strong>Proposed Loan Type:</strong> ${proposed_loan_type}</p>` : ''}
+                    ${amount ? `<p style="margin: 0; color: #166534; font-size: 15px;"><strong>Funding Amount Requested:</strong> ${amount}</p>` : ''}
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Documents Section -->
+          <tr>
+            <td style="padding: 20px 40px 8px;">
+              <h3 style="margin: 0 0 12px; color: #1e293b; font-size: 20px; font-weight: 600;">📄 Documents Needed</h3>
+              <ul style="margin: 0 0 8px; padding-left: 20px; color: #475569; font-size: 16px; line-height: 1.8;">
+                ${requested_documents.map(doc => `<li style="margin-bottom: 8px;">${doc}</li>`).join('')}
+              </ul>
+            </td>
+          </tr>
+
+          <!-- Upload CTA -->
+          <tr>
+            <td style="padding: 16px 40px 8px;">
+              <table role="presentation" style="width: 100%; background-color: #10b981; border-radius: 12px;">
+                <tr>
+                  <td style="padding: 24px; text-align: center;">
+                    <p style="margin: 0 0 20px; color: #ffffff; font-size: 15px; line-height: 1.6;">
+                      Upload your documents securely through your portal — no password needed, just tap the button below.
+                    </p>
+                    <a href="${access_url}" style="display: inline-block; background-color: #ffffff; color: #047857; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-size: 16px; font-weight: 700;">
+                      Upload Documents
+                    </a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Advisor Contact -->
+          <tr>
+            <td style="padding: 20px 40px;">
+              <div style="background-color: #f1f5f9; border-radius: 12px; padding: 24px;">
+                <p style="margin: 0 0 12px; color: #475569; font-size: 16px; line-height: 1.6;">
+                  Questions? Your advisor <strong>${advisor_name}</strong> is here to help.
+                </p>
+                <p style="margin: 0; color: #475569; font-size: 16px; line-height: 1.8;">
+                  📧 <a href="mailto:${advisor_email}" style="color: #10b981; text-decoration: none;">${advisor_email}</a>
+                  ${advisor_phone ? `<br>📞 <a href="tel:${advisor_phone}" style="color: #10b981; text-decoration: none;">${advisor_phone}</a>` : ''}
+                </p>
+              </div>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding: 40px; text-align: center; color: #94a3b8; font-size: 13px; line-height: 1.6;">
+              <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 0 0 20px;">
+              <p style="margin: 0;">© ${new Date().getFullYear()} Credit Banc. All rights reserved.</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `;
+}
+
+export function generate_speed_doc_request_email_text(data: SpeedDocRequestEmailData): string {
+  const {
+    client_name,
+    company_name,
+    proposed_loan_type,
+    capital_requested,
+    requested_documents,
+    magic_link,
+    login_url,
+    advisor_name,
+    advisor_email,
+    advisor_phone,
+  } = data;
+
+  const access_url = magic_link || login_url;
+  const amount = format_usd(capital_requested);
+
+  return `
+Application signed — let's get you funded!
+
+Hi ${client_name},
+
+Thank you for signing your funding application for ${company_name}. To move
+your request to underwriting, we now need a few documents from you.
+
+Your Funding Request:
+${proposed_loan_type ? `- Proposed Loan Type: ${proposed_loan_type}` : ''}
+${amount ? `- Funding Amount Requested: ${amount}` : ''}
+
+Documents Needed:
+${requested_documents.map(doc => `- ${doc}`).join('\n')}
+
+Upload your documents securely here (no password needed):
+${access_url}
+
+Questions? Your advisor ${advisor_name} is here to help.
+Email: ${advisor_email}
+${advisor_phone ? `Phone: ${advisor_phone}` : ''}
+
+© ${new Date().getFullYear()} Credit Banc. All rights reserved.
+  `.trim();
+}
+
+/**
+ * Sends the speed-form document request email (client TO, advisor + followers CC).
+ */
+export async function send_speed_doc_request_email(data: SpeedDocRequestEmailData) {
+  const transporter = create_smtp_transporter();
+
+  const from_email = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  const from_name = process.env.SMTP_FROM_NAME || 'Credit Banc';
+
+  const mail_options: any = {
+    from: `${from_name} <${from_email}>`,
+    to: data.client_email,
+    subject: `Documents Needed for Your ${format_usd(data.capital_requested) || 'Funding'} Request`,
+    text: generate_speed_doc_request_email_text(data),
+    html: generate_speed_doc_request_email_html(data),
+    attachments: [
+      {
+        filename: 'CBLOGOWHITE.png',
+        path: path.join(process.cwd(), 'public', 'CBLOGOWHITE.png'),
+        cid: 'cb_logo_white'
+      }
+    ]
+  };
+
+  const cc_list = build_cc_list(data.advisor_cc_email, data.advisor_cc_emails);
+  if (cc_list.length > 0) {
+    mail_options.cc = cc_list;
+  }
+
+  return transporter.sendMail(mail_options);
+}
+
+/**
+ * ============================================================================
  * PASSWORD UPDATED CONFIRMATION (client)
  * ============================================================================
  * Sent after the client creates their password in onboarding Step 3.

@@ -7,7 +7,6 @@ import { syncOutstandingDocuments } from '@/lib/outstanding-documents';
 import { syncUnifiedClientData, generateSecurePassword } from '@/lib/user-management';
 import { ghlSearchContacts, ghlUpdateContact, ghlAddContactFollowers, ghlAddTags } from '@/lib/ghl-api';
 import { generateOnboardingMagicLink, pushMagicLinkToGhl } from '@/lib/magic-link';
-import { BANK_STATEMENTS_DOC_CODE, BANK_STATEMENT_MONTH_OPTIONS } from '@/lib/document-scope';
 
 /**
  * Supabase admin client with elevated privileges
@@ -283,14 +282,6 @@ export async function POST(request: Request) {
     }
 
     console.log('✅ Basic validations passed');
-
-    // Bank statements carry a per-request period (months). Validate once against
-    // the allowed set here; reused for the dynamic-doc row and the welcome email
-    // label. Anything else → null (falls back to the static "(last 6 months)").
-    const rawBankStatementMonths = Number(body.bank_statement_months);
-    const bankStatementMonths = BANK_STATEMENT_MONTH_OPTIONS.includes(rawBankStatementMonths as any)
-      ? rawBankStatementMonths
-      : null;
 
     // ========== STEP 1.5: RESOLVE ADVISOR FROM SESSION (REQUIRED) ==========
     // Clients are only ever created by authenticated advisors. The session is
@@ -949,13 +940,15 @@ export async function POST(request: Request) {
       if (!primaryBusiness) {
         console.error('⚠️ Primary business_profiles row missing — dynamic docs cannot be scoped. Aborting doc seed.');
       } else {
+        const statement_months_val = parseInt(body.statement_months) || null;
         const dynamicDocRecords = docDefinitions.map(doc => ({
           user_id: user_id,
           document_id: doc.id,
           business_profile_id: primaryBusiness.id,
           is_active: true,
           requested_at: new Date().toISOString(),
-          statement_months: doc.code === BANK_STATEMENTS_DOC_CODE ? bankStatementMonths : null,
+          // Bank statements carry a per-request month count; other docs ignore it.
+          statement_months: doc.code === 'business_bank_statements' ? statement_months_val : null,
         }));
 
         const { error: insertError } = await supabase_admin
@@ -1090,13 +1083,6 @@ export async function POST(request: Request) {
     }
 
     // ========== STEP 6.5: SEND WELCOME EMAIL ==========
-    // Append the precise period to the bank-statements label so the email
-    // matches what the client sees in the vault (no more confusing "6 months").
-    const welcome_requested_documents = (body.documents_requested || []).map((label: string) =>
-      label === 'Business Bank Statements' && bankStatementMonths
-        ? `${label} (last ${bankStatementMonths} months)`
-        : label
-    );
     try {
       // Reuse advisor data already fetched above
       // CC the advisor + every follower so they all see the credentials
@@ -1109,7 +1095,7 @@ export async function POST(request: Request) {
         advisor_phone: advisor_phone || undefined,
         advisor_cc_email: advisor_email || undefined,
         advisor_cc_emails: follower_emails,
-        requested_documents: welcome_requested_documents,
+        requested_documents: body.documents_requested || [],
         login_url: `${process.env.NEXT_PUBLIC_APP_URL}/auth/login`,
       });
 

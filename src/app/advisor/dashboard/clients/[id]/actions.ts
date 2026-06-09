@@ -7,7 +7,7 @@ import { ghlAddTags, ghlUpdateContact } from "@/lib/ghl-api";
 import { syncUnifiedClientData } from "@/lib/user-management";
 import { updateLoanStatus } from "@/app/actions/pipeline";
 import { ghlSyncDocument } from "@/lib/ghl-document-sync";
-import { isClientScopedDoc, BANK_STATEMENTS_DOC_CODE, BANK_STATEMENT_MONTH_OPTIONS } from "@/lib/document-scope";
+import { isClientScopedDoc } from "@/lib/document-scope";
 
 /**
  * Owner OR follower check. Admin flow isn't covered here (advisor-persona actions).
@@ -164,12 +164,7 @@ export async function addManualFundingApplication(clientId: string, formData: Fo
  * Allows an advisor to request one or more new documents from a client.
  * Updates the database and syncs the request tags to GoHighLevel.
  */
-export async function requestDocuments(
-    clientId: string,
-    documentIds: string[],
-    businessProfileId?: string | null,
-    bankStatementMonths?: number | null,
-) {
+export async function requestDocuments(clientId: string, documentIds: string[], businessProfileId?: string | null, statementMonths?: number | null) {
     try {
         if (!documentIds || documentIds.length === 0) {
             throw new Error("No documents selected");
@@ -220,11 +215,6 @@ export async function requestDocuments(
         const primaryId = primary?.id ?? null;
         const defaultBusinessProfileId = businessProfileId ?? primaryId;
 
-        // Bank statements carry a per-request period (months). Validate against
-        // the allowed set; anything else falls back to null (static label).
-        const rawMonths = Number(bankStatementMonths);
-        const validMonths = BANK_STATEMENT_MONTH_OPTIONS.includes(rawMonths as any) ? rawMonths : null;
-
         // 5. Batch upsert into client_dynamic_documents scoped to that business.
         const dynamicsToInsert = documentIds.map(docId => {
             const def = docDefs.find((d: any) => d.id === docId);
@@ -236,7 +226,8 @@ export async function requestDocuments(
                 business_profile_id: bizId,
                 is_active: true,
                 requested_at: new Date().toISOString(),
-                statement_months: code === BANK_STATEMENTS_DOC_CODE ? validMonths : null,
+                // Bank statements carry a per-request month count; other docs ignore it.
+                statement_months: code === 'business_bank_statements' ? (statementMonths ?? null) : null,
             };
         });
 

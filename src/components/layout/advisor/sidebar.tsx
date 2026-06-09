@@ -134,6 +134,15 @@ export function Sidebar({
                 {!collapsed && <span>New Funding</span>}
               </button>
             </Link>
+            <Link href="/advisor/dashboard/clients/new/speed">
+              <button className={clsx(
+                "w-full mt-2 border-2 border-white/20 text-white rounded-xl py-3 px-4 font-bold flex items-center justify-center gap-2 active:scale-95 transition-transform hover:bg-white/10",
+                collapsed ? "px-0" : ""
+              )}>
+                <span className="material-symbols-outlined text-lg">bolt</span>
+                {!collapsed && <span>Fast Funding</span>}
+              </button>
+            </Link>
           </div>
         </nav>
 

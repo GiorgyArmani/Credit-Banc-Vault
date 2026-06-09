@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
 
 export type LoanStatus =
@@ -79,7 +80,8 @@ export async function getBulkLatestStatus(
 export async function updateLoanStatus(
   clientVaultId: string,
   newStatus: LoanStatus,
-  note?: string
+  note?: string,
+  options?: { useServiceRole?: boolean }
 ): Promise<{ success: boolean; error?: string }> {
   const supabase = await createClient();
 
@@ -91,8 +93,14 @@ export async function updateLoanStatus(
     return { success: false, error: "Unauthenticated" };
   }
 
+  // Client-triggered transitions (e.g. completing onboarding) can't write to
+  // loan_status_history under RLS. When the caller opts in, use the
+  // service-role client for the DB ops while still recording the authenticated
+  // user as the actor.
+  const db = options?.useServiceRole ? createAdminClient() : supabase;
+
   // Get the latest status to avoid redundant consecutive entries
-  const { data: latestEntry } = await supabase
+  const { data: latestEntry } = await db
     .from("loan_status_history")
     .select("status")
     .eq("client_vault_id", clientVaultId)
@@ -109,13 +117,13 @@ export async function updateLoanStatus(
   }
 
   // Get the actor's role
-  const { data: userData } = await supabase
+  const { data: userData } = await db
     .from("users")
     .select("role")
     .eq("id", user.id)
     .single();
 
-  const { error } = await supabase.from("loan_status_history").insert({
+  const { error } = await db.from("loan_status_history").insert({
     client_vault_id: clientVaultId,
     status: newStatus,
     changed_by: user.id,
@@ -137,7 +145,7 @@ export async function updateLoanStatus(
     };
 
     // Get advisor user_id for this client
-    const { data: vaultData } = await supabase
+    const { data: vaultData } = await db
       .from("client_data_vault")
       .select("advisor_id, client_name, advisors(user_id)")
       .eq("id", clientVaultId)
@@ -145,7 +153,7 @@ export async function updateLoanStatus(
 
     const advisorUserId = (vaultData?.advisors as any)?.user_id;
     if (advisorUserId) {
-      await supabase.from("in_app_notifications").insert({
+      await db.from("in_app_notifications").insert({
         user_id: advisorUserId,
         client_id: clientVaultId,
         title: statusLabels[newStatus],

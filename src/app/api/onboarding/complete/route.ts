@@ -37,7 +37,7 @@ export async function POST(request: Request) {
                 // Onboarding is now finished — advance the pipeline past the
                 // onboarding stage into documents_requested. The dashboard's
                 // auto-transition becomes a no-op once this runs.
-                await updateLoanStatus(vault.id, 'documents_requested', 'Client completed onboarding (Profile & Contract)');
+                await updateLoanStatus(vault.id, 'documents_requested', 'Client completed onboarding (Profile & Contract)', { useServiceRole: true });
                 console.log('✅ Pipeline status advanced past onboarding → documents_requested');
             }
         } catch (pipeline_error) {

@@ -75,7 +75,7 @@ import { isClientScopedDoc, matchesActiveBusiness, normalizeSupabaseJoin, format
 
 // Slack deal-channel integration is built but not yet tested end-to-end.
 // Flip to `true` to re-enable the "Create / Open Slack Channel" button.
-const SLACK_FEATURE_ENABLED = false;
+const SLACK_FEATURE_ENABLED = true;
 
 enum ComponentState {
     LOADING = "LOADING",

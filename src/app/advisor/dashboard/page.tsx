@@ -22,7 +22,8 @@ import {
   Sparkles,
   ArrowRight,
   Shield,
-  Activity
+  Activity,
+  Zap
 } from "lucide-react";
 import AdvisorWebsiteTour from "@/components/tour/advisor-website-tour";
 import { Badge } from "@/components/ui/badge";
@@ -33,37 +34,59 @@ import { LoanPipelineBadge } from "@/components/loan-pipeline-status";
  * Stat Card Component
  * Displays a single metric with icon and label
  */
+const STAT_TONES: Record<string, { chip: string; value: string; bar: string; glow: string }> = {
+  emerald: { chip: "bg-emerald-500 shadow-emerald-500/30", value: "text-emerald-600", bar: "from-emerald-400 to-emerald-600", glow: "bg-emerald-400/20" },
+  blue: { chip: "bg-blue-500 shadow-blue-500/30", value: "text-blue-600", bar: "from-blue-400 to-blue-600", glow: "bg-blue-400/20" },
+  amber: { chip: "bg-amber-500 shadow-amber-500/30", value: "text-amber-600", bar: "from-amber-400 to-amber-600", glow: "bg-amber-400/20" },
+  violet: { chip: "bg-violet-500 shadow-violet-500/30", value: "text-violet-600", bar: "from-violet-400 to-violet-600", glow: "bg-violet-400/20" },
+};
+
+// Static class strings per tone (Tailwind can't see dynamic `border-${x}` names).
+const QUICK_TONES: Record<string, { border: string; chip: string; shadow: string; arrow: string }> = {
+  emerald: { border: "border-emerald-100 hover:border-emerald-300", chip: "bg-emerald-500 shadow-emerald-500/30", shadow: "hover:shadow-emerald-500/10", arrow: "text-emerald-500" },
+  amber: { border: "border-amber-100 hover:border-amber-300", chip: "bg-amber-500 shadow-amber-500/30", shadow: "hover:shadow-amber-500/10", arrow: "text-amber-500" },
+  blue: { border: "border-blue-100 hover:border-blue-300", chip: "bg-blue-500 shadow-blue-500/30", shadow: "hover:shadow-blue-500/10", arrow: "text-blue-500" },
+  violet: { border: "border-violet-100 hover:border-violet-300", chip: "bg-violet-500 shadow-violet-500/30", shadow: "hover:shadow-violet-500/10", arrow: "text-violet-500" },
+};
+
 function StatCard({
   icon: Icon,
   label,
   value,
-  trend
+  trend,
+  tone = "emerald",
 }: {
   icon: any;
   label: string;
   value: string | number;
   trend?: string;
+  tone?: keyof typeof STAT_TONES;
   id?: string;
 }) {
+  const t = STAT_TONES[tone] ?? STAT_TONES.emerald;
   return (
-    <Card className="rounded-[2rem] border-emerald-50 bg-white/50 backdrop-blur-sm hover:shadow-2xl hover:shadow-emerald-500/5 transition-all duration-500 group overflow-hidden border-2 hover:border-emerald-100">
-      <CardHeader className="flex flex-row items-center justify-between pb-2 px-6 pt-6">
-        <CardTitle className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40">
-          {label}
-        </CardTitle>
-        <div className="p-2 bg-emerald-50 rounded-xl group-hover:bg-emerald-500 group-hover:text-white transition-all duration-500">
-          <Icon className="h-4 w-4" />
+    <div className="relative rounded-[2rem] border-2 border-slate-100 bg-white p-6 overflow-hidden transition-all duration-500 hover:-translate-y-1 hover:shadow-2xl hover:shadow-slate-200/60 hover:border-transparent group">
+      {/* top accent bar — reveals on hover */}
+      <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${t.bar} opacity-0 group-hover:opacity-100 transition-opacity duration-500`} />
+      {/* corner glow */}
+      <div className={`absolute -top-8 -right-8 w-24 h-24 ${t.glow} blur-2xl rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-500`} />
+
+      <div className="relative z-10 flex items-start justify-between mb-5">
+        <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 pt-1">{label}</span>
+        <div className={`w-11 h-11 rounded-2xl ${t.chip} shadow-lg flex items-center justify-center shrink-0 group-hover:scale-110 group-hover:-rotate-3 transition-transform duration-500`}>
+          <Icon className="h-5 w-5 text-white" />
         </div>
-      </CardHeader>
-      <CardContent className="px-6 pb-6 pt-2">
-        <div className="text-3xl font-black text-emerald-950 tracking-tighter uppercase">{value}</div>
-        {trend && (
-          <p className="text-[10px] font-black uppercase tracking-wider text-emerald-500 mt-2 flex items-center gap-1">
-            {trend}
-          </p>
-        )}
-      </CardContent>
-    </Card>
+      </div>
+
+      <div className={`relative z-10 text-4xl font-black tracking-tighter tabular-nums ${t.value}`}>{value}</div>
+
+      {trend && (
+        <p className="relative z-10 text-[10px] font-black uppercase tracking-wider text-slate-400 mt-2 flex items-center gap-1.5">
+          <span className={`inline-block w-1.5 h-1.5 rounded-full bg-gradient-to-r ${t.bar}`} />
+          {trend}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -402,24 +425,28 @@ export default function AdvisorDashboard() {
             label="Total Clients"
             value={stats.totalClients}
             trend="Active on platform"
+            tone="emerald"
           />
           <StatCard
             icon={Clock}
             label="Pending Applications"
             value={stats.pendingApplications}
             trend="Awaiting underwriting"
+            tone="amber"
           />
           <StatCard
             icon={CheckCircle}
             label="Approved Applications"
             value={stats.approvedApplications}
             trend="Fully processed"
+            tone="blue"
           />
           <StatCard
             icon={TrendingUp}
             label="Success Rate"
             value={`${stats.successRate}%`}
             trend="Of total submissions"
+            tone="violet"
           />
         </div>
 
@@ -433,41 +460,30 @@ export default function AdvisorDashboard() {
             </CardDescription>
           </CardHeader>
           <CardContent className="px-10 pb-10 pt-0">
-            <div className="grid gap-6 md:grid-cols-3">
-              <Button
-                className="h-auto flex-col items-start p-6 bg-emerald-50/50 border-emerald-100 hover:bg-emerald-500 hover:text-white transition-all duration-500 rounded-[2rem] border-2 shadow-none group/btn"
-                variant="outline"
-                onClick={() => router.push(pathname.startsWith("/admin") ? "/admin/clients/new" : "/advisor/dashboard/clients/new")}
-              >
-                <div className="p-3 bg-white rounded-2xl mb-4 group-hover/btn:bg-white/20 transition-colors">
-                  <FileText className="h-6 w-6 text-emerald-500 group-hover/btn:text-white" />
-                </div>
-                <span className="font-black uppercase tracking-tighter text-lg mb-1">New Client Application</span>
-                <span className="text-xs font-bold opacity-60 group-hover/btn:opacity-100">Start a new funding request</span>
-              </Button>
-
-              <Button
-                className="h-auto flex-col items-start p-6 bg-emerald-50/50 border-emerald-100 hover:bg-emerald-500 hover:text-white transition-all duration-500 rounded-[2rem] border-2 shadow-none group/btn"
-                variant="outline"
-                onClick={() => router.push(pathname.startsWith("/admin") ? "/admin/prospects" : "/advisor/dashboard/prospects")}
-              >
-                <div className="p-3 bg-white rounded-2xl mb-4 group-hover/btn:bg-white/20 transition-colors">
-                  <Users className="h-6 w-6 text-emerald-500 group-hover/btn:text-white" />
-                </div>
-                <span className="font-black uppercase tracking-tighter text-lg mb-1">View Prospects</span>
-                <span className="text-xs font-bold opacity-60 group-hover/btn:opacity-100">Manage your active pipeline</span>
-              </Button>
-
-              <Button
-                className="h-auto flex-col items-start p-6 bg-emerald-50/50 border-emerald-100 hover:bg-emerald-500 hover:text-white transition-all duration-500 rounded-[2rem] border-2 shadow-none group/btn"
-                variant="outline"
-              >
-                <div className="p-3 bg-white rounded-2xl mb-4 group-hover/btn:bg-white/20 transition-colors">
-                  <AlertCircle className="h-6 w-6 text-emerald-500 group-hover/btn:text-white" />
-                </div>
-                <span className="font-black uppercase tracking-tighter text-lg mb-1">Pending Reviews</span>
-                <span className="text-xs font-bold opacity-60 group-hover/btn:opacity-100">Applications awaiting your review</span>
-              </Button>
+            <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+              {[
+                { icon: FileText, title: "New Client Application", desc: "Start a new funding request", tone: "emerald", onClick: () => router.push(pathname.startsWith("/admin") ? "/admin/clients/new" : "/advisor/dashboard/clients/new") },
+                { icon: Zap, title: "Fast Funding", desc: "One-page speed form for the call", tone: "amber", onClick: () => router.push(pathname.startsWith("/admin") ? "/admin/clients/new/speed" : "/advisor/dashboard/clients/new/speed") },
+                { icon: Users, title: "View Prospects", desc: "Manage your active pipeline", tone: "blue", onClick: () => router.push(pathname.startsWith("/admin") ? "/admin/prospects" : "/advisor/dashboard/prospects") },
+                { icon: AlertCircle, title: "Pending Reviews", desc: "Applications awaiting your review", tone: "violet", onClick: () => router.push(pathname.startsWith("/admin") ? "/admin/prospects" : "/advisor/dashboard/prospects") },
+              ].map(({ icon: ActionIcon, title, desc, tone, onClick }) => {
+                const qt = QUICK_TONES[tone] ?? QUICK_TONES.emerald;
+                return (
+                  <button
+                    key={title}
+                    type="button"
+                    onClick={onClick}
+                    className={`group/btn relative text-left h-full rounded-[1.75rem] border-2 bg-white p-6 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl active:scale-[0.98] ${qt.border} ${qt.shadow}`}
+                  >
+                    <div className={`w-12 h-12 rounded-2xl ${qt.chip} shadow-lg flex items-center justify-center mb-5 group-hover/btn:scale-110 group-hover/btn:-rotate-3 transition-transform duration-300`}>
+                      <ActionIcon className="h-6 w-6 text-white" />
+                    </div>
+                    <p className="font-black uppercase tracking-tight text-base text-slate-900 mb-1 leading-tight">{title}</p>
+                    <p className="text-xs font-bold text-slate-400 leading-snug">{desc}</p>
+                    <ArrowRight className={`absolute top-6 right-6 h-4 w-4 ${qt.arrow} opacity-0 -translate-x-1 group-hover/btn:opacity-100 group-hover/btn:translate-x-0 transition-all duration-300`} />
+                  </button>
+                );
+              })}
             </div>
           </CardContent>
         </Card>
@@ -489,13 +505,17 @@ export default function AdvisorDashboard() {
               <div className="space-y-4">
                 {recentApps.length > 0 ? (
                   recentApps.map(app => (
-                    <div key={app.id} className="flex items-center justify-between p-4 bg-emerald-50/30 rounded-2xl border border-emerald-50 hover:bg-emerald-50/60 transition-colors">
+                    <div
+                      key={app.id}
+                      onClick={() => router.push((pathname.startsWith("/admin") ? "/admin/clients/" : "/advisor/dashboard/clients/") + (app.vault_id || app.id))}
+                      className="flex items-center justify-between p-4 bg-emerald-50/30 rounded-2xl border border-emerald-50 hover:bg-emerald-50/80 hover:border-emerald-200 hover:shadow-md cursor-pointer transition-all duration-200 active:scale-[0.99] group/row"
+                    >
                       <div className="flex items-center gap-4">
-                        <div className="p-3 bg-white rounded-xl shadow-sm border border-emerald-100/50">
+                        <div className="p-3 bg-white rounded-xl shadow-sm border border-emerald-100/50 group-hover/row:border-emerald-200 transition-colors">
                           <FileText className="h-5 w-5 text-emerald-500" />
                         </div>
                         <div>
-                          <p className="font-black text-emerald-950 text-sm uppercase tracking-tight">{app.client_name}</p>
+                          <p className="font-black text-emerald-950 text-sm uppercase tracking-tight group-hover/row:text-emerald-600 transition-colors">{app.client_name}</p>
                           <p className="text-xs font-bold text-emerald-900/40">{app.company_name}</p>
                         </div>
                       </div>

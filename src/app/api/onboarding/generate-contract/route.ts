@@ -38,7 +38,12 @@ export async function POST(request: Request) {
         }
 
         // 3. Prepare SignWell Params
-        const isPersonalTermLoan = vaultData.proposed_loan_type === 'Personal Term Loan';
+        // Speed-form clients ALWAYS sign the general funding application
+        // (SIGNWELL_TEMPLATE_ID) — never the PTL template — since the speed
+        // form is the fast-track of the paper FUNDING APPLICATION itself.
+        const isPersonalTermLoan =
+            vaultData.proposed_loan_type === 'Personal Term Loan' &&
+            vaultData.signup_flow !== 'speed';
 
         const templateId = isPersonalTermLoan
             ? process.env.SIGNWELL_PTL_TEMPLATE_ID
@@ -72,9 +77,9 @@ export async function POST(request: Request) {
             fields = {
                 // Business Details
                 application_business_name: vaultData.company_name,
-                application_dba: '', // Not collected
+                application_dba: vaultData.dba || '', // Collected by the speed form only
                 application_taxid: vaultData.ein,
-                application_state_of_incorporation: vaultData.company_state,
+                application_state_of_incorporation: vaultData.state_of_incorporation || vaultData.company_state,
                 application_business_start_date: vaultData.business_start_date,
                 application_industry: vaultData.industry,
                 application_address: vaultData.business_address || vaultData.company_address,
@@ -88,29 +93,36 @@ export async function POST(request: Request) {
                 application_email: vaultData.client_email,
                 application_website: '', // Not collected
                 gross_annual_revenue: vaultData.avg_annual_revenue?.toString(),
-                avg_monthly_cc_sales: vaultData.avg_monthly_deposits?.toString(),
+                avg_monthly_cc_sales: '', // Not collected — never reuse bank deposits here (would be a fake number)
                 funding_amount_requested: vaultData.capital_requested?.toString(),
                 monthly_bank_deposit: vaultData.avg_monthly_deposits?.toString(),
                 use_of_funds: vaultData.loan_purpose,
 
-                // Client Details
+                // Client Details — the owner_1_* / dob fields are collected by
+                // the speed form only; the standard flow leaves them null and
+                // the template falls back to '' / the client phone as before.
                 application_client_firstname: vaultData.client_name?.split(' ')[0],
                 application_client_lastname: vaultData.client_name?.split(' ').slice(1).join(' '),
                 application_client_ownership: vaultData.owner_1_ownership_pct?.toString(),
-                application_client_dob: '', // Not collected
+                application_client_dob: vaultData.owner_1_dob || '',
                 application_client_ssn: vaultData.ssn,
                 application_client_email2: vaultData.client_email,
                 application_client_street_address: vaultData.home_address,
-                application_client_city: '', // Not stored separately
-                application_client_state: '', // Not stored separately
-                application_client_zipcode: '', // Not stored separately
-                application_client_homephone: vaultData.client_phone,
+                // Owner city/state/zip mirror the business location (per spec).
+                application_client_city: vaultData.company_city || '',
+                application_client_state: vaultData.company_state || '',
+                application_client_zipcode: vaultData.company_zip_code || '',
+                application_client_homephone: vaultData.owner_1_home_phone || vaultData.client_phone,
                 application_client_cellphone: vaultData.client_phone,
                 application_client_name: vaultData.client_name,
 
                 // Agreement
                 agreement_day: agreementDay,
-                agreement_month: agreementMonth
+                agreement_month: agreementMonth,
+                agreement_company: vaultData.company_name,
+                agreement_company_address: vaultData.business_address || vaultData.company_address || '',
+                agreement_client_name: vaultData.client_name,
+                agreement_client_jobtitle: 'Owner',
             };
         }
 

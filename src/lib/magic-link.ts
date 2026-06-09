@@ -97,6 +97,25 @@ export async function generateOnboardingMagicLink(email: string): Promise<string
 }
 
 /**
+ * Same passwordless login as generateOnboardingMagicLink, but lands the client
+ * on their /dashboard instead of /onboarding. Used by the Speed Form doc-release
+ * flow (src/lib/speed-form.ts): by the time documents are released the client
+ * has already finished onboarding + signed, so the doc-request email should drop
+ * them straight on the dashboard where the document checklist lives.
+ */
+export async function generateDocUploadMagicLink(email: string): Promise<string | null> {
+  try {
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://vault.creditbanc.io";
+    const token = signMagicToken(email);
+    const next = encodeURIComponent("/dashboard");
+    return `${appUrl}/auth/magic?token=${token}&next=${next}`;
+  } catch (err) {
+    console.error("❌ Doc-upload magic link generation threw:", err);
+    return null;
+  }
+}
+
+/**
  * Pushes the magic link to GHL: writes it to the MAGIC_LINK custom field and
  * adds the `send-magic-link` tag so a GHL workflow can dispatch the SMS.
  * Non-fatal — logs and swallows errors so it never breaks the calling flow.

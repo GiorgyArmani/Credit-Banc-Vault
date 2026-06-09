@@ -200,6 +200,15 @@ export function Sidebar({
                 </div>
               </Link>
             )}
+            {/* Fast Funding (Speed Form) shortcut */}
+            {!collapsed && (
+              <Link href="/admin/clients/new/speed" onClick={onMobileClose}>
+                <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-500 hover:text-slate-900 hover:bg-slate-50 transition-all duration-200 cursor-pointer">
+                  <span className="material-symbols-outlined text-[18px] text-emerald-500">bolt</span>
+                  <span className="text-sm font-medium">Fast Funding</span>
+                </div>
+              </Link>
+            )}
           </div>
         </div>
 

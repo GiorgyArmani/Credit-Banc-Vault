@@ -296,6 +296,15 @@ export default function FundedClientsListPage() {
                     )}
 
                     <Button
+                        onClick={() => router.push(`${new_href}/speed`)}
+                        variant="outline"
+                        className="border-2 border-primary text-primary px-6 py-6 rounded-xl font-bold flex items-center gap-2 hover:bg-primary/5 active:scale-95 transition-all"
+                    >
+                        <span className="material-symbols-outlined">bolt</span>
+                        Speed Form
+                    </Button>
+
+                    <Button
                         onClick={() => router.push(new_href)}
                         className="bg-primary text-white px-6 py-6 rounded-xl font-bold flex items-center gap-2 hover:opacity-90 active:scale-95 transition-all shadow-lg shadow-primary/20"
                     >

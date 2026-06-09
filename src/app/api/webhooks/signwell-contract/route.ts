@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { signWell } from '@/lib/signwell';
+import { releaseSpeedFormDocs } from '@/lib/speed-form';
 
 // Cliente de Supabase con service role para operaciones del servidor
 const supabase = createClient(
@@ -142,6 +143,17 @@ export async function POST(request: NextRequest) {
         // 5. Verificar si el contrato ya estaba completado
         if (client_data.contract_completed) {
             console.log('⚠️ Contrato ya estaba completado');
+
+            // Speed-form safety net: if the first webhook marked the contract
+            // complete but the doc release failed midway, a retry lands here —
+            // releaseSpeedFormDocs is idempotent (no-ops once the pending list
+            // is cleared), so re-attempting is safe.
+            try {
+                await releaseSpeedFormDocs(supabase, client_data.id);
+            } catch (releaseErr) {
+                console.error('⚠️ Speed-form doc release retry threw (non-fatal):', releaseErr);
+            }
+
             return NextResponse.json(
                 {
                     success: true,
@@ -229,6 +241,21 @@ export async function POST(request: NextRequest) {
             }
         } catch (pipelineCatch) {
             console.error('⚠️ Pipeline advance threw (non-fatal):', pipelineCatch);
+        }
+
+        // 7.6 Speed-form flow: the signature is the gate for the document
+        //     request. Seed client_dynamic_documents from the parked
+        //     pending_document_requests, apply the requested_* GHL tags, sync
+        //     the outstanding-docs field, and email the client a complete
+        //     document request (docs + proposed loan type + funding amount).
+        //     No-op for standard-flow clients (signup_flow !== 'speed').
+        try {
+            const releaseResult = await releaseSpeedFormDocs(supabase, client_data.id);
+            if (releaseResult.released) {
+                console.log('✅ Speed-form document requests released after signature');
+            }
+        } catch (releaseErr) {
+            console.error('⚠️ Speed-form doc release threw (non-fatal):', releaseErr);
         }
 
         // 8. Download SignWell PDF and upload to vault
