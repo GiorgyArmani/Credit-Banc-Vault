@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { createClient as createBrowserClient } from "@/lib/supabase/server";
 import { syncOutstandingDocuments } from "@/lib/outstanding-documents";
 import { SupabaseClient } from "@supabase/supabase-js";
@@ -488,62 +488,72 @@ export async function POST(req: Request) {
         }
       }
 
-      // C. Email notification for advisor (CC followers)
+      // C. Email notification for advisor (CC followers). Deferred with after()
+      //    so the slow SMTP send runs AFTER the response is sent — the client
+      //    isn't blocked on it.
       if (advisor.email) {
-        try {
-          const { getFollowerEmailsForClient } = await import("@/lib/followers");
-          const follower_emails = await getFollowerEmailsForClient(admin, vaultRecord.id);
+        after(async () => {
+          try {
+            const { getFollowerEmailsForClient } = await import("@/lib/followers");
+            const follower_emails = await getFollowerEmailsForClient(admin, vaultRecord.id);
 
-          await send_new_document_uploaded_notification({
-            advisor_name: `${advisor.first_name} ${advisor.last_name}`,
-            advisor_email: advisor.email,
-            advisor_cc_emails: follower_emails,
-            client_name: vaultRecord.client_name,
-            document_name: doc.name,
-            document_category: docLabel,
-            upload_date: new Date().toLocaleDateString("en-US", {
-              month: "long",
-              day: "numeric",
-              year: "numeric",
-            }),
-            login_url: `${appUrl}/auth/login`,
-          });
-        } catch (emailError) {
-          console.error("Error sending document upload email:", emailError);
-        }
+            await send_new_document_uploaded_notification({
+              advisor_name: `${advisor.first_name} ${advisor.last_name}`,
+              advisor_email: advisor.email,
+              advisor_cc_emails: follower_emails,
+              client_name: vaultRecord.client_name,
+              document_name: doc.name,
+              document_category: docLabel,
+              upload_date: new Date().toLocaleDateString("en-US", {
+                month: "long",
+                day: "numeric",
+                year: "numeric",
+              }),
+              login_url: `${appUrl}/auth/login`,
+            });
+          } catch (emailError) {
+            console.error("Error sending document upload email:", emailError);
+          }
+        });
       }
     }
 
-    // 5. GHL Integration - Upload file and update tags
+    // 5. GHL Integration - Upload file and update tags. Deferred with after()
+    //    so the response returns right after the fast DB writes above; the slow
+    //    file download + GHL upload + tag sync run in the background.
     console.log(`Checking GHL Integration prerequisites: VaultRecord: ${!!vaultRecord}, GHL_TOKEN exists: ${!!process.env.GHL_TOKEN}`);
 
     if (vaultRecord && process.env.GHL_TOKEN) {
-      if (vaultRecord.ghl_contact_id) {
-        try {
-          const { ghlSyncDocument } = await import("@/lib/ghl-document-sync");
-          // Note: ghlSyncDocument handles checking mapping, uploading, and tagging
-          const syncResult = await ghlSyncDocument(
-            admin,
-            document_id,
-            user.id,
-            doc_code
-          );
-
-          if (syncResult.success) {
-            console.log(`✅ Successfully synced ${doc_code} to GHL via shared utility`);
-          } else {
-            console.warn(`⚠️ GHL Sync failed or skipped for ${doc_code}:`, syncResult.error);
-          }
-          
+      const ghlContactId = vaultRecord.ghl_contact_id;
+      const ghlToken = process.env.GHL_TOKEN;
+      if (ghlContactId) {
+        after(async () => {
           try {
-            await syncOutstandingDocuments(doc.user_id, vaultRecord.ghl_contact_id, process.env.GHL_TOKEN);
-            console.log(`✅ Synced outstanding docs after upload`);
-          } catch (syncOutstError) {
-            console.error("❌ Error syncing outstanding documents:", syncOutstError);
+            const { ghlSyncDocument } = await import("@/lib/ghl-document-sync");
+            // Note: ghlSyncDocument handles checking mapping, uploading, and tagging
+            const syncResult = await ghlSyncDocument(
+              admin,
+              document_id,
+              user.id,
+              doc_code
+            );
+
+            if (syncResult.success) {
+              console.log(`✅ Successfully synced ${doc_code} to GHL via shared utility`);
+            } else {
+              console.warn(`⚠️ GHL Sync failed or skipped for ${doc_code}:`, syncResult.error);
+            }
+
+            try {
+              await syncOutstandingDocuments(doc.user_id, ghlContactId, ghlToken);
+              console.log(`✅ Synced outstanding docs after upload`);
+            } catch (syncOutstError) {
+              console.error("❌ Error syncing outstanding documents:", syncOutstError);
+            }
+          } catch (syncError) {
+            console.error("❌ Error importing/calling ghlSyncDocument:", syncError);
           }
-        } catch (syncError) {
-          console.error("❌ Error importing/calling ghlSyncDocument:", syncError);
-        }
+        });
       } else {
         console.warn("No GHL Contact ID found in client_data_vault for user", doc.user_id);
       }

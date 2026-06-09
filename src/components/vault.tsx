@@ -74,6 +74,8 @@ interface DocumentCardProps {
    *  doc is client-scoped (DL/PFS/MyScoreIQ), which always land NULL so they
    *  serve every tab and survive business deletion. */
   activeBusinessId?: string | null;
+  /** Optional DOM id for the website tour to anchor on (set on the first card). */
+  anchorId?: string;
 }
 
 function DocumentCard({
@@ -91,6 +93,7 @@ function DocumentCard({
   isRejected = false,
   rejectionReason,
   activeBusinessId,
+  anchorId,
 }: DocumentCardProps) {
   const supabase = createClient();
   const { toast } = useToast();
@@ -191,26 +194,30 @@ function DocumentCard({
           .single();
         if (dbErr) throw dbErr;
 
-        // /api/uploads runs GHL sync + audit-event insert + advisor
-        // notification. Failure here doesn't roll back the local upload (the
-        // file is already in Supabase) but it does mean GHL/advisor see
-        // nothing. Log it so we can see it in monitoring.
-        try {
-          const res = await fetch("/api/uploads", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              document_id: data.id,
-              storage_path: data.storage_path,
-              doc_code: docType.code
-            }),
+        // /api/uploads runs the slow bookkeeping (GHL file sync, advisor email,
+        // pipeline advance). We DON'T await it: the file is already in Supabase
+        // and listed in the vault, so the client has nothing to wait for — the
+        // perceived upload time is just storage + this DB insert. `keepalive`
+        // lets the request finish server-side even if the client navigates away
+        // right after. Failures only mean GHL/advisor lag behind; log them.
+        void fetch("/api/uploads", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            document_id: data.id,
+            storage_path: data.storage_path,
+            doc_code: docType.code
+          }),
+          keepalive: true,
+        })
+          .then(async (res) => {
+            if (!res.ok) {
+              console.error(`Post-upload sync failed for ${docType.code}: ${res.status} ${await res.text().catch(() => "")}`);
+            }
+          })
+          .catch((e) => {
+            console.error(`Post-upload sync threw for ${docType.code}:`, e);
           });
-          if (!res.ok) {
-            console.error(`Post-upload sync failed for ${docType.code}: ${res.status} ${await res.text().catch(() => "")}`);
-          }
-        } catch (e) {
-          console.error(`Post-upload sync threw for ${docType.code}:`, e);
-        }
 
         successCount++;
       }
@@ -227,7 +234,7 @@ function DocumentCard({
   };
 
   return (
-    <div className={clsx(
+    <div id={anchorId} className={clsx(
       "rounded-[2.5rem] border-2 transition-all duration-500 overflow-hidden shadow-sm group",
       isApproved
         ? "bg-emerald-50/30 border-emerald-100/50 hover:border-emerald-200"
@@ -338,6 +345,7 @@ function DocumentCard({
               )}>
                 <Upload className="h-6 w-6 text-emerald-500 mb-2" />
                 <span className="text-sm font-bold text-emerald-950">Click to upload</span>
+                <span className="text-xs text-emerald-900/50 mt-1 text-center">Choose a file from your device. A clear photo or PDF of the document is fine.</span>
                 <input type="file" onChange={handleFileSelect} className="hidden" multiple={docType.multiple} />
               </label>
             </div>
@@ -631,7 +639,7 @@ export default function Vault({
 
   return (
     <div className="w-full space-y-8">
-      <div className="bg-gradient-to-br from-emerald-50 to-blue-50 border border-emerald-200 rounded-xl p-6">
+      <div id="tour-checklist" className="bg-gradient-to-br from-emerald-50 to-blue-50 border border-emerald-200 rounded-xl p-6">
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="text-xl font-semibold text-gray-900">Document Checklist</h2>
@@ -643,8 +651,42 @@ export default function Vault({
           </div>
         </div>
         <Progress value={progressPct} className="h-3" />
+
+        {/* Always-on "how to upload" guide. A tour is momentary; this stays on
+            screen so a confused client never has to remember the steps. Hidden
+            once everything is uploaded to avoid clutter. */}
+        {!allComplete && (
+          <div className="mt-5 rounded-2xl bg-white/80 border border-emerald-100 p-5">
+            <p className="text-sm font-bold text-emerald-900 mb-3 flex items-center gap-2">
+              <Upload className="h-4 w-4 text-emerald-600" />
+              How to upload a document (about 30 seconds):
+            </p>
+            <ol className="space-y-2.5">
+              {[
+                'Find a document in the list below and click it to open.',
+                'Tap “Click to upload” and choose the file from your device. A clear photo or screenshot of the page works too.',
+                'Press “Start Upload”. That’s it. Your advisor sees it right away, no email needed.',
+              ].map((step, i) => (
+                <li key={i} className="flex items-start gap-3 text-sm text-gray-700">
+                  <span className="flex-shrink-0 w-6 h-6 rounded-full bg-emerald-500 text-white text-xs font-bold flex items-center justify-center">
+                    {i + 1}
+                  </span>
+                  <span className="leading-relaxed">{step}</span>
+                </li>
+              ))}
+            </ol>
+            <p className="text-xs text-gray-500 mt-3 pl-9">
+              A card turned <span className="font-semibold text-rose-500">red</span>? Your advisor left a note. Open it, read the feedback, and upload a new file. Stuck on anything? Message your advisor above.
+            </p>
+          </div>
+        )}
+
         {allComplete && !isSubmitted && (
-          <div className="mt-6 flex justify-end">
+          <div className="mt-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <p className="text-sm font-bold text-emerald-700 flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4" />
+              All documents are in! Tap “Submit Vault” to send everything to underwriting.
+            </p>
             <Button onClick={handleSubmission} disabled={submitting} className="bg-emerald-600 text-white">
               {submitting ? "Submitting..." : "Submit Vault"}
             </Button>
@@ -661,9 +703,10 @@ export default function Vault({
               <div className="h-px flex-1 bg-emerald-100" />
             </div>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {coreDocs.map(d => (
+              {coreDocs.map((d, idx) => (
                 <DocumentCard
                   key={d.code}
+                  anchorId={idx === 0 ? 'tour-upload' : undefined}
                   docType={d}
                   documents={documents}
                   userId={userId || ""}
@@ -692,9 +735,10 @@ export default function Vault({
               <div className="h-px flex-1 bg-blue-100" />
             </div>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {addDocs.map(d => (
+              {addDocs.map((d, idx) => (
                 <DocumentCard
                   key={d.code}
+                  anchorId={coreDocs.length === 0 && idx === 0 ? 'tour-upload' : undefined}
                   docType={d}
                   documents={documents}
                   userId={userId || ""}

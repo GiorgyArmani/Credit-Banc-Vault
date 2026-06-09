@@ -108,11 +108,15 @@ export default function FundedClientsListPage() {
                 return;
             }
 
-            const { data: user_data, error: user_error } = await supabase
-                .from("users")
-                .select("id, role, email")
-                .eq("id", user.id)
-                .maybeSingle();
+            // Role lookup and the caller's advisor row both key on user.id and
+            // are independent — fetch them together instead of in sequence.
+            const [
+                { data: user_data, error: user_error },
+                { data: my_advisor },
+            ] = await Promise.all([
+                supabase.from("users").select("id, role, email").eq("id", user.id).maybeSingle(),
+                supabase.from('advisors').select('id').eq('user_id', user.id).maybeSingle(),
+            ]);
 
             if (user_error || !user_data || (user_data.role !== "advisor" && user_data.role !== "admin")) {
                 set_error_message("Access denied. You must be an advisor or admin to view this page.");
@@ -121,12 +125,6 @@ export default function FundedClientsListPage() {
             }
 
             set_user_role(user_data.role);
-
-            const { data: my_advisor } = await supabase
-                .from('advisors')
-                .select('id')
-                .eq('user_id', user.id)
-                .maybeSingle();
             if (my_advisor?.id) set_my_advisor_id(my_advisor.id);
 
             let accessibleIds: string[] | null = null;
@@ -176,8 +174,10 @@ export default function FundedClientsListPage() {
             }
 
             const vaultIds = clients_data.map(c => c.id);
-            const pipelineMap = await getBulkLatestStatus(vaultIds);
-            const activityMap = await getBulkClientActivity(vaultIds);
+            const [pipelineMap, activityMap] = await Promise.all([
+                getBulkLatestStatus(vaultIds),
+                getBulkClientActivity(vaultIds),
+            ]);
 
             const funded_only = clients_data
                 .map(c => ({

@@ -168,6 +168,7 @@ function build_cc_list(...inputs: (string | string[] | null | undefined)[]): str
  * Beautiful, responsive email template with all necessary information
  */
 export function generate_client_welcome_email_html(data: ClientWelcomeEmailData): string {
+  data = escape_email_strings(data);
   const {
     client_name,
     advisor_name,
@@ -459,6 +460,7 @@ function format_usd(amount: number): string {
 }
 
 export function generate_speed_doc_request_email_html(data: SpeedDocRequestEmailData): string {
+  data = escape_email_strings(data);
   const {
     client_name,
     company_name,
@@ -497,7 +499,7 @@ export function generate_speed_doc_request_email_html(data: SpeedDocRequestEmail
           </tr>
           <tr>
             <td style="background-color: #10b981; padding: 0 40px 32px; text-align: center;">
-              <h1 style="margin: 0; color: #ffffff; font-size: 26px; font-weight: 700; line-height: 1.2;">Application signed — let's get you funded! 🚀</h1>
+              <h1 style="margin: 0; color: #ffffff; font-size: 26px; font-weight: 700; line-height: 1.2;">Application signed let's get you funded!</h1>
             </td>
           </tr>
 
@@ -674,6 +676,7 @@ export async function send_speed_doc_request_email(data: SpeedDocRequestEmailDat
  */
 
 export function generate_password_updated_email_html(data: PasswordUpdatedNotificationData): string {
+  data = escape_email_strings(data);
   const { client_name, login_url } = data;
 
   return `
@@ -790,6 +793,7 @@ export async function send_password_updated_notification(data: PasswordUpdatedNo
  * Simple welcome message without password for security
  */
 export function generate_advisor_welcome_email_html(data: AdvisorWelcomeEmailData): string {
+  data = escape_email_strings(data);
   const {
     advisor_name,
     advisor_email,
@@ -962,6 +966,7 @@ export interface PasswordResetEmailData {
  * Generates HTML for password reset email
  */
 export function generate_password_reset_email_html(data: PasswordResetEmailData): string {
+  data = escape_email_strings(data);
   const { email, reset_link } = data;
 
   return `
@@ -1100,6 +1105,7 @@ export async function send_password_reset_email(data: PasswordResetEmailData) {
  * Generates HTML for underwriting welcome email
  */
 export function generate_underwriting_welcome_email_html(data: UnderwritingWelcomeEmailData): string {
+  data = escape_email_strings(data);
   const { underwriter_name, underwriter_email, login_url } = data;
 
   return `
@@ -1208,6 +1214,7 @@ export async function send_underwriting_welcome_email(data: UnderwritingWelcomeE
  * Generates HTML for advisor document notification email
  */
 export function generate_advisor_document_notification_html(data: AdvisorDocumentNotificationData): string {
+  data = escape_email_strings(data);
   const { advisor_name, client_name, missing_documents = [], additional_documents = [], login_url, custom_message } = data;
 
   const doc_list_html = (
@@ -1321,6 +1328,7 @@ export async function send_advisor_document_notification(data: AdvisorDocumentNo
  * Generates HTML for advisor new document notification
  */
 export function generate_new_document_uploaded_email_html(data: NewDocumentUploadedData): string {
+  data = escape_email_strings(data);
   const { advisor_name, client_name, document_name, document_category, upload_date, login_url } = data;
 
   return `
@@ -1425,6 +1433,7 @@ export async function send_new_document_uploaded_notification(data: NewDocumentU
  * Generates HTML for client vault submitted notification
  */
 export function generate_client_vault_submitted_email_html(data: ClientVaultSubmittedData): string {
+  data = escape_email_strings(data);
   const { client_name, advisor_name, company_name, login_url } = data;
 
   return `
@@ -1545,6 +1554,7 @@ export interface SupportTicketEmailData {
  * Generates HTML for support ticket email
  */
 export function generate_support_ticket_email_html(data: SupportTicketEmailData): string {
+  data = escape_email_strings(data);
   const { name, email, subject, message } = data;
 
   return `
@@ -1636,6 +1646,7 @@ export async function send_support_ticket_email(data: SupportTicketEmailData) {
  * Generates HTML for advisor vault submission notification
  */
 export function generate_advisor_vault_submission_html(data: AdvisorVaultSubmissionData): string {
+  data = escape_email_strings(data);
   const { advisor_name, client_name, company_name, submission_date, login_url } = data;
 
   return `
@@ -1732,6 +1743,7 @@ export async function send_advisor_vault_submission_notification(data: AdvisorVa
  * Generates HTML for underwriting vault ready notification
  */
 export function generate_underwriting_vault_ready_html(data: UnderwritingVaultReadyData): string {
+  data = escape_email_strings(data);
   const { client_name, company_name, advisor_name, capital_requested, client_profile_url } = data;
 
   return `
@@ -1838,6 +1850,7 @@ export async function send_underwriting_vault_ready_notification(data: Underwrit
 export function generate_lender_review_approved_html(
   data: LenderReviewApprovedNotificationData
 ): string {
+  data = escape_email_strings(data);
   const { client_name, company_name, admin_name, approved_lenders, notes_by_lender, client_profile_url } = data;
 
   const lender_rows = approved_lenders
@@ -1979,6 +1992,7 @@ export interface LenderMatchReadyNotificationData {
  * HTML for the "lender match ready for review" admin notification.
  */
 export function generate_lender_match_ready_html(data: LenderMatchReadyNotificationData): string {
+  data = escape_email_strings(data);
   const { client_name, company_name, recommended_lenders, client_profile_url } = data;
 
   const count = recommended_lenders.length;
@@ -2120,6 +2134,7 @@ export interface LoanFundedNotificationData {
 }
 
 export function generate_loan_funded_notification_html(data: LoanFundedNotificationData): string {
+  data = escape_email_strings(data);
   const { advisor_name, client_name, total_amount, lender, funding_date, login_url } = data;
 
   return `
@@ -2232,6 +2247,7 @@ export interface DocumentRejectionEmailData {
  * Generates HTML for document rejection email
  */
 export function generate_document_rejection_email_html(data: DocumentRejectionEmailData): string {
+  data = escape_email_strings(data);
   const { client_name, doc_label, rejection_reason, advisor_name, login_url } = data;
 
   return `
@@ -2581,6 +2597,31 @@ function escape_html(value: string): string {
     .replace(/'/g, "&#39;");
 }
 
+/**
+ * HTML-escapes every top-level string value (and string array element) on an
+ * email-data object so user-controlled fields (client/company name, free text)
+ * can't inject markup into the rendered HTML email. Numbers/booleans/nested
+ * objects pass through untouched.
+ *
+ * Use ONLY for the HTML templates — never the plain-text ones (escaping would
+ * surface literal "&amp;" etc.). App-generated URLs (magic links, reset links)
+ * are safe to pass through: "&" → "&amp;" inside an href is decoded correctly
+ * by every mail client.
+ */
+function escape_email_strings<T>(data: T): T {
+  if (!data || typeof data !== "object") return data;
+  const out: any = Array.isArray(data) ? [...(data as any)] : { ...(data as any) };
+  for (const key of Object.keys(out)) {
+    const v = out[key];
+    if (typeof v === "string") {
+      out[key] = escape_html(v);
+    } else if (Array.isArray(v)) {
+      out[key] = v.map((item) => (typeof item === "string" ? escape_html(item) : item));
+    }
+  }
+  return out as T;
+}
+
 export function generate_outstanding_docs_reminder_text(data: OutstandingDocsReminderData): string {
   const { client_name, business_name, missing_docs, advisor_name, advisor_email, advisor_phone, login_url } = data;
   const subject_target = business_name ? business_name : "your application";
@@ -2863,6 +2904,7 @@ function format_currency_or_dash(n: number | null | undefined): string {
 }
 
 export function generate_new_business_added_email_html(data: NewBusinessAddedEmailData): string {
+  data = escape_email_strings(data);
   const { client_name, advisor_name, advisor_email, advisor_phone, business, funding, requested_documents, login_url } = data;
 
   const business_rows: [string, string][] = [

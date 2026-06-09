@@ -36,12 +36,24 @@ export async function getBulkClientActivity(vaultIds: string[]): Promise<Map<str
 
     const userIds = Array.from(userToVault.keys());
 
-    // 2. Query loan_status_history
-    const { data: statusHistory } = await supabase
-        .from("loan_status_history")
-        .select("client_vault_id, created_at")
-        .in("client_vault_id", vaultIds);
+    // Queries 2-4 only depend on vaultIds/userIds (known here), so run them in
+    // parallel instead of three sequential round-trips.
+    const [{ data: statusHistory }, { data: userDocs }, { data: internalNotes }] = await Promise.all([
+        supabase
+            .from("loan_status_history")
+            .select("client_vault_id, created_at")
+            .in("client_vault_id", vaultIds),
+        supabase
+            .from("user_documents")
+            .select("user_id, upload_date")
+            .in("user_id", userIds),
+        supabase
+            .from("client_internal_notes")
+            .select("client_id, created_at")
+            .in("client_id", vaultIds),
+    ]);
 
+    // 2. loan_status_history
     statusHistory?.forEach(s => {
         const current = activityMap.get(s.client_vault_id);
         const latest = new Date(s.created_at);
@@ -50,12 +62,7 @@ export async function getBulkClientActivity(vaultIds: string[]): Promise<Map<str
         }
     });
 
-    // 3. Query user_documents
-    const { data: userDocs } = await supabase
-        .from("user_documents")
-        .select("user_id, upload_date")
-        .in("user_id", userIds);
-
+    // 3. user_documents
     userDocs?.forEach(d => {
         const vaultId = userToVault.get(d.user_id);
         if (vaultId) {
@@ -67,12 +74,7 @@ export async function getBulkClientActivity(vaultIds: string[]): Promise<Map<str
         }
     });
 
-    // 4. Query client_internal_notes
-    const { data: internalNotes } = await supabase
-        .from("client_internal_notes")
-        .select("client_id, created_at")
-        .in("client_id", vaultIds);
-
+    // 4. client_internal_notes
     internalNotes?.forEach(n => {
         const current = activityMap.get(n.client_id);
         const latest = new Date(n.created_at);

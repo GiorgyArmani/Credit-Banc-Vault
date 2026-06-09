@@ -73,7 +73,10 @@ export default function ProspectsListPage() {
     const [active_tab, set_active_tab] = useState<"active" | "finalized">("active");
     const [user_role, set_user_role] = useState<string>("");
     const [my_advisor_id, set_my_advisor_id] = useState<string | null>(null);
-    const [admin_scope, set_admin_scope] = useState<"all" | "mine">("all");
+    // Admin-only advisor filter. "all" = every advisor, "mine" = the admin's own
+    // book, or a specific advisor id. Drives scoped_clients below.
+    const [advisors, set_advisors] = useState<{ id: string; name: string }[]>([]);
+    const [selected_advisor_id, set_selected_advisor_id] = useState<string>("all");
 
     useEffect(() => {
         fetch_prospects();
@@ -88,10 +91,12 @@ export default function ProspectsListPage() {
     }, []);
 
     const scoped_clients = useMemo(() => {
-        if (user_role !== "admin" || admin_scope === "all") return clients;
-        if (!my_advisor_id) return [];
-        return clients.filter(c => c.advisor_id === my_advisor_id);
-    }, [clients, user_role, admin_scope, my_advisor_id]);
+        if (user_role !== "admin" || selected_advisor_id === "all") return clients;
+        if (selected_advisor_id === "mine") {
+            return my_advisor_id ? clients.filter(c => c.advisor_id === my_advisor_id) : [];
+        }
+        return clients.filter(c => c.advisor_id === selected_advisor_id);
+    }, [clients, user_role, selected_advisor_id, my_advisor_id]);
 
     const filtered_clients = useMemo(() => {
         if (search_query.trim() === "") return scoped_clients;
@@ -140,11 +145,15 @@ export default function ProspectsListPage() {
                 return;
             }
 
-            const { data: user_data, error: user_error } = await supabase
-                .from("users")
-                .select("id, role, email")
-                .eq("id", user.id)
-                .maybeSingle();
+            // Role lookup and the caller's advisor row both key on user.id and
+            // are independent — fetch them together instead of in sequence.
+            const [
+                { data: user_data, error: user_error },
+                { data: my_advisor },
+            ] = await Promise.all([
+                supabase.from("users").select("id, role, email").eq("id", user.id).maybeSingle(),
+                supabase.from('advisors').select('id').eq('user_id', user.id).maybeSingle(),
+            ]);
 
             if (user_error || !user_data || (user_data.role !== "advisor" && user_data.role !== "admin")) {
                 set_error_message("Access denied. You must be an advisor or admin to view this page.");
@@ -153,14 +162,21 @@ export default function ProspectsListPage() {
             }
 
             set_user_role(user_data.role);
-
-            // Lookup the caller's advisor row (used for admin "My" filter).
-            const { data: my_advisor } = await supabase
-                .from('advisors')
-                .select('id')
-                .eq('user_id', user.id)
-                .maybeSingle();
             if (my_advisor?.id) set_my_advisor_id(my_advisor.id);
+
+            // Admins get the full advisor roster for the per-advisor filter.
+            if (user_data.role === 'admin') {
+                const { data: advisorRows } = await supabase
+                    .from('advisors')
+                    .select('id, first_name, last_name')
+                    .order('first_name', { ascending: true });
+                set_advisors(
+                    (advisorRows || []).map((a: any) => ({
+                        id: a.id,
+                        name: `${a.first_name ?? ''} ${a.last_name ?? ''}`.trim() || 'Unnamed advisor',
+                    }))
+                );
+            }
 
             // Admins see all; advisors see owned + followed.
             let accessibleIds: string[] | null = null;
@@ -209,59 +225,79 @@ export default function ProspectsListPage() {
                 return;
             }
 
-            const { data: coreDocs } = await supabase.from("required_documents").select("code").eq("is_core", true);
+            // Doc counts in 3 bulk queries instead of 2-per-prospect. The old
+            // per-client fan-out was the main load-time bottleneck (~240
+            // round-trips for 120 prospects, which also saturated the connection
+            // pool). We fetch core requirements once, every prospect's active
+            // dynamic docs once, and every uploaded doc once, then group in
+            // memory by user_id.
+            const userIds = clients_data.map(c => c.user_id);
+            const vaultIds = clients_data.map(c => c.id);
+
+            // One parallel batch instead of sequential phases: the 3 doc-count
+            // queries + pipeline status + submissions + activity all depend only
+            // on the id lists above, so there's no reason to await them in turn.
+            const [
+                { data: coreDocs },
+                { data: allDynamicDocs },
+                { data: allUploadedDocs },
+                pipelineMap,
+                { data: sub_data },
+                activityMap,
+            ] = await Promise.all([
+                supabase.from("required_documents").select("code").eq("is_core", true),
+                supabase
+                    .from("client_dynamic_documents")
+                    .select("user_id, required_documents (code)")
+                    .in("user_id", userIds)
+                    .eq("is_active", true),
+                supabase
+                    .from("user_documents")
+                    .select("user_id, category, doc_code")
+                    .in("user_id", userIds),
+                getBulkLatestStatus(vaultIds),
+                supabase.from("submissions").select("user_id, status").in("user_id", userIds),
+                getBulkClientActivity(vaultIds),
+            ]);
+            const submissionMap = new Map(sub_data?.map(s => [s.user_id, s.status]) || []);
+
             const coreCodes = coreDocs?.map(d => d.code) || [];
 
-            const clients_with_doc_counts = await Promise.all(
-                clients_data.map(async (client) => {
-                    const { data: dynamicDocs } = await supabase
-                        .from("client_dynamic_documents")
-                        .select(`required_documents (code)`)
-                        .eq("user_id", client.user_id)
-                        .eq("is_active", true);
+            // user_id -> set of required dynamic codes. normalizeSupabaseJoin
+            // handles SDK array-vs-object embed variance; without it the
+            // dynamic-doc counter reads zero for every prospect.
+            const dynamicByUser = new Map<string, Set<string>>();
+            for (const row of (allDynamicDocs as any[] | null) || []) {
+                const code = normalizeSupabaseJoin<{ code?: string }>(row.required_documents)?.code;
+                if (!code) continue;
+                if (!dynamicByUser.has(row.user_id)) dynamicByUser.set(row.user_id, new Set());
+                dynamicByUser.get(row.user_id)!.add(code);
+            }
 
-                    // normalizeSupabaseJoin handles SDK array-vs-object embed
-                    // variance. Without it the dynamic-doc completion counter
-                    // reads as zero for every prospect.
-                    const dynamicCodes = (dynamicDocs as any[] | null)
-                        ?.map((d: any) => normalizeSupabaseJoin<{ code?: string }>(d.required_documents)?.code)
-                        .filter((c: string | undefined): c is string => !!c) || [];
-                    const allRequiredCodes = new Set([...coreCodes, ...dynamicCodes]);
+            // user_id -> set of uploaded codes (category + doc_code).
+            const uploadedByUser = new Map<string, Set<string>>();
+            for (const row of (allUploadedDocs as any[] | null) || []) {
+                if (!uploadedByUser.has(row.user_id)) uploadedByUser.set(row.user_id, new Set());
+                const set = uploadedByUser.get(row.user_id)!;
+                if (row.category) set.add(row.category);
+                if (row.doc_code) set.add(row.doc_code);
+            }
 
-                    const { data: uploadedDocs } = await supabase
-                        .from("user_documents")
-                        .select("category, doc_code")
-                        .eq("user_id", client.user_id);
+            const clients_with_doc_counts = clients_data.map((client) => {
+                const allRequiredCodes = new Set([...coreCodes, ...(dynamicByUser.get(client.user_id) || [])]);
+                const uploadedCodes = uploadedByUser.get(client.user_id) || new Set<string>();
+                const satisfied = Array.from(allRequiredCodes).filter(code => uploadedCodes.has(code)).length;
+                return {
+                    ...client,
+                    document_count: satisfied,
+                    total_required_docs: allRequiredCodes.size,
+                };
+            }) as ClientInfo[];
 
-                    const uploadedCodes = new Set([
-                        ...(uploadedDocs?.map(d => d.category).filter(Boolean) || []),
-                        ...(uploadedDocs?.map(d => d.doc_code).filter(Boolean) || [])
-                    ]);
-
-                    const satisfied = Array.from(allRequiredCodes).filter(code => uploadedCodes.has(code)).length;
-
-                    return {
-                        ...client,
-                        document_count: satisfied,
-                        total_required_docs: allRequiredCodes.size,
-                    };
-                })
-            ) as ClientInfo[];
-
-            const vaultIds = clients_data.map(c => c.id);
             if (vaultIds.length > 0) {
-                const pipelineMap = await getBulkLatestStatus(vaultIds);
-
-                const { data: sub_data } = await supabase
-                    .from("submissions")
-                    .select("user_id, status")
-                    .in("user_id", clients_with_doc_counts.map(c => c.user_id));
-                const submissionMap = new Map(sub_data?.map(s => [s.user_id, s.status]) || []);
-
-                const activityMap = await getBulkClientActivity(vaultIds);
-
                 const now = new Date();
                 const updated_clients = [...clients_with_doc_counts];
+                const declineOps: Promise<unknown>[] = [];
 
                 for (const client of updated_clients) {
                     client.pipeline_status = pipelineMap.get(client.id) ?? "created";
@@ -275,13 +311,24 @@ export default function ProspectsListPage() {
 
                     const isExempt = ["funded", "under_review"].includes(client.pipeline_status);
                     if (daysInactive >= 30 && !isExempt && client.pipeline_status !== "declined") {
-                        await updateLoanStatus(
-                            client.id,
-                            "declined",
-                            `System: Auto-declined due to ${daysInactive} days of inactivity.`
-                        );
+                        // Reflect the decline locally now so the filters are
+                        // correct, but persist in parallel after the loop instead
+                        // of blocking the first paint on a sequential await chain.
                         client.pipeline_status = "declined";
+                        declineOps.push(
+                            updateLoanStatus(
+                                client.id,
+                                "declined",
+                                `System: Auto-declined due to ${daysInactive} days of inactivity.`
+                            )
+                        );
                     }
+                }
+
+                if (declineOps.length > 0) {
+                    void Promise.all(declineOps).catch(e =>
+                        console.error("Auto-decline batch failed:", e)
+                    );
                 }
 
                 // Drop funded files — those belong to the Clients book, not Prospects.
@@ -348,28 +395,24 @@ export default function ProspectsListPage() {
                     </p>
                 </div>
                 <div className="flex items-center gap-4 flex-wrap">
-                    {/* Admin scope toggle */}
+                    {/* Admin advisor filter — pick All, the admin's own book, or
+                        any specific advisor. */}
                     {user_role === "admin" && (
-                        <div className="bg-surface-container-low p-1 rounded-xl border border-outline-variant/30 flex shadow-inner">
-                            <button
-                                onClick={() => set_admin_scope("all")}
-                                className={clsx(
-                                    "px-4 py-2 rounded-lg text-xs font-bold transition-all",
-                                    admin_scope === "all" ? "bg-white text-primary shadow-sm" : "text-outline hover:text-on-surface"
-                                )}
+                        <div className="relative">
+                            <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-outline text-base">
+                                badge
+                            </span>
+                            <select
+                                value={selected_advisor_id}
+                                onChange={(e) => set_selected_advisor_id(e.target.value)}
+                                className="bg-surface-container-low border border-outline-variant/30 rounded-xl pl-10 pr-4 py-2.5 text-xs font-bold text-on-surface shadow-inner cursor-pointer hover:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
                             >
-                                All Prospects
-                            </button>
-                            <button
-                                onClick={() => set_admin_scope("mine")}
-                                className={clsx(
-                                    "px-4 py-2 rounded-lg text-xs font-bold transition-all",
-                                    admin_scope === "mine" ? "bg-white text-primary shadow-sm" : "text-outline hover:text-on-surface"
-                                )}
-                                title={!my_advisor_id ? "No advisor profile linked to your admin account" : undefined}
-                            >
-                                My Prospects
-                            </button>
+                                <option value="all">All Advisors</option>
+                                {my_advisor_id && <option value="mine">My Prospects</option>}
+                                {advisors.map((a) => (
+                                    <option key={a.id} value={a.id}>{a.name}</option>
+                                ))}
+                            </select>
                         </div>
                     )}
 

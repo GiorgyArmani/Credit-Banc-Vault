@@ -148,23 +148,36 @@ function DashboardContent() {
     })();
   }, [supabase]);
 
-  // Handle tour auto-start
+  // Handle tour auto-start.
+  //   1. Explicit ?tour=true (e.g. linked from onboarding) always runs it.
+  //   2. Otherwise auto-run ONCE on a client's first dashboard visit — confused
+  //      first-timers get the upload walkthrough without hunting for the button.
+  //      A localStorage flag keeps it to a single auto-run; the "Website Tour"
+  //      button is always available to replay it.
+  const TOUR_SEEN_KEY = 'cb-dashboard-tour-seen';
   useEffect(() => {
-    const isTourRequested = searchParams?.get('tour') === 'true';
-    if (isTourRequested && allComponentsReady) {
-      // Small delay to ensure components are rendered
-      const timer = setTimeout(() => {
-        if (typeof (window as any).startWebsiteTour === 'function') {
-          (window as any).startWebsiteTour();
+    if (!allComponentsReady) return;
+    if (typeof window === 'undefined') return;
 
-          // Clear the parameter from the URL without refresh
+    const isTourRequested = searchParams?.get('tour') === 'true';
+    const hasSeenTour = window.localStorage.getItem(TOUR_SEEN_KEY) === '1';
+    if (!isTourRequested && hasSeenTour) return;
+
+    // Small delay to ensure components are rendered.
+    const timer = setTimeout(() => {
+      if (typeof (window as any).startWebsiteTour === 'function') {
+        (window as any).startWebsiteTour();
+        window.localStorage.setItem(TOUR_SEEN_KEY, '1');
+
+        if (isTourRequested) {
+          // Clear the parameter from the URL without refresh.
           const url = new URL(window.location.href);
           url.searchParams.delete('tour');
           window.history.replaceState({}, '', url.pathname + url.search);
         }
-      }, 500); // Reduced delay as we already checked for readiness
-      return () => clearTimeout(timer);
-    }
+      }
+    }, 500); // Reduced delay as we already checked for readiness
+    return () => clearTimeout(timer);
   }, [searchParams, allComponentsReady]);
 
   return (
@@ -268,6 +281,10 @@ function DashboardContent() {
               <ProfileDisplay onLoad={onProfileLoad} />
             </CollapsibleSection>
 
+            {/* id="tour-progress" anchors the website tour to the pipeline.
+                Wrapped in a plain div (not the CollapsibleSection) so the anchor
+                survives even when the client collapses the section. */}
+            <div id="tour-progress">
             <CollapsibleSection
               clientId={vaultId || 'self'}
               slug="pipeline"
@@ -289,7 +306,10 @@ function DashboardContent() {
                 </CardContent>
               </Card>
             </CollapsibleSection>
+            </div>
 
+            {/* id="tour-vault" anchors the tour to the document vault. */}
+            <div id="tour-vault">
             <CollapsibleSection
               clientId={vaultId || 'self'}
               slug="vault"
@@ -318,6 +338,7 @@ function DashboardContent() {
                 </CardContent>
               </Card>
             </CollapsibleSection>
+            </div>
 
             {isVaultSubmitted && <MyScoreIQCarousel />}
           </div>
