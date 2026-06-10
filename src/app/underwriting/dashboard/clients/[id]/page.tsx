@@ -54,6 +54,7 @@ import { toast } from "sonner";
 import clsx from "clsx";
 import { format } from "date-fns";
 import { LoanFundedDialog } from "@/components/loan-funded-dialog";
+import { ShareWithLenderButton } from "@/components/share/share-with-lender-button";
 import { getClientPipelineHistory, updateLoanStatus, type LoanStatus, type PipelineStatusEntry } from "@/app/actions/pipeline";
 import { LoanPipelineFull, LoanPipelineBadge, PIPELINE_STEPS } from "@/components/loan-pipeline-status";
 import { getBulkClientActivity } from "@/app/actions/advisor";
@@ -1308,6 +1309,12 @@ export default function UnderwritingClientDetailsPage() {
                             <ExternalLink className="w-3 h-3 mr-1.5" />
                             Match Tool
                         </Button>
+                        <ShareWithLenderButton
+                            clientId={client_id}
+                            businessProfileId={active_business_id}
+                            triggerLabel="Share with Lender"
+                            className="h-8 rounded-xl text-[9px] font-black uppercase tracking-widest border border-slate-200 hover:bg-slate-50 text-slate-700 px-3"
+                        />
                     </div>
                 </CardHeader>
                 <CardContent className="p-0">

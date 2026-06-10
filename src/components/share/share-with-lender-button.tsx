@@ -1,0 +1,302 @@
+"use client";
+
+import { useState } from "react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Share2, Loader2, Copy, Check, Trash2, Link as LinkIcon } from "lucide-react";
+import { toast } from "sonner";
+import clsx from "clsx";
+
+interface ShareLink {
+  id: string;
+  token: string;
+  label: string | null;
+  expires_at: string;
+  revoked_at: string | null;
+  view_count: number;
+  last_viewed_at: string | null;
+  created_at: string;
+}
+
+interface Props {
+  clientId: string;
+  businessProfileId: string | null;
+  /** Classes for the trigger button so it blends into its host (grid vs toolbar). */
+  className?: string;
+  triggerLabel?: string;
+}
+
+const EXPIRY_OPTIONS = [7, 14, 30] as const;
+
+function link_status(l: ShareLink): { label: string; tone: string } {
+  if (l.revoked_at) return { label: "Revoked", tone: "bg-slate-100 text-slate-500" };
+  if (new Date(l.expires_at).getTime() < Date.now())
+    return { label: "Expired", tone: "bg-amber-100 text-amber-700" };
+  return { label: "Active", tone: "bg-emerald-100 text-emerald-700" };
+}
+
+function format_date(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+export function ShareWithLenderButton({
+  clientId,
+  businessProfileId,
+  className,
+  triggerLabel = "Share with Lender",
+}: Props) {
+  const [open, set_open] = useState(false);
+  const [links, set_links] = useState<ShareLink[]>([]);
+  const [loading_links, set_loading_links] = useState(false);
+  const [generating, set_generating] = useState(false);
+  const [expiry_days, set_expiry_days] = useState<number>(14);
+  const [lender_label, set_lender_label] = useState("");
+  const [copied_id, set_copied_id] = useState<string | null>(null);
+  const [revoking_id, set_revoking_id] = useState<string | null>(null);
+
+  function build_url(token: string): string {
+    // Browser origin → respects whatever public host the proxy serves.
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    return `${origin}/share/${token}`;
+  }
+
+  async function load_links() {
+    set_loading_links(true);
+    try {
+      const qs = new URLSearchParams({ client_id: clientId });
+      if (businessProfileId) qs.set("business_profile_id", businessProfileId);
+      const res = await fetch(`/api/share-links?${qs.toString()}`);
+      const data = await res.json();
+      if (res.ok && data.success) set_links(data.links ?? []);
+    } catch (err) {
+      console.error("load share links error:", err);
+    } finally {
+      set_loading_links(false);
+    }
+  }
+
+  function handle_open(next: boolean) {
+    set_open(next);
+    if (next) load_links();
+  }
+
+  async function copy_link(token: string, id: string) {
+    try {
+      await navigator.clipboard.writeText(build_url(token));
+      set_copied_id(id);
+      toast.success("Link copied to clipboard");
+      setTimeout(() => set_copied_id((c) => (c === id ? null : c)), 2000);
+    } catch {
+      toast.error("Couldn't copy — copy it manually");
+    }
+  }
+
+  async function generate() {
+    set_generating(true);
+    try {
+      const res = await fetch("/api/share-links", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          client_id: clientId,
+          business_profile_id: businessProfileId,
+          expires_in_days: expiry_days,
+          label: lender_label.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        toast.error(data?.error || "Failed to create link");
+        return;
+      }
+      set_links((prev) => [data.link, ...prev]);
+      set_lender_label("");
+      await copy_link(data.link.token, data.link.id);
+    } catch (err) {
+      console.error("generate share link error:", err);
+      toast.error("An unexpected error occurred");
+    } finally {
+      set_generating(false);
+    }
+  }
+
+  async function revoke(id: string) {
+    set_revoking_id(id);
+    try {
+      const res = await fetch(`/api/share-links/${id}/revoke`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        toast.error(data?.error || "Failed to revoke link");
+        return;
+      }
+      set_links((prev) =>
+        prev.map((l) => (l.id === id ? { ...l, revoked_at: new Date().toISOString() } : l))
+      );
+      toast.success("Link revoked");
+    } catch (err) {
+      console.error("revoke share link error:", err);
+      toast.error("An unexpected error occurred");
+    } finally {
+      set_revoking_id(null);
+    }
+  }
+
+  return (
+    <>
+      <button
+        onClick={() => handle_open(true)}
+        className={clsx(
+          "flex items-center justify-center gap-2 transition-colors",
+          className ??
+            "px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl"
+        )}
+      >
+        <Share2 className="h-4 w-4" />
+        {triggerLabel}
+      </button>
+
+      <Dialog open={open} onOpenChange={handle_open}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Share documents with a lender</DialogTitle>
+            <DialogDescription>
+              Generates a secure link to this client&apos;s <strong>approved</strong> documents for
+              the selected business. Anyone with the link can view and download until it expires.
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* Generate */}
+          <div className="rounded-2xl border border-slate-200 p-4 space-y-3">
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold uppercase tracking-widest text-slate-400">
+                Lender name (optional)
+              </label>
+              <Input
+                value={lender_label}
+                onChange={(e) => set_lender_label(e.target.value)}
+                placeholder="e.g. LG Funding"
+                maxLength={120}
+              />
+            </div>
+            <div className="flex items-end gap-3">
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold uppercase tracking-widest text-slate-400">
+                  Expires in
+                </label>
+                <select
+                  value={expiry_days}
+                  onChange={(e) => set_expiry_days(parseInt(e.target.value))}
+                  className="h-10 text-sm font-semibold border border-slate-200 rounded-lg px-3 bg-white text-slate-700"
+                >
+                  {EXPIRY_OPTIONS.map((d) => (
+                    <option key={d} value={d}>
+                      {d} days
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <Button
+                onClick={generate}
+                disabled={generating}
+                className="ml-auto bg-emerald-600 hover:bg-emerald-700 text-white min-w-[150px]"
+              >
+                {generating ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Generating…
+                  </>
+                ) : (
+                  <>
+                    <LinkIcon className="h-4 w-4 mr-2" />
+                    Generate link
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+
+          {/* Existing links */}
+          <div className="space-y-2 max-h-[280px] overflow-y-auto">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400 px-1">
+              Links
+            </p>
+            {loading_links ? (
+              <div className="py-6 text-center">
+                <Loader2 className="h-5 w-5 text-emerald-500 animate-spin mx-auto" />
+              </div>
+            ) : links.length === 0 ? (
+              <p className="text-sm text-slate-400 py-4 text-center">No links yet.</p>
+            ) : (
+              links.map((l) => {
+                const status = link_status(l);
+                const is_active = !l.revoked_at && new Date(l.expires_at).getTime() >= Date.now();
+                return (
+                  <div
+                    key={l.id}
+                    className="flex items-center justify-between gap-2 rounded-xl border border-slate-100 bg-slate-50/50 p-3"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold text-slate-800 truncate">
+                          {l.label || "Untitled link"}
+                        </span>
+                        <span
+                          className={clsx(
+                            "text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full",
+                            status.tone
+                          )}
+                        >
+                          {status.label}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Expires {format_date(l.expires_at)} · {l.view_count} view
+                        {l.view_count === 1 ? "" : "s"}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {is_active && (
+                        <button
+                          onClick={() => copy_link(l.token, l.id)}
+                          title="Copy link"
+                          className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"
+                        >
+                          {copied_id === l.id ? (
+                            <Check className="h-4 w-4 text-emerald-600" />
+                          ) : (
+                            <Copy className="h-4 w-4" />
+                          )}
+                        </button>
+                      )}
+                      {is_active && (
+                        <button
+                          onClick={() => revoke(l.id)}
+                          disabled={revoking_id === l.id}
+                          title="Revoke link"
+                          className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
+                        >
+                          {revoking_id === l.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-4 w-4" />
+                          )}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}

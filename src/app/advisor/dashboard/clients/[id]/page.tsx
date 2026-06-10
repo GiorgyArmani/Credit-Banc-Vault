@@ -2012,6 +2012,7 @@ export default function AdvisorClientDetailsPage() {
                 <ClientProfileHeader
                     client_profile={displayed_profile}
                     completion_percentage={completion_percentage}
+                    active_business_profile_id={active_business_id}
                     is_resending={is_resending}
                     is_generating_magic_link={is_generating_magic_link}
                     is_sending_password_reset={is_sending_password_reset}

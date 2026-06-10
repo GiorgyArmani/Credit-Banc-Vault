@@ -6,6 +6,7 @@ import clsx from "clsx";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { REFERRAL_PARTNERS } from "@/data/referral-partners";
+import { ShareWithLenderButton } from "@/components/share/share-with-lender-button";
 
 interface ClientProfile {
     id: string;
@@ -33,6 +34,8 @@ interface ClientProfile {
 interface ClientProfileHeaderProps {
     client_profile: ClientProfile;
     completion_percentage: number;
+    /** Active business tab — scopes the lender share link to that business's approved docs. */
+    active_business_profile_id: string | null;
     is_resending: boolean;
     is_generating_magic_link: boolean;
     is_sending_password_reset: boolean;
@@ -89,6 +92,7 @@ function parse_credit_score(score: string): { min: number; max: number; value: n
 export function ClientProfileHeader({
     client_profile,
     completion_percentage,
+    active_business_profile_id,
     is_resending,
     is_generating_magic_link,
     is_sending_password_reset,
@@ -192,6 +196,12 @@ export function ClientProfileHeader({
                             )}
                             {is_sending_password_reset ? "Sending…" : "Send Reset Link"}
                         </button>
+                        <ShareWithLenderButton
+                            clientId={client_profile.id}
+                            businessProfileId={active_business_profile_id}
+                            triggerLabel="Share with Lender"
+                            className="col-span-2 px-4 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-sm font-semibold rounded-xl"
+                        />
                         {!client_profile.contract_completed ? (
                             <button
                                 onClick={on_add_funding_app}
