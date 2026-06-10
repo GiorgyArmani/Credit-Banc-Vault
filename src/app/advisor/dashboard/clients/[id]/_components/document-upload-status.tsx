@@ -16,7 +16,10 @@ import {
     X,
     FileText,
     Star,
+    RefreshCw,
+    Loader2,
 } from "lucide-react";
+import { useState } from "react";
 import clsx from "clsx";
 
 // ── Type definitions (mirrored from page.tsx) ────────────────────────────────
@@ -40,9 +43,12 @@ interface DocumentUploadStatusProps {
     approvals: Set<string>;
     expanded_categories: Set<string>;
     completion_percentage: number;
+    // Code currently being re-requested (drives the per-field spinner). null when idle.
+    requesting_again_code?: string | null;
     // callbacks
     on_toggle_expand: (code: string) => void;
     on_request_docs: () => void;
+    on_request_again: (doc: { code: string; label: string }, statement_months?: number) => void;
     on_upload: (code: string, label: string) => void;
     on_approve: (doc: { code: string; label: string }) => void;
     on_reject: (doc: { code: string; label: string }) => void;
@@ -139,11 +145,13 @@ function DocCategoryRow({
     documents,
     approvals,
     is_expanded,
+    is_requesting_again,
     on_toggle_expand,
     on_upload,
     on_approve,
     on_reject,
     on_remove_request,
+    on_request_again,
     on_preview,
     on_download,
     on_download_all,
@@ -154,11 +162,13 @@ function DocCategoryRow({
     documents: UserDocument[];
     approvals: Set<string>;
     is_expanded: boolean;
+    is_requesting_again: boolean;
     on_toggle_expand: () => void;
     on_upload: () => void;
     on_approve: () => void;
     on_reject: () => void;
     on_remove_request: () => void;
+    on_request_again: (statement_months?: number) => void;
     on_preview: (doc: UserDocument) => void;
     on_download: (doc: UserDocument) => void;
     on_download_all: (docs: UserDocument[]) => void;
@@ -168,6 +178,10 @@ function DocCategoryRow({
     const category_docs = documents.filter((d) => d.category === doc_type.code);
     const has_docs = category_docs.length > 0;
     const is_approved = approvals.has(doc_type.code);
+    const is_bank_statements = doc_type.code === "business_bank_statements";
+    // Local month picker for re-requesting bank statements (advisor may need a
+    // different period than the original request).
+    const [again_months, set_again_months] = useState(12);
     const status: "approved" | "uploaded" | "pending" = is_approved
         ? "approved"
         : has_docs
@@ -267,6 +281,37 @@ function DocCategoryRow({
                         Upload
                     </button>
 
+                    {/* Request again — re-asks the client for more on this same
+                        field (e.g. additional tax returns / bank statements),
+                        even after the file has been submitted to UW. Re-notifies
+                        the client and reopens the requirement. */}
+                    {is_bank_statements && (
+                        <select
+                            value={again_months}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => set_again_months(parseInt(e.target.value))}
+                            className="h-8 text-[10px] font-bold border border-slate-200 rounded-lg px-2 bg-white text-slate-600 shrink-0"
+                            title="Months to request"
+                        >
+                            {[6, 12, 18, 24].map((m) => (
+                                <option key={m} value={m}>{m} mo</option>
+                            ))}
+                        </select>
+                    )}
+                    <button
+                        onClick={(e) => { e.stopPropagation(); on_request_again(is_bank_statements ? again_months : undefined); }}
+                        disabled={is_requesting_again}
+                        className="h-8 px-3 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg text-[9px] font-black uppercase tracking-widest transition-colors flex items-center gap-1 disabled:opacity-60"
+                        title="Re-request this document from the client"
+                    >
+                        {is_requesting_again ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                            <RefreshCw className="h-3 w-3" />
+                        )}
+                        Request Again
+                    </button>
+
                     {/* Remove request (only if no docs) */}
                     {!has_docs && (
                         <button
@@ -326,8 +371,10 @@ export function DocumentUploadStatus({
     approvals,
     expanded_categories,
     completion_percentage,
+    requesting_again_code,
     on_toggle_expand,
     on_request_docs,
+    on_request_again,
     on_upload,
     on_approve,
     on_reject,
@@ -393,11 +440,13 @@ export function DocumentUploadStatus({
                         documents={documents}
                         approvals={approvals}
                         is_expanded={expanded_categories.has(doc_type.code)}
+                        is_requesting_again={requesting_again_code === doc_type.code}
                         on_toggle_expand={() => on_toggle_expand(doc_type.code)}
                         on_upload={() => on_upload(doc_type.code, doc_type.label)}
                         on_approve={() => on_approve(doc_type)}
                         on_reject={() => on_reject(doc_type)}
                         on_remove_request={() => on_remove_request(doc_type)}
+                        on_request_again={(months) => on_request_again(doc_type, months)}
                         on_preview={on_preview}
                         on_download={on_download}
                         on_download_all={on_download_all}

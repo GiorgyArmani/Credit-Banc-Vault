@@ -147,24 +147,31 @@ interface LenderAssignment {
     admin_review_notes: string | null;
     admin_reviewed_at: string | null;
     source: 'match_tool' | 'admin_manual';
-    status: 'pending' | 'submitted';
+    status: 'pending' | 'submitted' | 'approved_by_lender' | 'declined_by_lender' | 'funded';
 }
 
-// Five effective UI states for a lender assignment. The matching engine
-// proposes (decision), admin clears for outreach (admin_review), then UW
-// physically pushes the file out (status). The label rendered to UW is the
-// derived combination of those three columns.
+// Effective UI states for a lender assignment. The matching engine proposes
+// (decision), admin clears for outreach (admin_review), UW physically pushes
+// the file out (status='submitted'), then records the lender's verdict
+// (status='approved_by_lender' | 'declined_by_lender'). The label rendered to
+// UW is the derived combination of those columns.
 type LenderRowState =
     | 'rejected_by_matcher'   // decision = rejected
     | 'skipped_by_admin'       // decision = approved, admin_review = rejected
     | 'awaiting_admin'         // decision = approved, admin_review = pending
     | 'ready_to_submit'        // all approved, status = pending
-    | 'submitted';             // status = submitted
+    | 'submitted'              // status = submitted, awaiting lender
+    | 'approved_by_lender'     // lender approved the submission
+    | 'declined_by_lender'     // lender declined the submission
+    | 'funded';                // deal funded
 
 function derive_lender_row_state(a: LenderAssignment): LenderRowState {
     if (a.decision !== 'approved') return 'rejected_by_matcher';
     if (a.admin_review === 'rejected') return 'skipped_by_admin';
     if (a.admin_review !== 'approved') return 'awaiting_admin';
+    if (a.status === 'funded') return 'funded';
+    if (a.status === 'approved_by_lender') return 'approved_by_lender';
+    if (a.status === 'declined_by_lender') return 'declined_by_lender';
     if (a.status === 'submitted') return 'submitted';
     return 'ready_to_submit';
 }
@@ -258,6 +265,37 @@ export default function UnderwritingClientDetailsPage() {
             await fetch_lender_assignments();
         } catch (err: any) {
             console.error('mark_assignment_submitted error:', err);
+            toast.error('An unexpected error occurred');
+        } finally {
+            set_submitting_assignment_id(null);
+        }
+    }
+
+    // Move a submitted file around the lender lifecycle (the status dropdown).
+    // Drives status to submitted / approved_by_lender / declined_by_lender and
+    // notifies admins so the admin portal mirrors the outcome.
+    type SubmittedLifecycleStatus = 'submitted' | 'approved_by_lender' | 'declined_by_lender';
+    async function mark_assignment_status(assignment_id: string, status: SubmittedLifecycleStatus) {
+        set_submitting_assignment_id(assignment_id);
+        try {
+            const res = await fetch(`/api/lender-assignments/${assignment_id}/response`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status }),
+            });
+            const result = await res.json();
+            if (!res.ok || !result?.success) {
+                toast.error(result?.error || 'Failed to update lender status');
+                return;
+            }
+            const label =
+                status === 'approved_by_lender' ? 'Marked as approved by lender' :
+                status === 'declined_by_lender' ? 'Marked as declined by lender' :
+                'Marked as awaiting lender';
+            toast.success(label);
+            await fetch_lender_assignments();
+        } catch (err: any) {
+            console.error('mark_assignment_status error:', err);
             toast.error('An unexpected error occurred');
         } finally {
             set_submitting_assignment_id(null);
@@ -1228,6 +1266,9 @@ export default function UnderwritingClientDetailsPage() {
             awaiting_admin:      { label: 'Awaiting admin',      classes: 'bg-amber-100 text-amber-700 hover:bg-amber-100' },
             ready_to_submit:     { label: 'Ready to submit',     classes: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100' },
             submitted:           { label: 'Submitted · awaiting lender', classes: 'bg-blue-100 text-blue-700 hover:bg-blue-100' },
+            approved_by_lender:  { label: 'Approved by lender',  classes: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100' },
+            declined_by_lender:  { label: 'Declined by lender',  classes: 'bg-rose-100 text-rose-700 hover:bg-rose-100' },
+            funded:              { label: 'Funded',              classes: 'bg-violet-100 text-violet-700 hover:bg-violet-100' },
         };
 
         return (
@@ -1275,15 +1316,25 @@ export default function UnderwritingClientDetailsPage() {
                             const row_state = derive_lender_row_state(assign);
                             const badge = STATE_BADGE[row_state];
                             const is_submitting_this = submitting_assignment_id === assign.id;
+                            // Rows that are out the door (and not yet funded) get the inline
+                            // status dropdown instead of a static badge.
+                            const is_lifecycle_row =
+                                row_state === 'submitted' ||
+                                row_state === 'approved_by_lender' ||
+                                row_state === 'declined_by_lender';
                             const tile_classes =
                                 row_state === 'submitted'           ? 'bg-blue-500 text-white' :
+                                row_state === 'approved_by_lender'  ? 'bg-emerald-500 text-white' :
                                 row_state === 'ready_to_submit'     ? 'bg-emerald-500 text-white' :
+                                row_state === 'funded'              ? 'bg-violet-500 text-white' :
                                 row_state === 'awaiting_admin'      ? 'bg-amber-500 text-white' :
                                 row_state === 'skipped_by_admin'    ? 'bg-orange-500 text-white' :
                                                                        'bg-rose-500 text-white';
                             const tile_glyph =
                                 row_state === 'submitted'           ? '→' :
+                                row_state === 'approved_by_lender'  ? '✓' :
                                 row_state === 'ready_to_submit'     ? '✓' :
+                                row_state === 'funded'              ? '★' :
                                 row_state === 'awaiting_admin'      ? '…' :
                                                                        '✕';
 
@@ -1333,13 +1384,38 @@ export default function UnderwritingClientDetailsPage() {
                                                 )}
                                             </Button>
                                         )}
-                                        <div className="text-right">
-                                            <Badge className={clsx(
-                                                "font-black text-[9px] uppercase tracking-widest px-3 py-1",
-                                                badge.classes
-                                            )}>
-                                                {badge.label}
-                                            </Badge>
+                                        <div className="text-right flex flex-col items-end">
+                                            {is_lifecycle_row ? (
+                                                // Submitted-lifecycle rows: the status pill is a dropdown so
+                                                // UW can record the lender's verdict (or correct it) inline.
+                                                <div className="relative inline-flex items-center">
+                                                    <select
+                                                        value={assign.status}
+                                                        disabled={is_submitting_this}
+                                                        onChange={(e) => mark_assignment_status(assign.id, e.target.value as 'submitted' | 'approved_by_lender' | 'declined_by_lender')}
+                                                        className={clsx(
+                                                            "appearance-none font-black text-[9px] uppercase tracking-widest pl-3 pr-7 py-1.5 rounded-md border-0 cursor-pointer outline-none disabled:opacity-60",
+                                                            badge.classes
+                                                        )}
+                                                    >
+                                                        <option value="submitted">Submitted · Awaiting Lender</option>
+                                                        <option value="approved_by_lender">Lender Approved</option>
+                                                        <option value="declined_by_lender">Lender Declined</option>
+                                                    </select>
+                                                    {is_submitting_this ? (
+                                                        <Loader2 className="h-3 w-3 animate-spin absolute right-2 pointer-events-none" />
+                                                    ) : (
+                                                        <ChevronDown className="h-3 w-3 absolute right-2 pointer-events-none opacity-70" />
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <Badge className={clsx(
+                                                    "font-black text-[9px] uppercase tracking-widest px-3 py-1",
+                                                    badge.classes
+                                                )}>
+                                                    {badge.label}
+                                                </Badge>
+                                            )}
                                             <p className="text-[8px] font-bold text-slate-300 mt-1 uppercase tracking-tighter">
                                                 Assigned {format(new Date(assign.assigned_at), 'MMM d')}
                                             </p>

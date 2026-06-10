@@ -102,7 +102,7 @@ export interface UnderwritingVaultReadyData {
 }
 
 /**
- * Interface for "admin approved lenders for outreach" notification data
+ * Interface for "admin approved lenders for submission" notification data
  */
 export interface LenderReviewApprovedNotificationData {
   underwriter_email: string;
@@ -1886,8 +1886,8 @@ export function generate_lender_review_approved_html(
           <!-- Header -->
           <tr>
             <td style="padding: 40px 40px 20px; text-align: center; background-color: #065f46;">
-              <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 700;">Lenders Cleared for Outreach</h1>
-              <p style="margin: 8px 0 0; color: #a7f3d0; font-size: 13px; font-weight: 500;">${count_label} ready to contact</p>
+              <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 700;">Lenders Cleared for Submission</h1>
+              <p style="margin: 8px 0 0; color: #a7f3d0; font-size: 13px; font-weight: 500;">${count_label} ready to submit</p>
             </td>
           </tr>
 
@@ -1957,7 +1957,7 @@ export async function send_lender_review_approved_notification(
   const mail_options = {
     from: `${from_name} <${from_email}>`,
     to: recipient_email,
-    subject: `Lenders cleared for outreach: ${data.client_name} (${data.approved_lenders.length})`,
+    subject: `Lenders cleared for submissio: ${data.client_name} (${data.approved_lenders.length})`,
     html: html_content,
   };
 
@@ -2112,6 +2112,177 @@ export async function send_lender_match_ready_notification(data: LenderMatchRead
     return result;
   } catch (error) {
     console.error(`❌ SMTP Error sending lender-match-ready email to ${to}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * ============================================================================
+ * LENDER PIPELINE EVENT NOTIFICATIONS (submitted / lender approved / declined)
+ * ============================================================================
+ *
+ * One parametrized admin email covering the post-admin-review lifecycle of a
+ * single lender assignment:
+ *   • 'submitted'          — UW pushed the file out, awaiting the lender.
+ *   • 'approved_by_lender' — the lender approved the submission.
+ *   • 'declined_by_lender' — the lender declined the submission.
+ * Sent to all admins so the admin portal's lender status stays in sync with
+ * what UW records.
+ */
+
+export type LenderPipelineEvent = 'submitted' | 'approved_by_lender' | 'declined_by_lender';
+
+export interface LenderPipelineNotificationData {
+  /** Every admin recipient. The email goes to all of them at once. */
+  admin_emails: string[];
+  event: LenderPipelineEvent;
+  client_name: string;
+  company_name?: string;
+  lender_name: string;
+  specialty?: string | null;
+  /** Deep link to the admin client file (Lender Match — Admin Review card). */
+  client_profile_url: string;
+}
+
+const LENDER_PIPELINE_COPY: Record<
+  LenderPipelineEvent,
+  { header: string; accent: string; accent_soft: string; badge: string; subject: string; lead: (lender: string, client: string) => string }
+> = {
+  submitted: {
+    header: 'File Submitted to Lender',
+    accent: '#1d4ed8',
+    accent_soft: '#bfdbfe',
+    badge: 'Awaiting lender response',
+    subject: 'submitted to lender',
+    lead: (lender, client) =>
+      `Underwriting has submitted <strong>${client}</strong>'s file to <strong>${lender}</strong>. The submission is now awaiting the lender's decision.`,
+  },
+  approved_by_lender: {
+    header: 'Lender Approved the Submission',
+    accent: '#065f46',
+    accent_soft: '#a7f3d0',
+    badge: 'Approved by lender',
+    subject: 'approved by lender',
+    lead: (lender, client) =>
+      `<strong>${lender}</strong> has <strong>approved</strong> the submission for <strong>${client}</strong>.`,
+  },
+  declined_by_lender: {
+    header: 'Lender Declined the Submission',
+    accent: '#b91c1c',
+    accent_soft: '#fecaca',
+    badge: 'Declined by lender',
+    subject: 'declined by lender',
+    lead: (lender, client) =>
+      `<strong>${lender}</strong> has <strong>declined</strong> the submission for <strong>${client}</strong>.`,
+  },
+};
+
+export function generate_lender_pipeline_html(data: LenderPipelineNotificationData): string {
+  data = escape_email_strings(data);
+  const { event, client_name, company_name, lender_name, specialty, client_profile_url } = data;
+  const copy = LENDER_PIPELINE_COPY[event];
+  const lender_label = `${lender_name}${specialty ? ` (${specialty})` : ''}`;
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${copy.header}: ${client_name}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f6f9fc;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse;">
+    <tr>
+      <td align="center" style="padding: 40px 0;">
+        <table role="presentation" style="width: 600px; max-width: 100%; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+
+          <!-- Header -->
+          <tr>
+            <td style="padding: 40px 40px 20px; text-align: center; background-color: ${copy.accent};">
+              <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 700;">${copy.header}</h1>
+              <p style="margin: 8px 0 0; color: ${copy.accent_soft}; font-size: 13px; font-weight: 500;">${copy.badge}</p>
+            </td>
+          </tr>
+
+          <!-- Message -->
+          <tr>
+            <td style="padding: 40px 40px 20px;">
+              <p style="margin: 0 0 16px; color: #475569; font-size: 16px; line-height: 1.6;">
+                ${copy.lead(lender_label, client_name)}
+              </p>
+
+              <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px; margin-bottom: 24px;">
+                <p style="margin: 0 0 8px; color: #334155; font-size: 14px;"><strong>Client:</strong> ${client_name}</p>
+                ${company_name ? `<p style="margin: 0 0 8px; color: #334155; font-size: 14px;"><strong>Company:</strong> ${company_name}</p>` : ''}
+                <p style="margin: 0; color: #334155; font-size: 14px;"><strong>Lender:</strong> ${lender_label}</p>
+              </div>
+
+              <p style="margin: 0 0 24px; color: #475569; font-size: 16px; line-height: 1.6;">
+                Open the client file and check the <strong>Lender Match — Admin Review</strong> card to see the latest lender status.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Action Button -->
+          <tr>
+            <td style="padding: 0 40px 40px;" align="center">
+              <a href="${client_profile_url}" style="display: inline-block; background-color: ${copy.accent}; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-size: 16px; font-weight: 600;">
+                Open Client File
+              </a>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding: 40px; text-align: center; color: #94a3b8; font-size: 13px; line-height: 1.6; border-top: 1px solid #f1f5f9;">
+              <p style="margin: 0;">© ${new Date().getFullYear()} Credit Banc Vault. Confidential Internal Use Only.</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `;
+}
+
+/**
+ * Sends a lender-pipeline event notification to all admins at once. Non-fatal
+ * for the caller: logs and rethrows on SMTP error so the route can swallow it.
+ */
+export async function send_lender_pipeline_notification(data: LenderPipelineNotificationData) {
+  if (!data.admin_emails || data.admin_emails.length === 0) {
+    console.warn('send_lender_pipeline_notification: no admin emails to send to');
+    return null;
+  }
+
+  const transporter = create_smtp_transporter();
+
+  const from_email = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  const from_name = process.env.SMTP_FROM_NAME || 'Credit Banc Vault';
+  const to = data.admin_emails.join(', ');
+
+  const copy = LENDER_PIPELINE_COPY[data.event];
+  const html_content = generate_lender_pipeline_html(data);
+
+  const mail_options = {
+    from: `${from_name} <${from_email}>`,
+    to,
+    subject: `${data.lender_name} ${copy.subject}: ${data.client_name}`,
+    html: html_content,
+  };
+
+  console.log(`📧 Attempting to send lender-pipeline (${data.event}) email to: ${to}`);
+
+  try {
+    const result = await transporter.sendMail(mail_options);
+    console.log(`✅ SMTP Result for ${data.client_name} lender-pipeline ${data.event}:`, result.messageId);
+    return result;
+  } catch (error) {
+    console.error(`❌ SMTP Error sending lender-pipeline email to ${to}:`, error);
     throw error;
   }
 }

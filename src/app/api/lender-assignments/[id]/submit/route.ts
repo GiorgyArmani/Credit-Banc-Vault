@@ -17,6 +17,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { requireStaff } from '@/lib/auth/require-staff';
 import { slackPostMessage } from '@/lib/slack-api';
+import { notifyAdminsOfLenderPipelineEvent } from '@/lib/notifications/lender-pipeline';
 
 const supabase_admin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -81,6 +82,18 @@ export async function PATCH(
       console.error('lender-assignment submit update error:', update_error);
       return NextResponse.json({ error: update_error.message }, { status: 500 });
     }
+
+    // Trigger #1: notify admins that this specific lender was just submitted
+    // (in-app + email + Slack). Fire-and-forget — never block the transition.
+    void notifyAdminsOfLenderPipelineEvent(
+      {
+        id: existing.id,
+        client_id: (existing as any).client_id,
+        lender_name: (existing as any).lender_name,
+        specialty: (updated as any)?.specialty ?? null,
+      },
+      'submitted'
+    ).catch((e) => console.error('submit notify error (non-fatal):', e));
 
     // Trigger #2: if EVERY admin-approved lender for this client is now out the
     // door (status submitted / approved_by_lender / funded), post a Slack

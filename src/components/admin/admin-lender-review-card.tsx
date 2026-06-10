@@ -45,7 +45,22 @@ interface LenderAssignment {
     admin_review_notes: string | null;
     admin_reviewed_at: string | null;
     source: 'match_tool' | 'admin_manual';
+    status: 'pending' | 'submitted' | 'approved_by_lender' | 'declined_by_lender' | 'funded';
 }
+
+// The lender-side pipeline status, set by UW after admin clears a lender for
+// outreach: submitted → (approved | declined) by lender → funded. Rendered as
+// a secondary pill so admins see the lender's verdict without leaving the page.
+const LENDER_STATUS_PILL: Record<
+    LenderAssignment['status'],
+    { label: string; classes: string } | null
+> = {
+    pending:            null,
+    submitted:          { label: 'Submitted · awaiting lender', classes: 'bg-blue-100 text-blue-700 hover:bg-blue-100' },
+    approved_by_lender: { label: 'Approved by lender',          classes: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100' },
+    declined_by_lender: { label: 'Declined by lender',          classes: 'bg-rose-100 text-rose-700 hover:bg-rose-100' },
+    funded:             { label: 'Funded',                      classes: 'bg-violet-100 text-violet-700 hover:bg-violet-100' },
+};
 
 interface Props {
     clientId: string;
@@ -409,7 +424,7 @@ export function AdminLenderReviewCard({ clientId }: Props) {
                                                 </div>
                                             </div>
                                         </div>
-                                        <div className="text-right shrink-0">
+                                        <div className="text-right shrink-0 flex flex-col items-end gap-1.5">
                                             <Badge className={clsx(
                                                 "font-black text-[9px] uppercase tracking-widest px-3 py-1",
                                                 effective === 'approved' ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-100" :
@@ -418,6 +433,14 @@ export function AdminLenderReviewCard({ clientId }: Props) {
                                             )}>
                                                 {staged ? `${effective} (unsaved)` : effective}
                                             </Badge>
+                                            {LENDER_STATUS_PILL[a.status] && (
+                                                <Badge className={clsx(
+                                                    "font-black text-[9px] uppercase tracking-widest px-3 py-1",
+                                                    LENDER_STATUS_PILL[a.status]!.classes
+                                                )}>
+                                                    {LENDER_STATUS_PILL[a.status]!.label}
+                                                </Badge>
+                                            )}
                                             {a.admin_reviewed_at && !staged && (
                                                 <p className="text-[8px] font-bold text-slate-300 mt-1 uppercase tracking-tighter">
                                                     Reviewed {format(new Date(a.admin_reviewed_at), 'MMM d')}

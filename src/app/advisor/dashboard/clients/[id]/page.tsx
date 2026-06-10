@@ -342,6 +342,9 @@ export default function AdvisorClientDetailsPage() {
     const [is_requesting, set_is_requesting] = useState(false);
     // Bank statements only: how many months to request (others ignore it).
     const [request_statement_months, set_request_statement_months] = useState(12);
+    // doc_code currently being re-requested via the per-field "Request Again"
+    // button (drives that row's spinner). null when idle.
+    const [requesting_again_code, set_requesting_again_code] = useState<string | null>(null);
 
     // resend-credentials-state: Tracks loading state for credential resend
     const [is_resending, set_is_resending] = useState(false);
@@ -1550,6 +1553,40 @@ export default function AdvisorClientDetailsPage() {
         }
     }
 
+    // Re-request a document on an EXISTING field — used when more items are
+    // needed on a category that's already been requested (e.g. additional tax
+    // returns or extra months of bank statements), including after the file has
+    // been submitted to UW. Reuses requestDocuments, which re-activates the
+    // requirement, bumps statement_months, re-notifies the client, and reopens
+    // the submission status.
+    async function handle_request_again(doc: { code: string; label: string }, statement_months?: number) {
+        const type = all_doc_types.find((t) => t.code === doc.code);
+        if (!type) {
+            toast.error("Document type not found");
+            return;
+        }
+        set_requesting_again_code(doc.code);
+        try {
+            const result = await requestDocuments(
+                client_id,
+                [type.id],
+                active_business_id,
+                doc.code === "business_bank_statements" ? (statement_months ?? 12) : null,
+            );
+            if (result.success) {
+                toast.success(`Re-requested ${doc.label} from the client`);
+                fetch_client_details();
+            } else {
+                toast.error(result.error || "Failed to re-request document");
+            }
+        } catch (err: any) {
+            console.error("❌ Request again error:", err);
+            toast.error("An unexpected error occurred");
+        } finally {
+            set_requesting_again_code(null);
+        }
+    }
+
     async function handle_add_note() {
         if (!new_standalone_note.trim()) return;
 
@@ -2129,8 +2166,10 @@ export default function AdvisorClientDetailsPage() {
                             approvals={approvals}
                             expanded_categories={expanded_categories}
                             completion_percentage={completion_percentage}
+                            requesting_again_code={requesting_again_code}
                             on_toggle_expand={toggle_category_expansion}
                             on_request_docs={() => set_is_request_modal_open(true)}
+                            on_request_again={handle_request_again}
                             on_upload={(code, label) => {
                                 set_upload_doc_code(code);
                                 set_upload_doc_label(label);
