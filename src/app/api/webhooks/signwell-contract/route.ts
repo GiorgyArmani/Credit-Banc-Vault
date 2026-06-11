@@ -267,6 +267,35 @@ export async function POST(request: NextRequest) {
             if (!documentId) {
                 console.warn('⚠️ No document_id provided in payload, skipping PDF download');
             } else {
+                // Dedupe guard. The onboarding embed also calls /sync-contract
+                // for the same signed contract, and both paths insert a
+                // funding_application user_documents row. They race: this
+                // webhook can read contract_completed=false before sync-contract
+                // commits its update, then proceed and insert a SECOND identical
+                // row. Mirror sync-contract's guard — keyed on this user's
+                // funding_application doc with the same Signwell document_id, so
+                // a different contract (e.g. a new business) is NOT deduped.
+                const { data: alreadySynced } = await supabase
+                    .from('user_documents')
+                    .select('id')
+                    .eq('user_id', client_data.user_id)
+                    .eq('doc_code', 'funding_application')
+                    .contains('metadata', { document_id: documentId })
+                    .limit(1);
+                if (alreadySynced && alreadySynced.length > 0) {
+                    console.log(`⏩ Funding application for document ${documentId} already synced — skipping duplicate insert.`);
+                    return NextResponse.json(
+                        {
+                            success: true,
+                            message: 'Contract completed; funding application already synced',
+                            client_email,
+                            client_name: client_data.client_name,
+                            already_synced: true,
+                        },
+                        { status: 200 }
+                    );
+                }
+
                 const { blob } = await signWell.getCompletedPDF({
                     documentId,
                     urlOnly: false,

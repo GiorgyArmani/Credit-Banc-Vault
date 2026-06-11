@@ -21,6 +21,7 @@ export function DataVaultForm({ onComplete }: DataVaultFormProps) {
     const [formData, setFormData] = useState({
         ein: "",
         ssn: "",
+        dob: "",
         industry: "",
         homeAddress: "",
         businessAddress: "",
@@ -29,8 +30,15 @@ export function DataVaultForm({ onComplete }: DataVaultFormProps) {
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
 
-        if (!formData.ein || !formData.ssn || !formData.industry || !formData.homeAddress || !formData.businessAddress) {
+        if (!formData.ein || !formData.ssn || !formData.dob || !formData.industry || !formData.homeAddress || !formData.businessAddress) {
             toast.error("Please fill in all required fields.")
+            return
+        }
+
+        // Validate DOB is a real, past date (and not absurdly old).
+        const dobDate = new Date(formData.dob)
+        if (isNaN(dobDate.getTime()) || dobDate >= new Date() || dobDate.getFullYear() < 1900) {
+            toast.error("Please enter a valid date of birth.")
             return
         }
 
@@ -156,6 +164,23 @@ export function DataVaultForm({ onComplete }: DataVaultFormProps) {
                                     }
                                 }}
                                 maxLength={11}
+                                required
+                                className="h-14 rounded-xl border-emerald-100 bg-white/50 focus-visible:ring-emerald-500/20 font-bold text-emerald-950 placeholder:text-emerald-950/20 shadow-sm"
+                            />
+                        </div>
+                        <div className="space-y-3">
+                            <Label
+                                htmlFor="dob"
+                                className="text-[10px] font-black uppercase tracking-widest text-emerald-900/60 ml-1"
+                            >
+                                Date of Birth <span className="text-red-400">*</span>
+                            </Label>
+                            <Input
+                                id="dob"
+                                type="date"
+                                value={formData.dob}
+                                onChange={(e) => setFormData(prev => ({ ...prev, dob: e.target.value }))}
+                                max={new Date().toISOString().split('T')[0]}
                                 required
                                 className="h-14 rounded-xl border-emerald-100 bg-white/50 focus-visible:ring-emerald-500/20 font-bold text-emerald-950 placeholder:text-emerald-950/20 shadow-sm"
                             />

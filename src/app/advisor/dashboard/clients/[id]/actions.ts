@@ -240,6 +240,30 @@ export async function requestDocuments(clientId: string, documentIds: string[], 
             throw new Error("Failed to update document requirements in database");
         }
 
+        // 5a. Re-requesting a document means it must be (re)reviewed. Clear any
+        // existing advisor approval for these codes (scoped to the same business
+        // as the request) so the field drops from "Advisor Approved" back to
+        // "waiting approval" (Ready for Review) until the new upload is approved.
+        for (const def of docDefs) {
+            const code: string | undefined = (def as any).code;
+            if (!code) continue;
+            const bizId = isClientScopedDoc(code) ? primaryId : defaultBusinessProfileId;
+            const clearQuery = supabaseAdmin
+                .from("document_category_approvals")
+                .delete()
+                .eq("client_vault_id", clientId)
+                .eq("doc_code", code);
+            if (bizId) {
+                clearQuery.eq("business_profile_id", bizId);
+            } else {
+                clearQuery.is("business_profile_id", null);
+            }
+            const { error: clearErr } = await clearQuery;
+            if (clearErr) {
+                console.error(`Failed to clear approval for ${code} (non-fatal):`, clearErr);
+            }
+        }
+
         // 5. Update submission status to 'documents_requested'
         // This ensures the vault is no longer marked as 'locked' or 'submitted'
         const { error: statusError } = await supabaseAdmin
@@ -1078,9 +1102,9 @@ export async function removeRequestedDocument(clientId: string, documentCode: st
         if (deleteError) throw new Error(`Failed to remove document request: ${deleteError.message}`);
 
         // 5. Check if completion is now 100% and update status if needed
-        // (Optional: we could leave it as is and let the UI/advisor handle it, 
+        // (Optional: we could leave it as is and let the UI/advisor handle it,
         // but for a truly dynamic feel, we might want to reset if it was 'documents_requested')
-        
+
         // 6. Revalidate
         revalidatePath(`/advisor/dashboard/clients/${clientId}`);
 
@@ -1163,6 +1187,20 @@ export async function approveDocumentCategory(clientId: string, docCode: string,
         if (client.ghl_contact_id && process.env.GHL_TOKEN) {
             const { syncOutstandingDocuments } = await import("@/lib/outstanding-documents");
             await syncOutstandingDocuments(client.user_id, client.ghl_contact_id, process.env.GHL_TOKEN);
+
+            // If this approval was the last one — every required doc is now
+            // advisor-approved — tag the GHL contact so the doc-chase bot stops.
+            // Add-only and self-contained: nothing else in the vault/UW flow is
+            // touched. Non-fatal so it can't block the approval.
+            try {
+                const { isVaultFullyApproved, VAULT_COMPLETED_TAG } = await import("@/lib/outstanding-documents");
+                if (await isVaultFullyApproved(client.user_id)) {
+                    await ghlAddTags(client.ghl_contact_id, [VAULT_COMPLETED_TAG]);
+                    console.log(`✅ ${VAULT_COMPLETED_TAG} tag added for client ${clientId}`);
+                }
+            } catch (tagErr) {
+                console.error("⚠️ vault_completed tag failed (non-fatal):", tagErr);
+            }
         }
 
         revalidatePath(`/advisor/dashboard/clients/${clientId}`);

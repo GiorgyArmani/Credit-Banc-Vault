@@ -1,18 +1,19 @@
 // src/app/api/onboarding/notify-password-set/route.ts
 //
 // Called by the onboarding Step 3 set-password component AFTER the client has
-// successfully set their own password. Fires the two "password updated"
-// confirmations:
-//   - Email: send_password_updated_notification (client only)
+// successfully set their own password. This is the client's FIRST password
+// (they entered via a passwordless magic link and never saw the temp one), so
+// we deliberately do NOT send a "your password was changed" email here — that
+// wording is confusing for a first-time setup. We only signal GHL:
 //   - SMS:   GHL `password-updated` tag → a GHL workflow dispatches the text
 //
-// Both are best-effort: the password is already set, so a failure here must not
-// block the client from entering the vault.
+// Best-effort: the password is already set, so a failure here must not block
+// the client from entering the vault. (A genuine later password-change flow
+// would be the right place to send send_password_updated_notification.)
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { send_password_updated_notification } from '@/lib/email';
 import { ghlSearchContacts, ghlAddTags } from '@/lib/ghl-api';
 
 export const runtime = 'nodejs';
@@ -36,28 +37,14 @@ export async function POST() {
             .maybeSingle();
 
         const client_email = vault?.client_email || user.email;
-        const client_name = vault?.client_name || 'there';
 
         if (!client_email) {
-            // Nothing to notify — still report success so onboarding proceeds.
+            // Nothing to signal — still report success so onboarding proceeds.
             return NextResponse.json({ success: true, notified: false });
         }
 
-        const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://vault.creditbanc.io';
-
-        // 1. Email confirmation (non-fatal).
-        try {
-            await send_password_updated_notification({
-                client_name,
-                client_email,
-                login_url: `${appUrl}/auth/login`,
-            });
-            console.log(`✅ Password-updated email sent to ${client_email}`);
-        } catch (emailErr) {
-            console.error('⚠️ Password-updated email failed (non-fatal):', emailErr);
-        }
-
-        // 2. GHL tag → SMS confirmation (non-fatal).
+        // GHL tag → SMS confirmation (non-fatal). No email: see file header —
+        // first-time setup shouldn't tell the client their password "changed".
         try {
             if (process.env.GHL_TOKEN && process.env.GHL_LOCATION_ID) {
                 const contacts = await ghlSearchContacts({

@@ -1766,7 +1766,7 @@ export default function UnderwritingClientDetailsPage() {
                         <DialogHeader>
                             <DialogTitle>Upload Signed Funding Application</DialogTitle>
                             <DialogDescription>
-                                For clients who signed outside the vault. Marks the vault contract as completed and syncs to GHL.
+                                For clients who signed outside the vault. Marks the vault application as completed and syncs to GHL.
                             </DialogDescription>
                         </DialogHeader>
                         <div className="py-4 space-y-2">

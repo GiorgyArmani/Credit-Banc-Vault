@@ -69,6 +69,10 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             <div className="text-sm font-black text-slate-900 uppercase tracking-widest">{currentTitle}</div>
             <NotificationBell />
           </div>
+          {/* Search row — desktop keeps it in the topbar; mobile gets its own row. */}
+          <div className="px-3 pb-3">
+            <GlobalSearch />
+          </div>
         </header>
 
         {/* Topbar (Desktop) */}

@@ -275,7 +275,7 @@ export function generate_client_welcome_email_html(data: ClientWelcomeEmailData)
               <ol style="margin: 0; padding-left: 20px; color: #475569; font-size: 16px; line-height: 1.8;">
                 <li style="margin-bottom: 12px;"><strong>Access your account</strong> using the secure link above</li>
                 <li style="margin-bottom: 12px;"><strong>Complete your business profile</strong></li>
-                <li style="margin-bottom: 12px;"><strong>Review &amp; sign</strong> your service agreement</li>
+                <li style="margin-bottom: 12px;"><strong>Review &amp; sign</strong> your funding application</li>
                 <li style="margin-bottom: 12px;"><strong>Create your password</strong> to finish setup and secure your account</li>
                 <li style="margin-bottom: 12px;"><strong>Track your progress</strong> in real-time through your dashboard</li>
               </ol>
@@ -367,7 +367,7 @@ You can upload these documents securely through your portal after logging in.
 Next Steps:
 1. Access your account using the secure link above
 2. Complete your business profile
-3. Review & sign your service agreement
+3. Review & sign your funding application
 4. Create your password to finish setup
 5. Track your progress
 

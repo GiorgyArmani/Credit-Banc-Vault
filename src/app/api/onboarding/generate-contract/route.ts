@@ -4,6 +4,15 @@ import { signWell } from '@/lib/signwell';
 
 export const dynamic = 'force-dynamic';
 
+// owner_1_dob is a date column → PostgREST returns 'YYYY-MM-DD'. The funding
+// application expects US format, so present it as MM/DD/YYYY on the contract.
+function formatDobForContract(raw: string | null | undefined): string {
+    if (!raw) return '';
+    const [y, m, d] = String(raw).split('-');
+    if (!y || !m || !d) return String(raw);
+    return `${m}/${d}/${y}`;
+}
+
 export async function POST(request: Request) {
     try {
         const supabase = await createClient();
@@ -104,7 +113,7 @@ export async function POST(request: Request) {
                 application_client_firstname: vaultData.client_name?.split(' ')[0],
                 application_client_lastname: vaultData.client_name?.split(' ').slice(1).join(' '),
                 application_client_ownership: vaultData.owner_1_ownership_pct?.toString(),
-                application_client_dob: vaultData.owner_1_dob || '',
+                application_client_dob: formatDobForContract(vaultData.owner_1_dob),
                 application_client_ssn: vaultData.ssn,
                 application_client_email2: vaultData.client_email,
                 application_client_street_address: vaultData.home_address,

@@ -103,14 +103,14 @@ export default function OnboardingPage() {
               {step === "form"
                 ? "Business Profile"
                 : step === "contract_check"
-                  ? "Contract Signing"
+                  ? "Application Signing"
                   : "Create Your Password"}
             </h1>
             <p className="text-emerald-900/40 mt-4 text-xl font-bold">
               {step === "form"
                 ? "Let's start by getting some details about your business."
                 : step === "contract_check"
-                  ? "Almost there! Please review and sign your service agreement."
+                  ? "Almost there! Please review and sign your funding application."
                   : "Last step — secure your account with a password of your own."}
             </p>
 

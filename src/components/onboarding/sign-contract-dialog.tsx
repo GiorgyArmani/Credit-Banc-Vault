@@ -115,7 +115,7 @@ export function SignContractDialog({
             },
             error: (e: any) => {
               console.error("❌ SignWell embed error:", e);
-              toast.error("There was an error loading the contract. Try 'Open in new tab'.");
+              toast.error("There was an error loading the application. Try 'Open in new tab'.");
             },
           },
         });
@@ -151,7 +151,7 @@ export function SignContractDialog({
             </div>
             <div className="min-w-0">
               <h2 className="text-xl font-black text-amber-950 uppercase tracking-tight truncate">
-                Sign Your Contract — {current.business_name}
+                Sign Your Application — {current.business_name}
               </h2>
               <p className="text-sm text-amber-900/70 font-bold mt-0.5">
                 Your advisor added this business to your file. Sign below to continue.

@@ -2736,7 +2736,7 @@ export default function AdvisorClientDetailsPage() {
                             </DialogTitle>
                             <DialogDescription>
                                 Upload a signed Funding Application (PDF) for <strong>{client_profile.client_name}</strong>.
-                                This will mark the contract as completed and sync the document with GHL.
+                                This will mark the application as completed and sync the document with GHL.
                             </DialogDescription>
                         </DialogHeader>
                         <div className="space-y-4 py-4">

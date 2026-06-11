@@ -123,7 +123,7 @@ export function ContractCheckStep({ onComplete, onSignWellOpen, onSignWellClose 
                 setContractCompleted(true);
                 setIsWaiting(false);
                 if (!silent) {
-                    toast.success("Contract signed successfully!");
+                    toast.success("Application signed successfully!");
                 }
                 // Always redirect to dashboard once contract is complete, regardless of silent mode
                 setTimeout(() => {
@@ -146,10 +146,10 @@ export function ContractCheckStep({ onComplete, onSignWellOpen, onSignWellClose 
                         if (syncData.success) {
                             setContractCompleted(true);
                             setIsWaiting(false);
-                            toast.success("Contract verified and synced!");
+                            toast.success("Application verified and synced!");
                             setTimeout(() => onComplete(), 1500);
                         } else {
-                            toast.info("Contract not yet completed by all parties.");
+                            toast.info("Application not yet completed by all parties.");
                         }
                     } catch (err) {
                         console.error("Error during manual sync verify:", err);
@@ -176,7 +176,7 @@ export function ContractCheckStep({ onComplete, onSignWellOpen, onSignWellClose 
 
     const handleSignClick = () => {
         if (!contractUrl) {
-            toast.error("Contract URL not available");
+            toast.error("Application URL not available");
             return;
         }
 
@@ -280,10 +280,10 @@ export function ContractCheckStep({ onComplete, onSignWellOpen, onSignWellClose 
                         <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-700 text-center">
                             <CheckCircle2 className="h-16 w-16 text-emerald-600 mx-auto" />
                             <p className="text-emerald-600 font-bold text-lg">
-                                Contract Signed Successfully!
+                                Application Signed Successfully!
                             </p>
                             <p className="text-gray-500 text-sm">
-                                Your signed contract has been automatically saved to your document vault.
+                                Your signed application has been automatically saved to your document vault.
                             </p>
                         </div>
                     )}

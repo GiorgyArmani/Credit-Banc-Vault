@@ -8,15 +8,16 @@ import { Label } from "@/components/ui/label";
 import { Lock } from "lucide-react";
 
 interface SetPasswordStepProps {
-    /** Called once the password is saved (and the password-updated notice fired). */
+    /** Called once the password is saved (and the GHL setup signal fired). */
     onComplete: () => void;
 }
 
 /**
  * Onboarding Step 3 — the client replaces the temporary password the auth user
  * was created with (they entered via a passwordless magic link and never saw it)
- * with one of their own. On success we fire the email + SMS "password updated"
- * notice, then advance to /api/onboarding/complete via onComplete().
+ * with one of their own. This is a first-time setup, so we only fire the GHL
+ * `password-updated` SMS signal — no "password changed" email (that wording
+ * confuses a first-time setup) — then advance via onComplete().
  */
 export function SetPasswordStep({ onComplete }: SetPasswordStepProps) {
     const supabase = createClient();
@@ -43,7 +44,7 @@ export function SetPasswordStep({ onComplete }: SetPasswordStepProps) {
             return setErr(error.message);
         }
 
-        // Fire the email + SMS confirmation. Non-blocking for the user — if it
+        // Fire the GHL setup signal (SMS). Non-blocking for the user — if it
         // fails we still let them into the vault (the password is already set).
         try {
             await fetch("/api/onboarding/notify-password-set", { method: "POST" });

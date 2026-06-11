@@ -28,10 +28,10 @@ export async function POST(request: Request) {
         }
 
         const body = await request.json();
-        const { ein, ssn, industry, homeAddress, businessAddress } = body;
+        const { ein, ssn, dob, industry, homeAddress, businessAddress } = body;
 
         // Basic validation
-        if (!ein || !ssn || !industry || !homeAddress || !businessAddress) {
+        if (!ein || !ssn || !dob || !industry || !homeAddress || !businessAddress) {
             return NextResponse.json(
                 { message: 'Missing required fields' },
                 { status: 400 }
@@ -61,6 +61,7 @@ export async function POST(request: Request) {
             .update({
                 ein,
                 ssn,
+                owner_1_dob: dob, // 'YYYY-MM-DD' → date column; feeds application_client_dob on the SignWell contract
                 industry,
                 home_address: homeAddress,
                 business_address: businessAddress,

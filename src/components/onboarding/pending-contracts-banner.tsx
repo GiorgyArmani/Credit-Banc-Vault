@@ -42,10 +42,10 @@ export function PendingContractsBanner({ clientVaultId }: { clientVaultId: strin
           </div>
           <div className="flex-1 min-w-0">
             <h3 className="text-lg font-black text-amber-950 uppercase tracking-tight">
-              {pending.length === 1 ? "Contract Ready to Sign" : `${pending.length} Contracts Ready to Sign`}
+              {pending.length === 1 ? "Application Ready to Sign" : `${pending.length} Applications Ready to Sign`}
             </h3>
             <p className="text-sm text-amber-900/70 font-bold mt-1">
-              Your advisor added {pending.length === 1 ? "a new business" : "additional businesses"} to your file. Sign the contract{pending.length === 1 ? "" : "s"} below to keep things moving.
+              Your advisor added {pending.length === 1 ? "a new business" : "additional businesses"} to your file. Sign the application{pending.length === 1 ? "" : "s"} below to keep things moving.
             </p>
           </div>
         </div>
@@ -65,7 +65,7 @@ export function PendingContractsBanner({ clientVaultId }: { clientVaultId: strin
                 onClick={() => openAt(idx)}
                 className="bg-amber-600 hover:bg-amber-700 text-white font-bold uppercase tracking-widest text-xs rounded-xl"
               >
-                Sign Contract <ArrowRight className="h-4 w-4 ml-1" />
+                Sign Application <ArrowRight className="h-4 w-4 ml-1" />
               </Button>
             </div>
           ))}

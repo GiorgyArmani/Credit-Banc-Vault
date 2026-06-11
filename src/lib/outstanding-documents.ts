@@ -5,6 +5,12 @@ import { isClientScopedDoc, formatRequirementLabel } from "@/lib/document-scope"
 // Map for GHL Custom Field ID
 const GHL_CF_OUTSTANDING_DOCUMENTS = process.env.GHL_CF_OUTSTANDING_DOCUMENTS;
 
+// GHL tag flipped on once every required doc is advisor-approved (not merely
+// uploaded). Signals the doc-chase reminder bot to stop — it fires at approval
+// time, which can be well before the advisor submits the file to UW. Added
+// (only) by approveDocumentCategory; nothing else in the vault flow touches it.
+export const VAULT_COMPLETED_TAG = "vault_completed";
+
 export interface BusinessMissingDocs {
     /** business_profiles.id; null for client-scoped docs not pinned to a business. */
     business_profile_id: string | null;
@@ -199,6 +205,83 @@ export async function calculateOutstandingDocumentsByBusiness(userId: string): P
 export async function calculateOutstandingDocuments(userId: string): Promise<string[]> {
     const { flat } = await calculateOutstandingDocumentsByBusiness(userId);
     return flat;
+}
+
+/**
+ * Is every required document for this client advisor-APPROVED?
+ *
+ * This is approval-based, not upload-based: a doc is only satisfied once it has
+ * a document_category_approvals row — uploaded-but-unreviewed does NOT count.
+ * That's the distinction the doc-chase bot needs (the advisor may approve well
+ * before submitting to UW, and we want chasing to stop at approval).
+ *
+ * Scoping mirrors calculateOutstandingDocumentsByBusiness exactly:
+ *   • business-scoped codes need an approval pinned to the SAME business
+ *     (unbound request rows default to the primary business);
+ *   • client-scoped codes (DL / MyScoreIQ / PFS) are satisfied by an approval
+ *     of that code against any business.
+ *
+ * Returns false when the client has no active required docs at all — an empty
+ * vault isn't "completed", and we must never flip the tag on a fresh client.
+ */
+export async function isVaultFullyApproved(userId: string): Promise<boolean> {
+    const supabase = createAdminClient();
+
+    const { data: vault } = await supabase
+        .from("client_data_vault")
+        .select("id")
+        .eq("user_id", userId)
+        .maybeSingle();
+    if (!vault) return false;
+
+    const { data: businesses } = await supabase
+        .from("business_profiles")
+        .select("id, is_primary")
+        .eq("client_vault_id", vault.id);
+    const businessRows = (businesses ?? []) as Array<{ id: string; is_primary: boolean }>;
+    const primaryId = businessRows.find(b => b.is_primary)?.id ?? businessRows[0]?.id ?? null;
+
+    // Required docs = active requests.
+    const { data: dynamicDocs } = await supabase
+        .from("client_dynamic_documents")
+        .select(`business_profile_id, required_documents ( code )`)
+        .eq("user_id", userId)
+        .eq("is_active", true);
+
+    // Approvals.
+    const { data: approvalRows } = await supabase
+        .from("document_category_approvals")
+        .select("doc_code, business_profile_id")
+        .eq("client_vault_id", vault.id);
+
+    const approvals = (approvalRows ?? []) as Array<{ doc_code: string; business_profile_id: string | null }>;
+    const clientScopedApproved = new Set<string>(
+        approvals.filter(a => isClientScopedDoc(a.doc_code)).map(a => a.doc_code)
+    );
+    const perBusinessApproved = new Map<string, Set<string>>();
+    approvals.forEach(a => {
+        if (isClientScopedDoc(a.doc_code)) return;
+        const bid = a.business_profile_id ?? primaryId;
+        if (!bid) return;
+        if (!perBusinessApproved.has(bid)) perBusinessApproved.set(bid, new Set());
+        perBusinessApproved.get(bid)!.add(a.doc_code);
+    });
+
+    let requiredCount = 0;
+    for (const row of (dynamicDocs ?? []) as any[]) {
+        const def = Array.isArray(row.required_documents) ? row.required_documents[0] : row.required_documents;
+        const code: string | undefined = def?.code;
+        if (!code) continue;
+        requiredCount++;
+        if (isClientScopedDoc(code)) {
+            if (!clientScopedApproved.has(code)) return false;
+        } else {
+            const bid = row.business_profile_id ?? primaryId;
+            if (!bid || !perBusinessApproved.get(bid)?.has(code)) return false;
+        }
+    }
+
+    return requiredCount > 0;
 }
 
 export async function syncOutstandingDocuments(
