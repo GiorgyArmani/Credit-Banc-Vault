@@ -219,6 +219,8 @@ interface ClientOption {
   id: string;
   client_name: string;
   company_name: string;
+  industry?: string;
+  company_state?: string;
   proposed_loan_type: string;
   loan_purpose: string;
   business_start_date: string;
@@ -271,7 +273,7 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
     supabase
       .from("client_data_vault")
       .select(`
-        id, client_name, company_name,
+        id, client_name, company_name, industry, company_state,
         proposed_loan_type, loan_purpose, business_start_date, number_of_owners,
         owner_1_name, owner_1_ownership_pct,
         owner_2_name, owner_2_ownership_pct,
@@ -330,8 +332,8 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
         avgMonthlyDeposits: Number(analysis.avg_monthly_deposits) || 0,
         hasBankruptcy: analysis.has_bankruptcy || false,
         capitalRequested: Number(analysis.capital_requested) || 0,
-        state: analysis.company_state || "",
-        industry: analysis.industry || "",
+        state: analysis.company_state || client?.company_state || "",
+        industry: analysis.industry || client?.industry || "",
         businessName: analysis.business_name || client?.company_name || "",
         ownerName: analysis.owner_name || client?.client_name || "",
         proposedLoanType: client?.proposed_loan_type || "",
@@ -673,16 +675,16 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
       {/* Save bar — UW saves their recommendations; admins are notified */}
       {selectedClientId && recommendedCount > 0 && (
         <div className="rounded-xl border border-slate-200 p-3 flex items-center justify-between flex-wrap gap-3" style={{ background: "#ffffff" }}>
-          <div className="text-xs text-gray-400 font-mono">
-            <span className="text-emerald-400 font-bold">{recommendedCount} recommended</span>
+          <div className="text-xs text-gray-500 font-mono">
+            <span className="text-emerald-600 font-bold">{recommendedCount} recommended</span>
             {" · admin will be notified to approve which lenders to contact"}
           </div>
           <div className="flex items-center gap-3">
-            {saveSuccess && <span className="text-xs text-emerald-400 font-mono">✓ Saved successfully</span>}
+            {saveSuccess && <span className="text-xs text-emerald-600 font-mono">✓ Saved successfully</span>}
             <button
               onClick={saveAssignments}
               disabled={isSaving}
-              className="px-4 py-1.5 text-xs font-mono font-bold uppercase tracking-wider rounded border border-emerald-600 bg-emerald-900/30 text-emerald-300 hover:bg-emerald-900/60 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-4 py-1.5 text-xs font-mono font-bold uppercase tracking-wider rounded border border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700 hover:border-emerald-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isSaving ? "Saving..." : "Save Assignments"}
             </button>
@@ -697,8 +699,8 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
             key={s}
             onClick={() => setSpecialtyFilter(s)}
             className={`px-2.5 py-1 text-xs font-mono uppercase tracking-wider rounded border transition-all ${specialtyFilter === s
-                ? "bg-blue-600 border-blue-600 text-white"
-                : "border-slate-200 text-gray-500 hover:border-blue-600 hover:text-blue-400"
+                ? "bg-emerald-600 border-emerald-600 text-white"
+                : "border-slate-200 text-gray-500 hover:border-emerald-500 hover:text-emerald-600"
               }`}
           >
             {s}
@@ -707,8 +709,8 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
         <button
           onClick={() => setShowPassedOnly(!showPassedOnly)}
           className={`px-3 py-1 text-xs font-mono uppercase tracking-wider rounded border transition-all ${showPassedOnly
-              ? "bg-green-900/30 border-green-600/60 text-green-400"
-              : "border-slate-200 text-gray-500 hover:text-green-400"
+              ? "bg-emerald-100 border-emerald-300 text-emerald-700"
+              : "border-slate-200 text-gray-500 hover:text-emerald-600"
             }`}
         >
           {showPassedOnly ? "✓ Eligible Only" : "Show All"}
@@ -765,14 +767,14 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
     const maxF = typeof result.lender.max_funding === "number" ? result.lender.max_funding : null;
 
     const cardBorder =
-      decision === "approved" ? "border-emerald-600/70" :
-        decision === "rejected" ? "border-orange-700/60" :
-          result.passed && !isIncomplete ? "border-green-800/40 hover:border-green-600/60" :
-            "border-slate-200 hover:border-red-800/40";
+      decision === "approved" ? "border-emerald-400" :
+        decision === "rejected" ? "border-orange-300" :
+          result.passed && !isIncomplete ? "border-green-200 hover:border-green-400" :
+            "border-slate-200 hover:border-red-300";
 
     const cardBg =
-      decision === "approved" ? "#0d2318" :
-        decision === "rejected" ? "#1f1108" :
+      decision === "approved" ? "#ecfdf5" :
+        decision === "rejected" ? "#fff7ed" :
           result.passed && !isIncomplete ? "#ffffff" : "#f8fafc";
 
     return (
@@ -801,13 +803,13 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
                 </span>
               )}
               {decision === "approved" && (
-                <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-900/30 border border-emerald-700/50 rounded px-1.5 py-0.5">
+                <span className="text-xs font-mono font-bold text-emerald-700 bg-emerald-100 border border-emerald-300 rounded px-1.5 py-0.5">
                   ★ RECOMMENDED
                 </span>
               )}
             </div>
             {!isIncomplete && result.passed && result.warnings.length === 0 && (
-              <div className="text-xs text-green-400 mt-0.5">✓ Meets all entered criteria</div>
+              <div className="text-xs text-green-600 mt-0.5">✓ Meets all entered criteria</div>
             )}
             {isIncomplete && (
               <div className="text-[10px] text-gray-500 uppercase tracking-wider mt-0.5">Incomplete Guidelines</div>
@@ -815,7 +817,7 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
             {result.flags.length > 0 && !isIncomplete && (
               <div className="flex flex-wrap gap-1 mt-1.5">
                 {result.flags.slice(0, 2).map((f, fi) => (
-                  <span key={fi} className="text-xs bg-red-900/20 border border-red-800/40 text-red-400 rounded px-1.5 py-0.5 font-mono">
+                  <span key={fi} className="text-xs bg-red-50 border border-red-200 text-red-600 rounded px-1.5 py-0.5 font-mono">
                     {f}
                   </span>
                 ))}
@@ -825,7 +827,7 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
               </div>
             )}
             {result.warnings.map((w, wi) => (
-              <div key={wi} className="text-xs text-orange-400 mt-0.5">⚠ {w}</div>
+              <div key={wi} className="text-xs text-orange-600 mt-0.5">⚠ {w}</div>
             ))}
           </div>
           <span className="text-gray-600 text-xs flex-shrink-0 mt-1">{isExpanded ? "▲" : "▼"}</span>
@@ -837,7 +839,7 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
             onClick={() => toggleRecommended(result.lender)}
             className={`flex-1 py-1.5 text-xs font-mono font-bold uppercase tracking-wider rounded border transition-all ${decision === "approved"
                 ? "bg-emerald-600 border-emerald-600 text-white"
-                : "border-emerald-800/60 text-emerald-600 hover:bg-emerald-900/30 hover:text-emerald-400 hover:border-emerald-600"
+                : "border-emerald-300 text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-500"
               }`}
           >
             {decision === "approved" ? "★ Recommended — click to remove" : "★ Recommend to Admin"}
@@ -891,7 +893,7 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
             {result.flags.length > 0 && !isIncomplete && (
               <div className="space-y-1">
                 {result.flags.map((f, fi) => (
-                  <div key={fi} className="text-xs bg-red-900/20 border border-red-800/40 text-red-400 rounded px-2 py-1 font-mono">
+                  <div key={fi} className="text-xs bg-red-50 border border-red-200 text-red-600 rounded px-2 py-1 font-mono">
                     ✗ {f}
                   </div>
                 ))}
