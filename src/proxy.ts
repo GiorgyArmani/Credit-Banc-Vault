@@ -62,6 +62,8 @@ export async function proxy(request: NextRequest) {
     "/auth/advisor-signup-success",
     "/auth/underwriting-signup",
     "/auth/underwriting-signup-success",
+    "/auth/setter-signup",
+    "/auth/setter-signup-success",
     "/auth/update-password",
     "/auth/forgot-password",
     "/",
@@ -98,6 +100,7 @@ export async function proxy(request: NextRequest) {
     const roleRoutes: Record<string, string[]> = {
       advisor: ["/advisor"],
       underwriting: ["/underwriting"],
+      setter: ["/setter"], // Appointment setters: create-only fast-funding dashboard
       free: [], // Free users have access to basic /dashboard only
     };
 
@@ -153,6 +156,7 @@ export async function proxy(request: NextRequest) {
         const adminRedirectMap: Record<string, string> = {
           advisor: "/advisor/dashboard",
           underwriting: "/underwriting/dashboard",
+          setter: "/setter/dashboard",
           free: isOnboardingComplete ? "/dashboard" : "/onboarding",
         };
         return redirectWithCookies(adminRedirectMap[userRole] || "/dashboard");
@@ -173,6 +177,7 @@ export async function proxy(request: NextRequest) {
               const redirectMap: Record<string, string> = {
                 advisor: "/advisor/dashboard",
                 underwriting: "/underwriting/dashboard",
+                setter: "/setter/dashboard",
                 admin: "/admin/dashboard",
                 free: isOnboardingComplete ? "/dashboard" : "/onboarding",
               };
@@ -189,11 +194,12 @@ export async function proxy(request: NextRequest) {
       const redirectMap: Record<string, string> = {
         advisor: "/advisor/dashboard",
         underwriting: "/underwriting/dashboard",
+        setter: "/setter/dashboard",
         admin: "/admin/dashboard",
         free: isOnboardingComplete ? "/dashboard" : "/onboarding",
       };
 
-      if (userRole === "advisor" || userRole === "underwriting" || userRole === "admin" || !isOnboardingComplete) {
+      if (userRole === "advisor" || userRole === "underwriting" || userRole === "setter" || userRole === "admin" || !isOnboardingComplete) {
         return redirectWithCookies(redirectMap[userRole]);
       }
     }
@@ -203,6 +209,7 @@ export async function proxy(request: NextRequest) {
       const redirectMap: Record<string, string> = {
         advisor: "/advisor/dashboard",
         underwriting: "/underwriting/dashboard",
+        setter: "/setter/dashboard",
         admin: "/admin/dashboard",
         free: isOnboardingComplete ? "/dashboard" : "/onboarding",
       };

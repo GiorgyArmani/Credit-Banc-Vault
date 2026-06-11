@@ -80,10 +80,15 @@ const STEPS = [
 const inputClass = "h-12 rounded-xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-5";
 const labelClass = "text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-1.5 block ml-1";
 
-export default function SpeedClientSignUpForm() {
+export default function SpeedClientSignUpForm({ isSetter = false }: { isSetter?: boolean }) {
   const router = useRouter();
   const pathname = usePathname();
   const supabase = createClient();
+  // Setters get a trimmed 2-step form: no document picker and no loan-type
+  // picker. Documents auto-set to business bank statements and the proposed
+  // loan type to "other" — the assigned advisor refines the client afterward.
+  // (Also enforced server-side in /api/client-signup-speed for role=setter.)
+  const steps = isSetter ? STEPS.slice(0, 2) : STEPS;
   const [step, set_step] = useState(1);
   const [submitting, set_submitting] = useState(false);
   const { showError } = useErrorDialog();
@@ -108,7 +113,10 @@ export default function SpeedClientSignUpForm() {
   const [proposed_loan_types, set_proposed_loan_types] = useState<string[]>([]);
 
   // ===== Step 3 — Documents Requested (released only after the client signs) =====
-  const [documents_requested, set_documents_requested] = useState<string[]>([]);
+  // Setters skip this step; default to business bank statements only.
+  const [documents_requested, set_documents_requested] = useState<string[]>(
+    isSetter ? ["business_bank_statements"] : []
+  );
 
   // ===== Success state =====
   const [show_success, set_show_success] = useState(false);
@@ -166,7 +174,8 @@ export default function SpeedClientSignUpForm() {
       ];
       const missing = required.filter(([v]) => !v.trim()).map(([, label]) => label);
       if (missing.length > 0) return `Please complete: ${missing.join(", ")}`;
-      if (proposed_loan_types.length === 0) return "Select at least one proposed loan type.";
+      // Setters don't pick a loan type — it's auto-set to "other".
+      if (!isSetter && proposed_loan_types.length === 0) return "Select at least one proposed loan type.";
     }
     if (n === 3) {
       if (documents_requested.length === 0) return "Select at least one document to request.";
@@ -180,7 +189,7 @@ export default function SpeedClientSignUpForm() {
       showError(new Error(err), { context: "Speed form" });
       return;
     }
-    set_step((s) => Math.min(s + 1, STEPS.length));
+    set_step((s) => Math.min(s + 1, steps.length));
   };
 
   const go_back = () => set_step((s) => Math.max(s - 1, 1));
@@ -188,7 +197,7 @@ export default function SpeedClientSignUpForm() {
   const handle_submit = async () => {
     set_submitting(true);
     try {
-      for (let n = 1; n <= STEPS.length; n++) {
+      for (let n = 1; n <= steps.length; n++) {
         const err = validate_step(n);
         if (err) {
           set_step(n);
@@ -214,9 +223,11 @@ export default function SpeedClientSignUpForm() {
         capital_requested,
         credit_score,
         loan_purpose,
-        proposed_loan_type: proposed_loan_types.join(", "),
+        // Setters never pick a loan type — it's auto-set to "other".
+        proposed_loan_type: isSetter ? "other" : proposed_loan_types.join(", "),
 
-        // Doc codes — parked server-side until the application is signed
+        // Doc codes — parked server-side until the application is signed.
+        // For setters this is auto-set to business bank statements only.
         documents_requested,
       };
 
@@ -318,13 +329,16 @@ export default function SpeedClientSignUpForm() {
               >
                 Create Another
               </Button>
-              <Button
-                onClick={() => router.push(pathname.startsWith('/admin') ? '/admin/prospects' : '/advisor/dashboard/prospects')}
-                variant="outline"
-                className="flex-1 h-14 border-2 border-emerald-100 text-emerald-950 font-black rounded-2xl hover:bg-emerald-50 transition-all active:scale-95"
-              >
-                View Prospect List
-              </Button>
+              {/* Setters have a create-only dashboard — no prospect list to link to. */}
+              {!isSetter && (
+                <Button
+                  onClick={() => router.push(pathname.startsWith('/admin') ? '/admin/prospects' : '/advisor/dashboard/prospects')}
+                  variant="outline"
+                  className="flex-1 h-14 border-2 border-emerald-100 text-emerald-950 font-black rounded-2xl hover:bg-emerald-50 transition-all active:scale-95"
+                >
+                  View Prospect List
+                </Button>
+              )}
             </div>
           </div>
         </div>
@@ -353,7 +367,7 @@ export default function SpeedClientSignUpForm() {
               {/* Vertical step rail */}
               <aside className="md:w-56 shrink-0">
                 <div className="flex flex-row md:flex-col gap-2 overflow-x-auto md:overflow-visible pb-1 scrollbar-hide">
-                  {STEPS.map((s) => {
+                  {steps.map((s) => {
                     const active = step === s.num;
                     const done = step > s.num;
                     return (
@@ -504,6 +518,7 @@ export default function SpeedClientSignUpForm() {
                       <Label htmlFor="loan_purpose" className={labelClass}>Use of Funds *</Label>
                       <Textarea id="loan_purpose" value={loan_purpose} onChange={(e) => set_loan_purpose(e.target.value)} className="rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold p-6" placeholder="Equipment purchase, inventory, expansion, etc." rows={2} required />
                     </div>
+                    {!isSetter && (
                     <div className="md:col-span-2">
                       <Label className={`${labelClass} mb-3`}>
                         Proposed Loan Type * <span className="normal-case font-bold text-emerald-500">(select all that apply)</span>
@@ -534,6 +549,7 @@ export default function SpeedClientSignUpForm() {
                         })}
                       </div>
                     </div>
+                    )}
                   </div>
 
                   <div className="flex justify-between pt-8">
@@ -545,13 +561,31 @@ export default function SpeedClientSignUpForm() {
                       <ChevronLeft className="mr-2 w-5 h-5" />
                       Back
                     </Button>
-                    <Button
-                      onClick={go_next}
-                      className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black rounded-2xl px-10 py-6 shadow-xl shadow-emerald-500/20 transition-all active:scale-95"
-                    >
-                      Next: Documents
-                      <ChevronRight className="ml-2 w-5 h-5" />
-                    </Button>
+                    {isSetter ? (
+                      // Setter form ends at step 2 — submit here (no documents step).
+                      <Button
+                        onClick={handle_submit}
+                        disabled={submitting}
+                        className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black rounded-2xl px-12 py-6 text-lg shadow-xl shadow-emerald-500/20 transition-all active:scale-95 disabled:opacity-60"
+                      >
+                        {submitting ? (
+                          "Creating Client..."
+                        ) : (
+                          <span className="flex items-center gap-2">
+                            <Zap className="w-5 h-5" />
+                            Create Client &amp; Get Link
+                          </span>
+                        )}
+                      </Button>
+                    ) : (
+                      <Button
+                        onClick={go_next}
+                        className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black rounded-2xl px-10 py-6 shadow-xl shadow-emerald-500/20 transition-all active:scale-95"
+                      >
+                        Next: Documents
+                        <ChevronRight className="ml-2 w-5 h-5" />
+                      </Button>
+                    )}
                   </div>
                 </div>
               )}

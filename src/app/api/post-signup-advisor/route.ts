@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { send_advisor_welcome_email } from "@/lib/email";
+import { checkStaffInviteCode } from "@/lib/auth/staff-invite";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -76,7 +77,7 @@ export async function POST(req: NextRequest) {
   try {
     // Parse request body
     const body = await req.json();
-    const { firstName, lastName, email, phone, profilePicUrl, password, tags, profilePicBase64, profilePicName } = body;
+    const { firstName, lastName, email, phone, profilePicUrl, password, tags, profilePicBase64, profilePicName, inviteCode } = body;
 
     // Validate required fields
     if (!firstName || !lastName || !email || !password) {
@@ -84,6 +85,12 @@ export async function POST(req: NextRequest) {
         { message: "Missing required fields" },
         { status: 400 }
       );
+    }
+
+    // Gate: shared staff invite code (server-side — a form field alone isn't a gate).
+    const inviteError = checkStaffInviteCode(inviteCode);
+    if (inviteError) {
+      return NextResponse.json({ message: inviteError.message }, { status: inviteError.status });
     }
 
     // Step 1: Create the auth user in Supabase (Server-side)

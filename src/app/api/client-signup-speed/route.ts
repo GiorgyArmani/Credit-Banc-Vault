@@ -182,7 +182,8 @@ export async function POST(request: Request) {
     }
 
     // Documents the client will owe after signing — held until then.
-    const pending_doc_codes: string[] = Array.from(new Set(
+    // (Overridden to business bank statements only for setters, below.)
+    let pending_doc_codes: string[] = Array.from(new Set(
       (Array.isArray(body.documents_requested) ? body.documents_requested : [])
         .filter((code: any) => typeof code === 'string' && VALID_DOC_CODES.has(code))
     ));
@@ -211,47 +212,106 @@ export async function POST(request: Request) {
       );
     }
 
-    let { data: advisor_row } = await supabase_admin
-      .from('advisors')
-      .select('id, first_name, last_name, email, phone, ghl_user_id, user_id')
-      .eq('user_id', session_user.id)
+    // Resolve the session user's role. Setters (appointment setters) are NOT
+    // advisors — they have a create-only fast-funding dashboard, and every
+    // client they create is assigned to a fixed advisor stored on their own
+    // users.setter_advisor_id. Everyone else resolves the advisor from their
+    // own advisors row, exactly as before. See [[role_model]].
+    const { data: session_user_row } = await supabase_admin
+      .from('users')
+      .select('role, setter_advisor_id')
+      .eq('id', session_user.id)
       .maybeSingle();
 
-    if (!advisor_row && session_user.email) {
-      const { data: by_email } = await supabase_admin
+    let advisor_row:
+      | {
+          id: string;
+          first_name: string | null;
+          last_name: string | null;
+          email: string | null;
+          phone: string | null;
+          ghl_user_id: string | null;
+          user_id: string | null;
+        }
+      | null = null;
+
+    if (session_user_row?.role === 'setter') {
+      // ----- SETTER: assign to the advisor linked on the setter's user row -----
+      if (!session_user_row.setter_advisor_id) {
+        console.error(`❌ client-signup-speed: setter ${session_user.id} has no setter_advisor_id`);
+        return NextResponse.json(
+          { success: false, error: 'Your setter account is not linked to an advisor yet. Contact an admin.' },
+          { status: 403 }
+        );
+      }
+      const { data: target_advisor } = await supabase_admin
         .from('advisors')
         .select('id, first_name, last_name, email, phone, ghl_user_id, user_id')
-        .ilike('email', session_user.email)
+        .eq('id', session_user_row.setter_advisor_id)
         .maybeSingle();
-      advisor_row = by_email ?? null;
-
-      if (advisor_row && !advisor_row.user_id) {
-        await supabase_admin
-          .from('advisors')
-          .update({ user_id: session_user.id })
-          .eq('id', advisor_row.id);
-        console.log(`🔧 Linked advisor ${advisor_row.id} to user_id ${session_user.id}`);
+      advisor_row = target_advisor ?? null;
+      if (!advisor_row) {
+        console.error(
+          `❌ client-signup-speed: setter ${session_user.id} linked advisor ${session_user_row.setter_advisor_id} not found`
+        );
+        return NextResponse.json(
+          { success: false, error: 'The advisor linked to your setter account no longer exists. Contact an admin.' },
+          { status: 403 }
+        );
       }
-    }
+      console.log(`✅ Setter ${session_user.id} → assigning client to advisor ${advisor_row.id}`);
 
-    if (!advisor_row) {
-      console.error(
-        `❌ client-signup-speed: session user ${session_user.id} (${session_user.email}) has no advisors row`
-      );
-      return NextResponse.json(
-        {
-          success: false,
-          error:
-            'No advisor record found for the current user. Contact an admin to link your advisor profile before creating clients.',
-        },
-        { status: 403 }
-      );
+      // Setters never choose docs or loan type — force the house defaults
+      // server-side regardless of payload. The trimmed setter form already
+      // sends these; this guarantees it even if the request is crafted. The
+      // assigned advisor refines the client afterward.
+      pending_doc_codes = ['business_bank_statements'];
+      body.proposed_loan_type = 'other';
+    } else {
+      // ----- ADVISOR/ADMIN: resolve the advisor from the session (REQUIRED) -----
+      const { data: by_user } = await supabase_admin
+        .from('advisors')
+        .select('id, first_name, last_name, email, phone, ghl_user_id, user_id')
+        .eq('user_id', session_user.id)
+        .maybeSingle();
+      advisor_row = by_user ?? null;
+
+      if (!advisor_row && session_user.email) {
+        const { data: by_email } = await supabase_admin
+          .from('advisors')
+          .select('id, first_name, last_name, email, phone, ghl_user_id, user_id')
+          .ilike('email', session_user.email)
+          .maybeSingle();
+        advisor_row = by_email ?? null;
+
+        if (advisor_row && !advisor_row.user_id) {
+          await supabase_admin
+            .from('advisors')
+            .update({ user_id: session_user.id })
+            .eq('id', advisor_row.id);
+          console.log(`🔧 Linked advisor ${advisor_row.id} to user_id ${session_user.id}`);
+        }
+      }
+
+      if (!advisor_row) {
+        console.error(
+          `❌ client-signup-speed: session user ${session_user.id} (${session_user.email}) has no advisors row`
+        );
+        return NextResponse.json(
+          {
+            success: false,
+            error:
+              'No advisor record found for the current user. Contact an admin to link your advisor profile before creating clients.',
+          },
+          { status: 403 }
+        );
+      }
     }
 
     const advisor_id = advisor_row.id;
     const advisor_name =
       `${advisor_row.first_name ?? ''} ${advisor_row.last_name ?? ''}`.trim() || 'Unknown';
-    console.log(`✅ Advisor resolved from session: ${advisor_id} (${advisor_name})`);
+    console.log(`✅ Advisor resolved: ${advisor_id} (${advisor_name})`);
 
     // ========== STEP 2: CREATE/UPDATE USER IN AUTH ==========
     const { data: existing_user } = await supabase_admin.auth.admin

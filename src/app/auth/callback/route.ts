@@ -80,6 +80,7 @@ export async function GET(request: NextRequest) {
       const roleRedirects: Record<string, string> = {
         "advisor": "/advisor/dashboard",
         "underwriting": "/underwriting/dashboard",
+        "setter": "/setter/dashboard",
         "admin": "/admin/dashboard",
         "free": "/dashboard",
       };

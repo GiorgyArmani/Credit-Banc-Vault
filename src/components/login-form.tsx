@@ -69,6 +69,7 @@ export default function LoginForm({
         admin: "/admin/dashboard",
         advisor: "/advisor/dashboard",
         underwriting: "/underwriting/dashboard",
+        setter: "/setter/dashboard",
         free: "/dashboard",
       };
 

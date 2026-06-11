@@ -30,6 +30,7 @@ export function AdvisorSignUpForm({
   const [profilePic, setProfilePic] = useState<File | null>(null);
   const [password, setPassword] = useState("");
   const [repeatPassword, setRepeatPassword] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -123,6 +124,7 @@ export function AdvisorSignUpForm({
           profilePicName,
           password,
           tags: ["creditbanc-advisor", "advisor-signup"],
+          inviteCode: inviteCode.trim(),
         }),
       });
 
@@ -182,6 +184,19 @@ export function AdvisorSignUpForm({
                   accept="image/*"
                   onChange={handleFileChange}
                   className="hidden"
+                />
+              </div>
+
+              <div className="grid gap-3">
+                <Label htmlFor="invite-code" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 ml-1">Invite Code</Label>
+                <Input
+                  id="invite-code"
+                  type="text"
+                  placeholder="Enter your invite code"
+                  required
+                  value={inviteCode}
+                  onChange={(e) => setInviteCode(e.target.value)}
+                  className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
                 />
               </div>
 
