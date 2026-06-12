@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import type { DealSummary } from "./bank-analysis";
 import { createClient } from "@/lib/supabase/client";
@@ -251,6 +251,9 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
   const [clientList, setClientList] = useState<ClientOption[]>([]);
   const [selectedClientId, setSelectedClientId] = useState<string>(initial_client_id);
   const [isLoadingClient, setIsLoadingClient] = useState(false);
+  const [clientSearch, setClientSearch] = useState("");
+  const [clientDropdownOpen, setClientDropdownOpen] = useState(false);
+  const clientSearchRef = useRef<HTMLDivElement | null>(null);
   const [specialtyFilter, setSpecialtyFilter] = useState("All");
   const [showPassedOnly, setShowPassedOnly] = useState(false);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
@@ -286,6 +289,37 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
         if (data) setClientList(data as any as ClientOption[]);
       });
   }, []);
+
+  // Close the client search dropdown when clicking outside of it.
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (clientSearchRef.current && !clientSearchRef.current.contains(e.target as Node)) {
+        setClientDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const selectedClient = useMemo(
+    () => clientList.find((c) => c.id === selectedClientId),
+    [clientList, selectedClientId]
+  );
+
+  const filteredClientList = useMemo(() => {
+    const q = clientSearch.trim().toLowerCase();
+    if (!q) return clientList;
+    return clientList.filter((c) =>
+      `${c.company_name ?? ""} ${c.client_name ?? ""}`.toLowerCase().includes(q)
+    );
+  }, [clientList, clientSearch]);
+
+  function selectClient(clientId: string) {
+    setSelectedClientId(clientId);
+    setClientDropdownOpen(false);
+    setClientSearch("");
+    loadClientResults(clientId);
+  }
 
   const loadDecisions = useCallback(async (clientId: string) => {
     if (!clientId) return;
@@ -533,21 +567,69 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
           <div>
             <div className="text-xs font-bold text-gray-500 uppercase tracking-widest">Lender Match</div>
             <div className="flex items-center gap-3 mt-2">
-              <select
-                value={selectedClientId}
-                onChange={(e) => {
-                  setSelectedClientId(e.target.value);
-                  loadClientResults(e.target.value);
-                }}
-                className="bg-slate-50 border border-slate-200 rounded px-2 py-1.5 text-sm font-mono text-slate-900 focus:outline-none focus:border-emerald-500 min-w-[240px]"
-              >
-                <option value="">Select Client Analysis...</option>
-                {clientList.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.company_name} ({c.client_name})
-                  </option>
-                ))}
-              </select>
+              <div ref={clientSearchRef} className="relative min-w-[280px]">
+                <div className="relative">
+                  <svg
+                    className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                    viewBox="0 0 24 24"
+                  >
+                    <circle cx="11" cy="11" r="7" />
+                    <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                  </svg>
+                  <input
+                    type="text"
+                    value={clientDropdownOpen ? clientSearch : selectedClient ? `${selectedClient.company_name} (${selectedClient.client_name})` : clientSearch}
+                    placeholder="Search bank analysis by client or company..."
+                    onChange={(e) => {
+                      setClientSearch(e.target.value);
+                      if (!clientDropdownOpen) setClientDropdownOpen(true);
+                    }}
+                    onFocus={() => {
+                      setClientDropdownOpen(true);
+                      setClientSearch("");
+                    }}
+                    className="w-full bg-slate-50 border border-slate-200 rounded pl-8 pr-7 py-1.5 text-sm font-mono text-slate-900 focus:outline-none focus:border-emerald-500"
+                  />
+                  {selectedClientId && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedClientId("");
+                        setClientSearch("");
+                        setClientDropdownOpen(false);
+                      }}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 text-sm leading-none"
+                      aria-label="Clear selection"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+                {clientDropdownOpen && (
+                  <div className="absolute z-20 mt-1 w-full max-h-72 overflow-y-auto rounded-md border border-slate-200 bg-white shadow-lg">
+                    {filteredClientList.length === 0 ? (
+                      <div className="px-3 py-2 text-xs text-slate-400 font-mono">No matching analysis found.</div>
+                    ) : (
+                      filteredClientList.map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => selectClient(c.id)}
+                          className={`w-full text-left px-3 py-2 text-sm font-mono hover:bg-emerald-50 ${
+                            c.id === selectedClientId ? "bg-emerald-50 text-emerald-700" : "text-slate-900"
+                          }`}
+                        >
+                          <span className="font-semibold">{c.company_name}</span>
+                          <span className="text-slate-500"> ({c.client_name})</span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
               {isLoadingClient && <span className="text-xs text-blue-400 animate-pulse">Loading...</span>}
             </div>
           </div>
