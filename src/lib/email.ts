@@ -3229,3 +3229,79 @@ export async function send_new_business_added_notification(data: NewBusinessAdde
     throw error;
   }
 }
+
+/**
+ * ============================================================================
+ * LENDER GUIDELINE REVIEW REMINDER
+ * ============================================================================
+ * Nudges the underwriting team that one or more lenders' guidelines haven't been
+ * reviewed in over six months and should be re-checked for changes.
+ */
+export interface LenderReviewReminderData {
+  to_emails: string[];
+  stale_lenders: { name: string; last_reviewed: string | null }[];
+  guidelines_url: string;
+}
+
+export function generate_lender_review_reminder_html(data: LenderReviewReminderData): string {
+  data = escape_email_strings(data);
+  const { stale_lenders, guidelines_url } = data;
+
+  const rows = stale_lenders
+    .map(
+      (l) => `
+      <tr>
+        <td style="padding: 8px 12px; border-bottom: 1px solid #e2e8f0; font-weight: 600; color: #0f172a;">${l.name}</td>
+        <td style="padding: 8px 12px; border-bottom: 1px solid #e2e8f0; color: #64748b; font-size: 13px;">${l.last_reviewed || 'Never'}</td>
+      </tr>`
+    )
+    .join('');
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Lender guidelines due for review</title></head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f6f9fc;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse;">
+    <tr><td align="center" style="padding: 40px 0;">
+      <table role="presentation" style="width: 600px; max-width: 100%; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+        <tr><td style="background-color: #f59e0b; padding: 20px; text-align: center;">
+          <h1 style="margin: 0; color: #ffffff; font-size: 18px; letter-spacing: 0.04em;">Lender Guidelines Due for Review</h1>
+        </td></tr>
+        <tr><td style="padding: 28px;">
+          <p style="margin: 0 0 16px; color: #334155; font-size: 14px; line-height: 1.6;">
+            The following ${stale_lenders.length} lender${stale_lenders.length === 1 ? '' : 's'} ${stale_lenders.length === 1 ? 'has' : 'have'} not had ${stale_lenders.length === 1 ? 'its' : 'their'} guidelines reviewed in over six months. Please re-check them for any changes and mark them reviewed.
+          </p>
+          <table role="presentation" style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+            <tr>
+              <th align="left" style="padding: 8px 12px; border-bottom: 2px solid #cbd5e1; font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: #94a3b8;">Lender</th>
+              <th align="left" style="padding: 8px 12px; border-bottom: 2px solid #cbd5e1; font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: #94a3b8;">Last reviewed</th>
+            </tr>
+            ${rows}
+          </table>
+          <a href="${guidelines_url}" style="display: inline-block; background-color: #10b981; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; font-size: 14px;">Review lender database</a>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}
+
+export async function send_lender_review_reminder_email(data: LenderReviewReminderData) {
+  const recipients = (data.to_emails ?? []).filter((e) => !!e && e.includes('@'));
+  if (recipients.length === 0) return null;
+
+  const transporter = create_smtp_transporter();
+  const from_email = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  const from_name = process.env.SMTP_FROM_NAME || 'Credit Banc Vault';
+
+  const mail_options = {
+    from: `${from_name} <${from_email}>`,
+    to: recipients,
+    subject: `${data.stale_lenders.length} lender${data.stale_lenders.length === 1 ? '' : 's'} due for guideline review`,
+    html: generate_lender_review_reminder_html(data),
+  };
+
+  return await transporter.sendMail(mail_options);
+}

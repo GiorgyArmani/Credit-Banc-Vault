@@ -14,7 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { fetchNotifications, markNotificationAsRead, markAllNotificationsAsRead } from "@/app/actions/notifications";
 import { formatDistanceToNow } from "date-fns";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 
 interface Notification {
@@ -25,9 +25,21 @@ interface Notification {
     is_read: boolean;
     created_at: string;
     link_url?: string;
+    client_id?: string | null;
 }
 
-export function NotificationBell() {
+interface NotificationBellProps {
+    /**
+     * Portal-specific base path to the client detail route, e.g. "/admin/clients".
+     * When set, clicking a notification with a client_id navigates to `${clientBasePath}/${client_id}`.
+     * A notification's explicit link_url always takes precedence.
+     */
+    clientBasePath?: string;
+}
+
+export function NotificationBell({ clientBasePath }: NotificationBellProps = {}) {
+    const router = useRouter();
+    const [open, set_open] = useState(false);
     const [notifications, set_notifications] = useState<Notification[]>([]);
     const [unread_count, set_unread_count] = useState(0);
     const [is_loading, set_is_loading] = useState(false);
@@ -67,8 +79,30 @@ export function NotificationBell() {
         }
     };
 
+    const get_target = (notification: Notification): string | null => {
+        if (notification.link_url) return notification.link_url;
+        if (clientBasePath && notification.client_id) {
+            return `${clientBasePath}/${notification.client_id}`;
+        }
+        return null;
+    };
+
+    const handle_notification_click = (notification: Notification) => {
+        const target = get_target(notification);
+        if (!notification.is_read) {
+            // Optimistically mark as read, then persist in the background.
+            set_notifications(prev => prev.map(n => n.id === notification.id ? { ...n, is_read: true } : n));
+            set_unread_count(prev => Math.max(0, prev - 1));
+            markNotificationAsRead(notification.id);
+        }
+        if (target) {
+            set_open(false);
+            router.push(target);
+        }
+    };
+
     return (
-        <DropdownMenu>
+        <DropdownMenu open={open} onOpenChange={set_open}>
             <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" className="relative">
                     <Bell className="h-5 w-5" />
@@ -110,11 +144,23 @@ export function NotificationBell() {
                         </div>
                     ) : (
                         <div className="flex flex-col">
-                            {notifications.map((notification) => (
+                            {notifications.map((notification) => {
+                                const target = get_target(notification);
+                                return (
                                 <div
                                     key={notification.id}
+                                    role={target ? "button" : undefined}
+                                    tabIndex={target ? 0 : undefined}
+                                    onClick={target ? () => handle_notification_click(notification) : undefined}
+                                    onKeyDown={target ? (e) => {
+                                        if (e.key === "Enter" || e.key === " ") {
+                                            e.preventDefault();
+                                            handle_notification_click(notification);
+                                        }
+                                    } : undefined}
                                     className={cn(
                                         "p-4 border-b last:border-0 hover:bg-gray-50 transition-colors relative group",
+                                        target && "cursor-pointer",
                                         !notification.is_read && "bg-blue-50/50"
                                     )}
                                 >
@@ -145,13 +191,10 @@ export function NotificationBell() {
                                                 {formatDistanceToNow(new Date(notification.created_at), { addSuffix: true })}
                                             </p>
 
-                                            {notification.link_url && (
-                                                <Link
-                                                    href={notification.link_url}
-                                                    className="text-[11px] text-emerald-600 hover:underline inline-block mt-1"
-                                                >
+                                            {target && (
+                                                <span className="text-[11px] text-emerald-600 inline-block mt-1 group-hover:underline">
                                                     View details
-                                                </Link>
+                                                </span>
                                             )}
                                         </div>
                                     </div>
@@ -167,7 +210,8 @@ export function NotificationBell() {
                                         </Button>
                                     )}
                                 </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     )}
                 </ScrollArea>

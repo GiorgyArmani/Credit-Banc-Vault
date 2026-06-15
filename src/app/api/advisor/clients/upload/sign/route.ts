@@ -63,6 +63,15 @@ export async function POST(request: Request) {
         // STEP 3: VERIFY ADVISOR OWNERSHIP (owner, follower, or admin)
         // ========================================================================
 
+        const { data: caller_role } = await supabase_admin
+            .from('users')
+            .select('role')
+            .eq('id', user.id)
+            .maybeSingle();
+        // Admin and underwriting are trusted staff: they can upload for any
+        // client and don't need an advisor profile.
+        const is_staff = caller_role?.role === 'admin' || caller_role?.role === 'underwriting';
+
         let { data: advisor_data } = await supabase_admin
             .from('advisors')
             .select('id')
@@ -86,7 +95,7 @@ export async function POST(request: Request) {
             }
         }
 
-        if (!advisor_data) {
+        if (!advisor_data && !is_staff) {
             return NextResponse.json(
                 { success: false, error: 'Advisor profile not found' },
                 { status: 403 }
@@ -103,15 +112,8 @@ export async function POST(request: Request) {
             return NextResponse.json({ success: false, error: 'Client not found' }, { status: 404 });
         }
 
-        const { data: caller_role } = await supabase_admin
-            .from('users')
-            .select('role')
-            .eq('id', user.id)
-            .maybeSingle();
-        const is_admin_caller = caller_role?.role === 'admin';
-
-        let has_access = is_admin_caller || client.advisor_id === advisor_data.id;
-        if (!has_access) {
+        let has_access = is_staff || (!!advisor_data && client.advisor_id === advisor_data.id);
+        if (!has_access && advisor_data) {
             const { data: follower_row } = await supabase_admin
                 .from('client_followers')
                 .select('id')

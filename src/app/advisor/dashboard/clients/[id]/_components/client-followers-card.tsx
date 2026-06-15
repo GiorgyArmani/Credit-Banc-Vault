@@ -144,17 +144,14 @@ export function ClientFollowersCard({ clientId, canManage }: Props) {
     };
 
     return (
-        <section className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+        <section className="p-6">
             <div className="flex items-center justify-between mb-5">
                 <div className="flex items-center gap-2">
                     <div className="w-7 h-7 rounded-lg bg-emerald-100 flex items-center justify-center">
                         <Users className="h-4 w-4 text-emerald-700" />
                     </div>
-                    <h3 className="text-base font-extrabold text-slate-900">
-                        Followers
-                    </h3>
-                    <span className="ml-1 text-[11px] font-bold text-slate-400 tabular-nums">
-                        {loading ? "…" : followers.length}
+                    <span className="text-[11px] font-bold text-slate-400 tabular-nums">
+                        {loading ? "…" : `${followers.length} follower${followers.length === 1 ? "" : "s"}`}
                     </span>
                 </div>
                 {canManage && (

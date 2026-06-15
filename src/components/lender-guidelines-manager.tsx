@@ -36,7 +36,14 @@ interface Lender {
   payment_type: string | null;
   consolidation_positions: number | null;
   additional_info: string | null;
+  /** When these guidelines were last confirmed current (edit or "Mark reviewed").
+   *  Optional so INITIAL_LENDER_FIELDS need not seed it — the DB defaults it. */
+  last_reviewed_at?: string | null;
 }
+
+// Guidelines should be re-checked against the lender twice a year; past this we
+// flag the card as due for review.
+const REVIEW_INTERVAL_MS = 1000 * 60 * 60 * 24 * 183; // ~6 months
 
 interface GroupedLender {
   name: string;
@@ -159,12 +166,15 @@ export default function LenderGuidelinesManager() {
       }
 
       // 2. Handle Upserts (updates and inserts)
+      // Saving counts as a review — stamp now so the 6-month clock resets.
+      const reviewed_now = new Date().toISOString();
       for (const [spec, data] of newPrograms) {
         const { id, ...cleanData } = data;
         const payload = {
           ...cleanData,
           lender_name: editingGroup.lender_name,
           specialty: spec === "General" ? null : spec,
+          last_reviewed_at: reviewed_now,
         };
 
         if (id) {
@@ -201,6 +211,33 @@ export default function LenderGuidelinesManager() {
     } else {
       toast.error("Error removing lender");
     }
+  }
+
+  // Oldest review timestamp across a lender's programs — the one that drives the
+  // "due" flag (a lender is only as fresh as its stalest program).
+  function groupReview(group: GroupedLender): { oldest: Date | null; isDue: boolean } {
+    const dates = group.programs
+      .map(p => (p.last_reviewed_at ? new Date(p.last_reviewed_at) : null))
+      .filter((d): d is Date => d !== null && !isNaN(d.getTime()));
+    if (dates.length === 0) return { oldest: null, isDue: true };
+    const oldest = dates.reduce((a, b) => (a.getTime() < b.getTime() ? a : b));
+    return { oldest, isDue: Date.now() - oldest.getTime() > REVIEW_INTERVAL_MS };
+  }
+
+  async function markGroupReviewed(name: string) {
+    const now = new Date().toISOString();
+    const { error } = await supabase
+      .from("lender_guidelines")
+      .update({ last_reviewed_at: now })
+      .eq("lender_name", name);
+    if (error) {
+      toast.error("Couldn't mark as reviewed");
+      return;
+    }
+    setLenders(prev =>
+      prev.map(l => (l.lender_name === name ? { ...l, last_reviewed_at: now } : l))
+    );
+    toast.success(`${name} marked as reviewed`);
   }
 
   const handleFieldChange = (field: keyof Lender, value: any) => {
@@ -298,7 +335,9 @@ export default function LenderGuidelinesManager() {
           ) : groupedLenders.length === 0 ? (
             <div className="col-span-full py-12 text-center text-slate-500 border border-dashed border-slate-200 rounded-xl">No lenders found.</div>
           ) : (
-            groupedLenders.map(group => (
+            groupedLenders.map(group => {
+              const review = groupReview(group);
+              return (
               <div
                 key={group.name}
                 className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col justify-between hover:border-slate-400 transition-all group"
@@ -336,9 +375,33 @@ export default function LenderGuidelinesManager() {
                       <span className="text-emerald-500">{group.programs[0]?.specialty || "—"}</span>
                     </div>
                   </div>
+
+                  {/* Review freshness — 6-month guideline check */}
+                  <div className="mt-3 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-[11px] font-mono text-slate-500">
+                        Reviewed{" "}
+                        {review.oldest
+                          ? review.oldest.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                          : "—"}
+                      </span>
+                      {review.isDue && (
+                        <span className="text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">
+                          Due
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => markGroupReviewed(group.name)}
+                      className="text-[10px] font-semibold text-emerald-600 hover:text-emerald-700 whitespace-nowrap"
+                    >
+                      Mark reviewed
+                    </button>
+                  </div>
                 </div>
               </div>
-            ))
+              );
+            })
           )}
         </div>
       </div>

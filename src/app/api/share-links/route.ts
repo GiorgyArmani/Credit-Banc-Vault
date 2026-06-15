@@ -42,6 +42,31 @@ export async function POST(request: Request) {
     const label =
       typeof body?.label === "string" && body.label.trim() ? body.label.trim().slice(0, 120) : null;
 
+    // Optional per-file selection. Omitted/non-array → null → share every
+    // approved file (legacy behavior). An explicit array means "only these
+    // files", letting staff withhold the agreement or pick one of several files
+    // in a category.
+    const selected_document_ids: string[] | null = Array.isArray(body?.document_ids)
+      ? Array.from(
+          new Set(
+            (body.document_ids as unknown[]).filter(
+              (c): c is string => typeof c === "string" && !!c.trim()
+            )
+          )
+        )
+      : null;
+
+    // Legacy category-level selection (still honored when no document_ids given).
+    const selected_doc_codes: string[] | null = Array.isArray(body?.doc_codes)
+      ? Array.from(
+          new Set(
+            (body.doc_codes as unknown[]).filter(
+              (c): c is string => typeof c === "string" && !!c.trim()
+            )
+          )
+        )
+      : null;
+
     const link = await createShareLink({
       client_id,
       business_profile_id,
@@ -49,6 +74,8 @@ export async function POST(request: Request) {
       created_by_email: gate.user.email ?? null,
       label,
       expires_in_days,
+      selected_doc_codes,
+      selected_document_ids,
     });
 
     if (!link) {

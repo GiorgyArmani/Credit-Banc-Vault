@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
@@ -15,9 +14,10 @@ import {
     CommandItem,
     CommandList,
 } from "@/components/ui/command";
-import { Loader2, Check, X, Star, ExternalLink, BarChart3, Plus } from "lucide-react";
+import { Loader2, Check, X, ExternalLink, BarChart3, Plus } from "lucide-react";
 import Link from "next/link";
 import { BankAnalysisViewer } from "./bank-analysis-viewer";
+import { LenderResponsePanel } from "@/components/lender/lender-response-panel";
 import { toast } from "sonner";
 import clsx from "clsx";
 import { format } from "date-fns";
@@ -244,22 +244,12 @@ export function AdminLenderReviewCard({ clientId }: Props) {
 
     return (
         <>
-        <Card className="rounded-[2.5rem] border-slate-200 overflow-hidden shadow-sm">
-            <CardHeader className="pb-4 border-b border-slate-100 flex flex-row items-center justify-between bg-slate-50/30">
-                <div className="flex items-center gap-3">
-                    <div className="bg-emerald-500/10 p-2 rounded-xl">
-                        <Star className="h-4 w-4 text-emerald-600" />
-                    </div>
-                    <div>
-                        <CardTitle className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">
-                            Lender Match — Admin Review
-                        </CardTitle>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">
-                            {still_pending} pending · {approved_final} approved
-                        </p>
-                    </div>
-                </div>
-                <div className="flex items-center gap-2">
+        <div className="p-6">
+            <div className="pb-4 mb-2 border-b border-slate-100 flex flex-row items-center justify-between gap-4">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                    {still_pending} pending · {approved_final} approved
+                </p>
+                <div className="flex items-center gap-2 flex-wrap justify-end">
                     <Button
                         size="sm"
                         variant="outline"
@@ -356,9 +346,9 @@ export function AdminLenderReviewCard({ clientId }: Props) {
                         </Button>
                     )}
                 </div>
-            </CardHeader>
+            </div>
 
-            <CardContent className="p-0">
+            <div>
                 {is_loading ? (
                     <div className="p-10 text-center">
                         <Loader2 className="h-6 w-6 text-emerald-500 animate-spin mx-auto" />
@@ -449,43 +439,59 @@ export function AdminLenderReviewCard({ clientId }: Props) {
                                         </div>
                                     </div>
 
-                                    {/* Action row */}
-                                    <div className="mt-4 flex items-center gap-2 flex-wrap">
-                                        <Button
-                                            size="sm"
-                                            variant={effective === 'approved' ? "default" : "outline"}
-                                            onClick={() => stage_decision(a.id, 'approved')}
-                                            className={clsx(
-                                                "h-8 rounded-lg text-[10px] font-black uppercase tracking-widest",
-                                                effective === 'approved' && "bg-emerald-500 hover:bg-emerald-600 text-white"
+                                    {/* Action row — only while a decision is still needed or being
+                                        staged. Once the lender has been marked Contact/Skip and saved,
+                                        collapse to a single "Change decision" link so reviewed rows
+                                        don't keep showing the buttons. */}
+                                    {(is_pending_review || staged) ? (
+                                        <div className="mt-4 flex items-center gap-2 flex-wrap">
+                                            <Button
+                                                size="sm"
+                                                variant={effective === 'approved' ? "default" : "outline"}
+                                                onClick={() => stage_decision(a.id, 'approved')}
+                                                className={clsx(
+                                                    "h-8 rounded-lg text-[10px] font-black uppercase tracking-widest",
+                                                    effective === 'approved' && "bg-emerald-500 hover:bg-emerald-600 text-white"
+                                                )}
+                                            >
+                                                <Check className="h-3 w-3 mr-1" />
+                                                Contact
+                                            </Button>
+                                            <Button
+                                                size="sm"
+                                                variant={effective === 'rejected' ? "default" : "outline"}
+                                                onClick={() => stage_decision(a.id, 'rejected')}
+                                                className={clsx(
+                                                    "h-8 rounded-lg text-[10px] font-black uppercase tracking-widest",
+                                                    effective === 'rejected' && "bg-orange-500 hover:bg-orange-600 text-white"
+                                                )}
+                                            >
+                                                <X className="h-3 w-3 mr-1" />
+                                                Skip
+                                            </Button>
+                                            {staged && (
+                                                <Button
+                                                    size="sm"
+                                                    variant="ghost"
+                                                    onClick={() => clear_pending(a.id)}
+                                                    className="h-8 rounded-lg text-[10px] font-bold uppercase tracking-widest text-slate-500"
+                                                >
+                                                    Cancel
+                                                </Button>
                                             )}
-                                        >
-                                            <Check className="h-3 w-3 mr-1" />
-                                            Contact
-                                        </Button>
-                                        <Button
-                                            size="sm"
-                                            variant={effective === 'rejected' ? "default" : "outline"}
-                                            onClick={() => stage_decision(a.id, 'rejected')}
-                                            className={clsx(
-                                                "h-8 rounded-lg text-[10px] font-black uppercase tracking-widest",
-                                                effective === 'rejected' && "bg-orange-500 hover:bg-orange-600 text-white"
-                                            )}
-                                        >
-                                            <X className="h-3 w-3 mr-1" />
-                                            Skip
-                                        </Button>
-                                        {staged && (
+                                        </div>
+                                    ) : (
+                                        <div className="mt-4">
                                             <Button
                                                 size="sm"
                                                 variant="ghost"
-                                                onClick={() => clear_pending(a.id)}
-                                                className="h-8 rounded-lg text-[10px] font-bold uppercase tracking-widest text-slate-500"
+                                                onClick={() => stage_decision(a.id, a.admin_review === 'rejected' ? 'rejected' : 'approved')}
+                                                className="h-8 px-2 rounded-lg text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:text-slate-600"
                                             >
-                                                Cancel
+                                                Change decision
                                             </Button>
-                                        )}
-                                    </div>
+                                        </div>
+                                    )}
 
                                     {/* Notes — show when staging or when notes exist */}
                                     {(staged || a.admin_review_notes) && (
@@ -510,13 +516,19 @@ export function AdminLenderReviewCard({ clientId }: Props) {
                                             Awaiting admin decision
                                         </p>
                                     )}
+
+                                    {/* Lender's recorded response (note + screenshots) once the
+                                        deal is out to the lender. Lazily loads on expand. */}
+                                    {a.status !== 'pending' && (
+                                        <LenderResponsePanel assignmentId={a.id} status={a.status} />
+                                    )}
                                 </div>
                             );
                         })}
                     </div>
                 )}
-            </CardContent>
-        </Card>
+            </div>
+        </div>
 
         <BankAnalysisViewer
             clientId={clientId}

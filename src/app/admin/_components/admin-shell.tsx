@@ -67,7 +67,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
               <Menu className="h-6 w-6 text-slate-600" />
             </button>
             <div className="text-sm font-black text-slate-900 uppercase tracking-widest">{currentTitle}</div>
-            <NotificationBell />
+            <NotificationBell clientBasePath="/admin/clients" />
           </div>
           {/* Search row — desktop keeps it in the topbar; mobile gets its own row. */}
           <div className="px-3 pb-3">
@@ -86,7 +86,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             <GlobalSearch />
           </div>
           <div className="flex items-center gap-4 shrink-0">
-            <NotificationBell />
+            <NotificationBell clientBasePath="/admin/clients" />
           </div>
         </header>
 

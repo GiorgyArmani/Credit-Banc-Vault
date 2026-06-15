@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { FileText, Pencil, Check, X, Send, Loader2, Plus } from "lucide-react";
+import { Pencil, Check, X, Send, Loader2, Plus } from "lucide-react";
 import { format } from "date-fns";
 import clsx from "clsx";
 
@@ -65,15 +65,7 @@ export function ClientNotesCard({
     };
 
     return (
-        <section className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
-            {/* Header */}
-            <div className="flex items-center gap-2 mb-5">
-                <div className="w-7 h-7 rounded-lg bg-emerald-100 flex items-center justify-center">
-                    <FileText className="h-4 w-4 text-emerald-700" />
-                </div>
-                <h3 className="text-base font-extrabold text-slate-900">Client Notes</h3>
-            </div>
-
+        <section className="p-6">
             {/* Section A — Signup Notes (inline editable) */}
             <div className="space-y-4">
                 <SignupNoteField

@@ -19,6 +19,7 @@ export const FUNDING_OPTIONS: readonly string[] = [
     "Term Loan",
     "Revenue Based Loan",
     "Factor",
+    "Invoice Factoring",
     "Equipment",
     "Project Financing",
     "Line of Credit",

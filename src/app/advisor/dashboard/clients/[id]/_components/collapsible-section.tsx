@@ -4,10 +4,10 @@
 // toggles a Radix Collapsible. Open/closed state persists to localStorage so
 // each user's preference per (client, section) survives a reload.
 //
-// The wrapper deliberately does NOT replace the inner card's own header —
-// rendering a separate header above keeps subcomponents drop-in without
-// having to plumb open/closed state into each one. The wrapper's header is
-// kept slim so the redundancy reads as a section divider, not a duplicate.
+// The wrapper IS the section card: it renders the single bordered container and
+// its clickable header (title + chevron). Children are the bare body — they must
+// NOT carry their own border or repeat the title, or the section reads as a
+// card-in-card with a duplicated name.
 //
 // Listens for a `client-detail:toggle-all` window event to support the
 // page-level Expand/Collapse-all pill.
@@ -89,38 +89,45 @@ export function CollapsibleSection({
     }, []);
 
     return (
-        <Collapsible open={is_open} onOpenChange={set_is_open} className="space-y-2">
-            <CollapsibleTrigger asChild>
-                <button
-                    type="button"
+        <Collapsible open={is_open} onOpenChange={set_is_open}>
+            <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                {/* Header row: the trigger (chevron + title) toggles; the accessory
+                    sits beside it as a sibling so its buttons stay valid (no nested
+                    <button>) and don't toggle the section when clicked. */}
+                <div
                     className={clsx(
-                        "w-full group flex items-center gap-3 px-4 py-2.5 rounded-xl",
-                        "border border-slate-200 bg-white shadow-sm",
-                        "hover:border-emerald-200 hover:bg-emerald-50/40 transition-colors",
-                        "text-left",
+                        "flex items-center gap-3 px-5 py-3.5",
+                        is_open && "border-b border-slate-100",
                     )}
-                    aria-expanded={is_open}
                 >
-                    <ChevronDown
-                        className={clsx(
-                            "h-3.5 w-3.5 text-slate-400 shrink-0 transition-transform",
-                            is_open ? "rotate-0" : "-rotate-90",
-                        )}
-                    />
-                    <span className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-700 shrink-0">
-                        {title}
-                    </span>
-                    {summary && !is_open && (
-                        <span className="text-[11px] font-bold text-slate-400 truncate min-w-0">
-                            {summary}
-                        </span>
+                    <CollapsibleTrigger asChild>
+                        <button
+                            type="button"
+                            className="group flex items-center gap-3 flex-1 min-w-0 text-left hover:opacity-80 transition-opacity"
+                            aria-expanded={is_open}
+                        >
+                            <ChevronDown
+                                className={clsx(
+                                    "h-3.5 w-3.5 text-slate-400 shrink-0 transition-transform",
+                                    is_open ? "rotate-0" : "-rotate-90",
+                                )}
+                            />
+                            <span className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-500 shrink-0">
+                                {title}
+                            </span>
+                            {summary && !is_open && (
+                                <span className="text-[11px] font-bold text-slate-400 truncate min-w-0">
+                                    {summary}
+                                </span>
+                            )}
+                        </button>
+                    </CollapsibleTrigger>
+                    {accessory && (
+                        <div className="ml-auto shrink-0 flex items-center gap-2">{accessory}</div>
                     )}
-                    <span className="ml-auto flex items-center gap-2 shrink-0">
-                        {accessory}
-                    </span>
-                </button>
-            </CollapsibleTrigger>
-            <CollapsibleContent>{children}</CollapsibleContent>
+                </div>
+                <CollapsibleContent>{children}</CollapsibleContent>
+            </div>
         </Collapsible>
     );
 }

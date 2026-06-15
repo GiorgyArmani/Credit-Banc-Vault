@@ -109,7 +109,7 @@ export function AdvisorShell({ children }: { children: React.ReactNode }) {
               <Menu className="h-6 w-6" />
             </button>
             <div className="text-sm font-medium text-gray-700">{currentTitle}</div>
-            <NotificationBell />
+            <NotificationBell clientBasePath="/advisor/dashboard/clients" />
           </div>
           {/* Search row — desktop keeps it in the topbar; mobile gets its own row. */}
           <div className="px-3 pb-3">
@@ -124,7 +124,7 @@ export function AdvisorShell({ children }: { children: React.ReactNode }) {
           </div>
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-full hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors cursor-pointer">
-              <NotificationBell />
+              <NotificationBell clientBasePath="/advisor/dashboard/clients" />
             </div>
 
             <div className="h-8 w-px bg-slate-200 mx-2"></div>

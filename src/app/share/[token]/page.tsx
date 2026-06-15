@@ -6,7 +6,8 @@
 // this is meant to be handed to an external lender.
 
 import { resolveShareLink } from "@/lib/share-links";
-import { ShieldCheck, FileText, Download, Eye, Lock } from "lucide-react";
+import { ShieldCheck, FileText, Lock } from "lucide-react";
+import { SharedDocuments } from "./shared-documents";
 
 export const dynamic = "force-dynamic";
 export const metadata = {
@@ -58,15 +59,6 @@ export default async function SharePage({
 
   if (!share) return <InvalidState />;
 
-  // Group documents by their category label for a tidy package view.
-  const groups = new Map<string, typeof share.documents>();
-  for (const doc of share.documents) {
-    const key = doc.category_label;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key)!.push(doc);
-  }
-  const grouped = Array.from(groups.entries());
-
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Brand header */}
@@ -109,55 +101,7 @@ export default async function SharePage({
             </p>
           </div>
         ) : (
-          <div className="space-y-6">
-            {grouped.map(([label, docs]) => (
-              <section key={label}>
-                <h2 className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-2 px-1">
-                  {label}
-                </h2>
-                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm divide-y divide-slate-100 overflow-hidden">
-                  {docs.map((doc) => (
-                    <div
-                      key={doc.id}
-                      className="flex items-center justify-between gap-3 p-4 hover:bg-slate-50/60 transition-colors"
-                    >
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center shrink-0">
-                          <FileText className="h-4 w-4 text-slate-400" />
-                        </div>
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold text-slate-800 truncate">
-                            {doc.display_name}
-                          </p>
-                          {doc.size != null && (
-                            <p className="text-[11px] text-slate-400">{format_size(doc.size)}</p>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <a
-                          href={doc.view_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-1.5 px-3 py-2 text-slate-600 hover:bg-slate-100 rounded-lg text-[11px] font-bold transition-colors"
-                        >
-                          <Eye className="h-3.5 w-3.5" />
-                          View
-                        </a>
-                        <a
-                          href={doc.download_url}
-                          className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold transition-colors"
-                        >
-                          <Download className="h-3.5 w-3.5" />
-                          Download
-                        </a>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            ))}
-          </div>
+          <SharedDocuments documents={share.documents} />
         )}
 
         <p className="text-[11px] text-slate-400 text-center mt-8 leading-relaxed">

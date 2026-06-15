@@ -22,9 +22,11 @@ interface LoanFundedDialogProps {
     clientId: string;
     clientName: string;
     onSuccess?: () => void;
+    /** Override the trigger button styling so it can blend into its host. */
+    triggerClassName?: string;
 }
 
-export function LoanFundedDialog({ clientId, clientName, onSuccess }: LoanFundedDialogProps) {
+export function LoanFundedDialog({ clientId, clientName, onSuccess, triggerClassName }: LoanFundedDialogProps) {
     const [isOpen, setIsOpen] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
 
@@ -69,7 +71,7 @@ export function LoanFundedDialog({ clientId, clientName, onSuccess }: LoanFunded
     return (
         <Dialog open={isOpen} onOpenChange={setIsOpen}>
             <DialogTrigger asChild>
-                <Button className="h-12 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl shadow-xl shadow-emerald-500/10 px-6 font-black uppercase tracking-widest text-xs">
+                <Button className={triggerClassName ?? "h-12 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl shadow-xl shadow-emerald-500/10 px-6 font-black uppercase tracking-widest text-xs"}>
                     <DollarSign className="w-4 h-4 mr-2" />
                     Loan Funded
                 </Button>

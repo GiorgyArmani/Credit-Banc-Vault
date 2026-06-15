@@ -1,7 +1,7 @@
 // src/app/underwriting/dashboard/clients/[id]/page.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter, useParams, usePathname } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -34,7 +34,9 @@ import {
     Pencil,
     UploadCloud,
     BarChart3,
-    Slack
+    Slack,
+    Send,
+    Search
 } from "lucide-react";
 import DocumentPreviewModal from "@/components/pdf/pdf-viewer";
 import {
@@ -55,6 +57,9 @@ import clsx from "clsx";
 import { format } from "date-fns";
 import { LoanFundedDialog } from "@/components/loan-funded-dialog";
 import { ShareWithLenderButton } from "@/components/share/share-with-lender-button";
+import { LenderResponsePanel } from "@/components/lender/lender-response-panel";
+import { UwAddLenderButton } from "@/components/lender/uw-add-lender-button";
+import { requestDocuments } from "@/app/advisor/dashboard/clients/[id]/actions";
 import { getClientPipelineHistory, updateLoanStatus, type LoanStatus, type PipelineStatusEntry } from "@/app/actions/pipeline";
 import { LoanPipelineFull, LoanPipelineBadge, PIPELINE_STEPS } from "@/components/loan-pipeline-status";
 import { getBulkClientActivity } from "@/app/actions/advisor";
@@ -218,6 +223,10 @@ export default function UnderwritingClientDetailsPage() {
     const is_admin_uw_route = pathname?.startsWith("/admin/uw") ?? false;
     const is_admin_unified_route = pathname?.startsWith("/admin/clients") ?? false;
     const is_admin_route = is_admin_uw_route || is_admin_unified_route;
+    const is_underwriting_route = pathname?.startsWith("/underwriting") ?? false;
+    // Document upload is open to all staff surfaces of this page (admin already
+    // exposes it via Admin Actions; UW gets its own trigger below).
+    const can_upload = is_admin_route || is_underwriting_route;
     const queue_path = is_admin_unified_route
         ? "/admin/dashboard"
         : is_admin_uw_route
@@ -343,16 +352,32 @@ export default function UnderwritingClientDetailsPage() {
     const [is_submitting_vault, set_is_submitting_vault] = useState(false);
     const [submit_vault_fico, set_submit_vault_fico] = useState("");
 
-    // Admin-only: manual funding application upload
+    // Manual funding application upload
     const [is_funding_app_open, set_is_funding_app_open] = useState(false);
     const [funding_app_file, set_funding_app_file] = useState<File | null>(null);
     const [is_uploading_funding_app, set_is_uploading_funding_app] = useState(false);
+    // Lender version: funding app with the agreement page removed. Uploaded as a
+    // standalone shareable doc — does NOT mark the deal complete, sync GHL, or
+    // touch the document-request flow.
+    const [funding_app_for_lenders, set_funding_app_for_lenders] = useState(false);
 
-    // Admin-only: upload documents on behalf of client
+    // Admin-only: upload documents on behalf of client (generic multi-type modal)
     const [is_doc_upload_open, set_is_doc_upload_open] = useState(false);
     const [doc_upload_code, set_doc_upload_code] = useState("");
     const [doc_upload_files, set_doc_upload_files] = useState<File[]>([]);
     const [is_uploading_docs, set_is_uploading_docs] = useState(false);
+
+    // Per-category direct upload (advisor-style: pick files → upload, no menu)
+    const category_upload_input_ref = useRef<HTMLInputElement>(null);
+    const [inline_upload_code, set_inline_upload_code] = useState("");
+    const [inline_uploading_code, set_inline_uploading_code] = useState<string | null>(null);
+
+    // Staff: request documents from the client (mirrors the advisor flow)
+    const [is_request_modal_open, set_is_request_modal_open] = useState(false);
+    const [selected_request_ids, set_selected_request_ids] = useState<string[]>([]);
+    const [request_search, set_request_search] = useState("");
+    const [is_requesting_docs, set_is_requesting_docs] = useState(false);
+    const [requesting_again_code, set_requesting_again_code] = useState<string | null>(null);
 
     // Admin-only: delete vault confirmation
     const [is_delete_vault_open, set_is_delete_vault_open] = useState(false);
@@ -364,7 +389,7 @@ export default function UnderwritingClientDetailsPage() {
 
     const [is_notify_modal_open, set_is_notify_modal_open] = useState(false);
     const [selected_missing_docs, set_selected_missing_docs] = useState<string[]>([]);
-    const [all_available_docs, set_all_available_docs] = useState<{ code: string; label: string }[]>([]);
+    const [all_available_docs, set_all_available_docs] = useState<{ id: string; code: string; label: string }[]>([]);
     const [selected_extra_docs, set_selected_extra_docs] = useState<string[]>([]);
     const [custom_note, set_custom_note] = useState("");
     const [is_notifying, set_is_notifying] = useState(false);
@@ -566,7 +591,7 @@ export default function UnderwritingClientDetailsPage() {
             // 4. Fetch all available document types FOR THE CATALOG
             const { data: allDocs } = await supabase
                 .from("required_documents")
-                .select("code, label")
+                .select("id, code, label")
                 .order("label", { ascending: true });
             set_all_available_docs(allDocs || []);
 
@@ -865,6 +890,53 @@ export default function UnderwritingClientDetailsPage() {
         });
     }
 
+    // Request a batch of document types from the client (modal "Request" button).
+    async function handle_request_documents() {
+        if (selected_request_ids.length === 0) return;
+        set_is_requesting_docs(true);
+        try {
+            const result = await requestDocuments(client_id, selected_request_ids, active_business_id);
+            if (result?.success) {
+                toast.success("Documents requested from client");
+                set_is_request_modal_open(false);
+                set_selected_request_ids([]);
+                set_request_search("");
+                fetch_client_details();
+            } else {
+                toast.error((result as any)?.error || "Failed to request documents");
+            }
+        } catch (err: any) {
+            console.error("uw request documents error:", err);
+            toast.error("An unexpected error occurred");
+        } finally {
+            set_is_requesting_docs(false);
+        }
+    }
+
+    // Re-request a single document type from the client (per-category button).
+    async function handle_request_again(doc_type: { code: string; label: string }) {
+        const def = all_available_docs.find(d => d.code === doc_type.code);
+        if (!def) {
+            toast.error("Document type not found in catalog");
+            return;
+        }
+        set_requesting_again_code(doc_type.code);
+        try {
+            const result = await requestDocuments(client_id, [def.id], active_business_id);
+            if (result?.success) {
+                toast.success(`Re-requested ${doc_type.label}`);
+                fetch_client_details();
+            } else {
+                toast.error((result as any)?.error || "Failed to request document");
+            }
+        } catch (err: any) {
+            console.error("uw request again error:", err);
+            toast.error("An unexpected error occurred");
+        } finally {
+            set_requesting_again_code(null);
+        }
+    }
+
     function format_file_size(bytes: number): string {
         if (!bytes) return "0 Bytes";
         const k = 1024;
@@ -908,6 +980,19 @@ export default function UnderwritingClientDetailsPage() {
         if (!funding_app_file) return;
         set_is_uploading_funding_app(true);
         try {
+            if (funding_app_for_lenders) {
+                // Lender version: just a shareable document under its own code.
+                // Goes through the plain upload path, so none of the funding-app
+                // side effects (deal-complete flag, GHL sync, request-doc flow)
+                // fire — it's only a file to hand lenders.
+                const ok = await run_doc_upload('funding_application_lenders', [funding_app_file]);
+                if (ok) {
+                    set_is_funding_app_open(false);
+                    set_funding_app_file(null);
+                    set_funding_app_for_lenders(false);
+                }
+                return;
+            }
             const fd = new FormData();
             fd.append('file', funding_app_file);
             const result = await addManualFundingApplication(client_id, fd, active_business_id);
@@ -920,28 +1005,29 @@ export default function UnderwritingClientDetailsPage() {
                 toast.error(result.error || 'Upload failed');
             }
         } catch (err: any) {
-            console.error('admin funding app upload error:', err);
+            console.error('funding app upload error:', err);
             toast.error('An unexpected error occurred');
         } finally {
             set_is_uploading_funding_app(false);
         }
     }
 
-    async function handle_admin_doc_upload() {
-        if (doc_upload_files.length === 0 || !doc_upload_code) return;
-        set_is_uploading_docs(true);
+    // Core upload: sign → push to storage → register. Caller owns the spinner
+    // and any modal/reset. Returns true when at least one file registered.
+    async function run_doc_upload(doc_code: string, files: File[]): Promise<boolean> {
+        if (files.length === 0 || !doc_code) return false;
         try {
             const supabase = createClient();
 
             const upload_results = await Promise.all(
-                doc_upload_files.map(async (file) => {
+                files.map(async (file) => {
                     try {
                         const sign_res = await fetch('/api/advisor/clients/upload/sign', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
                                 client_id,
-                                doc_code: doc_upload_code,
+                                doc_code,
                                 file_name: file.name,
                                 file_type: file.type,
                             }),
@@ -985,24 +1071,21 @@ export default function UnderwritingClientDetailsPage() {
             const failed = upload_results.filter((r) => !r.ok);
 
             failed.forEach((f) => {
-                console.error(`admin doc upload failed for ${f.file_name}:`, f.error);
+                console.error(`doc upload failed for ${f.file_name}:`, f.error);
                 toast.error(`Failed to upload ${f.file_name}: ${f.error}`);
             });
 
-            if (successful.length === 0) {
-                return;
-            }
+            if (successful.length === 0) return false;
 
             const res = await fetch('/api/advisor/clients/upload', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     client_id,
-                    doc_code: doc_upload_code,
-                    // Scope UW-side upload to the active business tab. Without
-                    // this, business_profile_id is stamped null and the doc
-                    // is hidden from every per-business tab (or, for client-
-                    // scoped codes, surfaces correctly anyway).
+                    doc_code,
+                    // Scope to the active business tab, else the doc is hidden
+                    // from every per-business tab (client-scoped codes surface
+                    // correctly regardless).
                     business_profile_id: active_business_id ?? null,
                     files: successful.map((s) => ({
                         storage_path: s.storage_path,
@@ -1016,22 +1099,57 @@ export default function UnderwritingClientDetailsPage() {
             if (!res.ok) {
                 const text = await res.text();
                 toast.error(`Upload registration failed: ${text || res.status}`);
-                return;
+                return false;
             }
 
             const result = await res.json();
             if (result.success) {
                 toast.success(`${result.uploaded} file(s) uploaded`);
+                fetch_client_details();
+                return true;
+            }
+            toast.error(result.error || 'Upload failed');
+            return false;
+        } catch (err: any) {
+            console.error('doc upload error:', err);
+            toast.error('An unexpected error occurred');
+            return false;
+        }
+    }
+
+    // Per-category Upload button → open the OS file picker straight away, then
+    // upload to that category (no document-type menu — same feel as advisor).
+    function trigger_category_upload(code: string) {
+        set_inline_upload_code(code);
+        if (category_upload_input_ref.current) {
+            category_upload_input_ref.current.value = "";
+            category_upload_input_ref.current.click();
+        }
+    }
+
+    async function on_category_files_selected(e: React.ChangeEvent<HTMLInputElement>) {
+        const files = Array.from(e.target.files ?? []);
+        e.target.value = "";
+        const code = inline_upload_code;
+        if (files.length === 0 || !code) return;
+        set_inline_uploading_code(code);
+        try {
+            await run_doc_upload(code, files);
+        } finally {
+            set_inline_uploading_code(null);
+        }
+    }
+
+    async function handle_admin_doc_upload() {
+        if (doc_upload_files.length === 0 || !doc_upload_code) return;
+        set_is_uploading_docs(true);
+        try {
+            const ok = await run_doc_upload(doc_upload_code, doc_upload_files);
+            if (ok) {
                 set_is_doc_upload_open(false);
                 set_doc_upload_files([]);
                 set_doc_upload_code("");
-                fetch_client_details();
-            } else {
-                toast.error(result.error || 'Upload failed');
             }
-        } catch (err: any) {
-            console.error('admin doc upload error:', err);
-            toast.error('An unexpected error occurred');
         } finally {
             set_is_uploading_docs(false);
         }
@@ -1220,6 +1338,47 @@ export default function UnderwritingClientDetailsPage() {
                     </div>
 
                     <div className="flex items-center gap-3">
+                        {/* Request this doc from the client + upload it (admin + UW),
+                            mirroring the advisor view */}
+                        {can_upload && (
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={requesting_again_code === doc_type.code}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handle_request_again(doc_type);
+                                }}
+                                className="border-slate-200 text-slate-600 hover:bg-slate-50 rounded-xl h-8 px-3 font-black text-[9px] uppercase tracking-widest"
+                            >
+                                {requesting_again_code === doc_type.code ? (
+                                    <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                                ) : (
+                                    <Send className="h-3.5 w-3.5 mr-1" />
+                                )}
+                                Request
+                            </Button>
+                        )}
+                        {can_upload && (
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={inline_uploading_code === doc_type.code}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    trigger_category_upload(doc_type.code);
+                                }}
+                                className="border-slate-200 text-slate-600 hover:bg-slate-50 rounded-xl h-8 px-3 font-black text-[9px] uppercase tracking-widest"
+                            >
+                                {inline_uploading_code === doc_type.code ? (
+                                    <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                                ) : (
+                                    <UploadCloud className="h-3.5 w-3.5 mr-1" />
+                                )}
+                                Upload
+                            </Button>
+                        )}
+
                         {/* Download All if multiple docs */}
                         {has_docs && category_docs.length > 1 && (
                             <Button
@@ -1235,7 +1394,7 @@ export default function UnderwritingClientDetailsPage() {
                                 Download All
                             </Button>
                         )}
-                        
+
                         <div className="w-px h-6 bg-slate-200 mx-1" />
                         
                         {is_expanded ? <ChevronUp className="h-5 w-5 text-slate-400" /> : <ChevronDown className="h-5 w-5 text-slate-400" />}
@@ -1273,18 +1432,15 @@ export default function UnderwritingClientDetailsPage() {
         };
 
         return (
-            <Card className="rounded-[2.5rem] border-slate-200 overflow-hidden shadow-sm">
-                <CardHeader className="pb-4 border-b border-slate-100 flex flex-row items-center justify-between bg-slate-50/30">
+            <div>
+                <div className="px-5 py-4 border-b border-slate-100 flex flex-row items-center justify-between bg-slate-50/30 flex-wrap gap-3">
                     <div className="flex items-center gap-3">
                         <div className="bg-emerald-500/10 p-2 rounded-xl">
                             <Star className="h-4 w-4 text-emerald-600" />
                         </div>
-                        <div>
-                            <CardTitle className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">Lender Matching Results</CardTitle>
-                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">
-                                {ready_count} Ready · {submitted_count} Submitted · {lender_assignments.length} Total
-                            </p>
-                        </div>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                            {ready_count} Ready · {submitted_count} Submitted · {lender_assignments.length} Total
+                        </p>
                     </div>
                     <div className="flex items-center gap-2">
                         <Button
@@ -1309,15 +1465,22 @@ export default function UnderwritingClientDetailsPage() {
                             <ExternalLink className="w-3 h-3 mr-1.5" />
                             Match Tool
                         </Button>
+                        <UwAddLenderButton
+                            clientId={client_id}
+                            businessProfileId={active_business_id}
+                            assignedLenderNames={lender_assignments.map((a) => a.lender_name)}
+                            onAdded={fetch_lender_assignments}
+                        />
                         <ShareWithLenderButton
                             clientId={client_id}
                             businessProfileId={active_business_id}
-                            triggerLabel="Share with Lender"
+                            triggerLabel="Share"
+                            lenderOptions={lender_assignments.map((a) => a.lender_name)}
                             className="h-8 rounded-xl text-[9px] font-black uppercase tracking-widest border border-slate-200 hover:bg-slate-50 text-slate-700 px-3"
                         />
                     </div>
-                </CardHeader>
-                <CardContent className="p-0">
+                </div>
+                <div>
                     <div className="divide-y divide-slate-100">
                         {lender_assignments.map((assign) => {
                             const row_state = derive_lender_row_state(assign);
@@ -1346,7 +1509,8 @@ export default function UnderwritingClientDetailsPage() {
                                                                        '✕';
 
                             return (
-                                <div key={assign.id} className="p-4 flex items-center justify-between hover:bg-slate-50/50 transition-all group gap-4">
+                                <div key={assign.id} className="p-4 hover:bg-slate-50/50 transition-all group">
+                                  <div className="flex items-center justify-between gap-4">
                                     <div className="flex items-center gap-4 min-w-0">
                                         <div className={clsx(
                                             "w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm shadow-sm shrink-0",
@@ -1428,12 +1592,16 @@ export default function UnderwritingClientDetailsPage() {
                                             </p>
                                         </div>
                                     </div>
+                                  </div>
+                                  {is_lifecycle_row && (
+                                    <LenderResponsePanel assignmentId={assign.id} status={assign.status} />
+                                  )}
                                 </div>
                             );
                         })}
                     </div>
-                </CardContent>
-            </Card>
+                </div>
+            </div>
         );
     }
 
@@ -1507,13 +1675,8 @@ export default function UnderwritingClientDetailsPage() {
                     </button>
                 </div>
 
+
                 <Dialog open={is_notify_modal_open} onOpenChange={set_is_notify_modal_open}>
-                    <DialogTrigger asChild>
-                        <Button className="h-12 bg-slate-900 hover:bg-slate-800 text-white rounded-xl shadow-xl shadow-slate-900/10 px-6 font-black uppercase tracking-widest text-xs">
-                            <Bell className="w-4 h-4 mr-2" />
-                            Notify Advisor
-                        </Button>
-                    </DialogTrigger>
                     <DialogContent className="sm:max-w-md rounded-[3rem] p-8">
                         <DialogHeader>
                             <DialogTitle className="text-2xl font-black text-slate-900 uppercase tracking-tighter">Missing Documents</DialogTitle>
@@ -1591,12 +1754,6 @@ export default function UnderwritingClientDetailsPage() {
                         </DialogFooter>
                     </DialogContent>
                 </Dialog>
-
-                <LoanFundedDialog
-                    clientId={client_id}
-                    clientName={client_profile.client_name}
-                    onSuccess={fetch_client_details}
-                />
             </div>
 
             {/* Section folding controls — same pattern as the advisor page so
@@ -1630,19 +1787,7 @@ export default function UnderwritingClientDetailsPage() {
                     title="Admin Actions"
                     defaultOpen
                 >
-                <Card className="rounded-[2.5rem] border-emerald-200 bg-gradient-to-br from-emerald-50/40 to-white overflow-hidden shadow-sm">
-                    <CardHeader className="pb-4 border-b border-emerald-100/60">
-                        <div className="flex items-center gap-3 mb-4">
-                            <div className="bg-emerald-500/10 p-2 rounded-xl">
-                                <ShieldCheck className="h-4 w-4 text-emerald-600" />
-                            </div>
-                            <div>
-                                <CardTitle className="text-xs font-black uppercase tracking-[0.2em] text-slate-500">Admin Actions</CardTitle>
-                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">
-                                    Advisor-side controls
-                                </p>
-                            </div>
-                        </div>
+                <div className="p-6 space-y-4">
                         <div className="flex flex-wrap gap-2">
                             <Button
                                 onClick={() => set_is_edit_profile_open(true)}
@@ -1689,11 +1834,8 @@ export default function UnderwritingClientDetailsPage() {
                                 Delete Vault
                             </Button>
                         </div>
-                    </CardHeader>
-                    <CardContent className="p-6">
                         <ClientFollowersCard clientId={client_id} canManage={true} />
-                    </CardContent>
-                </Card>
+                </div>
                 </CollapsibleSection>
             )}
 
@@ -1756,30 +1898,46 @@ export default function UnderwritingClientDetailsPage() {
                 </Dialog>
             )}
 
-            {/* Manual Funding Application Upload (admin-only) */}
-            {is_admin_route && (
+            {/* Manual Funding Application Upload (admin + UW) */}
+            {can_upload && (
                 <Dialog
                     open={is_funding_app_open}
-                    onOpenChange={(open) => { if (!is_uploading_funding_app) set_is_funding_app_open(open); }}
+                    onOpenChange={(open) => { if (!is_uploading_funding_app) { set_is_funding_app_open(open); if (!open) set_funding_app_for_lenders(false); } }}
                 >
                     <DialogContent className="sm:max-w-md">
                         <DialogHeader>
-                            <DialogTitle>Upload Signed Funding Application</DialogTitle>
+                            <DialogTitle>Upload Funding Application</DialogTitle>
                             <DialogDescription>
-                                For clients who signed outside the vault. Marks the vault application as completed and syncs to GHL.
+                                {funding_app_for_lenders
+                                    ? "Lender version (agreement page removed). Stored as a shareable document only — it won't mark the deal complete, sync to GHL, or request anything from the client."
+                                    : "Signed application for clients who signed outside the vault. Marks the vault application as completed and syncs to GHL."}
                             </DialogDescription>
                         </DialogHeader>
-                        <div className="py-4 space-y-2">
-                            <Label htmlFor="funding_app_file" className="text-xs font-black uppercase tracking-widest text-slate-400">
-                                Signed Application (PDF)
-                            </Label>
-                            <Input
-                                id="funding_app_file"
-                                type="file"
-                                accept=".pdf"
-                                onChange={(e) => set_funding_app_file(e.target.files?.[0] ?? null)}
-                                className="h-12 rounded-xl"
-                            />
+                        <div className="py-4 space-y-4">
+                            <label className="flex items-start gap-3 rounded-xl border border-slate-200 p-3 cursor-pointer hover:bg-slate-50">
+                                <Checkbox
+                                    checked={funding_app_for_lenders}
+                                    onCheckedChange={(c) => set_funding_app_for_lenders(c === true)}
+                                    className="mt-0.5"
+                                />
+                                <span className="text-xs text-slate-600">
+                                    <span className="font-black uppercase tracking-widest text-slate-500">For lenders (omit agreement page)</span>
+                                    <br />
+                                    Upload the lender-facing copy without the agreement page — no deal-complete, GHL, or document-request triggers.
+                                </span>
+                            </label>
+                            <div className="space-y-2">
+                                <Label htmlFor="funding_app_file" className="text-xs font-black uppercase tracking-widest text-slate-400">
+                                    Application (PDF)
+                                </Label>
+                                <Input
+                                    id="funding_app_file"
+                                    type="file"
+                                    accept=".pdf"
+                                    onChange={(e) => set_funding_app_file(e.target.files?.[0] ?? null)}
+                                    className="h-12 rounded-xl"
+                                />
+                            </div>
                         </div>
                         <DialogFooter>
                             <Button variant="ghost" onClick={() => set_is_funding_app_open(false)} disabled={is_uploading_funding_app}>
@@ -1798,7 +1956,83 @@ export default function UnderwritingClientDetailsPage() {
             )}
 
             {/* Upload documents on behalf of client (admin-only) */}
-            {is_admin_route && (
+            {/* Hidden input backing the per-category direct upload */}
+            <input
+                ref={category_upload_input_ref}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={on_category_files_selected}
+            />
+
+            {/* Request documents from the client (admin + UW) */}
+            {can_upload && (
+                <Dialog
+                    open={is_request_modal_open}
+                    onOpenChange={(open) => { if (!is_requesting_docs) set_is_request_modal_open(open); }}
+                >
+                    <DialogContent className="sm:max-w-md">
+                        <DialogHeader>
+                            <DialogTitle>Request Documents from Client</DialogTitle>
+                            <DialogDescription>
+                                Select the document types to request. The client is notified and the items appear in their vault.
+                            </DialogDescription>
+                        </DialogHeader>
+                        <div className="py-2 space-y-3">
+                            <div className="relative">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                                <Input
+                                    value={request_search}
+                                    onChange={(e) => set_request_search(e.target.value)}
+                                    placeholder="Search document types…"
+                                    className="h-10 rounded-xl pl-9"
+                                />
+                            </div>
+                            <div className="max-h-[320px] overflow-y-auto rounded-xl border border-slate-200 divide-y divide-slate-100">
+                                {all_available_docs
+                                    .filter(d => !scoped_required_docs.some(r => r.code === d.code))
+                                    .filter(d => d.label.toLowerCase().includes(request_search.toLowerCase()))
+                                    .map(d => {
+                                        const checked = selected_request_ids.includes(d.id);
+                                        return (
+                                            <label
+                                                key={d.id}
+                                                className="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-slate-50"
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    checked={checked}
+                                                    onChange={() => set_selected_request_ids(prev =>
+                                                        prev.includes(d.id) ? prev.filter(x => x !== d.id) : [...prev, d.id]
+                                                    )}
+                                                    className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                                                />
+                                                <span className="text-sm text-slate-700 flex-1">{d.label}</span>
+                                            </label>
+                                        );
+                                    })}
+                                {all_available_docs.filter(d => !scoped_required_docs.some(r => r.code === d.code)).length === 0 && (
+                                    <p className="text-xs text-slate-400 py-4 text-center">All document types are already requested.</p>
+                                )}
+                            </div>
+                        </div>
+                        <DialogFooter>
+                            <Button variant="ghost" onClick={() => set_is_request_modal_open(false)} disabled={is_requesting_docs}>
+                                Cancel
+                            </Button>
+                            <Button
+                                onClick={handle_request_documents}
+                                disabled={is_requesting_docs || selected_request_ids.length === 0}
+                                className="bg-emerald-500 hover:bg-emerald-600 text-white"
+                            >
+                                {is_requesting_docs ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Requesting…</> : <><Send className="h-4 w-4 mr-2" />Request {selected_request_ids.length > 0 ? `(${selected_request_ids.length})` : ""}</>}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+            )}
+
+            {can_upload && (
                 <Dialog
                     open={is_doc_upload_open}
                     onOpenChange={(open) => { if (!is_uploading_docs) set_is_doc_upload_open(open); }}
@@ -1947,54 +2181,44 @@ export default function UnderwritingClientDetailsPage() {
                 slug="uw-pipeline"
                 title="Funding Pipeline"
                 summary={current_pipeline_status.replace(/_/g, " ")}
-                defaultOpen
-            >
-            <Card className="bg-white border-slate-200 rounded-[2.5rem] shadow-sm overflow-hidden">
-                <CardHeader className="px-8 pt-8 pb-4">
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <CardTitle className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">Funding Pipeline</CardTitle>
-                            <CardDescription className="text-slate-400 font-bold text-xs mt-1">Current stage: <span className="text-slate-700 uppercase">{current_pipeline_status.replace(/_/g, " ")}</span></CardDescription>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                            {/* Next step button */}
-                            {(() => {
-                                const currentIdx = PIPELINE_STEPS.findIndex((s: { status: LoanStatus }) => s.status === current_pipeline_status);
-                                const nextStep = currentIdx >= 0 && currentIdx < PIPELINE_STEPS.length - 1 ? PIPELINE_STEPS[currentIdx + 1] : null;
-                                return nextStep ? (
-                                    <Button
-                                        size="sm"
-                                        className="h-9 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-black uppercase tracking-widest text-[9px] shadow-lg shadow-emerald-500/20"
-                                        onClick={() => handleAdvanceStatus(nextStep.status)}
-                                        disabled={is_advancing_status}
-                                    >
-                                        {is_advancing_status ? <Loader2 className="w-4 h-4 animate-spin" /> : `→ ${nextStep.shortLabel}`}
-                                    </Button>
-                                ) : null;
-                            })()}
-                            {/* Decline button */}
-                            {current_pipeline_status !== "declined" && current_pipeline_status !== "funded" && (
+                accessory={
+                    <div className="flex flex-wrap gap-2">
+                        {(() => {
+                            const currentIdx = PIPELINE_STEPS.findIndex((s: { status: LoanStatus }) => s.status === current_pipeline_status);
+                            const nextStep = currentIdx >= 0 && currentIdx < PIPELINE_STEPS.length - 1 ? PIPELINE_STEPS[currentIdx + 1] : null;
+                            return nextStep ? (
                                 <Button
                                     size="sm"
-                                    variant="outline"
-                                    className="h-9 border-red-200 text-red-500 hover:bg-red-50 rounded-xl font-black uppercase tracking-widest text-[9px]"
-                                    onClick={() => handleAdvanceStatus("declined")}
+                                    className="h-8 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg font-black uppercase tracking-widest text-[9px] shadow-lg shadow-emerald-500/20"
+                                    onClick={() => handleAdvanceStatus(nextStep.status)}
                                     disabled={is_advancing_status}
                                 >
-                                    Decline
+                                    {is_advancing_status ? <Loader2 className="w-4 h-4 animate-spin" /> : `→ ${nextStep.shortLabel}`}
                                 </Button>
-                            )}
-                        </div>
+                            ) : null;
+                        })()}
+                        {current_pipeline_status !== "declined" && current_pipeline_status !== "funded" && (
+                            <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-8 border-red-200 text-red-500 hover:bg-red-50 rounded-lg font-black uppercase tracking-widest text-[9px]"
+                                onClick={() => handleAdvanceStatus("declined")}
+                                disabled={is_advancing_status}
+                            >
+                                Decline
+                            </Button>
+                        )}
                     </div>
-                </CardHeader>
-                <CardContent className="px-8 pb-8">
-                    <LoanPipelineFull
-                        currentStatus={current_pipeline_status}
-                        history={pipeline_history}
-                        onStatusChange={handleAdvanceStatus}
-                    />
-                </CardContent>
-            </Card>
+                }
+                defaultOpen
+            >
+            <div className="px-8 py-6">
+                <LoanPipelineFull
+                    currentStatus={current_pipeline_status}
+                    history={pipeline_history}
+                    onStatusChange={handleAdvanceStatus}
+                />
+            </div>
             </CollapsibleSection>
 
             {/* Profile Hero */}
@@ -2035,42 +2259,59 @@ export default function UnderwritingClientDetailsPage() {
                         })()}
                     </div>
 
-                    {/* Deal Slack channel — enabled once documentation is fully approved */}
-                    {SLACK_FEATURE_ENABLED && (
+                    {/* Deal actions — notify advisor, mark funded, and (once docs
+                        are approved) the Slack channel — grouped in the card so
+                        they read like the advisor/admin profile header. */}
                     <div className="flex flex-col items-center md:items-end gap-2 shrink-0">
-                        {slack_channel.id ? (
-                            <a
-                                href={`https://slack.com/app_redirect?channel=${slack_channel.id}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-2 h-11 px-5 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/20 text-white font-black uppercase tracking-widest text-[10px] transition-all"
+                        <div className="flex flex-wrap items-center justify-center md:justify-end gap-2">
+                            <Button
+                                onClick={() => set_is_notify_modal_open(true)}
+                                className="h-11 px-5 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/20 text-white font-black uppercase tracking-widest text-[10px] transition-all"
                             >
-                                <Slack className="w-4 h-4 text-emerald-400" />
-                                Open Slack Channel
-                                <ExternalLink className="w-3 h-3 opacity-60" />
-                            </a>
-                        ) : (
-                            <>
-                                <Button
-                                    onClick={create_slack_channel}
-                                    disabled={!is_docs_approved || is_creating_slack_channel}
-                                    className="h-11 px-5 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-black uppercase tracking-widest text-[10px] shadow-lg shadow-emerald-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
+                                <Bell className="w-4 h-4 mr-2" />
+                                Notify Advisor
+                            </Button>
+                            <LoanFundedDialog
+                                clientId={client_id}
+                                clientName={client_profile.client_name}
+                                onSuccess={fetch_client_details}
+                                triggerClassName="h-11 px-5 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-black uppercase tracking-widest text-[10px] shadow-lg shadow-emerald-500/20"
+                            />
+                        </div>
+                        {SLACK_FEATURE_ENABLED && (
+                            slack_channel.id ? (
+                                <a
+                                    href={`https://slack.com/app_redirect?channel=${slack_channel.id}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-2 h-11 px-5 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/20 text-white font-black uppercase tracking-widest text-[10px] transition-all"
                                 >
-                                    {is_creating_slack_channel ? (
-                                        <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Creating…</>
-                                    ) : (
-                                        <><Slack className="w-4 h-4 mr-2" /> Create Slack Channel</>
+                                    <Slack className="w-4 h-4 text-emerald-400" />
+                                    Open Slack Channel
+                                    <ExternalLink className="w-3 h-3 opacity-60" />
+                                </a>
+                            ) : (
+                                <>
+                                    <Button
+                                        onClick={create_slack_channel}
+                                        disabled={!is_docs_approved || is_creating_slack_channel}
+                                        className="h-11 px-5 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-black uppercase tracking-widest text-[10px] shadow-lg shadow-emerald-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
+                                    >
+                                        {is_creating_slack_channel ? (
+                                            <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Creating…</>
+                                        ) : (
+                                            <><Slack className="w-4 h-4 mr-2" /> Create Slack Channel</>
+                                        )}
+                                    </Button>
+                                    {!is_docs_approved && (
+                                        <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest max-w-[12rem] text-center md:text-right">
+                                            Available once all documents are approved
+                                        </p>
                                     )}
-                                </Button>
-                                {!is_docs_approved && (
-                                    <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest max-w-[12rem] text-center md:text-right">
-                                        Available once all documents are approved
-                                    </p>
-                                )}
-                            </>
+                                </>
+                            )
                         )}
                     </div>
-                    )}
                 </CardContent>
             </Card>
 
@@ -2083,11 +2324,7 @@ export default function UnderwritingClientDetailsPage() {
                         title="Company Integrity"
                         defaultOpen
                     >
-                    <Card className="rounded-[2.5rem] border-slate-200">
-                        <CardHeader className="pb-4">
-                            <CardTitle className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">Company Integrity</CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
+                    <div className="p-6 space-y-4">
                             <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
                                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Assigned Advisor</p>
                                 <p className="text-slate-900 font-black">{client_profile.advisor.first_name} {client_profile.advisor.last_name}</p>
@@ -2121,8 +2358,7 @@ export default function UnderwritingClientDetailsPage() {
                                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Entity Profile</p>
                                 <p className="text-slate-900 font-black uppercase tracking-tighter">{client_profile.legal_entity_type}</p>
                             </div>
-                        </CardContent>
-                    </Card>
+                    </div>
                     </CollapsibleSection>
 
                     <CollapsibleSection
@@ -2132,11 +2368,7 @@ export default function UnderwritingClientDetailsPage() {
                         summary={`${client_profile.number_of_owners} owner${String(client_profile.number_of_owners) === "1" ? "" : "s"}`}
                         defaultOpen={false}
                     >
-                    <Card className="rounded-[2.5rem] border-slate-200">
-                        <CardHeader className="pb-4">
-                            <CardTitle className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">Ownership & Structure</CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
+                    <div className="p-6 space-y-4">
                             <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
                                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Amount of Owners</p>
                                 <p className="text-slate-900 font-black">{client_profile.number_of_owners}</p>
@@ -2175,8 +2407,7 @@ export default function UnderwritingClientDetailsPage() {
                                     )}
                                 </div>
                             </div>
-                        </CardContent>
-                    </Card>
+                    </div>
                     </CollapsibleSection>
 
                     <CollapsibleSection
@@ -2186,11 +2417,7 @@ export default function UnderwritingClientDetailsPage() {
                         summary={client_profile.client_email}
                         defaultOpen={false}
                     >
-                    <Card className="rounded-[2.5rem] border-slate-200">
-                        <CardHeader className="pb-4">
-                            <CardTitle className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">Client Direct Contact</CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-3">
+                    <div className="p-6 space-y-3">
                             <div className="flex items-center gap-3 p-3 text-slate-600 font-bold hover:bg-slate-50 rounded-xl transition-colors">
                                 <Mail className="w-5 h-5 text-emerald-500" />
                                 <span className="truncate text-sm">{client_profile.client_email}</span>
@@ -2199,8 +2426,7 @@ export default function UnderwritingClientDetailsPage() {
                                 <Phone className="w-5 h-5 text-emerald-500" />
                                 <span className="text-sm">{client_profile.client_phone}</span>
                             </div>
-                        </CardContent>
-                    </Card>
+                    </div>
                     </CollapsibleSection>
 
                     {/* Internal Notes Feed */}
@@ -2209,16 +2435,11 @@ export default function UnderwritingClientDetailsPage() {
                         slug="uw-internal-comm"
                         title="Internal Communication"
                         summary={notes.length === 0 ? "No notes yet" : `${notes.length} note${notes.length === 1 ? "" : "s"}`}
+                        accessory={<Badge variant="outline" className="text-[9px]">{notes.length}</Badge>}
                         defaultOpen
                     >
-                    <Card className="rounded-[2.5rem] border-slate-200 flex flex-col h-[500px]">
-                        <CardHeader className="pb-4 shrink-0">
-                            <CardTitle className="text-xs font-black uppercase tracking-[0.2em] text-slate-400 flex items-center justify-between">
-                                Internal Communication
-                                <Badge variant="outline" className="text-[9px]">{notes.length}</Badge>
-                            </CardTitle>
-                        </CardHeader>
-                        <CardContent className="flex-1 flex flex-col min-h-0 overflow-hidden">
+                    <div className="flex flex-col h-[500px] p-6">
+                        <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
                             {/* Notes List */}
                             <div className="flex-1 overflow-y-auto space-y-4 pr-2 mb-4 custom-scrollbar">
                                 {notes.length === 0 ? (
@@ -2264,8 +2485,8 @@ export default function UnderwritingClientDetailsPage() {
                                     {is_adding_note ? <Loader2 className="w-4 h-4 animate-spin" /> : "Post Note"}
                                 </Button>
                             </div>
-                        </CardContent>
-                    </Card>
+                        </div>
+                    </div>
                     </CollapsibleSection>
                 </div>
 
@@ -2282,16 +2503,11 @@ export default function UnderwritingClientDetailsPage() {
                                 summary={client_profile.loan_purpose ? client_profile.loan_purpose.slice(0, 60) : "Not specified"}
                                 defaultOpen
                             >
-                            <Card className="rounded-[2rem] border-emerald-100 bg-emerald-50/10 overflow-hidden">
-                                <CardHeader className="bg-emerald-50/30 pb-3">
-                                    <CardTitle className="text-[10px] font-black uppercase tracking-widest text-emerald-800/40">Use of Proceeds</CardTitle>
-                                </CardHeader>
-                                <CardContent className="p-6">
+                            <div className="p-6">
                                     <p className="text-sm font-bold text-slate-700 leading-relaxed italic">
                                         "{client_profile.loan_purpose || "No use of proceeds specified."}"
                                     </p>
-                                </CardContent>
-                            </Card>
+                            </div>
                             </CollapsibleSection>
 
                             {/* Lender Matching Results */}
@@ -2310,16 +2526,10 @@ export default function UnderwritingClientDetailsPage() {
                                 slug="uw-open-positions"
                                 title="Open Positions (Previous Debt)"
                                 summary={open_positions.length === 0 ? "None reported" : `${open_positions.length} position${open_positions.length === 1 ? "" : "s"}`}
+                                accessory={<Badge variant="outline" className="text-emerald-500 font-black">{open_positions.length}</Badge>}
                                 defaultOpen
                             >
-                            <Card className="rounded-[2.5rem] border-slate-200 overflow-hidden">
-                                <CardHeader className="pb-4 border-b border-slate-100">
-                                    <div className="flex items-center justify-between">
-                                        <CardTitle className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">Open Positions (Previous Debt)</CardTitle>
-                                        <Badge variant="outline" className="text-emerald-500 font-black">{open_positions.length}</Badge>
-                                    </div>
-                                </CardHeader>
-                                <CardContent className="p-0">
+                            <div className="overflow-hidden">
                                     {open_positions.length === 0 ? (
                                         <div className="p-10 text-center">
                                             <CheckCircle2 className="w-8 h-8 text-emerald-200 mx-auto mb-2" />
@@ -2363,8 +2573,7 @@ export default function UnderwritingClientDetailsPage() {
                                             </table>
                                         </div>
                                     )}
-                                </CardContent>
-                            </Card>
+                                </div>
                             </CollapsibleSection>
                         </div>
                     </div>
@@ -2375,15 +2584,42 @@ export default function UnderwritingClientDetailsPage() {
                         slug="uw-required-docs"
                         title="Required Review Packet"
                         summary={`${completion_pct}% complete · ${completed_count}/${total_count} docs`}
+                        accessory={
+                            can_upload ? (
+                                <div className="flex items-center gap-2">
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => {
+                                            set_funding_app_for_lenders(true);
+                                            set_funding_app_file(null);
+                                            set_is_funding_app_open(true);
+                                        }}
+                                        className="h-8 rounded-lg text-[9px] font-black uppercase tracking-widest border-slate-200 hover:bg-slate-50"
+                                    >
+                                        <FileText className="w-3.5 h-3.5 mr-1.5" />
+                                        Funding App (Lenders)
+                                    </Button>
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => {
+                                            set_selected_request_ids([]);
+                                            set_request_search("");
+                                            set_is_request_modal_open(true);
+                                        }}
+                                        className="h-8 rounded-lg text-[9px] font-black uppercase tracking-widest border-slate-200 hover:bg-slate-50"
+                                    >
+                                        <Send className="w-3.5 h-3.5 mr-1.5" />
+                                        Request Doc
+                                    </Button>
+                                </div>
+                            ) : undefined
+                        }
                         defaultOpen
                     >
-                    <div className="space-y-4">
-                        <h3 className="text-xs font-black uppercase tracking-[0.3em] text-slate-400 flex items-center gap-3 ml-2">
-                            <FileText className="w-4 h-4" /> Required Review Packet
-                        </h3>
-                        <div className="space-y-4">
-                            {scoped_required_docs.map((docType) => render_document_category(docType))}
-                        </div>
+                    <div className="space-y-4 p-6">
+                        {scoped_required_docs.map((docType) => render_document_category(docType))}
                     </div>
                     </CollapsibleSection>
 
@@ -2396,10 +2632,7 @@ export default function UnderwritingClientDetailsPage() {
                             summary={`${scoped_documents.filter(d => !scoped_required_docs.some(r => r.code === d.category)).length} file(s)`}
                             defaultOpen={false}
                         >
-                        <div className="space-y-4 pt-8 border-t border-slate-100">
-                            <h3 className="text-xs font-black uppercase tracking-[0.3em] text-slate-400 flex items-center gap-3 ml-2">
-                                <Plus className="w-4 h-4" /> Miscellaneous Files
-                            </h3>
+                        <div className="p-6">
                             <div className="grid grid-cols-1 gap-4">
                                 {scoped_documents.filter(d => !scoped_required_docs.some(r => r.code === d.category)).map(doc => render_document_card(doc))}
                             </div>

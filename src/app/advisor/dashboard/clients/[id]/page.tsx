@@ -68,7 +68,7 @@ import DocumentPreviewModal from "@/components/pdf/pdf-viewer";
 import { ClientProfileHeader } from "./_components/client-profile-header";
 import { BusinessTabStrip, type BusinessTab } from "./_components/business-tab-strip";
 import { AddBusinessModal } from "./_components/add-business-modal";
-import { FundingPipelineCard } from "./_components/funding-pipeline-card";
+import { FundingPipelineCard, FundingPipelineAdvanceButton } from "./_components/funding-pipeline-card";
 import { DocumentUploadStatus } from "./_components/document-upload-status";
 import { InternalCommunication } from "./_components/internal-communication";
 import { SubmitUnderwritingCTA } from "./_components/submit-underwriting-cta";
@@ -2080,6 +2080,12 @@ export default function AdvisorClientDetailsPage() {
                     summary={current_pipeline_status
                         ? current_pipeline_status.replace(/_/g, " ")
                         : undefined}
+                    accessory={
+                        <FundingPipelineAdvanceButton
+                            current_pipeline_status={current_pipeline_status}
+                            on_status_change={(status) => handle_status_change(status, "Set by advisor")}
+                        />
+                    }
                     defaultOpen
                 >
                     <FundingPipelineCard
@@ -2099,17 +2105,7 @@ export default function AdvisorClientDetailsPage() {
                         slug="reassign"
                         title="Assigned Advisor"
                         summary={client_profile.advisor_name || "Unassigned"}
-                        defaultOpen={false}
-                    >
-                        <div className="rounded-2xl border border-emerald-200 bg-emerald-50/40 p-5 flex items-center justify-between gap-4">
-                            <div>
-                                <p className="text-xs font-black uppercase tracking-[0.2em] text-emerald-700 mb-1">
-                                    Assigned Advisor
-                                </p>
-                                <p className="text-base font-bold text-slate-900">
-                                    {client_profile.advisor_name || "Unassigned"}
-                                </p>
-                            </div>
+                        accessory={
                             <Button
                                 onClick={open_reassign_modal}
                                 size="sm"
@@ -2119,6 +2115,13 @@ export default function AdvisorClientDetailsPage() {
                                 <UserCog className="w-3.5 h-3.5 mr-1.5" />
                                 Reassign Advisor
                             </Button>
+                        }
+                        defaultOpen={false}
+                    >
+                        <div className="bg-emerald-50/40 p-5">
+                            <p className="text-base font-bold text-slate-900">
+                                {client_profile.advisor_name || "Unassigned"}
+                            </p>
                         </div>
                     </CollapsibleSection>
                 )}
@@ -2158,7 +2161,7 @@ export default function AdvisorClientDetailsPage() {
                     summary={`${completion_percentage}% complete${notes.length > 0 ? ` · ${notes.length} note${notes.length === 1 ? "" : "s"}` : ""}`}
                     defaultOpen
                 >
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 p-6">
                     {/* Left: document accordion */}
                     <div className="lg:col-span-2">
                         <DocumentUploadStatus

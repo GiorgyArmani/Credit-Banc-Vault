@@ -63,7 +63,7 @@ export function UnderwritingShell({ children }: { children: React.ReactNode }) {
                             <Menu className="h-6 w-6 text-slate-600" />
                         </button>
                         <div className="text-sm font-bold text-slate-900 uppercase tracking-widest">{currentTitle}</div>
-                        <NotificationBell />
+                        <NotificationBell clientBasePath="/underwriting/dashboard/clients" />
                     </div>
                     {/* Search row — desktop keeps it in the topbar; mobile gets its own row. */}
                     <div className="px-3 pb-3">
@@ -78,7 +78,7 @@ export function UnderwritingShell({ children }: { children: React.ReactNode }) {
                     </div>
                     <div className="flex items-center gap-4">
                         <div className="flex items-center gap-2 px-3 py-1.5 rounded-full hover:bg-slate-200 transition-colors cursor-pointer">
-                            <NotificationBell />
+                            <NotificationBell clientBasePath="/underwriting/dashboard/clients" />
                         </div>
                     </div>
                 </header>
