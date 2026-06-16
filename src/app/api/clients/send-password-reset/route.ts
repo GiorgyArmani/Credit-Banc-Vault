@@ -61,6 +61,15 @@ export async function POST(request: Request) {
 
         const supabaseAdmin = createAdminClient();
 
+        // Admins manage every client profile, so they bypass the owner/follower
+        // gate below.
+        const { data: caller_row } = await supabaseAdmin
+            .from("users")
+            .select("role")
+            .eq("id", user.id)
+            .maybeSingle();
+        const is_admin = caller_row?.role === "admin";
+
         // 2. Locate advisor record
         let { data: advisor_data } = await supabaseAdmin
             .from("advisors")
@@ -85,7 +94,7 @@ export async function POST(request: Request) {
             }
         }
 
-        if (!advisor_data) {
+        if (!advisor_data && !is_admin) {
             return NextResponse.json(
                 { success: false, error: "Advisor profile not found" },
                 { status: 403 }
@@ -106,13 +115,13 @@ export async function POST(request: Request) {
             );
         }
 
-        let has_access = client_data.advisor_id === advisor_data.id;
+        let has_access = is_admin || client_data.advisor_id === advisor_data?.id;
         if (!has_access) {
             const { data: follower_row } = await supabaseAdmin
                 .from("client_followers")
                 .select("id")
                 .eq("client_vault_id", client_data.id)
-                .eq("advisor_id", advisor_data.id)
+                .eq("advisor_id", advisor_data?.id)
                 .maybeSingle();
             has_access = !!follower_row;
         }

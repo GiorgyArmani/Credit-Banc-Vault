@@ -64,6 +64,16 @@ export async function POST(request: Request) {
             );
         }
 
+        // Admins manage every client profile, so they bypass the owner/follower
+        // gate below. (The advisor lookup still runs — admins normally have an
+        // advisors row, and when they do the welcome email CCs them as usual.)
+        const { data: caller_row } = await supabase_admin
+            .from('users')
+            .select('role')
+            .eq('id', user.id)
+            .maybeSingle();
+        const is_admin = caller_row?.role === 'admin';
+
         // ========================================================================
         // STEP 2: GET ADVISOR PROFILE & VERIFY OWNERSHIP
         // ========================================================================
@@ -94,7 +104,7 @@ export async function POST(request: Request) {
             }
         }
 
-        if (!advisor_data) {
+        if (!advisor_data && !is_admin) {
             return NextResponse.json(
                 { success: false, error: 'Advisor profile not found' },
                 { status: 403 }
@@ -117,14 +127,14 @@ export async function POST(request: Request) {
             );
         }
 
-        // Security: owner OR follower can resend credentials
-        let has_access = client_data.advisor_id === advisor_data.id;
+        // Security: owner OR follower OR admin can resend credentials
+        let has_access = is_admin || client_data.advisor_id === advisor_data?.id;
         if (!has_access) {
             const { data: follower_row } = await supabase_admin
                 .from('client_followers')
                 .select('id')
                 .eq('client_vault_id', client_data.id)
-                .eq('advisor_id', advisor_data.id)
+                .eq('advisor_id', advisor_data?.id)
                 .maybeSingle();
             has_access = !!follower_row;
         }
@@ -188,7 +198,23 @@ export async function POST(request: Request) {
         // ========================================================================
         // STEP 6: RESEND WELCOME EMAIL (WITH ADVISOR + FOLLOWERS CC)
         // ========================================================================
-        const advisor_full_name = `${advisor_data.first_name} ${advisor_data.last_name}`.trim();
+        // The email must come from the client's ASSIGNED advisor, not the caller.
+        // When an admin (or a follower) acts on behalf of the team, the client
+        // should still see their own dedicated advisor's name/contact. Fall back
+        // to the caller's advisor record only if the client has no assigned owner.
+        let email_advisor = advisor_data;
+        if (client_data.advisor_id) {
+            const { data: assigned_advisor } = await supabase_admin
+                .from('advisors')
+                .select('id, first_name, last_name, email, phone')
+                .eq('id', client_data.advisor_id)
+                .maybeSingle();
+            if (assigned_advisor) email_advisor = assigned_advisor;
+        }
+
+        const advisor_full_name = email_advisor
+            ? `${email_advisor.first_name} ${email_advisor.last_name}`.trim()
+            : '';
 
         const { getFollowerEmailsForClient } = await import('@/lib/followers');
         const follower_emails = await getFollowerEmailsForClient(supabase_admin, client_data.id);
@@ -198,9 +224,9 @@ export async function POST(request: Request) {
             client_email: client_data.client_email,
             magic_link,
             advisor_name: advisor_full_name || client_data.advisor_name || 'Your Advisor',
-            advisor_email: advisor_data.email || 'support@creditbanc.io',
-            advisor_phone: advisor_data.phone || undefined,
-            advisor_cc_email: advisor_data.email || undefined, // CC the advisor
+            advisor_email: email_advisor?.email || 'support@creditbanc.io',
+            advisor_phone: email_advisor?.phone || undefined,
+            advisor_cc_email: email_advisor?.email || undefined, // CC the assigned advisor
             advisor_cc_emails: follower_emails,
             requested_documents,
             login_url: `${process.env.NEXT_PUBLIC_APP_URL}/auth/login`,
