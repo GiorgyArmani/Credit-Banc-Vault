@@ -75,6 +75,20 @@ export default function AdminPipelinePage() {
     import("drag-drop-touch");
   }, []);
 
+  // Restore the All/My Deals scope on mount so drilling into a client and
+  // coming back keeps the rep's chosen view instead of resetting to All Deals.
+  useEffect(() => {
+    const saved = localStorage.getItem("admin-pipeline-scope");
+    if (saved === "mine" || saved === "all") setScope(saved);
+  }, []);
+
+  // The toggle is sticky: persist on the user's click (not in an effect, which
+  // would race the restore-on-mount above and clobber the saved value).
+  const applyScope = (next: "all" | "mine") => {
+    setScope(next);
+    localStorage.setItem("admin-pipeline-scope", next);
+  };
+
   const filteredDeals = useMemo(() => {
     let out = deals;
     if (scope === "mine") {
@@ -126,7 +140,7 @@ export default function AdminPipelinePage() {
       {/* Scope: All vs Mine */}
       <div className="bg-slate-100 dark:bg-slate-900 p-0.5 rounded-xl flex border border-slate-200 dark:border-slate-800">
         <button
-          onClick={() => setScope("all")}
+          onClick={() => applyScope("all")}
           className={clsx(
             "px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all",
             scope === "all"
@@ -137,7 +151,7 @@ export default function AdminPipelinePage() {
           All Deals
         </button>
         <button
-          onClick={() => setScope("mine")}
+          onClick={() => applyScope("mine")}
           disabled={!myAdvisorId}
           title={!myAdvisorId ? "No advisor profile linked to your admin account" : undefined}
           className={clsx(

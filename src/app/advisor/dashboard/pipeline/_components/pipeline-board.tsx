@@ -79,6 +79,23 @@ export function PipelineBoard({
     [deals]
   );
 
+  // Column-major order of the currently-visible (filtered) deals. Stashed when a
+  // card is opened so the client detail page's prev/next + counter walk exactly
+  // the set the user was looking at (e.g. "My Deals") instead of every client.
+  const orderedDealIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const stage of STAGE_MAP) {
+      for (const d of deals) if (d.pipeline_status === stage.status) ids.push(d.id);
+    }
+    return ids;
+  }, [deals]);
+
+  const stashNavIds = () => {
+    try {
+      sessionStorage.setItem("pipeline-nav-ids", JSON.stringify(orderedDealIds));
+    } catch {}
+  };
+
   const toggleCollapsed = (status: LoanStatus) => {
     setCollapsedStages(prev => {
       const next = new Set(prev);
@@ -164,7 +181,8 @@ export function PipelineBoard({
                     <PipelineDealCard
                       key={deal.id}
                       deal={deal}
-                      detailHref={`${detailHrefBase}${deal.id}`}
+                      detailHref={`${detailHrefBase}${deal.id}?from=pipeline`}
+                      onOpen={stashNavIds}
                       onDragStart={handleDragStart}
                     />
                   ))}

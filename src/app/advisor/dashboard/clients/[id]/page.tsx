@@ -288,8 +288,20 @@ export default function AdvisorClientDetailsPage() {
     // detect that and rewrite back/prev/next links so admins don't get
     // bounced out into the advisor portal layout.
     const is_admin_path = pathname?.startsWith("/admin") ?? false;
-    const client_detail_path = (id: string) =>
-        is_admin_path ? `/admin/clients/${id}` : `/advisor/dashboard/clients/${id}`;
+    const client_detail_path = (id: string) => {
+        const base = is_admin_path ? `/admin/clients/${id}` : `/advisor/dashboard/clients/${id}`;
+        // Preserve the pipeline context across prev/next so the filtered set + counter persist.
+        return came_from_pipeline ? `${base}?from=pipeline` : base;
+    };
+
+    // When the user drilled in from the funding pipeline (?from=pipeline), the
+    // back button should return to the pipeline rather than the prospects/clients
+    // list. Read from the URL on mount instead of useSearchParams() to avoid the
+    // Suspense-boundary requirement on this large client component.
+    const [came_from_pipeline, set_came_from_pipeline] = useState(false);
+    useEffect(() => {
+        set_came_from_pipeline(new URLSearchParams(window.location.search).get("from") === "pipeline");
+    }, []);
 
     // component-state: Single source of truth for component state
     const [component_state, set_component_state] = useState<ComponentState>(
@@ -412,11 +424,14 @@ export default function AdvisorClientDetailsPage() {
     const [pipeline_history, set_pipeline_history] = useState<PipelineStatusEntry[]>([]);
     const [current_pipeline_status, set_current_pipeline_status] = useState<LoanStatus>("created");
 
-    // Route the back-to-list button based on the file's status: funded files go
+    // Route the back-to-list button. If the user came from the funding pipeline,
+    // send them back there. Otherwise route by the file's status: funded files go
     // to the Clients book, everything else to the Prospects pipeline.
-    const clients_list_path = current_pipeline_status === "funded"
-        ? (is_admin_path ? "/admin/clients" : "/advisor/dashboard/clients")
-        : (is_admin_path ? "/admin/prospects" : "/advisor/dashboard/prospects");
+    const clients_list_path = came_from_pipeline
+        ? (is_admin_path ? "/admin/pipeline" : "/advisor/dashboard/pipeline")
+        : current_pipeline_status === "funded"
+            ? (is_admin_path ? "/admin/clients" : "/advisor/dashboard/clients")
+            : (is_admin_path ? "/admin/prospects" : "/advisor/dashboard/prospects");
 
     // Rejection state
     const [is_reject_modal_open, set_is_reject_modal_open] = useState(false);
@@ -543,6 +558,22 @@ export default function AdvisorClientDetailsPage() {
     // Used to drive prev/next navigation between client detail pages. Cached at the module level
     // so navigations within the same tab session don't re-issue these queries.
     useEffect(() => {
+        // If the user drilled in from the pipeline, prev/next + the counter should
+        // walk exactly the filtered set they were viewing (e.g. "My Deals"), not
+        // every accessible client. The pipeline stashes that ordered list on open.
+        if (new URLSearchParams(window.location.search).get("from") === "pipeline") {
+            try {
+                const raw = sessionStorage.getItem("pipeline-nav-ids");
+                if (raw) {
+                    const ids = JSON.parse(raw);
+                    if (Array.isArray(ids) && ids.includes(client_id)) {
+                        set_navigable_client_ids(ids);
+                        return;
+                    }
+                }
+            } catch { /* fall through to the default accessible-clients list */ }
+        }
+
         async function fetch_navigable_clients() {
             const identity = await resolve_identity_cached(supabase);
             if (!identity) return;
@@ -1855,7 +1886,7 @@ export default function AdvisorClientDetailsPage() {
                         className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50 hover:text-slate-900 transition-colors"
                     >
                         <ArrowUp className="h-4 w-4" />
-                        Back to Clients
+                        {came_from_pipeline ? "Back to Pipeline" : "Back to Clients"}
                         {current_nav_index >= 0 && navigable_client_ids.length > 0 && (
                             <span className="text-[10px] font-black tracking-wide bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-md">
                                 {current_nav_index + 1} / {navigable_client_ids.length}

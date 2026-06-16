@@ -18,13 +18,21 @@ interface PipelineCardProps {
     last_activity_at?: string;
   };
   detailHref: string;
+  onOpen?: () => void;
   onDragStart: (e: React.DragEvent, id: string) => void;
 }
 
 const fmt_currency = (n: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n || 0);
 
-export function PipelineDealCard({ deal, detailHref, onDragStart }: PipelineCardProps) {
+const fmt_phone = (p: string) => {
+  const digits = (p || "").replace(/\D/g, "");
+  const local = digits.length === 11 && digits[0] === "1" ? digits.slice(1) : digits;
+  if (local.length === 10) return `(${local.slice(0, 3)}) ${local.slice(3, 6)}-${local.slice(6)}`;
+  return p;
+};
+
+export function PipelineDealCard({ deal, detailHref, onOpen, onDragStart }: PipelineCardProps) {
   const docsProgress = deal.total_required_docs > 0
     ? Math.min(100, (deal.document_count / deal.total_required_docs) * 100)
     : 0;
@@ -43,7 +51,7 @@ export function PipelineDealCard({ deal, detailHref, onDragStart }: PipelineCard
         </h4>
         <Link
           href={detailHref}
-          onClick={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); onOpen?.(); }}
           className="text-slate-300 hover:text-emerald-500 transition-colors flex-shrink-0 bg-slate-50 dark:bg-slate-800 p-0.5 rounded-lg"
           title="Open deal"
         >
@@ -52,9 +60,21 @@ export function PipelineDealCard({ deal, detailHref, onDragStart }: PipelineCard
       </div>
 
       {/* Company */}
-      <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 truncate mb-2">
+      <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 truncate mb-1">
         {deal.company_name || "—"}
       </p>
+
+      {/* Phone — shown inline so reps can dial without opening the deal */}
+      {deal.client_phone && (
+        <a
+          href={`tel:${deal.client_phone}`}
+          onClick={(e) => e.stopPropagation()}
+          className="flex items-center gap-1 w-fit text-[11px] font-semibold text-slate-500 dark:text-slate-400 hover:text-emerald-600 transition-colors mb-2"
+        >
+          <Phone className="h-3 w-3 flex-shrink-0" />
+          {fmt_phone(deal.client_phone)}
+        </a>
+      )}
 
       {/* Currency on its own row — never gets cropped */}
       <div className="text-[15px] font-black text-slate-900 dark:text-slate-100 tabular-nums mb-2">
