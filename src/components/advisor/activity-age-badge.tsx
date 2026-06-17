@@ -1,19 +1,83 @@
 import { differenceInDays } from "date-fns";
 
-// Aggressive thresholds — funding work is time-sensitive, so any deal that
-// hasn't moved in 5+ days needs immediate attention.
-function age_classes(days: number): { wrapper: string; dot: string; label: string } {
-    if (days >= 14) return { wrapper: "bg-red-50 border-red-200 text-red-700", dot: "bg-red-500", label: "Stale" };
-    if (days >= 10) return { wrapper: "bg-red-50 border-red-200 text-red-600", dot: "bg-red-400", label: "Urgent" };
-    if (days >= 5)  return { wrapper: "bg-orange-50 border-orange-200 text-orange-700", dot: "bg-orange-500", label: "Alert" };
-    if (days >= 3)  return { wrapper: "bg-amber-50 border-amber-200 text-amber-700", dot: "bg-amber-500", label: "Watch" };
-    return { wrapper: "bg-emerald-50 border-emerald-200 text-emerald-700", dot: "bg-emerald-500", label: "Fresh" };
+// The activity-decay states a deal card can be in, freshest → most overdue.
+export type ActivityState = "Fresh" | "Alert" | "Urgent" | "Stale";
+
+// Order used for the pipeline filter dropdown (most urgent first reads better there).
+export const ACTIVITY_STATES: ActivityState[] = ["Stale", "Urgent", "Alert", "Fresh"];
+
+// Auto-reassignment fires at 7 days of no activity (reassign-stale-files cron).
+const REASSIGN_AFTER_DAYS = 7;
+
+// Idle-day bands for files NOT (yet) reassigned to the catch-all advisor.
+// "Stale" is intentionally excluded here — it's a post-reassignment state
+// layered on by getActivityState() below.
+function ageBandForDays(days: number): Exclude<ActivityState, "Stale"> {
+    if (days >= REASSIGN_AFTER_DAYS) return "Urgent"; // due for / past auto-reassign
+    if (days >= 5)                   return "Alert";  // approaching auto-reassign
+    return "Fresh";
 }
+
+// Days that drive the chip's color: idle time normally, or days-since-created
+// when nothing has happened beyond creation. Exported so the pipeline
+// activity-state filter classifies cards exactly the way this badge renders.
+export function activityDrivingDays(created_at: string, last_activity_at?: string | null): number {
+    const now = new Date();
+    const created = new Date(created_at);
+    const days_since_created = Math.max(0, differenceInDays(now, created));
+    const last_activity = last_activity_at ? new Date(last_activity_at) : created;
+    const days_since_activity = Math.max(0, differenceInDays(now, last_activity));
+    const no_activity_yet =
+        !last_activity_at || Math.abs(last_activity.getTime() - created.getTime()) < 60_000;
+    return no_activity_yet ? days_since_created : days_since_activity;
+}
+
+/**
+ * Classifies a deal's activity state.
+ *
+ * "Stale" is special: a file is only Stale once it has been reassigned to the
+ * catch-all advisor (reassigned_to_catch_all_at is set) AND has had no activity
+ * for another 7 days since — i.e. even the catch-all advisor hasn't moved it.
+ * Everything else is graded purely on idle time (Fresh / Alert / Urgent).
+ */
+export function getActivityState(
+    created_at: string,
+    last_activity_at?: string | null,
+    reassigned_to_catch_all_at?: string | null,
+): ActivityState {
+    if (reassigned_to_catch_all_at) {
+        const now = new Date();
+        const reassigned = new Date(reassigned_to_catch_all_at);
+        const last_activity = last_activity_at ? new Date(last_activity_at) : new Date(created_at);
+        // Measure from whichever is later: the reassignment, or any activity since.
+        const ref = last_activity > reassigned ? last_activity : reassigned;
+        if (differenceInDays(now, ref) >= REASSIGN_AFTER_DAYS) return "Stale";
+    }
+    return ageBandForDays(activityDrivingDays(created_at, last_activity_at));
+}
+
+// Plain-language explanation of each activity state, for the pipeline legend.
+// Keep day ranges in sync with ageBandForDays() + getActivityState() above.
+export const ACTIVITY_STATE_LEGEND: { state: ActivityState; dot: string; description: string }[] = [
+    { state: "Fresh",  dot: "bg-emerald-500", description: "Activity within the last 4 days." },
+    { state: "Alert",  dot: "bg-orange-500",  description: "No activity for 5–6 days — auto-reassign nears at 7." },
+    { state: "Urgent", dot: "bg-red-400",     description: "No activity for 7+ days — due for auto-reassign to the catch-all advisor." },
+    { state: "Stale",  dot: "bg-red-500",     description: "Reassigned to the catch-all advisor and still untouched for 7+ days." },
+];
+
+const STATE_STYLES: Record<ActivityState, { wrapper: string; dot: string }> = {
+    Stale:  { wrapper: "bg-red-50 border-red-200 text-red-700", dot: "bg-red-500" },
+    Urgent: { wrapper: "bg-red-50 border-red-200 text-red-600", dot: "bg-red-400" },
+    Alert:  { wrapper: "bg-orange-50 border-orange-200 text-orange-700", dot: "bg-orange-500" },
+    Fresh:  { wrapper: "bg-emerald-50 border-emerald-200 text-emerald-700", dot: "bg-emerald-500" },
+};
 
 interface ActivityAgeBadgeProps {
     /** ISO timestamps from the client_data_vault row. */
     created_at: string;
     last_activity_at?: string | null;
+    /** Set when the file was handed to the catch-all advisor — drives the "Stale" state. */
+    reassigned_to_catch_all_at?: string | null;
     /** "compact" omits the "Created … · " prefix when there's been no real activity yet. */
     variant?: "default" | "compact";
     className?: string;
@@ -26,6 +90,7 @@ interface ActivityAgeBadgeProps {
 export function ActivityAgeBadge({
     created_at,
     last_activity_at,
+    reassigned_to_catch_all_at,
     variant = "default",
     className = "",
 }: ActivityAgeBadgeProps) {
@@ -40,10 +105,8 @@ export function ActivityAgeBadge({
     const no_activity_yet =
         !last_activity_at || Math.abs(last_activity.getTime() - created.getTime()) < 60_000;
 
-    // Color the chip by the more urgent of the two: idle time drives decay, but
-    // a brand-new vault that hasn't moved in days is still worth nudging.
-    const driving_days = no_activity_yet ? days_since_created : days_since_activity;
-    const cls = age_classes(driving_days);
+    const state = getActivityState(created_at, last_activity_at, reassigned_to_catch_all_at);
+    const cls = { ...STATE_STYLES[state], label: state };
 
     const day_word = (n: number) => `${n}d`;
     const created_phrase = `${day_word(days_since_created)} in pipeline`;

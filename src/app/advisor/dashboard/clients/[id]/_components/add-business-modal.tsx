@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Loader2, Plus, X, Building2, DollarSign, AlertTriangle, FileCheck2, Trash2 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { createClient } from "@/lib/supabase/client";
 import { CLIENT_SCOPED_DOC_CODES } from "@/lib/document-scope";
 import { FUNDING_OPTIONS } from "@/data/loan-types";

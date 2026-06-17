@@ -5,7 +5,8 @@ import { createClient } from "@/lib/supabase/client";
 import { PipelineBoard, type PipelineDeal } from "@/app/advisor/dashboard/pipeline/_components/pipeline-board";
 import { enrichDeals } from "@/app/advisor/dashboard/pipeline/page";
 import { updateLoanStatus, type LoanStatus } from "@/app/actions/pipeline";
-import { toast } from "sonner";
+import { getActivityState, ACTIVITY_STATES, type ActivityState } from "@/components/advisor/activity-age-badge";
+import { toast } from "@/lib/toast";
 import { Loader2, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import clsx from "clsx";
@@ -25,6 +26,9 @@ export default function AdminPipelinePage() {
   // Filters
   const [scope, setScope] = useState<"all" | "mine">("all");
   const [advisorFilter, setAdvisorFilter] = useState<string>("");
+  // Activity-decay state filter (Fresh/Watch/Alert/Urgent/Stale) — same
+  // classification the card badges + the reassign-stale-files cron use.
+  const [activityFilter, setActivityFilter] = useState<ActivityState | "">("");
   const [searchQuery, setSearchQuery] = useState("");
 
   const fetchAll = async () => {
@@ -43,7 +47,7 @@ export default function AdminPipelinePage() {
       const [{ data: clients, error }, { data: advisorRows }] = await Promise.all([
         supabase
           .from("client_data_vault")
-          .select("id, user_id, advisor_id, client_name, client_email, client_phone, company_name, capital_requested, created_at"),
+          .select("id, user_id, advisor_id, client_name, client_email, client_phone, company_name, capital_requested, created_at, reassigned_to_catch_all_at, reassignment_paused_until"),
         supabase.from("advisors").select("id, first_name, last_name, email"),
       ]);
 
@@ -102,6 +106,9 @@ export default function AdminPipelinePage() {
         out = out.filter(d => d.advisor_id === advisorFilter);
       }
     }
+    if (activityFilter) {
+      out = out.filter(d => getActivityState(d.created_at, d.last_activity_at, d.reassigned_to_catch_all_at) === activityFilter);
+    }
     const q = searchQuery.trim().toLowerCase();
     if (q) {
       out = out.filter(d =>
@@ -111,7 +118,7 @@ export default function AdminPipelinePage() {
       );
     }
     return out;
-  }, [deals, scope, advisorFilter, searchQuery, myAdvisorId]);
+  }, [deals, scope, advisorFilter, activityFilter, searchQuery, myAdvisorId]);
 
   const handleDrop = async (dealId: string, newStatus: LoanStatus) => {
     const old = [...deals];
@@ -175,6 +182,18 @@ export default function AdminPipelinePage() {
         <option value="__unassigned__">Unassigned</option>
         {advisors.map(a => (
           <option key={a.id} value={a.id}>{a.label}</option>
+        ))}
+      </select>
+
+      {/* Activity-state filter (Fresh / Watch / Alert / Urgent / Stale) */}
+      <select
+        value={activityFilter}
+        onChange={(e) => setActivityFilter(e.target.value as ActivityState | "")}
+        className="h-9 md:h-10 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-[12px] font-bold text-slate-700 dark:text-slate-200 px-3 pr-8 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+      >
+        <option value="">All activity</option>
+        {ACTIVITY_STATES.map(state => (
+          <option key={state} value={state}>{state}</option>
         ))}
       </select>
 

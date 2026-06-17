@@ -3,6 +3,7 @@
 import { Mail, Phone, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { ActivityAgeBadge } from "@/components/advisor/activity-age-badge";
+import { ReassignmentPauseControl } from "@/app/advisor/dashboard/clients/[id]/_components/reassignment-pause-control";
 
 interface PipelineCardProps {
   deal: {
@@ -16,6 +17,8 @@ interface PipelineCardProps {
     total_required_docs: number;
     created_at: string;
     last_activity_at?: string;
+    reassigned_to_catch_all_at?: string | null;
+    reassignment_paused_until?: string | null;
   };
   detailHref: string;
   onOpen?: () => void;
@@ -49,14 +52,21 @@ export function PipelineDealCard({ deal, detailHref, onOpen, onDragStart }: Pipe
         <h4 className="font-black text-slate-900 dark:text-slate-100 text-[13px] leading-tight group-hover:text-emerald-600 transition-colors break-words flex-1 min-w-0">
           {deal.client_name}
         </h4>
-        <Link
-          href={detailHref}
-          onClick={(e) => { e.stopPropagation(); onOpen?.(); }}
-          className="text-slate-300 hover:text-emerald-500 transition-colors flex-shrink-0 bg-slate-50 dark:bg-slate-800 p-0.5 rounded-lg"
-          title="Open deal"
-        >
-          <ChevronRight className="h-4 w-4" />
-        </Link>
+        <div className="flex items-center gap-1 flex-shrink-0">
+          <ReassignmentPauseControl
+            clientId={deal.id}
+            paused_until={deal.reassignment_paused_until ?? null}
+            compact
+          />
+          <Link
+            href={detailHref}
+            onClick={(e) => { e.stopPropagation(); onOpen?.(); }}
+            className="text-slate-300 hover:text-emerald-500 transition-colors bg-slate-50 dark:bg-slate-800 p-0.5 rounded-lg"
+            title="Open deal"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Link>
+        </div>
       </div>
 
       {/* Company */}
@@ -86,6 +96,7 @@ export function PipelineDealCard({ deal, detailHref, onOpen, onDragStart }: Pipe
         <ActivityAgeBadge
           created_at={deal.created_at}
           last_activity_at={deal.last_activity_at}
+          reassigned_to_catch_all_at={deal.reassigned_to_catch_all_at}
           variant="compact"
           className="max-w-full"
         />

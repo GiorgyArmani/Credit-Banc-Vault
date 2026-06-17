@@ -18,7 +18,7 @@ import { Loader2, Check, X, ExternalLink, BarChart3, Plus } from "lucide-react";
 import Link from "next/link";
 import { BankAnalysisViewer } from "./bank-analysis-viewer";
 import { LenderResponsePanel } from "@/components/lender/lender-response-panel";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import clsx from "clsx";
 import { format } from "date-fns";
 

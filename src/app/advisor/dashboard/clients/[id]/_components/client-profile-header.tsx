@@ -7,6 +7,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { REFERRAL_PARTNERS } from "@/data/referral-partners";
 import { ShareWithLenderButton } from "@/components/share/share-with-lender-button";
+import { ReassignmentPauseControl } from "./reassignment-pause-control";
 
 interface ClientProfile {
     id: string;
@@ -29,6 +30,7 @@ interface ClientProfile {
     contract_completed: boolean;
     contract_completed_at: string | null;
     referral_partner?: string | null;
+    reassignment_paused_until?: string | null;
 }
 
 interface ClientProfileHeaderProps {
@@ -147,6 +149,13 @@ export function ClientProfileHeader({
                                     Priority Client
                                 </span>
                             </div>
+                            {/* Pause valve for the 7-day auto-reassignment (advisor + admin). */}
+                            <div className="mt-3">
+                                <ReassignmentPauseControl
+                                    clientId={client_profile.id}
+                                    paused_until={client_profile.reassignment_paused_until ?? null}
+                                />
+                            </div>
                         </div>
                     </div>
 
@@ -202,7 +211,7 @@ export function ClientProfileHeader({
                             triggerLabel="Share with Lender"
                             className="col-span-2 px-4 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-sm font-semibold rounded-xl"
                         />
-                        {!client_profile.contract_completed ? (
+                        {!client_profile.contract_completed && (
                             <button
                                 onClick={on_add_funding_app}
                                 className="col-span-2 flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-sm font-semibold rounded-xl transition-colors"
@@ -210,24 +219,14 @@ export function ClientProfileHeader({
                                 <FileSignature className="h-4 w-4" />
                                 Add Funding App
                             </button>
-                        ) : (
-                            <button
-                                onClick={on_delete_vault}
-                                className="col-span-2 flex items-center justify-center gap-2 px-4 py-2.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-100 text-sm font-semibold rounded-xl transition-colors"
-                            >
-                                <Trash2 className="h-4 w-4" />
-                                Delete Vault
-                            </button>
                         )}
-                        {!client_profile.contract_completed && (
-                            <button
-                                onClick={on_delete_vault}
-                                className="col-span-2 flex items-center justify-center gap-2 px-4 py-2.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-100 text-sm font-semibold rounded-xl transition-colors"
-                            >
-                                <Trash2 className="h-4 w-4" />
-                                Delete Vault
-                            </button>
-                        )}
+                        <button
+                            onClick={on_delete_vault}
+                            className="col-span-2 flex items-center justify-center gap-2 px-4 py-2.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-100 text-sm font-semibold rounded-xl transition-colors"
+                        >
+                            <Trash2 className="h-4 w-4" />
+                            Delete Vault
+                        </button>
                     </div>
                 </div>
 

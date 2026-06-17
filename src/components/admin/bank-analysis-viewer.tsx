@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Loader2, BarChart3, Download } from "lucide-react";
 import { format } from "date-fns";
 import clsx from "clsx";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 
 interface BankAnalysisRow {
     id: string;

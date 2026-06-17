@@ -3305,3 +3305,168 @@ export async function send_lender_review_reminder_email(data: LenderReviewRemind
 
   return await transporter.sendMail(mail_options);
 }
+
+/**
+ * Interface for the "client reassigned to you" notification.
+ *
+ * Sent to the catch-all advisor when files are handed to them — either
+ * automatically by the reassign-stale-files cron (7-day no-activity) or
+ * manually via the admin "Inactive" button. The email itself is framed as a
+ * reassignment + reach-out-ASAP nudge, not as "inactive".
+ */
+export interface FileReassignmentNotificationData {
+  /** New owner (recipient). */
+  advisor_name: string;
+  advisor_email: string;
+  /** Files newly assigned to the recipient. */
+  files: Array<{
+    client_name: string;
+    company_name: string;
+    capital_requested?: number | null;
+    previous_advisor_name?: string | null;
+    inactivity_days: number;
+    detail_url: string;
+  }>;
+  login_url: string;
+}
+
+/**
+ * Generates HTML for the stale-file reassignment notification.
+ *
+ * Nested `files` rows are escaped per-field here because escape_email_strings
+ * only walks top-level string values, not arrays of objects.
+ */
+export function generate_file_reassignment_email_html(data: FileReassignmentNotificationData): string {
+  const advisor_name = escape_html(data.advisor_name || "there");
+  const count = data.files.length;
+
+  const rows = data.files.map((f) => {
+    const client_name = escape_html(f.client_name || "Unnamed client");
+    const company_name = escape_html(f.company_name || "");
+    const previous = f.previous_advisor_name ? escape_html(f.previous_advisor_name) : "Unassigned";
+    const amount = typeof f.capital_requested === "number" && f.capital_requested > 0
+      ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(f.capital_requested)
+      : "—";
+    const days = f.inactivity_days;
+    // Last meaningful contact, framed as plain context (no "inactive" wording).
+    const last_activity_label = days > 0 ? `${days} day${days === 1 ? "" : "s"} ago` : "—";
+    return `
+      <tr>
+        <td style="padding: 14px 16px; border-bottom: 1px solid #f1f5f9; font-size: 14px; color: #1e293b;">
+          <strong>${client_name}</strong><br>
+          <span style="color: #64748b; font-size: 13px;">${company_name}</span>
+        </td>
+        <td style="padding: 14px 16px; border-bottom: 1px solid #f1f5f9; font-size: 14px; color: #475569; white-space: nowrap;">${amount}</td>
+        <td style="padding: 14px 16px; border-bottom: 1px solid #f1f5f9; font-size: 13px; color: #64748b;">${previous}</td>
+        <td style="padding: 14px 16px; border-bottom: 1px solid #f1f5f9; font-size: 13px; color: #64748b; white-space: nowrap;">${last_activity_label}</td>
+      </tr>`;
+  }).join("");
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${count === 1 ? "A Client Has" : "Clients Have"} Been Reassigned to You</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f6f9fc;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse;">
+    <tr>
+      <td align="center" style="padding: 40px 0;">
+        <table role="presentation" style="width: 640px; max-width: 100%; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+
+          <!-- Header -->
+          <tr>
+            <td style="background-color: #10b981; padding: 40px 20px; text-align: center;">
+              <img src="cid:cb_logo_white" alt="Credit Banc" style="height: 44px; width: auto; display: block; margin: 0 auto; margin-bottom: 24px;">
+              <h1 style="margin: 0; color: #ffffff; font-size: 18px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.15em; line-height: 1;">${count === 1 ? "Client" : "Clients"} Reassigned to You</h1>
+            </td>
+          </tr>
+
+          <!-- Message -->
+          <tr>
+            <td style="padding: 40px 40px 8px;">
+              <h2 style="margin: 0 0 16px; color: #1e293b; font-size: 20px; font-weight: 600;">Hi ${advisor_name},</h2>
+              <p style="margin: 0 0 16px; color: #475569; font-size: 16px; line-height: 1.6;">
+                ${count === 1 ? "A client has" : `${count} clients have`} been reassigned to you. Please <strong>reach out to ${count === 1 ? "them" : "them all"} as soon as possible</strong> to keep their deal moving.
+              </p>
+              <div style="background-color: #fffbeb; border: 1px solid #fde68a; border-radius: 10px; padding: 12px 16px; margin-bottom: 8px;">
+                <p style="margin: 0; color: #92400e; font-size: 14px; font-weight: 600;">⏱ Time-sensitive — please make contact today.</p>
+              </div>
+            </td>
+          </tr>
+
+          <!-- Files table -->
+          <tr>
+            <td style="padding: 8px 40px 8px;">
+              <table role="presentation" style="width: 100%; border-collapse: collapse; border: 1px solid #f1f5f9; border-radius: 8px; overflow: hidden;">
+                <thead>
+                  <tr style="background-color: #f8fafc;">
+                    <th align="left" style="padding: 10px 16px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #94a3b8;">Client</th>
+                    <th align="left" style="padding: 10px 16px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #94a3b8;">Requested</th>
+                    <th align="left" style="padding: 10px 16px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #94a3b8;">Previously</th>
+                    <th align="left" style="padding: 10px 16px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #94a3b8;">Last Activity</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${rows}
+                </tbody>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Action Button -->
+          <tr>
+            <td style="padding: 24px 40px 40px;" align="center">
+              <a href="${data.login_url}" style="display: inline-block; background-color: #10b981; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-size: 16px; font-weight: 600;">
+                ${count === 1 ? "View Client" : "View Clients"}
+              </a>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding: 40px; text-align: center; color: #94a3b8; font-size: 13px; line-height: 1.6; border-top: 1px solid #f1f5f9;">
+              <p style="margin: 0;">© ${new Date().getFullYear()} Credit Banc Vault. This is an automated notification.</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `;
+}
+
+/**
+ * Sends the stale-file reassignment summary to the new owner.
+ */
+export async function send_file_reassignment_notification(data: FileReassignmentNotificationData) {
+  if (!data.files.length) return null;
+
+  const transporter = create_smtp_transporter();
+  const from_email = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  const from_name = process.env.SMTP_FROM_NAME || "Credit Banc Vault";
+
+  const count = data.files.length;
+  const mail_options = {
+    from: `${from_name} <${from_email}>`,
+    to: data.advisor_email,
+    subject: count === 1
+      ? "A client has been reassigned to you — please reach out ASAP"
+      : `${count} clients reassigned to you — please reach out ASAP`,
+    html: generate_file_reassignment_email_html(data),
+    attachments: [
+      {
+        filename: "CBLOGOWHITE.png",
+        path: path.join(process.cwd(), "public", "CBLOGOWHITE.png"),
+        cid: "cb_logo_white",
+      },
+    ],
+  };
+
+  return await transporter.sendMail(mail_options);
+}

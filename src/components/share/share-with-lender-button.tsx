@@ -11,7 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Share2, Loader2, Copy, Check, Trash2, Link as LinkIcon } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import clsx from "clsx";
 
 interface ShareLink {

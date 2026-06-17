@@ -52,7 +52,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { notifyAdvisor, markDocumentAsViewed } from "../../actions";
 import { fetchInternalNotes, addInternalNote } from "@/app/actions/internal-notes";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import clsx from "clsx";
 import { format } from "date-fns";
 import { LoanFundedDialog } from "@/components/loan-funded-dialog";
@@ -107,6 +107,7 @@ interface ClientProfile {
     avg_annual_revenue?: number;
     credit_score: string;
     created_at: string;
+    reassigned_to_catch_all_at?: string | null;
     proposed_loan_type: string;
     loan_purpose: string;
     industry: string;
@@ -519,7 +520,7 @@ export default function UnderwritingClientDetailsPage() {
                     id, user_id, client_name, client_email, client_phone,
                     company_name, company_city, company_state, company_zip_code, capital_requested,
                     legal_entity_type, business_start_date, avg_monthly_deposits, avg_annual_revenue,
-                    credit_score, created_at,
+                    credit_score, created_at, reassigned_to_catch_all_at,
                     proposed_loan_type, loan_purpose, industry, funding_eta, employees_count, is_home_based,
                     number_of_owners, owner_1_name, owner_1_ownership_pct,
                     owner_2_name, owner_2_ownership_pct, owner_3_name, owner_3_ownership_pct,
@@ -2144,6 +2145,7 @@ export default function UnderwritingClientDetailsPage() {
                         <ActivityAgeBadge
                             created_at={client_profile.created_at}
                             last_activity_at={last_activity_at}
+                            reassigned_to_catch_all_at={client_profile.reassigned_to_catch_all_at}
                         />
                         {show_upload_alert && (
                             <span

@@ -6,7 +6,7 @@ import LenderMatch from "./lender-match";
 import { createClient } from "@/lib/supabase/client";
 import BankAnalysisPDF, { type BankAnalysisPDFData } from "./pdf/bank-analysis-pdf";
 import { LOAN_TYPES } from "@/data/loan-types";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

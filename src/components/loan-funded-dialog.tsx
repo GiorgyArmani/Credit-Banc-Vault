@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { DollarSign, Calendar, User, Hash, FileText, Send, Loader2 } from "lucide-react";
 import { fundLoanAction } from "@/app/underwriting/dashboard/actions";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 
 interface LoanFundedDialogProps {
     clientId: string;

@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import type { DealSummary } from "./bank-analysis";
 import { createClient } from "@/lib/supabase/client";
 import { notifyAdminsOfLenderMatchSaved } from "@/app/actions/lender-match-notifications";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

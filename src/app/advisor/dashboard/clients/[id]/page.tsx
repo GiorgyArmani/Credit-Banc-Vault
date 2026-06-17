@@ -52,7 +52,7 @@ import {
 } from "./actions";
 import { fetchInternalNotes, addInternalNote } from "@/app/actions/internal-notes";
 import { fetchFileNotes, addFileNote } from "@/app/actions/client-file-notes";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import clsx from "clsx";
 import { format, differenceInDays } from "date-fns";
 import { Textarea } from "@/components/ui/textarea";
@@ -238,6 +238,8 @@ interface ClientProfile {
     referral_partner?: string | null;
     advisor_id?: string | null;
     advisor_name?: string | null;
+    reassignment_paused_until?: string | null;
+    reassigned_to_catch_all_at?: string | null;
 }
 
 /**
@@ -708,7 +710,9 @@ export default function AdvisorClientDetailsPage() {
           employees_count,
           is_home_based,
           referral_partner,
-          advisor_name
+          advisor_name,
+          reassignment_paused_until,
+          reassigned_to_catch_all_at
         `)
                 .eq("id", client_id)
                 .maybeSingle();
@@ -1920,6 +1924,7 @@ export default function AdvisorClientDetailsPage() {
                             <ActivityAgeBadge
                                 created_at={client_profile.created_at}
                                 last_activity_at={last_activity_at}
+                                reassigned_to_catch_all_at={client_profile.reassigned_to_catch_all_at}
                             />
                             {show_upload_alert && (
                                 <span

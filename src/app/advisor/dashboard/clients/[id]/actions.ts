@@ -8,6 +8,8 @@ import { syncUnifiedClientData } from "@/lib/user-management";
 import { updateLoanStatus } from "@/app/actions/pipeline";
 import { ghlSyncDocument } from "@/lib/ghl-document-sync";
 import { isClientScopedDoc } from "@/lib/document-scope";
+import { resolveCatchAllAdvisor } from "@/lib/catch-all-advisor";
+import { send_file_reassignment_notification } from "@/lib/email";
 
 /**
  * Owner OR follower check. Admin flow isn't covered here (advisor-persona actions).
@@ -977,19 +979,27 @@ export async function reassignClientAdvisor(clientId: string, newAdvisorId: stri
         const advisor_name =
             `${newAdvisor.first_name ?? ""} ${newAdvisor.last_name ?? ""}`.trim() || "Unknown";
 
-        // Capture the previous advisor for the audit note.
+        // Is this a hand-off TO the catch-all advisor? That path starts the
+        // "Stale" clock and notifies the catch-all advisor, exactly like the
+        // auto-reassign cron. Reassigning to anyone else clears that clock.
+        const catchAll = await resolveCatchAllAdvisor(supabaseAdmin);
+        const isToCatchAll = !!catchAll && newAdvisorId === catchAll.id;
+
+        // Capture the previous advisor for the audit note + notification email.
         const { data: existing } = await supabaseAdmin
             .from("client_data_vault")
-            .select("advisor_id, advisor_name")
+            .select("advisor_id, advisor_name, client_name, company_name, capital_requested")
             .eq("id", clientId)
             .maybeSingle();
 
+        const now_iso = new Date().toISOString();
         const { error: updateErr } = await supabaseAdmin
             .from("client_data_vault")
             .update({
                 advisor_id: newAdvisorId,
                 advisor_name,
-                updated_at: new Date().toISOString(),
+                reassigned_to_catch_all_at: isToCatchAll ? now_iso : null,
+                updated_at: now_iso,
             })
             .eq("id", clientId);
 
@@ -1012,6 +1022,36 @@ export async function reassignClientAdvisor(clientId: string, newAdvisorId: stri
         const previous_advisor_id = existing?.advisor_id ?? null;
         const previous_advisor_name = existing?.advisor_name ?? null;
 
+        // Notify the catch-all advisor (in-app + email), mirroring the cron.
+        if (isToCatchAll && catchAll) {
+            if (catchAll.user_id) {
+                await supabaseAdmin.from("in_app_notifications").insert({
+                    user_id: catchAll.user_id,
+                    client_id: clientId,
+                    title: "Client reassigned to you",
+                    message: `${existing?.client_name || "A client"}${existing?.company_name ? ` (${existing.company_name})` : ""} has been reassigned to you. Please reach out as soon as possible.`,
+                });
+            }
+            const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://vault.creditbanc.io";
+            try {
+                await send_file_reassignment_notification({
+                    advisor_name: catchAll.name,
+                    advisor_email: catchAll.email,
+                    files: [{
+                        client_name: existing?.client_name || "",
+                        company_name: existing?.company_name || "",
+                        capital_requested: existing?.capital_requested ?? null,
+                        previous_advisor_name,
+                        inactivity_days: 0,
+                        detail_url: `${appUrl}/admin/clients/${clientId}`,
+                    }],
+                    login_url: `${appUrl}/admin/pipeline`,
+                });
+            } catch (mailErr) {
+                console.error("reassignClientAdvisor: catch-all email failed:", mailErr);
+            }
+        }
+
         revalidatePath(`/admin/clients/${clientId}`);
         revalidatePath(`/advisor/dashboard/clients/${clientId}`);
 
@@ -1023,6 +1063,70 @@ export async function reassignClientAdvisor(clientId: string, newAdvisorId: stri
         };
     } catch (error: any) {
         console.error("Exception in reassignClientAdvisor:", error);
+        return { success: false, error: error.message || "An unexpected error occurred" };
+    }
+}
+
+/**
+ * setReassignmentPause
+ *
+ * Pauses (or resumes) auto-reassignment of a file to the catch-all advisor.
+ * Pass a positive number of days to pause that long from now; pass null to
+ * resume immediately. Admins and the owning/following advisor may call it.
+ * The reassign-stale-files cron skips any file whose reassignment_paused_until
+ * is still in the future.
+ */
+export async function setReassignmentPause(clientId: string, pauseDays: number | null) {
+    try {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return { success: false, error: "Unauthorized" };
+
+        const { data: client, error: clientErr } = await supabase
+            .from("client_data_vault")
+            .select("advisor_id")
+            .eq("id", clientId)
+            .maybeSingle();
+        if (clientErr || !client) return { success: false, error: "Client not found" };
+
+        // Access: admins always; otherwise the owning/following advisor.
+        const { data: callerRow } = await supabase
+            .from("users")
+            .select("role")
+            .eq("id", user.id)
+            .maybeSingle();
+        if (callerRow?.role !== "admin") {
+            const { data: advisorData } = await supabase
+                .from("advisors")
+                .select("id")
+                .eq("user_id", user.id)
+                .maybeSingle();
+            if (!advisorData || !(await hasClientAccess(supabase, advisorData.id, clientId, client.advisor_id))) {
+                return { success: false, error: "Access denied" };
+            }
+        }
+
+        // null/0/negative → resume. Otherwise pause `pauseDays` from now.
+        const paused_until =
+            pauseDays && pauseDays > 0
+                ? new Date(Date.now() + pauseDays * 86_400_000).toISOString()
+                : null;
+
+        const supabaseAdmin = createAdminClient();
+        const { error: updateErr } = await supabaseAdmin
+            .from("client_data_vault")
+            .update({ reassignment_paused_until: paused_until })
+            .eq("id", clientId);
+        if (updateErr) {
+            return { success: false, error: `Failed to update pause: ${updateErr.message}` };
+        }
+
+        revalidatePath(`/admin/clients/${clientId}`);
+        revalidatePath(`/advisor/dashboard/clients/${clientId}`);
+
+        return { success: true, paused_until };
+    } catch (error: any) {
+        console.error("Exception in setReassignmentPause:", error);
         return { success: false, error: error.message || "An unexpected error occurred" };
     }
 }

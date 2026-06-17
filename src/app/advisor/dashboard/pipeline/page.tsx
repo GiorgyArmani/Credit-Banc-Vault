@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { PipelineBoard, type PipelineDeal } from "./_components/pipeline-board";
 import { getBulkLatestStatus, updateLoanStatus, type LoanStatus } from "@/app/actions/pipeline";
 import { getBulkClientActivity } from "@/app/actions/advisor";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { Loader2 } from "lucide-react";
 import { normalizeSupabaseJoin } from "@/lib/document-scope";
 
@@ -47,7 +47,7 @@ export default function AdvisorPipelinePage() {
 
       const { data: clients, error } = await supabase
         .from("client_data_vault")
-        .select("id, user_id, advisor_id, client_name, client_email, client_phone, company_name, capital_requested, created_at")
+        .select("id, user_id, advisor_id, client_name, client_email, client_phone, company_name, capital_requested, created_at, reassigned_to_catch_all_at, reassignment_paused_until")
         .in("id", Array.from(idSet));
 
       if (error) throw error;
@@ -115,6 +115,8 @@ export async function enrichDeals(
     company_name: string;
     capital_requested: number;
     created_at: string;
+    reassigned_to_catch_all_at?: string | null;
+    reassignment_paused_until?: string | null;
   }>
 ): Promise<PipelineDeal[]> {
   const vaultIds = clients.map(c => c.id);

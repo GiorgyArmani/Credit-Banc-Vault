@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import { FileSignature, X, ExternalLink } from "lucide-react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import type { PendingContract } from "./use-pending-contracts";
 
 interface SignContractDialogProps {

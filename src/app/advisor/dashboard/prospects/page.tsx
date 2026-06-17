@@ -50,6 +50,7 @@ interface ClientInfo {
     company_name: string;
     capital_requested: number;
     created_at: string;
+    reassigned_to_catch_all_at?: string | null;
     document_count: number;
     total_required_docs: number;
     pipeline_status?: LoanStatus;
@@ -201,7 +202,7 @@ export default function ProspectsListPage() {
 
             let clientsQuery = supabase
                 .from('client_data_vault')
-                .select('id, user_id, advisor_id, client_name, client_email, client_phone, company_name, capital_requested, created_at')
+                .select('id, user_id, advisor_id, client_name, client_email, client_phone, company_name, capital_requested, created_at, reassigned_to_catch_all_at')
                 .order('created_at', { ascending: false });
 
             if (accessibleIds !== null) {
@@ -496,7 +497,7 @@ export default function ProspectsListPage() {
                                                                 {client.document_count === client.total_required_docs ? "Ready for Review" : "Incomplete Docs"}
                                                             </span>
                                                             <div className="text-[10px] font-bold text-error uppercase tracking-tighter animate-pulse">Action Required</div>
-                                                            <ActivityAgeBadge created_at={client.created_at} last_activity_at={client.last_activity_at} />
+                                                            <ActivityAgeBadge created_at={client.created_at} last_activity_at={client.last_activity_at} reassigned_to_catch_all_at={client.reassigned_to_catch_all_at} />
                                                         </div>
 
                                                         <h4 className="font-bold text-on-surface">{client.client_name}</h4>
@@ -597,7 +598,7 @@ export default function ProspectsListPage() {
                                                                 <div className="text-[11px] font-bold text-outline">
                                                                     {format_currency(client.capital_requested)}
                                                                 </div>
-                                                                <ActivityAgeBadge created_at={client.created_at} last_activity_at={client.last_activity_at} />
+                                                                <ActivityAgeBadge created_at={client.created_at} last_activity_at={client.last_activity_at} reassigned_to_catch_all_at={client.reassigned_to_catch_all_at} />
                                                             </div>
                                                         </div>
                                                     </div>
@@ -650,7 +651,7 @@ export default function ProspectsListPage() {
                                                 <div className="h-10 w-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400 group-hover:bg-tertiary-fixed group-hover:text-on-tertiary-fixed transition-colors">
                                                     <span className="material-symbols-outlined">person</span>
                                                 </div>
-                                                <ActivityAgeBadge created_at={client.created_at} last_activity_at={client.last_activity_at} />
+                                                <ActivityAgeBadge created_at={client.created_at} last_activity_at={client.last_activity_at} reassigned_to_catch_all_at={client.reassigned_to_catch_all_at} />
                                             </div>
 
                                             <h4 className="font-bold text-on-surface text-lg mb-1">{client.client_name}</h4>

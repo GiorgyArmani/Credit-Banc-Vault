@@ -4,11 +4,13 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useState,
   type ReactNode,
 } from "react";
 import { AlertCircle, Copy, CheckCircle2, Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { registerErrorHandler } from "@/lib/error-bus";
 
 /**
  * App-wide error popup.
@@ -106,6 +108,43 @@ export function ErrorDialogProvider({ children }: { children: ReactNode }) {
     // Mirror to the console so it's also in any captured logs.
     console.error("[ErrorDialog]", error);
   }, []);
+
+  // Bridge: let imperative callers (e.g. toast.error → dispatchError) open this
+  // same modal, so every error in the app surfaces as a must-dismiss popup.
+  useEffect(() => {
+    return registerErrorHandler(({ error, options }) => showError(error, options));
+  }, [showError]);
+
+  // Global safety net: catch uncaught runtime errors and unhandled promise
+  // rejections (the ones that never reach a try/catch or toast.error) and show
+  // them in the same modal — so nothing fails silently in the console only.
+  useEffect(() => {
+    function isBenign(message: string): boolean {
+      // ResizeObserver loop warnings are harmless browser noise, not bugs.
+      return message.includes("ResizeObserver loop");
+    }
+
+    function onError(event: ErrorEvent) {
+      // Resource load failures (img/script 404s) have no `error` object — skip.
+      if (!event.error && !event.message) return;
+      if (event.message && isBenign(event.message)) return;
+      showError(event.error ?? event.message, { context: "Uncaught error" });
+    }
+
+    function onRejection(event: PromiseRejectionEvent) {
+      const reason = event.reason;
+      const msg = reason instanceof Error ? reason.message : String(reason ?? "");
+      if (isBenign(msg)) return;
+      showError(reason, { context: "Unhandled promise rejection" });
+    }
+
+    window.addEventListener("error", onError);
+    window.addEventListener("unhandledrejection", onRejection);
+    return () => {
+      window.removeEventListener("error", onError);
+      window.removeEventListener("unhandledrejection", onRejection);
+    };
+  }, [showError]);
 
   const close = useCallback(() => setState(CLOSED), []);
 

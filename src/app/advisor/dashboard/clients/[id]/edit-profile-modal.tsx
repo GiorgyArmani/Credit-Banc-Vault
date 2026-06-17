@@ -36,7 +36,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Loader2, UserCog, Building2, DollarSign, MapPin, CreditCard, Clock } from "lucide-react";
 import { updateClientProfile, updateBusinessProfile } from "./actions";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 
 // Constants from signup form for consistency
 const US_STATES = [
