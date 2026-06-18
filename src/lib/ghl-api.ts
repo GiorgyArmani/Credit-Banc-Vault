@@ -61,6 +61,31 @@ export async function ghlUpdateContact(contactId: string, body: Partial<GhlConta
   return handle(res);
 }
 
+/**
+ * Fetch a single contact by id, including its owner (`assignedTo`).
+ * The search endpoint doesn't reliably return `assignedTo`, so when we need
+ * the contact owner (e.g. to mirror GHL round-robin ownership into the vault)
+ * we read the full contact here.
+ */
+export async function ghlGetContact(
+  contactId: string
+): Promise<{ id: string; assignedTo?: string | null; email?: string | null; phone?: string | null } | null> {
+  const res = await fetch(`${BASE}/contacts/${contactId}`, {
+    method: "GET",
+    headers: authHeaders(),
+    cache: "no-store",
+  });
+  const data = await handle(res);
+  const contact = data?.contact ?? data;
+  if (!contact?.id) return null;
+  return {
+    id: contact.id,
+    assignedTo: contact.assignedTo ?? null,
+    email: contact.email ?? null,
+    phone: contact.phone ?? null,
+  };
+}
+
 export type GhlCustomField = { id: string; name: string; key: string; objectType: string };
 
 export async function ghlFetchCustomFields(locationId: string) {

@@ -3,8 +3,8 @@
 // Server-side setter gate. Runs before any /setter/* page renders. Appointment
 // setters get a deliberately small, create-only surface: the fast-funding speed
 // form and nothing else. Every client they create is assigned to the advisor
-// linked on their users.setter_advisor_id (resolved server-side in
-// /api/client-signup-speed). See [[role_model]].
+// mirrored from the GHL contact owner (round-robin), resolved server-side in
+// /api/client-signup-speed. See [[role_model]].
 //
 // admin can also reach /setter/* (admins bypass role guards everywhere).
 // Defense-in-depth on top of the proxy gate at src/proxy.ts.

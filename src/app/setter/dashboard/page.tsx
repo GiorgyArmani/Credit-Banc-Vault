@@ -5,8 +5,9 @@ import SpeedClientSignUpForm from "@/components/speed-client-sign-up-form";
  *
  * Appointment setters use this to spin up a client (vault) on the speed/fast
  * funding flow while on the call. The created client is assigned to the advisor
- * linked on the setter's users.setter_advisor_id (resolved server-side in
- * /api/client-signup-speed) — the setter never picks the advisor.
+ * mirrored from the GHL contact owner (round-robin, set when the setter booked
+ * the appointment), resolved server-side in /api/client-signup-speed — the
+ * setter never picks the advisor.
  *
  * Same SpeedClientSignUpForm the advisor/admin speed pages use, but in setter
  * mode (isSetter): a trimmed 2-step form (Business → Funding) with no documents

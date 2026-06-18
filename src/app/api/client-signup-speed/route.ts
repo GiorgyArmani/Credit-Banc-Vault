@@ -21,7 +21,7 @@ import { createClient } from '@supabase/supabase-js';
 import { createClient as createServerSupabaseClient } from '@/lib/supabase/server';
 import { send_client_welcome_email } from '@/lib/email';
 import { syncUnifiedClientData, generateSecurePassword } from '@/lib/user-management';
-import { ghlSearchContacts, ghlUpdateContact } from '@/lib/ghl-api';
+import { ghlSearchContacts, ghlUpdateContact, ghlGetContact } from '@/lib/ghl-api';
 import { generateOnboardingMagicLink, pushMagicLinkToGhl } from '@/lib/magic-link';
 
 const supabase_admin = createClient(
@@ -152,9 +152,11 @@ export async function POST(request: Request) {
       ['avg_monthly_deposits', 'Monthly Bank Deposit Volume'],
       ['capital_requested', 'Funding Amount Requested'],
       ['credit_score', 'Approximate Credit Score'],
-      ['loan_purpose', 'Use of Funds'],
       ['proposed_loan_type', 'Proposed Loan Type'],
     ];
+    // loan_purpose ("Use of Funds") is required for advisor/admin creates but
+    // NOT for setters — they capture call notes (additional_notes) in its place.
+    // Enforced per-role after the session role is known (Step 1.5).
 
     const missing = required_fields
       .filter(([key]) => !body[key] || !String(body[key]).trim())
@@ -213,13 +215,15 @@ export async function POST(request: Request) {
     }
 
     // Resolve the session user's role. Setters (appointment setters) are NOT
-    // advisors — they have a create-only fast-funding dashboard, and every
-    // client they create is assigned to a fixed advisor stored on their own
-    // users.setter_advisor_id. Everyone else resolves the advisor from their
-    // own advisors row, exactly as before. See [[role_model]].
+    // advisors — they have a create-only fast-funding dashboard and set up
+    // vaults for the whole team. Before the setter creates the vault they book
+    // an appointment in GHL, whose round-robin assigns the contact's owner. So
+    // the client already has an advisor in GHL: we mirror that owner into the
+    // vault rather than picking a fixed advisor. Everyone else resolves the
+    // advisor from their own advisors row, exactly as before. See [[role_model]].
     const { data: session_user_row } = await supabase_admin
       .from('users')
-      .select('role, setter_advisor_id')
+      .select('role')
       .eq('id', session_user.id)
       .maybeSingle();
 
@@ -235,31 +239,71 @@ export async function POST(request: Request) {
         }
       | null = null;
 
+    // For setters, the GHL contact (already owned by the round-robin advisor)
+    // is found here so we can read its owner; reused later to skip a 2nd search.
+    let setter_ghl_contact_id: string | null = null;
+
     if (session_user_row?.role === 'setter') {
-      // ----- SETTER: assign to the advisor linked on the setter's user row -----
-      if (!session_user_row.setter_advisor_id) {
-        console.error(`❌ client-signup-speed: setter ${session_user.id} has no setter_advisor_id`);
+      // ----- SETTER: mirror the GHL contact owner into the vault advisor -----
+      // The contact already exists in GHL (the setter just booked the
+      // appointment) and round-robin set its owner. Find it, read assignedTo,
+      // and resolve the matching active vault advisor. If we can't, we hard
+      // block: there is no "unassigned" — the contact already has an owner.
+      const existing = await ghlSearchContacts({
+        email: body.client_email.toLowerCase(),
+        phone: body.client_phone,
+        name: client_name,
+        locationId: process.env.GHL_LOCATION_ID!,
+      });
+
+      if (existing.length === 0) {
+        console.error(`❌ client-signup-speed: setter ${session_user.id} — no GHL contact for ${body.client_email}`);
         return NextResponse.json(
-          { success: false, error: 'Your setter account is not linked to an advisor yet. Contact an admin.' },
-          { status: 403 }
+          { success: false, error: 'No GoHighLevel contact found for this client. Book the appointment in GHL first so the contact gets an owner, then create the vault.' },
+          { status: 409 }
         );
       }
-      const { data: target_advisor } = await supabase_admin
+
+      setter_ghl_contact_id = existing[0].id;
+      const ghl_contact = await ghlGetContact(setter_ghl_contact_id);
+      const owner_ghl_user_id = ghl_contact?.assignedTo || null;
+
+      if (!owner_ghl_user_id) {
+        console.error(`❌ client-signup-speed: GHL contact ${setter_ghl_contact_id} has no owner (assignedTo)`);
+        return NextResponse.json(
+          { success: false, error: 'This GoHighLevel contact has no owner yet. Book the appointment (round-robin assigns an advisor) before creating the vault.' },
+          { status: 409 }
+        );
+      }
+
+      const { data: owner_advisor } = await supabase_admin
         .from('advisors')
-        .select('id, first_name, last_name, email, phone, ghl_user_id, user_id')
-        .eq('id', session_user_row.setter_advisor_id)
+        .select('id, first_name, last_name, email, phone, ghl_user_id, user_id, is_active')
+        .eq('ghl_user_id', owner_ghl_user_id)
         .maybeSingle();
-      advisor_row = target_advisor ?? null;
-      if (!advisor_row) {
+
+      if (!owner_advisor || owner_advisor.is_active === false) {
         console.error(
-          `❌ client-signup-speed: setter ${session_user.id} linked advisor ${session_user_row.setter_advisor_id} not found`
+          `❌ client-signup-speed: GHL owner ${owner_ghl_user_id} (contact ${setter_ghl_contact_id}) maps to no active advisor`
         );
         return NextResponse.json(
-          { success: false, error: 'The advisor linked to your setter account no longer exists. Contact an admin.' },
-          { status: 403 }
+          { success: false, error: 'The GoHighLevel owner of this contact is not an active Vault advisor. Reassign the contact to a Vault advisor in GHL, then create the vault.' },
+          { status: 409 }
         );
       }
-      console.log(`✅ Setter ${session_user.id} → assigning client to advisor ${advisor_row.id}`);
+      advisor_row = owner_advisor;
+      console.log(`✅ Setter ${session_user.id} → mirroring GHL owner ${owner_ghl_user_id} → advisor ${advisor_row.id}`);
+
+      // Setters capture call notes in place of "Use of Funds" so the advisor
+      // opens the file with context. Require the notes; loan_purpose is NOT
+      // NULL on the vault, so default it (the advisor sets it later).
+      if (!body.additional_notes || !String(body.additional_notes).trim()) {
+        return NextResponse.json(
+          { success: false, error: 'Missing required fields: Call Notes' },
+          { status: 400 }
+        );
+      }
+      body.loan_purpose = 'Not specified — see call notes';
 
       // Setters never choose docs or loan type — force the house defaults
       // server-side regardless of payload. The trimmed setter form already
@@ -268,6 +312,13 @@ export async function POST(request: Request) {
       pending_doc_codes = ['business_bank_statements'];
       body.proposed_loan_type = 'other';
     } else {
+      // ----- ADVISOR/ADMIN: "Use of Funds" is required (no call-notes swap) ---
+      if (!body.loan_purpose || !String(body.loan_purpose).trim()) {
+        return NextResponse.json(
+          { success: false, error: 'Missing required fields: Use of Funds' },
+          { status: 400 }
+        );
+      }
       // ----- ADVISOR/ADMIN: resolve the advisor from the session (REQUIRED) -----
       const { data: by_user } = await supabase_admin
         .from('advisors')
@@ -441,12 +492,16 @@ export async function POST(request: Request) {
     const advisor_phone: string | null = advisor_row.phone || null;
 
     console.log('🔍 Searching for existing GHL contact...');
-    const existingContacts = await ghlSearchContacts({
-      email: body.client_email.toLowerCase(),
-      phone: body.client_phone,
-      name: client_name,
-      locationId: process.env.GHL_LOCATION_ID!
-    });
+    // Setters already located the contact above (to read its round-robin owner),
+    // so reuse that id instead of searching again.
+    const existingContacts = setter_ghl_contact_id
+      ? [{ id: setter_ghl_contact_id }]
+      : await ghlSearchContacts({
+          email: body.client_email.toLowerCase(),
+          phone: body.client_phone,
+          name: client_name,
+          locationId: process.env.GHL_LOCATION_ID!
+        });
 
     let ghl_contact_id: string;
 
@@ -465,7 +520,10 @@ export async function POST(request: Request) {
       country: 'US',
       customFields: custom_fields
     };
-    if (advisor_ghl_user_id) {
+    // Don't touch ownership for setters — GHL's round-robin already owns the
+    // contact and we mirrored that owner into the vault. Only advisor/admin
+    // self-serve creates stamp ownership from the session advisor.
+    if (advisor_ghl_user_id && !setter_ghl_contact_id) {
       ghl_contact_payload.assignedTo = advisor_ghl_user_id;
     }
 

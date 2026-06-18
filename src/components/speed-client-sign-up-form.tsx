@@ -111,6 +111,9 @@ export default function SpeedClientSignUpForm({ isSetter = false }: { isSetter?:
   const [credit_score, set_credit_score] = useState("");
   const [loan_purpose, set_loan_purpose] = useState("");
   const [proposed_loan_types, set_proposed_loan_types] = useState<string[]>([]);
+  // Setters collect call notes here (in place of "Use of Funds") so the
+  // assigned advisor opens the file with context already on it.
+  const [additional_notes, set_additional_notes] = useState("");
 
   // ===== Step 3 — Documents Requested (released only after the client signs) =====
   // Setters skip this step; default to business bank statements only.
@@ -170,7 +173,8 @@ export default function SpeedClientSignUpForm({ isSetter = false }: { isSetter?:
         [avg_monthly_deposits, "Monthly Bank Deposit Volume"],
         [capital_requested, "Funding Amount Requested"],
         [credit_score, "Approximate Credit Score"],
-        [loan_purpose, "Use of Funds"],
+        // Setters capture call notes here instead of "Use of Funds".
+        isSetter ? [additional_notes, "Call Notes"] : [loan_purpose, "Use of Funds"],
       ];
       const missing = required.filter(([v]) => !v.trim()).map(([, label]) => label);
       if (missing.length > 0) return `Please complete: ${missing.join(", ")}`;
@@ -223,6 +227,8 @@ export default function SpeedClientSignUpForm({ isSetter = false }: { isSetter?:
         capital_requested,
         credit_score,
         loan_purpose,
+        // Call notes (setters) → advisor-visible additional_notes on the vault.
+        additional_notes,
         // Setters never pick a loan type — it's auto-set to "other".
         proposed_loan_type: isSetter ? "other" : proposed_loan_types.join(", "),
 
@@ -514,10 +520,17 @@ export default function SpeedClientSignUpForm({ isSetter = false }: { isSetter?:
                         </SelectContent>
                       </Select>
                     </div>
-                    <div className="md:col-span-2">
-                      <Label htmlFor="loan_purpose" className={labelClass}>Use of Funds *</Label>
-                      <Textarea id="loan_purpose" value={loan_purpose} onChange={(e) => set_loan_purpose(e.target.value)} className="rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold p-6" placeholder="Equipment purchase, inventory, expansion, etc." rows={2} required />
-                    </div>
+                    {isSetter ? (
+                      <div className="md:col-span-2">
+                        <Label htmlFor="additional_notes" className={labelClass}>Call Notes *</Label>
+                        <Textarea id="additional_notes" value={additional_notes} onChange={(e) => set_additional_notes(e.target.value)} className="rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold p-6" placeholder="Everything you collected on the call — use of funds, urgency, situation, anything the advisor should know." rows={4} required />
+                      </div>
+                    ) : (
+                      <div className="md:col-span-2">
+                        <Label htmlFor="loan_purpose" className={labelClass}>Use of Funds *</Label>
+                        <Textarea id="loan_purpose" value={loan_purpose} onChange={(e) => set_loan_purpose(e.target.value)} className="rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold p-6" placeholder="Equipment purchase, inventory, expansion, etc." rows={2} required />
+                      </div>
+                    )}
                     {!isSetter && (
                     <div className="md:col-span-2">
                       <Label className={`${labelClass} mb-3`}>

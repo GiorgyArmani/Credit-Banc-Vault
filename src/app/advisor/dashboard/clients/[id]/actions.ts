@@ -963,10 +963,11 @@ export async function reassignClientAdvisor(clientId: string, newAdvisorId: stri
 
         const supabaseAdmin = createAdminClient();
 
-        // Resolve the new advisor's display name.
+        // Resolve the new advisor's display name (+ ghl_user_id to mirror
+        // ownership back to GHL).
         const { data: newAdvisor, error: advisorErr } = await supabaseAdmin
             .from("advisors")
-            .select("id, first_name, last_name, email, is_active")
+            .select("id, first_name, last_name, email, is_active, ghl_user_id")
             .eq("id", newAdvisorId)
             .maybeSingle();
         if (advisorErr || !newAdvisor) {
@@ -988,7 +989,7 @@ export async function reassignClientAdvisor(clientId: string, newAdvisorId: stri
         // Capture the previous advisor for the audit note + notification email.
         const { data: existing } = await supabaseAdmin
             .from("client_data_vault")
-            .select("advisor_id, advisor_name, client_name, company_name, capital_requested")
+            .select("advisor_id, advisor_name, client_name, company_name, capital_requested, ghl_contact_id")
             .eq("id", clientId)
             .maybeSingle();
 
@@ -1014,6 +1015,18 @@ export async function reassignClientAdvisor(clientId: string, newAdvisorId: stri
             .delete()
             .eq("client_vault_id", clientId)
             .eq("advisor_id", newAdvisorId);
+
+        // Mirror the new owner into GHL so the contact owner tracks the vault
+        // advisor (keeps GHL ownership in sync with reassignments). Non-fatal.
+        if (existing?.ghl_contact_id && newAdvisor.ghl_user_id) {
+            try {
+                await ghlUpdateContact(existing.ghl_contact_id, {
+                    assignedTo: newAdvisor.ghl_user_id,
+                });
+            } catch (ghlErr) {
+                console.error("reassignClientAdvisor: GHL owner sync failed:", ghlErr);
+            }
+        }
 
         // (loan_status_history requires a valid status enum value, so we
         // don't write an audit entry here. The change is visible via
