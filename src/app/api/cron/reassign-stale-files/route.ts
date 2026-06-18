@@ -4,8 +4,10 @@
 // is automatically reassigned to a designated catch-all advisor (Grant) so
 // stalled deals don't sit unworked. On reassignment we:
 //   1. flip client_data_vault.advisor_id / advisor_name to the catch-all owner,
-//   2. drop an in-app notification per file for the new owner, and
-//   3. email the new owner a single summary of everything handed to them.
+//   2. demote the previous advisor to a follower so they keep access alongside
+//      the catch-all owner (both can see the file),
+//   3. drop an in-app notification per file for the new owner, and
+//   4. email the new owner a single summary of everything handed to them.
 //
 // "Inactivity" mirrors getBulkClientActivity / send-document-reminders:
 //   max(created_at, latest loan_status_history, latest user_documents.upload_date,
@@ -230,6 +232,26 @@ export async function GET(req: Request) {
                 result.error = updateError.message;
                 results.push(result);
                 continue;
+            }
+
+            // a2. Demote the previous advisor to a follower so they keep access
+            //     alongside the catch-all owner (Grant). Unassigned files have no
+            //     previous advisor to preserve, and we never add Grant to himself.
+            //     A dup (already a follower, 23505) is fine — just ignore it.
+            if (client.advisor_id && client.advisor_id !== grant.id) {
+                const { error: followerError } = await supabase
+                    .from("client_followers")
+                    .insert({
+                        client_vault_id: client.id,
+                        advisor_id: client.advisor_id,
+                        assigned_by: grant.id,
+                    });
+                if (followerError && (followerError as any).code !== "23505") {
+                    console.error(
+                        `[cron/reassign-stale-files] follower insert for client ${client.id} failed:`,
+                        followerError,
+                    );
+                }
             }
 
             // b. In-app notification for the new owner.
