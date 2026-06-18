@@ -35,6 +35,23 @@ export interface BankAnalysisPDFPosition {
     term: string;
 }
 
+/**
+ * One selectable lookback window in the exported report. The user can pick
+ * several at export time (e.g. 3 + 6 months) and the PDF renders one Account
+ * Breakdown page per period plus a comparison table. Each view carries its OWN
+ * pre-computed summary so a 3-month and a 6-month view don't share averages.
+ */
+export interface BankAnalysisPeriodView {
+    monthRange: number;
+    activeMonths: string[];      // 3-letter labels in display order (e.g. ["Dec","Jan","Feb"])
+    activeMonthIndices: number[]; // indices into each account's months[] array
+    avgRevenue: number;
+    avgDailyBalance: number;
+    avgMonthlyDeposits: number;
+    totalNegDays: number;
+    avgNegDays: number;
+}
+
 export interface BankAnalysisPDFData {
     // Client/deal snapshot
     businessName: string;
@@ -60,10 +77,17 @@ export interface BankAnalysisPDFData {
     hasBankruptcy: boolean;
 
     // Raw data
+    //
+    // Legacy single-window fields. Still honored when `periods` is absent (the
+    // saved-snapshot viewer passes these). When `periods` is supplied it is the
+    // source of truth and these are ignored for the breakdown/summary.
     monthRange: number;
     activeMonths: string[]; // 3-letter labels in display order (e.g. ["Dec", "Jan", "Feb"])
-    accounts: BankAnalysisPDFAccount[];
     activeMonthIndices: number[]; // indices into each account's months[] array
+    /** Multiple lookback windows to render (3/4/6/12). Takes precedence over
+     *  the legacy monthRange/activeMonths/activeMonthIndices when present. */
+    periods?: BankAnalysisPeriodView[];
+    accounts: BankAnalysisPDFAccount[];
     positions: BankAnalysisPDFPosition[];
     questions: Record<string, string>;
 
@@ -348,11 +372,6 @@ export default function BankAnalysisPDF({ data }: { data: BankAnalysisPDFData })
         phone2,
         state,
         industry,
-        avgRevenue,
-        avgDailyBalance,
-        avgMonthlyDeposits,
-        totalNegDays,
-        avgNegDays,
         numOpenPositions,
         capitalRequested,
         fico,
@@ -361,36 +380,61 @@ export default function BankAnalysisPDF({ data }: { data: BankAnalysisPDFData })
         hasBankruptcy,
         advisorName,
         followers,
-        monthRange,
-        activeMonths,
         accounts,
-        activeMonthIndices,
         positions,
         questions,
         generatedAt,
         analystName,
     } = data;
 
-    const monthColWidth = `${70 / Math.max(activeMonths.length, 1)}%`;
+    // Resolve the lookback windows to render. New callers pass `periods` (one
+    // entry per selected 3/4/6/12-month window). Legacy callers (saved-snapshot
+    // viewer) pass the flat monthRange/activeMonths/activeMonthIndices + summary
+    // fields — synthesize a single period from those so nothing breaks.
+    const periodViews: BankAnalysisPeriodView[] =
+        data.periods && data.periods.length > 0
+            ? [...data.periods].sort((a, b) => a.monthRange - b.monthRange)
+            : [
+                {
+                    monthRange: data.monthRange,
+                    activeMonths: data.activeMonths,
+                    activeMonthIndices: data.activeMonthIndices,
+                    avgRevenue: data.avgRevenue,
+                    avgDailyBalance: data.avgDailyBalance,
+                    avgMonthlyDeposits: data.avgMonthlyDeposits,
+                    totalNegDays: data.totalNegDays,
+                    avgNegDays: data.avgNegDays,
+                },
+            ];
+
+    // The summary page and the positions analysis are single-valued, so they
+    // key off the LARGEST selected window — the fullest picture of the file.
+    const primary = periodViews.reduce((a, b) => (b.monthRange > a.monthRange ? b : a), periodViews[0]);
+    const { avgRevenue, avgDailyBalance, avgMonthlyDeposits, totalNegDays, avgNegDays } = primary;
+    const monthRange = primary.monthRange;
+
     const labelColWidth = "20%";
     const totalColWidth = "10%";
 
-    // Compact typography for high month counts. At 9+ months the default
-    // fontSize/padding spills $1M+ figures across cells (overlap on the
-    // Account Breakdown page). Scaling type + padding keeps everything in
-    // its column even at the 12-month lookback.
-    const denseMonths = activeMonths.length >= 9;
-    const cellFontSize = denseMonths ? 6.5 : 8;
-    const cellPaddingV = denseMonths ? 2 : 4;
-    const cellPaddingH = denseMonths ? 2 : 5;
-    const cellStyleOverride = {
-        fontSize: cellFontSize,
-        paddingVertical: cellPaddingV,
-        paddingHorizontal: cellPaddingH,
-    };
-
-    const renderAccountTable = (account: BankAnalysisPDFAccount, idx: number) => {
+    const renderAccountTable = (
+        account: BankAnalysisPDFAccount,
+        idx: number,
+        period: BankAnalysisPeriodView,
+    ) => {
+        const { activeMonths, activeMonthIndices } = period;
         const activeData = activeMonthIndices.map((mi) => account.months[mi]);
+        const monthColWidth = `${70 / Math.max(activeMonths.length, 1)}%`;
+
+        // Compact typography for high month counts. At 9+ months the default
+        // fontSize/padding spills $1M+ figures across cells (overlap on the
+        // Account Breakdown page). Scaling type + padding keeps everything in
+        // its column even at the 12-month lookback.
+        const denseMonths = activeMonths.length >= 9;
+        const cellStyleOverride = {
+            fontSize: denseMonths ? 6.5 : 8,
+            paddingVertical: denseMonths ? 2 : 4,
+            paddingHorizontal: denseMonths ? 2 : 5,
+        };
 
         return (
             <View key={idx} style={styles.card} wrap={false}>
@@ -564,6 +608,43 @@ export default function BankAnalysisPDF({ data }: { data: BankAnalysisPDFData })
                     <SummaryCell label="State" value={state || "—"} last />
                 </View>
 
+                {/* Period comparison — only when more than one window was exported.
+                    Lets the reader compare the file across 3 / 4 / 6 / 12 months
+                    side by side without flipping between breakdown pages. */}
+                {periodViews.length > 1 && (
+                    <>
+                        <Text style={styles.h2}>Period Comparison</Text>
+                        <View style={styles.table}>
+                            <View style={styles.tr}>
+                                <Text style={[styles.th, { width: "28%" }]}>Lookback</Text>
+                                <Text style={[styles.th, { width: "20%", textAlign: "right" }]}>Avg Revenue</Text>
+                                <Text style={[styles.th, { width: "20%", textAlign: "right" }]}>Avg Daily Bal</Text>
+                                <Text style={[styles.th, { width: "16%", textAlign: "right" }]}>Avg # Dep</Text>
+                                <Text style={[styles.th, { width: "16%", textAlign: "right" }]}>Neg Days</Text>
+                            </View>
+                            {periodViews.map((pv) => (
+                                <View key={pv.monthRange} style={styles.tr}>
+                                    <Text style={[styles.td, styles.tdLabel, { width: "28%" }]}>
+                                        {pv.monthRange}-month
+                                    </Text>
+                                    <Text style={[styles.td, { width: "20%", textAlign: "right" }]}>
+                                        {formatMoney(pv.avgRevenue)}
+                                    </Text>
+                                    <Text style={[styles.td, { width: "20%", textAlign: "right" }]}>
+                                        {formatMoney(pv.avgDailyBalance)}
+                                    </Text>
+                                    <Text style={[styles.td, { width: "16%", textAlign: "right" }]}>
+                                        {Number.isFinite(pv.avgMonthlyDeposits) ? pv.avgMonthlyDeposits.toFixed(1) : "—"}
+                                    </Text>
+                                    <Text style={[styles.td, { width: "16%", textAlign: "right" }]}>
+                                        {pv.totalNegDays.toString()}
+                                    </Text>
+                                </View>
+                            ))}
+                        </View>
+                    </>
+                )}
+
                 {/* Qualifying questions */}
                 <Text style={styles.h2}>Qualifying Questions</Text>
                 <View style={styles.card}>
@@ -598,27 +679,32 @@ export default function BankAnalysisPDF({ data }: { data: BankAnalysisPDFData })
                 </Text>
             </Page>
 
-            {/* One page per account (or batched if they fit). Landscape at
-                7+ months so the per-cell width stays generous enough for
-                $1M+ figures — portrait was overlapping cells at 9+ months. */}
-            <Page
-                size="A4"
-                orientation={activeMonths.length >= 7 ? "landscape" : "portrait"}
-                style={styles.page}
-            >
-                <Text style={styles.h1}>Account Breakdown</Text>
-                <Text style={styles.small}>
-                    {accounts.length} account{accounts.length === 1 ? "" : "s"} · {monthRange}-month lookback
-                </Text>
-                <View style={{ marginTop: 8 }}>
-                    {accounts.map((acc, i) => renderAccountTable(acc, i))}
-                </View>
+            {/* One Account Breakdown page PER selected lookback window. Each
+                shows every bank account at that window. Landscape at 7+ months
+                so per-cell width stays generous enough for $1M+ figures —
+                portrait was overlapping cells at 9+ months. */}
+            {periodViews.map((period) => (
+                <Page
+                    key={period.monthRange}
+                    size="A4"
+                    orientation={period.activeMonths.length >= 7 ? "landscape" : "portrait"}
+                    style={styles.page}
+                >
+                    <Text style={styles.h1}>Account Breakdown — {period.monthRange}-month lookback</Text>
+                    <Text style={styles.small}>
+                        {accounts.length} account{accounts.length === 1 ? "" : "s"}
+                        {" · "}{period.activeMonths[0]} → {period.activeMonths[period.activeMonths.length - 1]}
+                    </Text>
+                    <View style={{ marginTop: 8 }}>
+                        {accounts.map((acc, i) => renderAccountTable(acc, i, period))}
+                    </View>
 
-                <Text style={styles.footer} fixed>
-                    Credit Banc — Bank Analysis Report
-                    {analystName ? ` · Prepared by ${analystName}` : ""}
-                </Text>
-            </Page>
+                    <Text style={styles.footer} fixed>
+                        Credit Banc — Bank Analysis Report
+                        {analystName ? ` · Prepared by ${analystName}` : ""}
+                    </Text>
+                </Page>
+            ))}
 
             {/* Positions page — deep analysis (landscape for column density) */}
             {filledPositions.length > 0 && (

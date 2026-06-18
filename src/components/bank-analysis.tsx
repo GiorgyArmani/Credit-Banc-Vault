@@ -81,6 +81,23 @@ export interface DealSummary {
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const TERM_MONTHS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
+/** Lookback windows offered both in the on-screen range selector and the PDF
+ *  export picker. A preset is only exportable when enough months of data exist
+ *  (see availableMonths). */
+const PERIOD_PRESETS = [3, 4, 6, 12] as const;
+
+/** A month slot counts as having data when any statement figure was entered.
+ *  negativeDays defaults to "0", so it's excluded — a lone "0" isn't data. */
+function monthHasData(m: MonthlyData): boolean {
+  return [
+    m.totalDeposits,
+    m.beginningBalance,
+    m.endingBalance,
+    m.avgDailyBalance,
+    m.numDeposits,
+  ].some((v) => v != null && v.trim() !== "");
+}
+
 /** Compute the active month indices anchored at `prevMonthIdx`, counting
  *  backwards `range` months. Used for both the global window and per-account
  *  overrides so the slice math stays in one place. */
@@ -843,6 +860,10 @@ export default function BankAnalysis() {
   const [clientSearch, setClientSearch] = useState("");
   const [selectedClientId, setSelectedClientId] = useState(initial_client_id);
   const [loadedClientName, setLoadedClientName] = useState("");
+  // Combobox UI state for the client search. `isClientDropdownOpen` controls
+  // the results panel; `clientHighlight` is the keyboard-nav cursor (-1 = none).
+  const [isClientDropdownOpen, setIsClientDropdownOpen] = useState(false);
+  const [clientHighlight, setClientHighlight] = useState(-1);
 
   // Multi-business state. `businesses` is the per-client list (1 row for the
   // 99% case, N for multi-business). `selectedBusinessId` drives every
@@ -969,7 +990,13 @@ export default function BankAnalysis() {
   const [activeTab, setActiveTab] = useState<"analysis" | "positions">("analysis");
 
   // ── Month range selector ────────────────────────────────────────────────
-  const [monthRange, setMonthRange] = useState<3 | 6 | 8 | 12>(3);
+  const [monthRange, setMonthRange] = useState<3 | 4 | 6 | 12>(3);
+
+  // ── PDF export period picker ──────────────────────────────────────────────
+  // Which lookback windows to render in the exported PDF. The dialog lets the
+  // user tick several (e.g. 3 + 6); each becomes its own Account Breakdown page.
+  const [showExportDialog, setShowExportDialog] = useState(false);
+  const [exportPeriods, setExportPeriods] = useState<number[]>([]);
 
   // Always count backwards from previous month
   // e.g. current=March(2), previous=February(1), 3 months: [Dec(11), Jan(0), Feb(1)]
@@ -983,7 +1010,15 @@ export default function BankAnalysis() {
       .select("id, client_name, company_name, client_phone, owner_1_name, owner_2_name, capital_requested, credit_score, business_start_date, legal_entity_type, num_owners:number_of_owners, company_state, industry, avg_monthly_deposits, avg_annual_revenue, proposed_loan_type")
       .order("client_name", { ascending: true })
       .then(({ data }) => {
-        if (data) setClientList(data as ClientOption[]);
+        if (!data) return;
+        const rows = data as ClientOption[];
+        setClientList(rows);
+        // Deep-link prefill: show the linked client's name in the search box
+        // so a ?client=<id> arrival reads as "selected", not blank.
+        if (initial_client_id) {
+          const match = rows.find((c) => c.id === initial_client_id);
+          if (match) setClientSearch(`${match.company_name} · ${match.client_name}`);
+        }
       });
   }, []);
 
@@ -1026,10 +1061,14 @@ export default function BankAnalysis() {
   //      for the resolved business. Single-business clients (99%) just get
   //      their lone business auto-selected; multi-business honors the
   //      ?business=<id> deep-link or falls back to the primary row.
-  async function loadClient() {
-    if (!selectedClientId) return;
+  async function loadClient(clientIdArg?: string) {
+    // Accept an explicit id (combobox selection auto-loads before the
+    // selectedClientId state flush) and fall back to the selected state.
+    const cid = clientIdArg ?? selectedClientId;
+    if (!cid) return;
+    if (cid !== selectedClientId) setSelectedClientId(cid);
     setIsLoading(true);
-    const client = clientList.find(c => c.id === selectedClientId);
+    const client = clientList.find(c => c.id === cid);
     if (!client) { setIsLoading(false); return; }
 
     // Client-scoped identity fields (same regardless of which business is active).
@@ -1049,7 +1088,7 @@ export default function BankAnalysis() {
     const { data: bizRows } = await supabase
       .from("business_profiles")
       .select("id, is_primary, display_order, company_name, business_name, legal_entity_type, business_start_date, company_state, industry, avg_monthly_deposits, avg_annual_revenue")
-      .eq("client_vault_id", selectedClientId)
+      .eq("client_vault_id", cid)
       .order("is_primary", { ascending: false })
       .order("display_order", { ascending: true })
       .order("created_at", { ascending: true });
@@ -1069,7 +1108,7 @@ export default function BankAnalysis() {
 
     if (resolved) {
       setSelectedBusinessId(resolved.id);
-      await loadBusinessScopedData(resolved, client, list);
+      await loadBusinessScopedData(resolved, client, list, cid);
     } else {
       // Legacy path: no business_profiles row exists. Prefill from
       // client_data_vault directly so the screen still works.
@@ -1082,7 +1121,7 @@ export default function BankAnalysis() {
         businessType: client.legal_entity_type || "",
         timeInBusiness: formatFullDate(client.business_start_date),
       }));
-      await loadBusinessScopedData(null, client, list);
+      await loadBusinessScopedData(null, client, list, cid);
     }
   }
 
@@ -1101,6 +1140,7 @@ export default function BankAnalysis() {
     business: BusinessOption | null,
     client: ClientOption,
     bizList: BusinessOption[],
+    clientId: string,
   ) {
     const isMultiBusiness = bizList.length > 1;
     // Business-level prefill (only when we have a business row — otherwise the
@@ -1127,7 +1167,7 @@ export default function BankAnalysis() {
     let snapshotQuery = supabase
       .from("bank_analysis_results")
       .select("*")
-      .eq("client_id", selectedClientId);
+      .eq("client_id", clientId);
     if (business && isMultiBusiness) {
       snapshotQuery = snapshotQuery.eq("business_profile_id", business.id);
     } else if (business) {
@@ -1157,7 +1197,7 @@ export default function BankAnalysis() {
 
     // History side-panel: business-scoped only when multi-business; otherwise
     // client-scoped so legacy snapshots stay in the list.
-    refreshHistory(selectedClientId, isMultiBusiness && business ? business.id : undefined);
+    refreshHistory(clientId, isMultiBusiness && business ? business.id : undefined);
 
     // 2. Open positions ("ground truth" from Client Vault). Same scoping
     //    rule: business-scoped when multi-business, client-scoped otherwise
@@ -1165,7 +1205,7 @@ export default function BankAnalysis() {
     let positionsQuery = supabase
       .from("client_open_positions")
       .select("*")
-      .eq("client_vault_id", selectedClientId);
+      .eq("client_vault_id", clientId);
     if (business && isMultiBusiness) {
       positionsQuery = positionsQuery.eq("business_profile_id", business.id);
     }
@@ -1222,12 +1262,65 @@ export default function BankAnalysis() {
     setIsLoading(false);
   }
 
-  const filteredClients = clientSearch.trim()
-    ? clientList.filter(c =>
-      c.client_name.toLowerCase().includes(clientSearch.toLowerCase()) ||
-      c.company_name.toLowerCase().includes(clientSearch.toLowerCase())
-    )
-    : clientList;
+  // Search across company, client, both owner names, and phone so the analyst
+  // can find a file by whatever they remember. Tokenized (every word must
+  // match somewhere) so "acme john" narrows to John at Acme.
+  const filteredClients = (() => {
+    const q = clientSearch.trim().toLowerCase();
+    if (!q) return clientList;
+    // Drop the "·" separator that our own selection label injects, so
+    // refocusing a selected client ("Acme · John") still matches.
+    const tokens = q.split(/\s+/).filter((t) => t && t !== "·");
+    return clientList.filter((c) => {
+      const haystack = [
+        c.company_name,
+        c.client_name,
+        c.owner_1_name,
+        c.owner_2_name,
+        c.client_phone,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return tokens.every((t) => haystack.includes(t));
+    });
+  })();
+  // Cap the rendered list — the vault can hold thousands of clients and a
+  // single unfiltered <div> of all of them would jank the dropdown.
+  const visibleClients = filteredClients.slice(0, 50);
+
+  const clientLabel = (c: ClientOption) => `${c.company_name} · ${c.client_name}`;
+
+  // Pick a client from the combobox: sync state, show its label, close the
+  // panel, and auto-load so the analyst doesn't need a second click.
+  const selectClient = (c: ClientOption) => {
+    setSelectedClientId(c.id);
+    setClientSearch(clientLabel(c));
+    setIsClientDropdownOpen(false);
+    setClientHighlight(-1);
+    loadClient(c.id);
+  };
+
+  // Keyboard nav for the combobox input.
+  const onClientSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setIsClientDropdownOpen(true);
+      setClientHighlight((i) => Math.min(i + 1, visibleClients.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setClientHighlight((i) => Math.max(i - 1, 0));
+    } else if (e.key === "Enter") {
+      const pick = visibleClients[clientHighlight] ?? visibleClients[0];
+      if (pick) {
+        e.preventDefault();
+        selectClient(pick);
+      }
+    } else if (e.key === "Escape") {
+      setIsClientDropdownOpen(false);
+      setClientHighlight(-1);
+    }
+  };
 
   // Active business row for any display reads that vary per-business
   // (e.g. avg annual revenue, avg monthly deposits in the Economic Data
@@ -1272,6 +1365,62 @@ export default function BankAnalysis() {
     0,
   );
   const avgNegDaysAcrossAccounts = totalNegDaysSum / (totalActiveMonthCells || 1);
+
+  // ── Export period availability ────────────────────────────────────────────
+  // How many of the most-recent-12 months hold data in ANY account. Drives
+  // which PDF presets are exportable: a preset N is available iff N months of
+  // data exist (6 months of data → 3/4/6 enabled, 12 disabled).
+  const last12Indices = computeMonthIndices(prevMonthIdx, 12);
+  const availableMonths = accounts.reduce((max, a) => {
+    const filled = last12Indices.filter((mi) => monthHasData(a.months[mi])).length;
+    return Math.max(max, filled);
+  }, 0);
+
+  /** Build a self-contained period view (indices + per-window summary) for the
+   *  PDF. Applied uniformly across all accounts — per-account on-screen range
+   *  overrides are an editing convenience and don't affect the export window. */
+  const buildPeriodView = (range: number) => {
+    const indices = computeMonthIndices(prevMonthIdx, range);
+    const monthsForAll = accounts.flatMap((a) => indices.map((mi) => a.months[mi]));
+    const periodAvgRevenue = avgOfFilled(monthsForAll.map((m) => m.totalDeposits));
+    const periodAvgDailyBalance = avgOfFilled(monthsForAll.map((m) => m.avgDailyBalance));
+    const periodAvgMonthlyDeposits = avgOfIntegers(monthsForAll.map((m) => m.numDeposits));
+    const periodTotalNegDays = accounts.reduce(
+      (sum, a) =>
+        sum + indices.reduce((mSum, mi) => mSum + (parseInt(a.months[mi].negativeDays) || 0), 0),
+      0,
+    );
+    const cells = accounts.length * indices.length;
+    const periodAvgNegDays = periodTotalNegDays / (cells || 1);
+    return {
+      monthRange: range,
+      activeMonths: indices.map((mi) => MONTHS[mi].slice(0, 3)),
+      activeMonthIndices: indices,
+      avgRevenue: Number.isFinite(periodAvgRevenue) ? periodAvgRevenue : 0,
+      avgDailyBalance: Number.isFinite(periodAvgDailyBalance) ? periodAvgDailyBalance : 0,
+      avgMonthlyDeposits: Number.isFinite(periodAvgMonthlyDeposits) ? periodAvgMonthlyDeposits : 0,
+      totalNegDays: periodTotalNegDays,
+      avgNegDays: Number.isFinite(periodAvgNegDays) ? periodAvgNegDays : 0,
+    };
+  };
+
+  /** Open the export dialog, pre-selecting sensible periods: the current
+   *  on-screen range if it has data, otherwise the largest available preset. */
+  const openExportDialog = () => {
+    const usable = PERIOD_PRESETS.filter((n) => n <= availableMonths);
+    let preselected: number[];
+    if (usable.includes(monthRange)) {
+      preselected = [monthRange];
+    } else if (usable.length > 0) {
+      preselected = [usable[usable.length - 1]];
+    } else {
+      // No window has enough data yet — fall back to the smallest preset so the
+      // user can still export (cells just render "—").
+      preselected = [PERIOD_PRESETS[0]];
+    }
+    setExportPeriods(preselected);
+    setShowExportDialog(true);
+  };
 
   const updateQ = (k: keyof QualifyingQuestions, v: string) =>
     setQuestions((q) => ({ ...q, [k]: v }));
@@ -1368,7 +1517,12 @@ export default function BankAnalysis() {
   };
 
   // ─── Export to PDF ─────────────────────────────────────────────────────────
-  const exportToPDF = async () => {
+  const exportToPDF = async (selectedPeriods: number[]) => {
+    setShowExportDialog(false);
+    // Render the chosen windows ascending so the comparison + breakdown pages
+    // read 3 → 4 → 6 → 12. Guard against an empty selection.
+    const ranges = [...new Set(selectedPeriods)].sort((a, b) => a - b);
+    const periodViews = (ranges.length > 0 ? ranges : [monthRange]).map(buildPeriodView);
     setIsExporting(true);
     try {
       // Dynamic import keeps @react-pdf/renderer's heavy client bundle out of
@@ -1446,9 +1600,12 @@ export default function BankAnalysis() {
         tibMonths: tibMonths || parseInt(questions.timeInBusiness) || 0,
         businessStartDate: selectedClient?.business_start_date || undefined,
         hasBankruptcy: questions.bankruptcy.toLowerCase().includes("yes") || hasBankruptcy,
+        // Legacy single-window fields — kept as a fallback; the PDF prefers
+        // `periods` below when present.
         monthRange,
         activeMonths: activeMonthIndices.map((mi) => MONTHS[mi].slice(0, 3)),
         activeMonthIndices,
+        periods: periodViews,
         accounts,
         positions,
         questions: { ...questions } as Record<string, string>,
@@ -1539,30 +1696,99 @@ export default function BankAnalysis() {
             )}
           </div>
           <div className="flex gap-2">
+            {/* Client combobox — single search field with an inline results
+                panel. Typing filters live; arrow keys + Enter navigate; clicking
+                a result selects AND auto-loads it. */}
             <div className="relative flex-1">
-              <svg xmlns="http://www.w3.org/2000/svg" className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+              <svg xmlns="http://www.w3.org/2000/svg" className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
               <input
                 type="text"
                 value={clientSearch}
-                onChange={e => setClientSearch(e.target.value)}
-                placeholder="Search client name or company..."
-                className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1.5 pl-8 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-emerald-500 transition-colors"
+                onChange={e => {
+                  setClientSearch(e.target.value);
+                  setIsClientDropdownOpen(true);
+                  setClientHighlight(-1);
+                  // Editing the text invalidates a prior pick so a stale id
+                  // can't be loaded via the button.
+                  if (selectedClientId) setSelectedClientId("");
+                }}
+                onFocus={() => setIsClientDropdownOpen(true)}
+                onBlur={() => {
+                  // Delay so an onMouseDown selection on a result registers
+                  // before the panel unmounts.
+                  setTimeout(() => setIsClientDropdownOpen(false), 120);
+                }}
+                onKeyDown={onClientSearchKeyDown}
+                placeholder="Search by company, client, owner or phone..."
+                role="combobox"
+                aria-expanded={isClientDropdownOpen}
+                aria-autocomplete="list"
+                className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1.5 pl-8 pr-7 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-emerald-500 transition-colors"
               />
+              {clientSearch && (
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    setClientSearch("");
+                    setSelectedClientId("");
+                    setClientHighlight(-1);
+                    setIsClientDropdownOpen(true);
+                  }}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  title="Clear search"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                </button>
+              )}
+
+              {isClientDropdownOpen && (
+                <div className="absolute z-30 mt-1 w-full max-h-72 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-xl">
+                  {visibleClients.length === 0 ? (
+                    <div className="px-3 py-3 text-xs text-slate-400 font-mono">
+                      {clientList.length === 0 ? "Loading clients…" : "No matches"}
+                    </div>
+                  ) : (
+                    <>
+                      {visibleClients.map((c, idx) => {
+                        const isHi = idx === clientHighlight;
+                        const isSel = c.id === selectedClientId;
+                        return (
+                          <button
+                            key={c.id}
+                            type="button"
+                            // onMouseDown (not onClick) so the selection fires
+                            // before the input's onBlur closes the panel.
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              selectClient(c);
+                            }}
+                            onMouseEnter={() => setClientHighlight(idx)}
+                            className={`flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left transition-colors ${
+                              isHi ? "bg-emerald-50" : "hover:bg-slate-50"
+                            } ${isSel ? "border-l-2 border-emerald-500" : "border-l-2 border-transparent"}`}
+                          >
+                            <span className="text-sm font-medium text-slate-800 truncate w-full">
+                              {c.company_name || "(No company)"}
+                            </span>
+                            <span className="text-[11px] text-slate-500 font-mono truncate w-full">
+                              {[c.client_name, c.client_phone].filter(Boolean).join(" · ")}
+                            </span>
+                          </button>
+                        );
+                      })}
+                      {filteredClients.length > visibleClients.length && (
+                        <div className="px-3 py-2 text-[10px] text-slate-400 font-mono border-t border-slate-100">
+                          +{filteredClients.length - visibleClients.length} more — keep typing to narrow
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
             </div>
-            <select
-              value={selectedClientId}
-              onChange={e => setSelectedClientId(e.target.value)}
-              className="flex-1 bg-slate-50 border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-900 focus:outline-none focus:border-emerald-500 transition-colors font-mono"
-            >
-              <option value="">— Select client —</option>
-              {filteredClients.map(c => (
-                <option key={c.id} value={c.id}>
-                  {c.company_name} · {c.client_name}
-                </option>
-              ))}
-            </select>
             <button
-              onClick={loadClient}
+              onClick={() => loadClient()}
               disabled={!selectedClientId || isLoading}
               className="px-4 py-1.5 rounded text-xs font-bold tracking-wider uppercase bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors whitespace-nowrap"
             >
@@ -1599,7 +1825,7 @@ export default function BankAnalysis() {
                       if (!client) return;
                       setIsLoading(true);
                       setSelectedBusinessId(b.id);
-                      await loadBusinessScopedData(b, client, businesses);
+                      await loadBusinessScopedData(b, client, businesses, selectedClientId);
                     }}
                     disabled={isLoading}
                     className={
@@ -1765,7 +1991,7 @@ export default function BankAnalysis() {
             {/* Month range selector */}
             <div className="flex items-center gap-2 mb-4">
               <span className="text-[10px] text-slate-500 uppercase tracking-wider font-mono">Range:</span>
-              {([3, 6, 8, 12] as const).map(n => (
+              {([3, 4, 6, 12] as const).map(n => (
                 <button
                   key={n}
                   onClick={() => {
@@ -1817,7 +2043,7 @@ export default function BankAnalysis() {
         {/* Final Actions */}
         <div className="mt-12 flex justify-end gap-3">
           <button
-            onClick={exportToPDF}
+            onClick={openExportDialog}
             disabled={isExporting}
             className="flex items-center justify-center gap-3 px-8 py-4 font-bold text-slate-900 bg-slate-200 hover:bg-slate-300 border border-slate-300/40 rounded-2xl text-xs uppercase tracking-[0.2em] shadow-2xl shadow-black/20 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-40 disabled:hover:scale-100 group"
           >
@@ -1853,6 +2079,83 @@ export default function BankAnalysis() {
             )}
           </button>
         </div>
+
+        {/* ── PDF export period picker ─────────────────────────────────────
+            Pick one or more lookback windows to render. Presets are gated on
+            how many months of data the file actually holds (availableMonths):
+            6 months of data → 3/4/6 enabled, 12 disabled. The PDF gets one
+            Account Breakdown page per ticked window plus a comparison table. */}
+        {showExportDialog && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+            onClick={() => setShowExportDialog(false)}
+          >
+            <div
+              className="w-full max-w-md rounded-2xl bg-white shadow-2xl border border-slate-200"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="px-6 pt-5 pb-4 border-b border-slate-100">
+                <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Export PDF — Select Periods</h3>
+                <p className="mt-1 text-xs text-slate-500">
+                  {availableMonths > 0
+                    ? `This file has data for up to ${availableMonths} month${availableMonths === 1 ? "" : "s"}. Pick the lookback windows to include — each becomes its own page with all bank accounts.`
+                    : "No statement data entered yet. Only the shortest window is available."}
+                </p>
+              </div>
+
+              <div className="px-6 py-5 grid grid-cols-2 gap-3">
+                {PERIOD_PRESETS.map((n) => {
+                  // Always allow the smallest preset so there's something to export.
+                  const enabled = n <= availableMonths || n === PERIOD_PRESETS[0];
+                  const checked = exportPeriods.includes(n);
+                  return (
+                    <button
+                      key={n}
+                      type="button"
+                      disabled={!enabled}
+                      onClick={() =>
+                        setExportPeriods((prev) =>
+                          prev.includes(n) ? prev.filter((p) => p !== n) : [...prev, n],
+                        )
+                      }
+                      className={`flex items-center justify-between rounded-xl border px-4 py-3 text-sm font-mono font-bold tracking-wider transition-all ${
+                        !enabled
+                          ? "border-slate-100 bg-slate-50 text-slate-300 cursor-not-allowed"
+                          : checked
+                            ? "border-emerald-500 bg-emerald-500 text-white shadow-[0_0_8px_rgba(16,185,129,0.4)]"
+                            : "border-slate-200 bg-white text-slate-600 hover:border-emerald-500/50"
+                      }`}
+                      title={enabled ? "" : `Needs ${n} months of data`}
+                    >
+                      <span>{n} Months</span>
+                      {checked && enabled && (
+                        <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="px-6 pb-5 pt-1 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowExportDialog(false)}
+                  className="px-5 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={exportPeriods.length === 0}
+                  onClick={() => exportToPDF(exportPeriods)}
+                  className="px-6 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 transition-all"
+                >
+                  Export {exportPeriods.length > 0 ? `(${exportPeriods.length})` : ""}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         </div>{/* ── /Left column ── */}
 

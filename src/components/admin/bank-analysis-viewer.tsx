@@ -172,7 +172,7 @@ export function BankAnalysisViewer({ clientId, isOpen, onClose }: Props) {
                 const bb = parseFloat(m?.beginningBalance ?? "0") || 0;
                 if (td !== 0 || eb !== 0 || bb !== 0) active_indices.push(idx);
             });
-            const month_range = (active_indices.length === 6 || active_indices.length === 8 || active_indices.length === 12)
+            const month_range = (active_indices.length === 4 || active_indices.length === 6 || active_indices.length === 8 || active_indices.length === 12)
                 ? active_indices.length
                 : 3;
             const final_active_indices = active_indices.length > 0 ? active_indices : [
