@@ -3,6 +3,7 @@ import type { Metadata } from 'next'
 import { ThemeProvider } from 'next-themes'
 import { FloatingSupport } from '@/components/floating-support'
 import { ErrorDialogProvider } from '@/components/error-dialog'
+import { Analytics } from '@vercel/analytics/next'
 
 export const metadata: Metadata = {
   title: 'Credit Banc Vault',
@@ -26,6 +27,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
             <FloatingSupport />
           </ErrorDialogProvider>
         </ThemeProvider>
+        <Analytics />
       </body>
     </html>
   )
