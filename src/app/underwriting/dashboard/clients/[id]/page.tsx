@@ -2273,12 +2273,40 @@ export default function UnderwritingClientDetailsPage() {
                                 <Bell className="w-4 h-4 mr-2" />
                                 Notify Advisor
                             </Button>
+                            {(() => {
+                                // Rescope the funded modal to the active business: the
+                                // requested amount, the lenders that actually reached
+                                // submission, and the deal row that receives the funded
+                                // figures all key off the business currently in view.
+                                const active = businesses.find((b) => b.id === active_business_id);
+                                const useBiz = active && !active.is_primary;
+                                const requested = useBiz ? (active!.capital_requested ?? null) : (client_profile.capital_requested ?? null);
+                                const FUNDED_LABEL: Record<string, string> = {
+                                    submitted: 'Submitted',
+                                    approved_by_lender: 'Approved by lender',
+                                    funded: 'Funded',
+                                };
+                                const lenderOptions = lender_assignments
+                                    .filter((a) => ['submitted', 'approved_by_lender', 'funded'].includes(a.status))
+                                    .map((a) => ({
+                                        assignmentId: a.id,
+                                        lenderName: a.lender_name,
+                                        stateLabel: FUNDED_LABEL[a.status] ?? a.status,
+                                    }));
+                                return (
                             <LoanFundedDialog
                                 clientId={client_id}
                                 clientName={client_profile.client_name}
-                                onSuccess={fetch_client_details}
+                                businessProfileId={active_business_id}
+                                amountRequested={requested}
+                                lenderOptions={lenderOptions}
+                                defaultSalesRep={`${client_profile.advisor?.first_name ?? ''} ${client_profile.advisor?.last_name ?? ''}`.trim()}
+                                defaultSlackChannel={slack_channel.name ?? ''}
+                                onSuccess={() => { fetch_client_details(); fetch_lender_assignments(); }}
                                 triggerClassName="h-11 px-5 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-black uppercase tracking-widest text-[10px] shadow-lg shadow-emerald-500/20"
                             />
+                                );
+                            })()}
                         </div>
                         {SLACK_FEATURE_ENABLED && (
                             slack_channel.id ? (

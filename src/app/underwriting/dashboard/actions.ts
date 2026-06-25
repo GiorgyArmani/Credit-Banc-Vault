@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { send_advisor_document_notification, send_loan_funded_notification } from "@/lib/email";
 import { createClient } from "@/lib/supabase/server";
 import { ghlUpdateContact, ghlAddTags } from "@/lib/ghl-api";
+import { updateLoanStatus } from "@/app/actions/pipeline";
 import { revalidatePath } from "next/cache";
 
 /**
@@ -149,6 +150,12 @@ export async function fundLoanAction(clientId: string, data: {
     lenderFunded: string;
     dateOfSubmission: string;
     fundingDate: string;
+    /** Active business whose funding_deal receives the funded figures. */
+    businessProfileId?: string | null;
+    /** What was originally asked for — recorded alongside the funded amount. */
+    amountRequested?: string | number | null;
+    /** The lender-selection row chosen as the funder; flipped to status='funded'. */
+    fundedAssignmentId?: string | null;
 }) {
     const supabaseAdmin = createAdminClient();
     const supabase = await createClient();
@@ -219,8 +226,10 @@ export async function fundLoanAction(clientId: string, data: {
             .single();
 
         const authorName = profile ? `${profile.first_name} ${profile.last_name || ''}`.trim() : "Underwriter";
+        const requestedLine = (data.amountRequested ?? '') !== '' ? `- Requested: ${data.amountRequested}\n` : '';
         const noteContent = `LOAN FUNDED DETAILS:\n` +
-            `- Amount: ${data.totalAmountFunded}\n` +
+            requestedLine +
+            `- Funded: ${data.totalAmountFunded}\n` +
             `- Lender: ${data.lenderFunded}\n` +
             `- Term: ${data.termOfFundedLoan}\n` +
             `- Date: ${data.fundingDate}\n` +
@@ -258,6 +267,82 @@ export async function fundLoanAction(clientId: string, data: {
         } catch (emailError) {
             console.error("fundLoanAction Error: Failed to send email:", emailError);
             // Non-fatal, let it succeed
+        }
+
+        // 6. Persist the funded figures onto the active business's funding_deal.
+        //    This is the in-vault source of truth (powers the admin funded-$ KPI
+        //    and renewal tracking). GHL above is the signaling layer; this is the
+        //    record. Non-fatal — a missing deal row must not block the tag/email.
+        if (data.businessProfileId) {
+            try {
+                const { data: deal } = await supabaseAdmin
+                    .from("funding_deals")
+                    .select("id")
+                    .eq("business_profile_id", data.businessProfileId)
+                    .order("display_order", { ascending: true })
+                    .limit(1)
+                    .maybeSingle();
+
+                const fundedAmountNum = Number(String(data.totalAmountFunded).replace(/[^0-9.]/g, ""));
+                const fundedFields = {
+                    funded_amount: Number.isFinite(fundedAmountNum) ? fundedAmountNum : null,
+                    lender_funded: data.lenderFunded || null,
+                    funded_term: data.termOfFundedLoan || null,
+                    funded_at: new Date().toISOString(),
+                    sales_rep_funded: data.salesRepFunded || null,
+                    date_of_submission: data.dateOfSubmission || null,
+                    file_synopsis: data.fileSinopsis || null,
+                    use_of_proceeds: data.useOfProceeds || null,
+                    slack_channel: data.slackChannel || null,
+                };
+
+                if (deal?.id) {
+                    await supabaseAdmin.from("funding_deals").update(fundedFields).eq("id", deal.id);
+                } else {
+                    // No deal row yet — common for primary businesses whose
+                    // requested amount still lives on client_data_vault. Create
+                    // one so the funded figures persist and the admin funded-$
+                    // KPI reads the real funded amount instead of the requested.
+                    const { error: insertErr } = await supabaseAdmin
+                        .from("funding_deals")
+                        .insert({ business_profile_id: data.businessProfileId, ...fundedFields });
+                    if (insertErr) {
+                        console.error("fundLoanAction Error: Failed to create funding_deal:", insertErr);
+                    }
+                }
+            } catch (dealError) {
+                console.error("fundLoanAction Error: Failed to persist funding_deal:", dealError);
+                // Non-fatal
+            }
+        }
+
+        // 7. Flip the chosen lender-selection row to 'funded' so the pipeline UI
+        //    lights up the Funded badge and the loop closes back to lender match.
+        if (data.fundedAssignmentId) {
+            try {
+                await supabaseAdmin
+                    .from("client_lender_assignments")
+                    .update({ status: "funded", updated_at: new Date().toISOString() })
+                    .eq("id", data.fundedAssignmentId)
+                    .eq("client_id", clientId);
+            } catch (assignError) {
+                console.error("fundLoanAction Error: Failed to mark assignment funded:", assignError);
+                // Non-fatal
+            }
+        }
+
+        // 8. Record the pipeline transition. Reuses updateLoanStatus, which writes
+        //    loan_status_history (drives the admin funded-$ KPI) and fires the
+        //    advisor "Loan Funded 🎉" in-app notification. Non-fatal.
+        try {
+            await updateLoanStatus(
+                clientId,
+                "funded",
+                `Funded by ${data.lenderFunded || "lender"} — ${data.totalAmountFunded}`
+            );
+        } catch (statusError) {
+            console.error("fundLoanAction Error: Failed to record funded transition:", statusError);
+            // Non-fatal
         }
 
         revalidateClientSurfaces(clientId);

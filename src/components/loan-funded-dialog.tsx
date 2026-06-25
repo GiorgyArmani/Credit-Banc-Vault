@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -18,34 +18,95 @@ import { DollarSign, Calendar, User, Hash, FileText, Send, Loader2 } from "lucid
 import { fundLoanAction } from "@/app/underwriting/dashboard/actions";
 import { toast } from "@/lib/toast";
 
+interface LenderOption {
+    assignmentId: string;
+    lenderName: string;
+    stateLabel: string;
+}
+
 interface LoanFundedDialogProps {
     clientId: string;
     clientName: string;
     onSuccess?: () => void;
     /** Override the trigger button styling so it can blend into its host. */
     triggerClassName?: string;
+    /** Active business whose funding_deal receives the funded figures. */
+    businessProfileId?: string | null;
+    /** What was originally asked for — shown read-only next to the funded amount. */
+    amountRequested?: number | null;
+    /** Lenders that reached submission, sourced from the lender-selection pipeline. */
+    lenderOptions?: LenderOption[];
+    /** Pre-fills the Sales Rep field (typically the assigned advisor). */
+    defaultSalesRep?: string;
+    /** Pre-fills the Slack Channel field with the deal's channel name. */
+    defaultSlackChannel?: string;
 }
 
-export function LoanFundedDialog({ clientId, clientName, onSuccess, triggerClassName }: LoanFundedDialogProps) {
+const OTHER_LENDER = "__other__";
+
+const today = () => new Date().toISOString().slice(0, 10);
+
+export function LoanFundedDialog({
+    clientId,
+    clientName,
+    onSuccess,
+    triggerClassName,
+    businessProfileId,
+    amountRequested,
+    lenderOptions = [],
+    defaultSalesRep = "",
+    defaultSlackChannel = "",
+}: LoanFundedDialogProps) {
     const [isOpen, setIsOpen] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
 
-    const [formData, setFormData] = useState({
+    // Tracks which lender-selection row was picked (null when "Other" / free text).
+    const [fundedAssignmentId, setFundedAssignmentId] = useState<string | null>(null);
+    // Drives the lender <select> independently of the free-text lenderFunded.
+    const [lenderChoice, setLenderChoice] = useState<string>("");
+
+    const seed = () => ({
         fileSinopsis: "",
         termOfFundedLoan: "",
         totalAmountFunded: "",
         useOfProceeds: "",
-        slackChannel: "",
-        salesRepFunded: "",
-        dateFunded: "",
+        slackChannel: defaultSlackChannel,
+        salesRepFunded: defaultSalesRep,
+        dateFunded: today(),
         lenderFunded: "",
         dateOfSubmission: "",
-        fundingDate: "",
+        fundingDate: today(),
     });
+
+    const [formData, setFormData] = useState(seed);
+
+    // Re-seed from the latest file data each time the modal opens so UW always
+    // starts from what's already on the file rather than stale prior input.
+    useEffect(() => {
+        if (isOpen) {
+            setFormData(seed());
+            setFundedAssignmentId(null);
+            setLenderChoice("");
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isOpen]);
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
         const { name, value } = e.target;
         setFormData((prev) => ({ ...prev, [name]: value }));
+    };
+
+    const handleLenderSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
+        const value = e.target.value;
+        setLenderChoice(value);
+        if (value === OTHER_LENDER || value === "") {
+            setFundedAssignmentId(null);
+            setFormData((prev) => ({ ...prev, lenderFunded: "" }));
+        } else {
+            const picked = lenderOptions.find((o) => o.assignmentId === value);
+            setFundedAssignmentId(value);
+            setFormData((prev) => ({ ...prev, lenderFunded: picked?.lenderName ?? "" }));
+        }
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -53,7 +114,12 @@ export function LoanFundedDialog({ clientId, clientName, onSuccess, triggerClass
         setIsLoading(true);
 
         try {
-            const result = await fundLoanAction(clientId, formData);
+            const result = await fundLoanAction(clientId, {
+                ...formData,
+                businessProfileId: businessProfileId ?? null,
+                amountRequested: amountRequested ?? null,
+                fundedAssignmentId,
+            });
             if (result.success) {
                 toast.success("Loan Funded successfully!");
                 setIsOpen(false);
@@ -91,6 +157,11 @@ export function LoanFundedDialog({ clientId, clientName, onSuccess, triggerClass
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div className="space-y-2">
                             <Label htmlFor="totalAmountFunded" className="text-xs font-black uppercase tracking-widest text-slate-400">Total Amount Funded</Label>
+                            {amountRequested != null && (
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                                    Requested: <span className="text-slate-600">{amountRequested.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })}</span>
+                                </p>
+                            )}
                             <div className="relative">
                                 <DollarSign className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
                                 <Input
@@ -106,19 +177,35 @@ export function LoanFundedDialog({ clientId, clientName, onSuccess, triggerClass
                         </div>
 
                         <div className="space-y-2">
-                            <Label htmlFor="lenderFunded" className="text-xs font-black uppercase tracking-widest text-slate-400">Lender that Funded</Label>
+                            <Label htmlFor="lenderChoice" className="text-xs font-black uppercase tracking-widest text-slate-400">Lender that Funded</Label>
                             <div className="relative">
-                                <FileText className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+                                <FileText className="absolute left-3 top-3 w-4 h-4 text-slate-400 z-10" />
+                                <select
+                                    id="lenderChoice"
+                                    value={lenderChoice}
+                                    onChange={handleLenderSelect}
+                                    className="w-full appearance-none pl-10 pr-8 h-10 rounded-2xl border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                                >
+                                    <option value="">Select lender…</option>
+                                    {lenderOptions.map((o) => (
+                                        <option key={o.assignmentId} value={o.assignmentId}>
+                                            {o.lenderName} — {o.stateLabel}
+                                        </option>
+                                    ))}
+                                    <option value={OTHER_LENDER}>Other (type manually)</option>
+                                </select>
+                            </div>
+                            {lenderChoice === OTHER_LENDER && (
                                 <Input
                                     id="lenderFunded"
                                     name="lenderFunded"
                                     placeholder="Lender Name"
-                                    className="pl-10 rounded-2xl border-slate-200 focus:ring-emerald-500"
+                                    className="rounded-2xl border-slate-200 focus:ring-emerald-500"
                                     value={formData.lenderFunded}
                                     onChange={handleChange}
                                     required
                                 />
-                            </div>
+                            )}
                         </div>
 
                         <div className="space-y-2">

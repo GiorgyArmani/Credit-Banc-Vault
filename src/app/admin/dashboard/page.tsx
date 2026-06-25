@@ -183,6 +183,7 @@ async function load_metrics(
     { data: recent_signup_rows },
     { data: upload_rows },
     { data: pending_review_rows },
+    { data: funded_deal_rows },
   ] = await Promise.all([
     supabase_admin
       .from('loan_status_history')
@@ -207,7 +208,23 @@ async function load_metrics(
       .eq('decision', 'approved')
       .eq('admin_review', 'approved')
       .eq('status', 'pending'),
+
+    // The real funded amount per vault, stamped by UW's Loan Funded flow onto
+    // funding_deals. Joined to the vault via business_profiles.client_vault_id.
+    // compute_funded_amount prefers this over the requested amount.
+    supabase_admin
+      .from('funding_deals')
+      .select('funded_amount, business_profiles!inner(client_vault_id)'),
   ])
+
+  // Aggregate funded_amount per vault (a vault may have several business deals).
+  const funded_amount_by_vault = new Map<string, number>()
+  for (const d of funded_deal_rows ?? []) {
+    const vault_id = (d as any).business_profiles?.client_vault_id as string | null
+    const amount = Number((d as any).funded_amount)
+    if (!vault_id || !Number.isFinite(amount)) continue
+    funded_amount_by_vault.set(vault_id, (funded_amount_by_vault.get(vault_id) ?? 0) + amount)
+  }
 
   // ─── Index helpers ─────────────────────────────────────────────────────
   const vault_by_id = new Map<string, any>()
@@ -334,8 +351,12 @@ async function load_metrics(
     const ts = new Date(r.created_at).getTime()
     const v = vault_by_id.get(r.client_vault_id)
     // Source of truth for "how much was funded" lives in compute_funded_amount
-    // — today reads vault.capital_requested, future swaps to funding_deals.
-    const amount = compute_funded_amount({ vault: v })
+    // — prefers the funded_amount stamped on funding_deals, falling back to
+    // vault.capital_requested for deals funded before that column was written.
+    const amount = compute_funded_amount({
+      vault: v,
+      funding_deal_amount: funded_amount_by_vault.get(r.client_vault_id) ?? null,
+    })
 
     if (ts >= range_from_ms && ts <= range_to_ms) {
       latest_funded_in_range.set(r.client_vault_id, { ts, amount })

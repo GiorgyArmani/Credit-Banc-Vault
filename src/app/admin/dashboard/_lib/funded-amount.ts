@@ -13,15 +13,24 @@
 
 export interface FundedAmountInputs {
   vault: { capital_requested: number | string | null | undefined } | undefined
-  // Reserved for when funding_deals is populated in prod:
-  //   funding_deal?: { funded_amount: number | string | null }
+  // The real funded amount stamped onto funding_deals by UW's Loan Funded flow,
+  // aggregated per vault. Preferred when present; otherwise we fall back to the
+  // requested amount so historical deals (funded before this column was written)
+  // still register on the KPI.
+  funding_deal_amount?: number | string | null
+}
+
+function to_finite_number(raw: number | string | null | undefined): number | null {
+  if (raw == null) return null
+  const n = typeof raw === 'number' ? raw : Number(raw)
+  return Number.isFinite(n) ? n : null
 }
 
 export function compute_funded_amount(inputs: FundedAmountInputs): number {
+  const funded = to_finite_number(inputs.funding_deal_amount)
+  if (funded != null) return funded
+
   const v = inputs.vault
   if (!v) return 0
-  const raw = v.capital_requested
-  if (raw == null) return 0
-  const n = typeof raw === 'number' ? raw : Number(raw)
-  return Number.isFinite(n) ? n : 0
+  return to_finite_number(v.capital_requested) ?? 0
 }
