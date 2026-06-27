@@ -281,6 +281,67 @@ export async function POST(request: Request) {
       );
     }
 
+    // Validate EVERY field that maps to a NOT NULL column in client_data_vault
+    // BEFORE we create anything. Otherwise a missing numeric/date field slips
+    // through to STEP 5 (the vault upsert) and dies on a not-null constraint —
+    // but only AFTER the auth user, the unified profile rows (STEP 2.5), and the
+    // GHL contact (STEP 4) have already been created, leaving a half-built
+    // "ghost" client behind (no docs requested, incomplete info). Reject the bad
+    // request here so nothing is ever created from an incomplete form.
+    const missing_fields: string[] = [];
+
+    // Required text/date fields — an empty value yields a broken record even
+    // though "" technically satisfies a NOT NULL text column.
+    const required_text: Record<string, any> = {
+      client_phone: body.client_phone,
+      company_state: body.company_state,
+      company_zip_code: body.company_zip_code,
+      loan_purpose: body.loan_purpose,
+      proposed_loan_type: body.proposed_loan_type,
+      legal_entity_type: body.legal_entity_type,
+      business_start_date: body.business_start_date,
+      number_of_owners: body.number_of_owners,
+      owner_1_name: body.owner_1_name,
+      credit_score: body.credit_score,
+      funding_eta: body.funding_eta,
+    };
+    for (const [key, val] of Object.entries(required_text)) {
+      if (val === undefined || val === null || String(val).trim() === '') {
+        missing_fields.push(key);
+      }
+    }
+
+    // Required numeric fields — must parse to a finite, positive number.
+    if (!is_valid_positive_number(body.avg_monthly_deposits)) missing_fields.push('avg_monthly_deposits');
+    if (!is_valid_positive_number(body.avg_annual_revenue)) missing_fields.push('avg_annual_revenue');
+    if (!is_valid_positive_number(body.owner_1_ownership_pct)) missing_fields.push('owner_1_ownership_pct');
+
+    // employees_count: required non-negative integer (0 employees is valid, so
+    // is_valid_positive_number — which requires > 0 — can't be used here).
+    {
+      const ec = parseInt(body.employees_count, 10);
+      if (
+        body.employees_count === undefined ||
+        body.employees_count === null ||
+        String(body.employees_count).trim() === '' ||
+        !Number.isFinite(ec) ||
+        ec < 0
+      ) {
+        missing_fields.push('employees_count');
+      }
+    }
+
+    if (missing_fields.length > 0) {
+      console.warn(`🚫 client-signup rejected — missing/invalid required fields: ${missing_fields.join(', ')}`);
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Missing or invalid required fields: ${missing_fields.join(', ')}. Please complete the form and try again.`,
+        },
+        { status: 400 }
+      );
+    }
+
     console.log('✅ Basic validations passed');
 
     // ========== STEP 1.5: RESOLVE ADVISOR FROM SESSION (REQUIRED) ==========

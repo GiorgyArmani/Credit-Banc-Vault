@@ -530,6 +530,37 @@ export default function ClientSignupForm() {
     set_submitting(true);
 
     try {
+      // Require every field that maps to a NOT NULL column in client_data_vault.
+      // The server validates these too, but a missing field used to slip through
+      // and fail on the DB constraint only AFTER the auth user / profile / GHL
+      // contact were created — leaving a half-built "ghost" client. Catch it here
+      // for instant feedback before any of that runs.
+      const required_fields: Record<string, string> = {
+        "Client name": client_name,
+        "Company name": company_name,
+        "Client email": client_email,
+        "Client phone": client_phone,
+        "Company state": company_state,
+        "Company zip code": company_zip_code,
+        "Capital requested": capital_requested,
+        "Loan purpose": loan_purpose,
+        "Average monthly deposits": avg_monthly_deposits,
+        "Average annual revenue": avg_annual_revenue,
+        "Legal entity type": legal_entity_type,
+        "Business start date": business_start_date,
+        "Number of employees": employees_count,
+        "Owner 1 name": owner_1_name,
+        "Credit score": credit_score,
+        "Funding ETA": funding_eta,
+      };
+      const missing = Object.entries(required_fields)
+        .filter(([, val]) => !String(val ?? "").trim())
+        .map(([label]) => label);
+      if (proposed_loan_types.length === 0) missing.push("Proposed loan type");
+      if (missing.length > 0) {
+        throw new Error(`Please complete all required fields: ${missing.join(", ")}.`);
+      }
+
       // Require at least one requested document. Creating a vault with an empty
       // request leaves the client with nothing to upload and produces the
       // "empty doc request" clients — block it at the source.
