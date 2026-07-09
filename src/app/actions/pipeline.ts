@@ -11,6 +11,7 @@ export type LoanStatus =
   | "documents_received"
   | "under_review"
   | "lender_matched"
+  | "consulting_program"
   | "funded"
   | "declined";
 

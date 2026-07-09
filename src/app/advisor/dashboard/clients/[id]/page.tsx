@@ -57,6 +57,7 @@ import clsx from "clsx";
 import { format, differenceInDays } from "date-fns";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { EditProfileModal } from "./edit-profile-modal";
 import { PIPELINE_STEPS, LoanPipelineBadge } from "@/components/loan-pipeline-status";
 import { getClientPipelineHistory, updateLoanStatus, type LoanStatus, type PipelineStatusEntry } from "@/app/actions/pipeline";
@@ -2559,15 +2560,19 @@ export default function AdvisorClientDetailsPage() {
                                                     {type.label}
                                                 </label>
                                                 {type.code === 'business_bank_statements' && selected_doc_ids.includes(type.id) && (
-                                                    <select
-                                                        value={request_statement_months}
-                                                        onChange={(e) => set_request_statement_months(parseInt(e.target.value))}
-                                                        className="text-xs font-bold border rounded-md px-2 py-1 bg-white text-gray-700 shrink-0"
+                                                    <Select
+                                                        value={String(request_statement_months)}
+                                                        onValueChange={(v) => set_request_statement_months(parseInt(v))}
                                                     >
-                                                        {[6, 12, 18, 24].map((m) => (
-                                                            <option key={m} value={m}>{m} months</option>
-                                                        ))}
-                                                    </select>
+                                                        <SelectTrigger className="h-auto text-xs font-bold border rounded-md px-2 py-1 gap-1 bg-white text-gray-700 shrink-0 w-auto">
+                                                            <SelectValue />
+                                                        </SelectTrigger>
+                                                        <SelectContent className="rounded-xl">
+                                                            {[6, 12, 18, 24].map((m) => (
+                                                                <SelectItem key={m} value={String(m)}>{m} months</SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
                                                 )}
                                             </div>
                                         ))
@@ -2687,20 +2692,23 @@ export default function AdvisorClientDetailsPage() {
                                 <Label className="text-xs font-black uppercase tracking-widest text-slate-400">
                                     New advisor
                                 </Label>
-                                <select
+                                <Select
                                     value={reassign_target_id}
-                                    onChange={(e) => set_reassign_target_id(e.target.value)}
-                                    className="w-full h-12 rounded-xl border border-slate-200 px-3 text-sm font-medium bg-white"
+                                    onValueChange={set_reassign_target_id}
                                 >
-                                    <option value="">Select an advisor…</option>
-                                    {reassign_advisor_options
-                                        .filter(a => a.id !== client_profile?.advisor_id)
-                                        .map(a => (
-                                            <option key={a.id} value={a.id}>
-                                                {a.first_name} {a.last_name} — {a.email}
-                                            </option>
-                                        ))}
-                                </select>
+                                    <SelectTrigger className="w-full h-12 rounded-xl border-slate-200 px-3 text-sm font-medium bg-white">
+                                        <SelectValue placeholder="Select an advisor…" />
+                                    </SelectTrigger>
+                                    <SelectContent className="rounded-xl">
+                                        {reassign_advisor_options
+                                            .filter(a => a.id !== client_profile?.advisor_id)
+                                            .map(a => (
+                                                <SelectItem key={a.id} value={a.id}>
+                                                    {a.first_name} {a.last_name} — {a.email}
+                                                </SelectItem>
+                                            ))}
+                                    </SelectContent>
+                                </Select>
                                 {client_profile?.advisor_name && (
                                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2">
                                         Currently assigned: {client_profile.advisor_name}

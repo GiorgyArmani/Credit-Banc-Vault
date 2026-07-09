@@ -14,6 +14,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DollarSign, Calendar, User, Hash, FileText, Send, Loader2 } from "lucide-react";
 import { fundLoanAction } from "@/app/underwriting/dashboard/actions";
 import { toast } from "@/lib/toast";
@@ -96,8 +97,7 @@ export function LoanFundedDialog({
         setFormData((prev) => ({ ...prev, [name]: value }));
     };
 
-    const handleLenderSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        const value = e.target.value;
+    const handleLenderSelect = (value: string) => {
         setLenderChoice(value);
         if (value === OTHER_LENDER || value === "") {
             setFundedAssignmentId(null);
@@ -180,20 +180,19 @@ export function LoanFundedDialog({
                             <Label htmlFor="lenderChoice" className="text-xs font-black uppercase tracking-widest text-slate-400">Lender that Funded</Label>
                             <div className="relative">
                                 <FileText className="absolute left-3 top-3 w-4 h-4 text-slate-400 z-10" />
-                                <select
-                                    id="lenderChoice"
-                                    value={lenderChoice}
-                                    onChange={handleLenderSelect}
-                                    className="w-full appearance-none pl-10 pr-8 h-10 rounded-2xl border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                                >
-                                    <option value="">Select lender…</option>
-                                    {lenderOptions.map((o) => (
-                                        <option key={o.assignmentId} value={o.assignmentId}>
-                                            {o.lenderName} — {o.stateLabel}
-                                        </option>
-                                    ))}
-                                    <option value={OTHER_LENDER}>Other (type manually)</option>
-                                </select>
+                                <Select value={lenderChoice} onValueChange={handleLenderSelect}>
+                                    <SelectTrigger id="lenderChoice" className="w-full pl-10 h-10 rounded-2xl border-slate-200 bg-white text-sm focus:ring-2 focus:ring-emerald-500">
+                                        <SelectValue placeholder="Select lender…" />
+                                    </SelectTrigger>
+                                    <SelectContent className="rounded-xl">
+                                        {lenderOptions.map((o) => (
+                                            <SelectItem key={o.assignmentId} value={o.assignmentId}>
+                                                {o.lenderName} — {o.stateLabel}
+                                            </SelectItem>
+                                        ))}
+                                        <SelectItem value={OTHER_LENDER}>Other (type manually)</SelectItem>
+                                    </SelectContent>
+                                </Select>
                             </div>
                             {lenderChoice === OTHER_LENDER && (
                                 <Input

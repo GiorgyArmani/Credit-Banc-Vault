@@ -50,6 +50,7 @@ export const STAGE_MAP: PipelineStage[] = [
   { label: "Docs Received",   status: "documents_received",  color: "bg-cyan-400",    accent: "text-cyan-600",   description: "Required documents are in and ready to be packaged for underwriting review." },
   { label: "Underwriting",    status: "under_review",        color: "bg-purple-400",  accent: "text-purple-600", description: "Vault submitted and under active underwriting review." },
   { label: "Offer Received",  status: "lender_matched",      color: "bg-indigo-400",  accent: "text-indigo-600", description: "Matched with a lender and an offer is on the table for the client." },
+  { label: "Consulting Program", status: "consulting_program", color: "bg-teal-400", accent: "text-teal-600", description: "Working with the client on a consultative basis to prime them for capital — credit building, tax planning, lien resolution, operations, accounting, etc." },
   { label: "Deal Funded",     status: "funded",              color: "bg-emerald-500", accent: "text-emerald-600", description: "Deal closed and funded. 🎉" },
   { label: "Closed Lost",     status: "declined",            color: "bg-red-500",     accent: "text-red-600",    description: "Declined or lost. No longer active in the pipeline." },
 ];

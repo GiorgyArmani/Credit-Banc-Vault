@@ -940,8 +940,11 @@ export async function deleteClientVault(clientId: string) {
  * reassignClientAdvisor
  *
  * Admin-only action: change the primary advisor on a client_data_vault row.
- * Does NOT touch followers (the existing ClientFollowersCard already handles
- * those). Stamps client_data_vault.advisor_name from the new advisor's record
+ * Followers are normally left to ClientFollowersCard, with two exceptions here:
+ * the new owner is removed from the followers list, and — when handing off TO
+ * the catch-all advisor — the previous advisor is added as a follower so they
+ * keep visibility (mirrors the auto-reassign cron).
+ * Stamps client_data_vault.advisor_name from the new advisor's record
  * so downstream emails/UI stay consistent. Pipeline state and documents are
  * untouched — only the assignment changes.
  */
@@ -1015,6 +1018,29 @@ export async function reassignClientAdvisor(clientId: string, newAdvisorId: stri
             .delete()
             .eq("client_vault_id", clientId)
             .eq("advisor_id", newAdvisorId);
+
+        // When handing off TO the catch-all advisor, preserve the PREVIOUS
+        // advisor as a follower so they keep visibility on a file that was
+        // taken from them. This mirrors the auto-reassign cron
+        // (api/cron/reassign-stale-files). Normal reassignments intentionally
+        // do NOT do this (see the note above) — ClientFollowersCard manages
+        // those.
+        if (isToCatchAll && existing?.advisor_id && existing.advisor_id !== newAdvisorId) {
+            const { error: followerErr } = await supabaseAdmin
+                .from("client_followers")
+                .insert({
+                    client_vault_id: clientId,
+                    advisor_id: existing.advisor_id,
+                    assigned_by: newAdvisorId,
+                });
+            // 23505 = already a follower; harmless, don't surface it.
+            if (followerErr && (followerErr as { code?: string }).code !== "23505") {
+                console.error(
+                    "reassignClientAdvisor: failed to add previous advisor as follower:",
+                    followerErr
+                );
+            }
+        }
 
         // Mirror the new owner into GHL so the contact owner tracks the vault
         // advisor (keeps GHL ownership in sync with reassignments). Non-fatal.

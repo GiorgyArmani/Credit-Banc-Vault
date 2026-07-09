@@ -9,6 +9,7 @@ import { getActivityState, ACTIVITY_STATES, type ActivityState } from "@/compone
 import { toast } from "@/lib/toast";
 import { Loader2, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import clsx from "clsx";
 
 interface AdvisorOption {
@@ -172,30 +173,40 @@ export default function AdminPipelinePage() {
         </button>
       </div>
 
-      {/* Advisor filter */}
-      <select
-        value={advisorFilter}
-        onChange={(e) => setAdvisorFilter(e.target.value)}
-        className="h-9 md:h-10 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-[12px] font-bold text-slate-700 dark:text-slate-200 px-3 pr-8 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+      {/* Advisor filter — Radix Select so the open menu matches the rounded UI.
+          Radix disallows an empty-string item value, so "" (= all) maps to the
+          __all__ sentinel on the way in and back to "" on the way out. */}
+      <Select
+        value={advisorFilter === "" ? "__all__" : advisorFilter}
+        onValueChange={(v) => setAdvisorFilter(v === "__all__" ? "" : v)}
       >
-        <option value="">All advisors</option>
-        <option value="__unassigned__">Unassigned</option>
-        {advisors.map(a => (
-          <option key={a.id} value={a.id}>{a.label}</option>
-        ))}
-      </select>
+        <SelectTrigger className="h-9 md:h-10 w-[160px] rounded-xl border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-[12px] font-bold text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-emerald-500/30">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent className="rounded-xl">
+          <SelectItem value="__all__">All advisors</SelectItem>
+          <SelectItem value="__unassigned__">Unassigned</SelectItem>
+          {advisors.map(a => (
+            <SelectItem key={a.id} value={a.id}>{a.label}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
 
       {/* Activity-state filter (Fresh / Watch / Alert / Urgent / Stale) */}
-      <select
-        value={activityFilter}
-        onChange={(e) => setActivityFilter(e.target.value as ActivityState | "")}
-        className="h-9 md:h-10 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-[12px] font-bold text-slate-700 dark:text-slate-200 px-3 pr-8 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+      <Select
+        value={activityFilter === "" ? "__all__" : activityFilter}
+        onValueChange={(v) => setActivityFilter(v === "__all__" ? "" : (v as ActivityState))}
       >
-        <option value="">All activity</option>
-        {ACTIVITY_STATES.map(state => (
-          <option key={state} value={state}>{state}</option>
-        ))}
-      </select>
+        <SelectTrigger className="h-9 md:h-10 w-[150px] rounded-xl border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-[12px] font-bold text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-emerald-500/30">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent className="rounded-xl">
+          <SelectItem value="__all__">All activity</SelectItem>
+          {ACTIVITY_STATES.map(state => (
+            <SelectItem key={state} value={state}>{state}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
 
       {/* Search */}
       <div className="relative flex-1 md:flex-none">

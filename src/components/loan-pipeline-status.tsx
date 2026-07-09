@@ -19,6 +19,7 @@ export const PIPELINE_STEPS: { status: LoanStatus; label: string; shortLabel: st
   { status: "documents_received", label: "Documents Received", shortLabel: "Docs In" },
   { status: "under_review", label: "Under Review", shortLabel: "In Review" },
   { status: "lender_matched", label: "Lender Matched", shortLabel: "Matched" },
+  { status: "consulting_program", label: "Consulting Program", shortLabel: "Consulting" },
   { status: "funded", label: "Loan Funded", shortLabel: "Funded" },
 ];
 
@@ -51,9 +52,22 @@ interface LoanPipelineFullProps {
 }
 
 export function LoanPipelineFull({ currentStatus, history, onStatusChange, className, showAllSteps = true }: LoanPipelineFullProps) {
+  // The Consulting Program stage only applies to clients we're actively priming
+  // on a consultative basis. On the client-facing bar (showAllSteps = false) we
+  // hide it entirely unless this client has actually touched consulting — either
+  // they're in it now or their history contains a consulting_program entry.
+  const inConsulting =
+    currentStatus === 'consulting_program' ||
+    history.some(h => h.status === 'consulting_program');
+
   const displayedSteps = showAllSteps
     ? PIPELINE_STEPS
-    : PIPELINE_STEPS.filter(s => s.status !== 'created' && s.status !== 'onboarding');
+    : PIPELINE_STEPS.filter(
+        s =>
+          s.status !== 'created' &&
+          s.status !== 'onboarding' &&
+          (s.status !== 'consulting_program' || inConsulting)
+      );
 
   const isDeclined = currentStatus === DECLINED_STATUS;
   const currentIndex = isDeclined ? -1 : displayedSteps.findIndex(s => s.status === currentStatus);
@@ -187,6 +201,7 @@ const STATUS_CONFIG: Record<LoanStatus, { label: string; color: string }> = {
   documents_received: { label: "Docs Received", color: "bg-cyan-100 text-cyan-700 border-cyan-200" },
   under_review: { label: "Under Review", color: "bg-purple-100 text-purple-700 border-purple-200" },
   lender_matched: { label: "Lender Matched", color: "bg-indigo-100 text-indigo-700 border-indigo-200" },
+  consulting_program: { label: "Consulting Program", color: "bg-teal-100 text-teal-700 border-teal-200" },
   funded: { label: "Funded 🎉", color: "bg-emerald-100 text-emerald-700 border-emerald-200" },
   declined: { label: "Declined", color: "bg-red-100 text-red-700 border-red-200" },
 };

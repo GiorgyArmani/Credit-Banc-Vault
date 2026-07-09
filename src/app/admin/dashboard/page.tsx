@@ -53,6 +53,7 @@ const PIPELINE_STAGES = [
   'documents_received',
   'under_review',
   'lender_matched',
+  'consulting_program',
   'funded',
   'declined',
 ] as const
@@ -67,6 +68,7 @@ const IN_FLIGHT_STAGES: ReadonlySet<string> = new Set([
   'documents_received',
   'under_review',
   'lender_matched',
+  'consulting_program',
 ])
 
 const FUNNEL_STAGES = [
@@ -76,6 +78,7 @@ const FUNNEL_STAGES = [
   'documents_received',
   'under_review',
   'lender_matched',
+  'consulting_program',
   'funded',
 ] as const
 
@@ -86,6 +89,7 @@ const STAGE_LABEL: Record<string, string> = {
   documents_received: 'Docs In',
   under_review: 'In Review',
   lender_matched: 'Matched',
+  consulting_program: 'Consulting',
   funded: 'Funded',
   declined: 'Declined',
   stale: 'Stale',

@@ -6,6 +6,7 @@ import { toast } from "@/lib/toast";
 import { createClient } from "@/lib/supabase/client";
 import { CLIENT_SCOPED_DOC_CODES } from "@/lib/document-scope";
 import { FUNDING_OPTIONS } from "@/data/loan-types";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface AddBusinessModalProps {
   client_vault_id: string;
@@ -254,12 +255,16 @@ export function AddBusinessModal({ client_vault_id, open, on_close, on_created }
                 />
               </Field>
               <Field label="Legal Entity Type">
-                <select value={legal_entity_type} onChange={(e) => set_legal_entity_type(e.target.value)} className={input_cls}>
-                  <option value="">Select…</option>
-                  {LEGAL_ENTITY_TYPES.map((t) => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
-                </select>
+                <Select value={legal_entity_type} onValueChange={set_legal_entity_type}>
+                  <SelectTrigger className={input_cls}>
+                    <SelectValue placeholder="Select…" />
+                  </SelectTrigger>
+                  <SelectContent className="rounded-xl">
+                    {LEGAL_ENTITY_TYPES.map((t) => (
+                      <SelectItem key={t} value={t}>{t}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </Field>
               <Field label="Industry">
                 <input type="text" value={industry} onChange={(e) => set_industry(e.target.value)} className={input_cls} placeholder="Retail, Construction, …" />
@@ -338,10 +343,14 @@ export function AddBusinessModal({ client_vault_id, open, on_close, on_created }
                 </Field>
               </div>
               <Field label="Funding ETA">
-                <select value={funding_eta} onChange={(e) => set_funding_eta(e.target.value)} className={input_cls}>
-                  <option value="">Select…</option>
-                  {FUNDING_ETAS.map((t) => (<option key={t} value={t}>{t}</option>))}
-                </select>
+                <Select value={funding_eta} onValueChange={set_funding_eta}>
+                  <SelectTrigger className={input_cls}>
+                    <SelectValue placeholder="Select…" />
+                  </SelectTrigger>
+                  <SelectContent className="rounded-xl">
+                    {FUNDING_ETAS.map((t) => (<SelectItem key={t} value={t}>{t}</SelectItem>))}
+                  </SelectContent>
+                </Select>
               </Field>
               <Field label="Loan Purpose">
                 <input type="text" value={loan_purpose} onChange={(e) => set_loan_purpose(e.target.value)} className={input_cls} placeholder="Equipment, working capital, …" />
@@ -366,14 +375,17 @@ export function AddBusinessModal({ client_vault_id, open, on_close, on_created }
                         onChange={(e) => update_position(idx, { lender_name: e.target.value })}
                         className={input_cls + " md:col-span-3"}
                       />
-                      <select
+                      <Select
                         value={p.loan_type}
-                        onChange={(e) => update_position(idx, { loan_type: e.target.value })}
-                        className={input_cls + " md:col-span-2"}
+                        onValueChange={(v) => update_position(idx, { loan_type: v })}
                       >
-                        <option value="">Loan type…</option>
-                        {FUNDING_OPTIONS.map((t) => (<option key={t} value={t}>{t}</option>))}
-                      </select>
+                        <SelectTrigger className={input_cls + " md:col-span-2"}>
+                          <SelectValue placeholder="Loan type…" />
+                        </SelectTrigger>
+                        <SelectContent className="rounded-xl">
+                          {FUNDING_OPTIONS.map((t) => (<SelectItem key={t} value={t}>{t}</SelectItem>))}
+                        </SelectContent>
+                      </Select>
                       <button
                         type="button"
                         onClick={() => remove_position(idx)}
@@ -412,14 +424,17 @@ export function AddBusinessModal({ client_vault_id, open, on_close, on_created }
                         onChange={(e) => update_position(idx, { payment_amount: e.target.value })}
                         className={input_cls}
                       />
-                      <select
+                      <Select
                         value={p.payment_frequency}
-                        onChange={(e) => update_position(idx, { payment_frequency: e.target.value })}
-                        className={input_cls}
+                        onValueChange={(v) => update_position(idx, { payment_frequency: v })}
                       >
-                        <option value="">Frequency…</option>
-                        {PAYMENT_FREQUENCIES.map((f) => (<option key={f} value={f}>{f}</option>))}
-                      </select>
+                        <SelectTrigger className={input_cls}>
+                          <SelectValue placeholder="Frequency…" />
+                        </SelectTrigger>
+                        <SelectContent className="rounded-xl">
+                          {PAYMENT_FREQUENCIES.map((f) => (<SelectItem key={f} value={f}>{f}</SelectItem>))}
+                        </SelectContent>
+                      </Select>
                       <input
                         type="number"
                         inputMode="numeric"
