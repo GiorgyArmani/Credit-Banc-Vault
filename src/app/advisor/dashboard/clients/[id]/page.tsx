@@ -74,6 +74,7 @@ import { DocumentUploadStatus } from "./_components/document-upload-status";
 import { InternalCommunication } from "./_components/internal-communication";
 import { SubmitUnderwritingCTA } from "./_components/submit-underwriting-cta";
 import { ClientFollowersCard } from "./_components/client-followers-card";
+import { listClientFollowers, type FollowerRow } from "./follower-actions";
 import { ClientNotesCard, type FileNote } from "./_components/client-notes-card";
 import { AdminLenderReviewCard } from "@/components/admin/admin-lender-review-card";
 import { CollapsibleSection, broadcast_toggle_all } from "./_components/collapsible-section";
@@ -317,6 +318,24 @@ export default function AdvisorClientDetailsPage() {
     // is-owner-state: Whether current advisor owns this client (vs. being a follower).
     // Drives the "Manage Followers" permission (owner + admin can manage; followers cannot).
     const [is_owner, set_is_owner] = useState(false);
+
+    // followers-list-state: page-level mirror of the Followers card's data. The
+    // card self-fetches, but the collapse unmounts it when closed — so the page
+    // fetches once here to populate the collapsed section header (follower
+    // names), and the card keeps this in sync via onFollowersChange after loads
+    // and add/remove.
+    const [followers_list, set_followers_list] = useState<FollowerRow[]>([]);
+
+    useEffect(() => {
+        if (!client_profile?.id) return;
+        let cancelled = false;
+        listClientFollowers(client_profile.id).then((res) => {
+            if (!cancelled && res.success && res.followers) set_followers_list(res.followers);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [client_profile?.id]);
 
     // navigable-clients-state: Ordered list of client IDs the current advisor can access
     // (owned + followed for advisors, all for admins). Powers the prev/next buttons in the header.
@@ -2168,11 +2187,19 @@ export default function AdvisorClientDetailsPage() {
                     clientId={client_profile.id}
                     slug="followers"
                     title="Followers"
+                    summary={
+                        followers_list.length === 0
+                            ? undefined
+                            : followers_list.length <= 2
+                                ? followers_list.map((f) => `${f.first_name} ${f.last_name}`.trim()).join(", ")
+                                : `${followers_list.slice(0, 2).map((f) => `${f.first_name} ${f.last_name}`.trim()).join(", ")} +${followers_list.length - 2} more`
+                    }
                     defaultOpen={false}
                 >
                     <ClientFollowersCard
                         clientId={client_profile.id}
                         canManage={is_owner}
+                        onFollowersChange={set_followers_list}
                     />
                 </CollapsibleSection>
 

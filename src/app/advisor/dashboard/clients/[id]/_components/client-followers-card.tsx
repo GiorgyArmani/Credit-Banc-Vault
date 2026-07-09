@@ -43,6 +43,10 @@ import {
 interface Props {
     clientId: string;
     canManage: boolean;
+    /** Reports the current follower list up to the parent (e.g. so the
+        collapsed-section header can show follower names). Fires on every load
+        and after add/remove. */
+    onFollowersChange?: (followers: FollowerRow[]) => void;
 }
 
 function initials(first: string, last: string) {
@@ -77,7 +81,7 @@ function Avatar({
     );
 }
 
-export function ClientFollowersCard({ clientId, canManage }: Props) {
+export function ClientFollowersCard({ clientId, canManage, onFollowersChange }: Props) {
     const [followers, setFollowers] = useState<FollowerRow[]>([]);
     const [loading, setLoading] = useState(true);
     const [dialogOpen, setDialogOpen] = useState(false);
@@ -91,11 +95,12 @@ export function ClientFollowersCard({ clientId, canManage }: Props) {
         const res = await listClientFollowers(clientId);
         if (res.success && res.followers) {
             setFollowers(res.followers);
+            onFollowersChange?.(res.followers);
         } else if (res.error) {
             toast.error(res.error);
         }
         setLoading(false);
-    }, [clientId]);
+    }, [clientId, onFollowersChange]);
 
     useEffect(() => {
         refresh();
