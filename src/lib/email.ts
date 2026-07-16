@@ -2397,6 +2397,120 @@ export async function send_loan_funded_notification(data: LoanFundedNotification
 
 /**
  * ============================================================================
+ * AFFILIATE PAYOUT NOTIFICATION
+ * ============================================================================
+ * Sent to an affiliate when one of their referrals gets funded and the fixed
+ * reward is dispatched via Giftronaut.
+ */
+export interface AffiliatePayoutNotificationData {
+  affiliate_name: string;
+  affiliate_email: string;
+  reward_amount: string; // pre-formatted, e.g. "$500"
+  login_url: string;
+}
+
+export function generate_affiliate_payout_notification_html(data: AffiliatePayoutNotificationData): string {
+  data = escape_email_strings(data);
+  const { affiliate_name, reward_amount, login_url } = data;
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>You earned a ${reward_amount} reward!</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f6f9fc;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse;">
+    <tr>
+      <td align="center" style="padding: 40px 0;">
+        <table role="presentation" style="width: 600px; max-width: 100%; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+
+          <!-- Header -->
+          <tr>
+            <td style="padding: 40px 40px 20px; text-align: center; background-color: #10b981;">
+              <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 700;">🎉 Reward Earned!</h1>
+            </td>
+          </tr>
+
+          <!-- Message -->
+          <tr>
+            <td style="padding: 40px 40px 20px;">
+              <h2 style="margin: 0 0 16px; color: #1e293b; font-size: 20px; font-weight: 600;">Hi ${affiliate_name},</h2>
+              <p style="margin: 0 0 16px; color: #475569; font-size: 16px; line-height: 1.6;">
+                Great news — one of your referrals just got funded! Your <strong>${reward_amount}</strong> reward is on its way to your inbox via Giftronaut.
+              </p>
+
+              <div style="background-color: #f0fdf4; border: 1px solid #dcfce7; border-radius: 12px; padding: 24px; margin-bottom: 24px; text-align: center;">
+                <p style="margin: 0; color: #166534; font-size: 32px; font-weight: 700;">${reward_amount}</p>
+                <p style="margin: 8px 0 0; color: #166534; font-size: 14px;">Referral reward</p>
+              </div>
+
+              <p style="margin: 0 0 24px; color: #475569; font-size: 16px; line-height: 1.6;">
+                Keep sharing your referral link to earn more. You can track all your referrals and rewards in your affiliate dashboard.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Action Button -->
+          <tr>
+            <td style="padding: 0 40px 40px;" align="center">
+              <a href="${login_url}" style="display: inline-block; background-color: #10b981; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-size: 16px; font-weight: 600;">
+                Go to Affiliate Dashboard
+              </a>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding: 40px; text-align: center; color: #94a3b8; font-size: 13px; line-height: 1.6; border-top: 1px solid #f1f5f9;">
+              <p style="margin: 0;">© ${new Date().getFullYear()} Credit Banc Vault. This is an automated notification.</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `;
+}
+
+export function generate_affiliate_payout_notification_text(data: AffiliatePayoutNotificationData): string {
+  data = escape_email_strings(data);
+  return [
+    `Hi ${data.affiliate_name},`,
+    ``,
+    `Great news — one of your referrals just got funded!`,
+    `Your ${data.reward_amount} reward is on its way via Giftronaut.`,
+    ``,
+    `Track your referrals and rewards: ${data.login_url}`,
+    ``,
+    `© ${new Date().getFullYear()} Credit Banc Vault`,
+  ].join("\n");
+}
+
+export async function send_affiliate_payout_notification(data: AffiliatePayoutNotificationData) {
+  const transporter = create_smtp_transporter();
+
+  const from_email = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  const from_name = process.env.SMTP_FROM_NAME || 'Credit Banc Vault';
+
+  const mail_options: any = {
+    from: `${from_name} <${from_email}>`,
+    to: data.affiliate_email,
+    subject: `🎉 You earned a ${data.reward_amount} referral reward!`,
+    html: generate_affiliate_payout_notification_html(data),
+    text: generate_affiliate_payout_notification_text(data),
+  };
+
+  return await transporter.sendMail(mail_options);
+}
+
+/**
+ * ============================================================================
  * DOCUMENT REJECTION NOTIFICATION FUNCTIONS
  * ============================================================================
  */

@@ -100,6 +100,15 @@ const config = {
         "on-error": {
           container: "#410002",
         },
+        // creditbanc.io marketing-site brand tokens (from its tailwind config).
+        // Note: emerald-500 / primary already equal cb.mint (#55cf9e).
+        cb: {
+          navy: "#202536", // dark surfaces (headers, footers, bands)
+          mint: "#55cf9e", // primary accent
+          gray: "#939598", // muted text
+          cream: "#faf9f6", // warm off-white page background
+          ink: "#1a1c1a", // near-black text
+        },
         // Simplified color palette
         emerald: {
           50: "#f0fdf7",
@@ -116,8 +125,9 @@ const config = {
         },
       },
       fontFamily: {
-        headline: ["Outfit", "sans-serif"],
+        headline: ["Manrope", "sans-serif"],
         body: ["Inter", "sans-serif"],
+        label: ["Inter", "sans-serif"],
         manrope: ["Manrope", "sans-serif"],
       },
       borderRadius: {

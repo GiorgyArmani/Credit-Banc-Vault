@@ -439,25 +439,6 @@ export async function POST(req: Request) {
       }
     }
 
-    // 4. Create event record (audit trail)
-    if (profileId) {
-      const { data: bp } = await admin
-        .from("business_profiles")
-        .select("id")
-        .eq("client_vault_id", vaultRecord!.id)
-        .eq("is_primary", true)
-        .maybeSingle();
-
-      if (bp) {
-        await admin.from("events").insert({
-          profile_id: bp.id,
-          type: "upload",
-          payload: { doc_code, storage_path, document_id },
-          actor: doc.user_id,
-        });
-      }
-    }
-
     // 4. Notify Advisor
     if (vaultRecord && vaultRecord.advisors) {
       const advisor: any = vaultRecord.advisors;

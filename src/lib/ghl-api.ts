@@ -105,6 +105,28 @@ export function buildFieldIndex(list: GhlCustomField[]) {
   return map;
 }
 
+// Cache resolved custom-field ids per location+key so we don't hit the API on
+// every call. Value is null when the field doesn't exist in the location.
+const _fieldIdCache: Record<string, string | null> = {};
+
+/**
+ * Resolve a GHL custom field id from its merge key (e.g. "contact.affiliate_partner").
+ * Returns null if the field can't be found. Cached in-process.
+ */
+export async function ghlResolveFieldId(locationId: string, key: string): Promise<string | null> {
+  const cacheKey = `${locationId}:${key}`;
+  if (cacheKey in _fieldIdCache) return _fieldIdCache[cacheKey];
+  try {
+    const { customFields } = await ghlFetchCustomFields(locationId);
+    const id = buildFieldIndex(customFields)[key] ?? null;
+    _fieldIdCache[cacheKey] = id;
+    return id;
+  } catch (e) {
+    console.error(`[ghl] ghlResolveFieldId failed for ${key}:`, e);
+    return null;
+  }
+}
+
 export async function ghlAddTags(contactId: string, tags: string[]) {
   if (!tags?.length) return;
   const res = await fetch(`${BASE}/contacts/${contactId}/tags`, {

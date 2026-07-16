@@ -23,6 +23,7 @@ import { send_client_welcome_email } from '@/lib/email';
 import { syncUnifiedClientData, generateSecurePassword } from '@/lib/user-management';
 import { ghlSearchContacts, ghlUpdateContact, ghlGetContact } from '@/lib/ghl-api';
 import { generateOnboardingMagicLink, pushMagicLinkToGhl } from '@/lib/magic-link';
+import { linkReferralLeadToVault } from '@/lib/affiliates';
 
 const supabase_admin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -661,6 +662,15 @@ export async function POST(request: Request) {
       vault_id = vault_entry!.id;
     }
     console.log(`✅ Data saved to client_data_vault: ${vault_id}`);
+
+    // If this client came in through an affiliate referral link, link the
+    // pending referral lead to this vault so the funded-payout hook can credit
+    // the affiliate. Best-effort — never blocks signup.
+    await linkReferralLeadToVault(supabase_admin, {
+      vaultId: vault_id,
+      email: body.client_email,
+      ghlContactId: ghl_contact_id || null,
+    });
 
     // ========== STEP 4.5: SEED INITIAL PIPELINE STATUS ==========
     await supabase_admin.from('loan_status_history').insert({

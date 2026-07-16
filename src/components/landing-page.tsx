@@ -18,6 +18,9 @@ import {
   Send,
   Menu,
   X,
+  Gift,
+  DollarSign,
+  Link2,
 } from "lucide-react"
 
 export function LandingPage() {
@@ -83,6 +86,9 @@ export function LandingPage() {
               <Link href="#how-it-works" className="text-sm font-semibold text-gray-600 hover:text-emerald-600 transition-colors">
                 How It Works
               </Link>
+              <Link href="/affiliate" className="text-sm font-semibold text-gray-600 hover:text-emerald-600 transition-colors">
+                Affiliate Program
+              </Link>
               <Link href="/support" className="text-sm font-semibold text-gray-600 hover:text-emerald-600 transition-colors">
                 Support
               </Link>
@@ -129,6 +135,13 @@ export function LandingPage() {
                   onClick={() => setMobileMenuOpen(false)}
                 >
                   How It Works
+                </Link>
+                <Link
+                  href="/affiliate"
+                  className="text-base font-bold text-gray-700 hover:text-emerald-600 transition-colors px-2 py-2"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  Affiliate Program
                 </Link>
                 <Link
                   href="/support"
@@ -284,6 +297,70 @@ export function LandingPage() {
               <p className="text-emerald-900/40 text-lg text-center italic border-t border-emerald-50 pt-10 font-bold tracking-tight">
                 The Vault tells you what’s needed, flags what’s missing, and skips everything that isn’t.
               </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* affiliate-section: Public affiliate program signup */}
+      <section id="affiliate" className="bg-emerald-950 py-32 relative overflow-hidden">
+        {/* glow */}
+        <div className="absolute top-0 right-0 w-[40%] h-[60%] bg-emerald-500/10 blur-[130px] rounded-full" />
+        <div className="absolute bottom-0 left-0 w-[40%] h-[50%] bg-emerald-400/5 blur-[130px] rounded-full" />
+
+        <div className="container relative z-10 mx-auto px-4">
+          <div className="grid lg:grid-cols-2 gap-16 items-center max-w-6xl mx-auto">
+            {/* pitch */}
+            <div className="text-white">
+              <div className="inline-flex items-center space-x-2 bg-white/5 border border-emerald-400/20 rounded-full px-4 py-2 mb-8">
+                <Badge className="bg-emerald-500 text-white hover:bg-emerald-400 font-bold border-none">PARTNERS</Badge>
+                <span className="text-sm text-emerald-300/60 font-bold uppercase tracking-[0.2em]">Affiliate Program</span>
+              </div>
+              <h2 className="text-4xl md:text-6xl font-black mb-8 tracking-tighter leading-tight">
+                Refer. <span className="text-emerald-400">Get Paid.</span>
+              </h2>
+              <p className="text-xl text-emerald-100/60 mb-12 leading-relaxed font-bold max-w-lg">
+                Share your link, send us business owners who need funding, and earn <span className="text-emerald-400">$500</span> for every referral that gets funded. It's that simple.
+              </p>
+
+              <div className="space-y-6">
+                {[
+                  { icon: Link2, title: "Get your link", desc: "Sign up and get a unique referral link instantly." },
+                  { icon: Gift, title: "Refer anyone", desc: "Send business owners through our quick pre-qualification form." },
+                  { icon: DollarSign, title: "Earn $500 per funded deal", desc: "Paid out via Giftronaut the moment your referral gets funded." },
+                ].map((item, i) => (
+                  <div key={i} className="flex items-start gap-5">
+                    <div className="h-12 w-12 rounded-2xl bg-emerald-500/15 border border-emerald-400/20 flex items-center justify-center shrink-0">
+                      <item.icon className="h-6 w-6 text-emerald-400" />
+                    </div>
+                    <div>
+                      <h4 className="text-lg font-black text-white tracking-tight">{item.title}</h4>
+                      <p className="text-emerald-100/50 font-bold">{item.desc}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* signup CTA — dedicated page */}
+            <div className="rounded-[3rem] bg-white/5 border border-emerald-400/20 p-12 text-center">
+              <div className="mx-auto w-16 h-16 bg-emerald-500/20 rounded-2xl flex items-center justify-center mb-6 border border-emerald-400/30">
+                <Gift className="h-8 w-8 text-emerald-400" />
+              </div>
+              <h3 className="text-3xl font-black text-white uppercase tracking-tighter mb-3">Become an Affiliate</h3>
+              <p className="text-emerald-100/60 font-bold mb-8">
+                Sign up free and start earning $500 for every funded referral.
+              </p>
+              <Button
+                size="lg"
+                className="text-lg px-10 py-8 h-auto bg-emerald-500 text-white hover:bg-emerald-400 font-black rounded-2xl shadow-2xl shadow-emerald-500/30 transition-all hover:scale-105 active:scale-95"
+                asChild
+              >
+                <Link href="/affiliate">
+                  Join the Program
+                  <ArrowRight className="ml-3 h-6 w-6" />
+                </Link>
+              </Button>
             </div>
           </div>
         </div>

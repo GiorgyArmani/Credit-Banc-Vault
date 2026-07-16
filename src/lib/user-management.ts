@@ -23,7 +23,7 @@ export interface UnifiedClientData {
     email: string;
     clientName: string;
     companyName: string;
-    role?: 'free' | 'advisor' | 'underwriting' | 'admin';
+    role?: 'free' | 'advisor' | 'underwriting' | 'admin' | 'setter' | 'affiliate';
     industry?: string;
     phone?: string;
     state?: string;

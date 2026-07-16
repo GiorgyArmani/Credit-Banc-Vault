@@ -7,6 +7,7 @@ import { syncOutstandingDocuments } from '@/lib/outstanding-documents';
 import { syncUnifiedClientData, generateSecurePassword } from '@/lib/user-management';
 import { ghlSearchContacts, ghlUpdateContact, ghlAddContactFollowers, ghlAddTags } from '@/lib/ghl-api';
 import { generateOnboardingMagicLink, pushMagicLinkToGhl } from '@/lib/magic-link';
+import { linkReferralLeadToVault } from '@/lib/affiliates';
 
 /**
  * Supabase admin client with elevated privileges
@@ -836,6 +837,15 @@ export async function POST(request: Request) {
       vault_id = vault_entry!.id;
       console.log(`✅ Data saved to client_data_vault: ${vault_id}`);
     }
+
+    // If this client came in through an affiliate referral link, link the
+    // pending referral lead to this vault so the funded-payout hook can credit
+    // the affiliate. Best-effort — never blocks signup.
+    await linkReferralLeadToVault(supabase_admin, {
+      vaultId: vault_id,
+      email: body.client_email,
+      ghlContactId: ghl_contact_id || null,
+    });
 
     // ========== STEP 5.1: SEED INITIAL PIPELINE STATUS ==========
     // Without this row, getBulkLatestStatus returns nothing and the UI defaults

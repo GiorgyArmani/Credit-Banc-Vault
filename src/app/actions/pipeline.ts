@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createAffiliatePayoutForFundedVault } from "@/lib/affiliates";
 import { revalidatePath } from "next/cache";
 
 export type LoanStatus =
@@ -161,6 +162,14 @@ export async function updateLoanStatus(
         message: `${vaultData?.client_name} status updated to "${statusLabels[newStatus]}"`,
       });
     }
+  }
+
+  // Affiliate reward: if a referred deal just funded, pay the affiliate their
+  // fixed reward via Giftronaut. Always uses the service role (the affiliate
+  // tables are RLS-locked); idempotent + non-throwing, so it never blocks the
+  // status transition. Only fires on the same-status-deduped funded insert above.
+  if (newStatus === "funded") {
+    await createAffiliatePayoutForFundedVault(createAdminClient(), clientVaultId);
   }
 
   revalidatePath("/underwriting/dashboard");

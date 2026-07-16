@@ -66,6 +66,9 @@ export async function proxy(request: NextRequest) {
     "/auth/setter-signup-success",
     "/auth/update-password",
     "/auth/forgot-password",
+    "/r/", // public affiliate referral pre-qualification landing
+    "/api/refer", // public referral submission endpoint
+    "/api/post-signup-affiliate", // public affiliate self-signup (form lives on "/")
     "/",
   ];
 
@@ -101,6 +104,8 @@ export async function proxy(request: NextRequest) {
       advisor: ["/advisor"],
       underwriting: ["/underwriting"],
       setter: ["/setter"], // Appointment setters: create-only fast-funding dashboard
+      // Only the dashboard is role-gated — /affiliate (index) is the PUBLIC signup page.
+      affiliate: ["/affiliate/dashboard"],
       free: [], // Free users have access to basic /dashboard only
     };
 
@@ -157,6 +162,7 @@ export async function proxy(request: NextRequest) {
           advisor: "/advisor/dashboard",
           underwriting: "/underwriting/dashboard",
           setter: "/setter/dashboard",
+          affiliate: "/affiliate/dashboard",
           free: isOnboardingComplete ? "/dashboard" : "/onboarding",
         };
         return redirectWithCookies(adminRedirectMap[userRole] || "/dashboard");
@@ -178,6 +184,7 @@ export async function proxy(request: NextRequest) {
                 advisor: "/advisor/dashboard",
                 underwriting: "/underwriting/dashboard",
                 setter: "/setter/dashboard",
+                affiliate: "/affiliate/dashboard",
                 admin: "/admin/dashboard",
                 free: isOnboardingComplete ? "/dashboard" : "/onboarding",
               };
@@ -195,11 +202,12 @@ export async function proxy(request: NextRequest) {
         advisor: "/advisor/dashboard",
         underwriting: "/underwriting/dashboard",
         setter: "/setter/dashboard",
+        affiliate: "/affiliate/dashboard",
         admin: "/admin/dashboard",
         free: isOnboardingComplete ? "/dashboard" : "/onboarding",
       };
 
-      if (userRole === "advisor" || userRole === "underwriting" || userRole === "setter" || userRole === "admin" || !isOnboardingComplete) {
+      if (userRole === "advisor" || userRole === "underwriting" || userRole === "setter" || userRole === "affiliate" || userRole === "admin" || !isOnboardingComplete) {
         return redirectWithCookies(redirectMap[userRole]);
       }
     }
@@ -210,6 +218,7 @@ export async function proxy(request: NextRequest) {
         advisor: "/advisor/dashboard",
         underwriting: "/underwriting/dashboard",
         setter: "/setter/dashboard",
+        affiliate: "/affiliate/dashboard",
         admin: "/admin/dashboard",
         free: isOnboardingComplete ? "/dashboard" : "/onboarding",
       };
