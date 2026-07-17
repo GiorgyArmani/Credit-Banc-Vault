@@ -39,6 +39,7 @@ import {
 } from "lucide-react";
 import { useErrorDialog } from "@/components/error-dialog";
 import { FUNDING_OPTIONS } from "@/data/loan-types";
+import { ReferralPartnerSelect } from "@/components/referral-partner-select";
 
 // FICO buckets MUST match the "Approximate Credit Score" checkboxes on the
 // SignWell FUNDING APPLICATION template (400-500 / 500-600 / 600-700 / 700+).
@@ -114,6 +115,8 @@ export default function SpeedClientSignUpForm({ isSetter = false }: { isSetter?:
   // Setters collect call notes here (in place of "Use of Funds") so the
   // assigned advisor opens the file with context already on it.
   const [additional_notes, set_additional_notes] = useState("");
+  // Internal referral partner — who referred this deal (optional).
+  const [referral_partner, set_referral_partner] = useState<string | null>(null);
 
   // ===== Step 3 — Documents Requested (released only after the client signs) =====
   // Setters skip this step; default to business bank statements only.
@@ -235,6 +238,9 @@ export default function SpeedClientSignUpForm({ isSetter = false }: { isSetter?:
         // Doc codes — parked server-side until the application is signed.
         // For setters this is auto-set to business bank statements only.
         documents_requested,
+
+        // Internal referral partner (who referred this deal) — optional.
+        referral_partner,
       };
 
       const res = await fetch("/api/client-signup-speed", {
@@ -531,6 +537,12 @@ export default function SpeedClientSignUpForm({ isSetter = false }: { isSetter?:
                         <Textarea id="loan_purpose" value={loan_purpose} onChange={(e) => set_loan_purpose(e.target.value)} className="rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold p-6" placeholder="Equipment purchase, inventory, expansion, etc." rows={2} required />
                       </div>
                     )}
+                    <div className="md:col-span-2">
+                      <ReferralPartnerSelect
+                        value={referral_partner}
+                        onChange={set_referral_partner}
+                      />
+                    </div>
                     {!isSetter && (
                     <div className="md:col-span-2">
                       <Label className={`${labelClass} mb-3`}>

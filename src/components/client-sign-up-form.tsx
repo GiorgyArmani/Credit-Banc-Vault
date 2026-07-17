@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useRouter, usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { ReferralPartnerSelect } from "@/components/referral-partner-select";
 import {
   ChevronRight,
   ChevronLeft,
@@ -338,6 +339,8 @@ export default function ClientSignupForm() {
   const [funding_eta, set_funding_eta] = useState("");
   const [additional_notes, set_additional_notes] = useState("");
   const [advisor_id, set_advisor_id] = useState("");
+  // Internal referral partner — who referred this deal (optional).
+  const [referral_partner, set_referral_partner] = useState<string | null>(null);
 
   // Follower advisors: additional advisors that should receive every email the primary advisor receives.
   const [follower_advisor_ids, set_follower_advisor_ids] = useState<string[]>([]);
@@ -673,6 +676,9 @@ export default function ClientSignupForm() {
 
         // Followers — advisors that should be CC'd on every client email
         follower_advisor_ids: follower_advisor_ids.filter(id => id && id !== advisor_id),
+
+        // Internal referral partner (who referred this deal) — optional.
+        referral_partner,
 
         // ===== Documents Requested =====
         // List of documents that need to be collected from the client
@@ -2088,6 +2094,16 @@ export default function ClientSignupForm() {
                         excludeIds={advisor_id ? [advisor_id] : []}
                         onAdd={(id) => toggle_follower(id)}
                         onRemove={(id) => toggle_follower(id)}
+                      />
+                    </div>
+                  )}
+
+                  {/* Referral partner — who referred this deal (optional) */}
+                  {is_advisor_context && (
+                    <div className="mt-8 pt-8 border-t border-emerald-50 max-w-md">
+                      <ReferralPartnerSelect
+                        value={referral_partner}
+                        onChange={set_referral_partner}
                       />
                     </div>
                   )}

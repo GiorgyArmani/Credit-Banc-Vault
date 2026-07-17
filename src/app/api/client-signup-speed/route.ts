@@ -486,6 +486,8 @@ export async function POST(request: Request) {
       create_custom_field('GHL_CF_OWNER_1_NAME', client_name, 'PaOPABkLZL3ZWxZxFrTV'),
       create_custom_field('GHL_CF_OWNER_1_PCT', '100', 'DsjleQk3ABfV8AjtNTD1'),
       create_custom_field('GHL_CF_CREDIT_SCORE', body.credit_score, 'G8suhHNaeaujGmC0fvk8'),
+      // Internal referral partner (who referred this deal) → AFFILIATE_ASSIGNED.
+      create_custom_field('AFFILIATE_ASSIGNED', body.referral_partner),
     ].filter(Boolean);
 
     const advisor_ghl_user_id: string | null = advisor_row.ghl_user_id || null;
@@ -623,6 +625,9 @@ export async function POST(request: Request) {
       has_active_judgements: false,
       funding_eta: 'Immediately',
       additional_notes: body.additional_notes || 'Created via Speed Form',
+
+      // Internal referral partner (who referred this deal) — optional.
+      referral_partner: body.referral_partner || null,
 
       // Metadata — data_vault_submitted_at is intentionally NOT set, so the
       // client lands on onboarding Step 1 before signing the application.

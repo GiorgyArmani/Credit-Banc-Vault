@@ -93,13 +93,14 @@ export function Sidebar({
         {/* Header / Branding */}
         <div className="px-5 py-7 border-b border-slate-100 relative">
           <div className={clsx('flex items-center gap-3', collapsed && 'md:justify-center')}>
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-500 flex items-center justify-center shadow-lg shadow-emerald-500/20 shrink-0">
-              <ShieldCheck className="h-5 w-5 text-white" />
-            </div>
-            {!collapsed && (
+            {collapsed ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src="/cb-mark.png" alt="Credit Banc" className="w-10 h-10 max-w-none shrink-0 rounded-full shadow-lg shadow-emerald-500/20" />
+            ) : (
               <div className="transition-all duration-300">
-                <h2 className="text-base font-black text-slate-900 leading-tight">Admin Portal</h2>
-                <p className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">Credit Banc</p>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/powered-by-shield.png" alt="Credit Banc — Powered by Shield Advisory Group" className="h-9 w-auto" />
+                
               </div>
             )}
           </div>

@@ -583,6 +583,10 @@ export async function POST(request: Request) {
       create_custom_field('GHL_CF_FUNDING_ETA', map_ghl_value('funding_eta', body.funding_eta), '3NLSSMdhnCRbV8zggguo'),
       create_custom_field('GHL_CF_ADDITIONAL_NOTES', body.additional_notes, 'FML6V2dctE8ffwvqOTrp'),
 
+      // Internal referral partner (who referred this deal) → AFFILIATE_ASSIGNED.
+      // Mirrors the setReferralPartner action so the value is set at creation time.
+      create_custom_field('AFFILIATE_ASSIGNED', body.referral_partner),
+
     ].filter(Boolean); // Remove null fields
 
     console.log(`✅ ${custom_fields.length} custom fields prepared for GHL`);
@@ -797,6 +801,9 @@ export async function POST(request: Request) {
       // Timeline and notes
       funding_eta: body.funding_eta,
       additional_notes: body.additional_notes,
+
+      // Internal referral partner (who referred this deal) — optional.
+      referral_partner: body.referral_partner || null,
 
       // Metadata
       status: 'active',

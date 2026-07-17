@@ -1,11 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Loader2, Link, Send, Trash2, UserCog, FileSignature, KeyRound, Check, ChevronsUpDown, Users2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Loader2, Link, Send, Trash2, UserCog, FileSignature, KeyRound, Check, ChevronsUpDown, Users2, Plus } from "lucide-react";
 import clsx from "clsx";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { REFERRAL_PARTNERS } from "@/data/referral-partners";
+import { addReferralPartner } from "@/app/admin/referral-partners/actions";
 import { ShareWithLenderButton } from "@/components/share/share-with-lender-button";
 import { ReassignmentPauseControl } from "./reassignment-pause-control";
 
@@ -338,15 +338,65 @@ interface ReferralPartnerPickerProps {
 
 function ReferralPartnerPicker({ value, is_saving, on_change }: ReferralPartnerPickerProps) {
     const [open, set_open] = useState(false);
-    const options = useMemo(() => REFERRAL_PARTNERS, []);
+    const [options, set_options] = useState<string[]>([]);
+    const [can_manage, set_can_manage] = useState(false);
+    const [search, set_search] = useState("");
+    const [adding, set_adding] = useState(false);
+
+    // DB-backed list (migration 20260718). Loaded once; falls back to an empty
+    // list on failure (the API itself falls back to the static seed).
+    useEffect(() => {
+        let cancelled = false;
+        fetch("/api/referral-partners")
+            .then((r) => (r.ok ? r.json() : { partners: [], can_manage: false }))
+            .then((data) => {
+                if (cancelled) return;
+                set_options(Array.isArray(data.partners) ? data.partners : []);
+                set_can_manage(!!data.can_manage);
+            })
+            .catch(() => {
+                if (!cancelled) set_options([]);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     const handle_select = (name: string) => {
         set_open(false);
+        set_search("");
         // Toggle off if re-selecting the current value
         if (name === value) {
             on_change(null);
         } else {
             on_change(name);
+        }
+    };
+
+    // Admin-only inline create: persist the new partner, add it to the local
+    // options, and select it in one go.
+    const trimmed_search = search.replace(/\s+/g, " ").trim();
+    const exact_match = options.some(
+        (o) => o.toLowerCase() === trimmed_search.toLowerCase()
+    );
+    const can_add = can_manage && trimmed_search.length > 0 && !exact_match;
+
+    const handle_add = async () => {
+        if (!trimmed_search) return;
+        set_adding(true);
+        try {
+            const res = await addReferralPartner(trimmed_search);
+            if (res.success) {
+                const stored = res.name || trimmed_search;
+                set_options((prev) =>
+                    prev.some((o) => o.toLowerCase() === stored.toLowerCase())
+                        ? prev
+                        : [...prev, stored].sort((a, b) => a.localeCompare(b))
+                );
+                handle_select(stored);
+            }
+        } finally {
+            set_adding(false);
         }
     };
 
@@ -382,9 +432,31 @@ function ReferralPartnerPicker({ value, is_saving, on_change }: ReferralPartnerP
                 </PopoverTrigger>
                 <PopoverContent className="w-[320px] p-0" align="end">
                     <Command>
-                        <CommandInput placeholder="Search partners…" />
+                        <CommandInput
+                            placeholder={can_manage ? "Search or add a partner…" : "Search partners…"}
+                            value={search}
+                            onValueChange={set_search}
+                        />
                         <CommandList>
-                            <CommandEmpty>No partners found.</CommandEmpty>
+                            <CommandEmpty>
+                                {can_manage ? "Type a name, then Add." : "No partners found."}
+                            </CommandEmpty>
+                            {can_add && (
+                                <CommandGroup>
+                                    <CommandItem
+                                        value={`__add__${trimmed_search}`}
+                                        onSelect={handle_add}
+                                        className="text-emerald-700"
+                                    >
+                                        {adding ? (
+                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                        ) : (
+                                            <Plus className="mr-2 h-4 w-4" />
+                                        )}
+                                        Add &ldquo;{trimmed_search}&rdquo;
+                                    </CommandItem>
+                                </CommandGroup>
+                            )}
                             <CommandGroup>
                                 {value && (
                                     <CommandItem

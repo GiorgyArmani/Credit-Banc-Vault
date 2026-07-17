@@ -84,15 +84,15 @@ export function Sidebar({
         <div className="sticky top-0 bg-emerald-950/80 backdrop-blur-md z-20">
           <div className="flex flex-col items-center justify-center px-4 py-8 border-b border-white/5 relative">
             <div className={`transition-all duration-300 ${collapsed ? 'md:opacity-0 md:scale-90 md:h-0 md:overflow-hidden opacity-100 scale-100' : 'opacity-100 scale-100'}`}>
-              <h1 className="text-xl font-black text-white uppercase tracking-tighter leading-none text-center">Credit Banc Vault</h1>
-              <p className="text-[10px] text-emerald-500/60 font-black uppercase tracking-[0.2em] mt-2 text-center">Easy • Fast • Secure</p>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/CBLOGOWHITE.png" alt="Credit Banc" className="h-9 w-auto mx-auto" />
+              <p className="text-[10px] text-emerald-500/60 font-black uppercase tracking-[0.2em] mt-3 text-center">Easy • Fast • Secure</p>
             </div>
 
-            {/* Minimal logo for collapsed state */}
+            {/* CB mark for collapsed state */}
             {collapsed && (
-              <div className="bg-emerald-500 w-10 h-10 rounded-2xl hidden md:flex items-center justify-center shadow-lg shadow-emerald-500/20">
-                <span className="text-white font-black text-xl">V</span>
-              </div>
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src="/cb-mark.png" alt="Credit Banc" className="w-10 h-10 max-w-none shrink-0 hidden md:block shadow-lg shadow-emerald-500/20 rounded-full" />
             )}
 
             <button

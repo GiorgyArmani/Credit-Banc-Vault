@@ -84,18 +84,16 @@ export function Sidebar({
         ].join(' ')}
       >
         {/* Branding */}
-        <div className="px-6 py-8 mb-4">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-xl editorial-gradient flex items-center justify-center shadow-lg shadow-emerald-500/20">
-              <span className="material-symbols-outlined text-white" style={{ fontVariationSettings: "'FILL' 1" }}>account_balance</span>
+        <div className={clsx('py-8 mb-4', collapsed ? 'px-0 flex justify-center' : 'px-6')}>
+          {collapsed ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src="/cb-mark.png" alt="Credit Banc" className="w-10 h-10 max-w-none shrink-0 rounded-full shadow-lg shadow-emerald-500/20" />
+          ) : (
+            <div className="transition-all duration-300">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/CBLOGOWHITE.png" alt="Credit Banc" className="h-8 w-auto" />
             </div>
-            {!collapsed && (
-              <div className="transition-all duration-300">
-                <h2 className="text-lg font-black text-white dark:text-emerald-500 font-headline leading-tight">Advisor Dashboard</h2>
-                <p className="text-[10px] uppercase tracking-widest opacity-60 font-manrope">Credit Banc</p>
-              </div>
-            )}
-          </div>
+          )}
         </div>
 
         {/* Navigation */}

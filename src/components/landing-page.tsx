@@ -63,17 +63,12 @@ export function LandingPage() {
             <div className="flex items-center">
               <Link href="/" className="flex items-center space-x-2 group">
                 <Image
-                  src="/vaultlogo.svg"
-                  alt="Credit Banc Vault"
-                  width={150}
-                  height={65}
+                  src="/powered-by-shield.png"
+                  alt="Credit Banc — Powered by Shield Advisory Group"
+                  width={266}
+                  height={45}
                   priority
-                  className="h-10 w-auto transition-transform group-hover:scale-105"
-                  onError={(e) => {
-                    // fallback-to-png: If SVG fails, try PNG
-                    const target = e.target as HTMLImageElement;
-                    target.src = '/vaultlogo.png';
-                  }}
+                  className="h-11 w-auto transition-transform group-hover:scale-105"
                 />
               </Link>
             </div>
