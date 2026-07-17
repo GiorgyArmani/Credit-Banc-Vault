@@ -1,18 +1,9 @@
 //src/components/layout/advisor/sidebar.tsx
 'use client'
 
-import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
-  MessageSquare,
-  TrendingUp,
-  FileSearch,
-  Calendar,
-  LogOut,
-  User,
-  BookMarked,
-  X,
   ChevronsLeft,
   ChevronsRight,
   BookCheck,
@@ -20,8 +11,6 @@ import {
   LayoutGrid,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import clsx from 'clsx'
 
 type SidebarProps = {
@@ -39,13 +28,6 @@ export function Sidebar({
 }: SidebarProps) {
   const pathname = usePathname()
   const supabase = createClient()
-  const [userEmail, setUserEmail] = useState<string | null>(null)
-
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user?.email) setUserEmail(user.email)
-    })
-  }, [supabase])
 
   const handleSignOut = async () => {
     await supabase.auth.signOut()
@@ -60,9 +42,6 @@ export function Sidebar({
     { label: 'Prospects', href: '/advisor/dashboard/prospects', icon: Users },
     { label: 'Clients', href: '/advisor/dashboard/clients', icon: Users },
   ]
-
-  // Ancho: en mobile siempre w-72; en desktop depende de "collapsed"
-  const desktopWidth = collapsed ? 'md:w-20' : 'md:w-72'
 
   return (
     <>
@@ -98,7 +77,7 @@ export function Sidebar({
 
         {/* Navigation */}
         <nav className="flex-1 space-y-1 px-3">
-          {navItems.map(({ href, label, icon: Icon }) => {
+          {navItems.map(({ href, label }) => {
             const active = pathname === href
             const iconName =
               label === 'Dashboard' ? 'dashboard'
