@@ -169,10 +169,7 @@ export function LandingPage() {
         <div className="container relative z-10 mx-auto px-4 pt-28 pb-24 text-center">
           <div className="max-w-4xl mx-auto">
             {/* beta-tag-inline */}
-            <div className="inline-flex items-center space-x-2 bg-white/80 border border-emerald-100 rounded-full px-4 py-2 mb-10 shadow-sm">
-              <Badge className="bg-emerald-500 text-white hover:bg-emerald-400 font-bold border-none shadow-sm">NEW</Badge>
-              <span className="text-sm text-emerald-900/40 font-bold uppercase tracking-[0.2em]">THE Credit Banc Vault</span>
-            </div>
+           
 
             {/* headline: Main value proposition */}
             <h1 className="text-5xl md:text-8xl font-black mb-10 leading-[1.05] tracking-tight text-emerald-950">
