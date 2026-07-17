@@ -99,4 +99,9 @@ export const REFERRAL_PARTNERS: readonly string[] = [
     "Victor Nocera",
     "Vincent M Sirianni",
     "Vivian Gant",
+    "Weston Holley",
+    "Zahra Yarahamdi",
+    "Chris Scheneider",
+    "Santo Chiarelli",
+
 ];
