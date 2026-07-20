@@ -152,5 +152,17 @@ export async function sendGiftCard(args: {
   }
 
   const data = await res.json();
-  return { orderId: data.orderId ?? null, status: data.status ?? null };
+  // Giftronaut's response shape varies: the id may be flat, nested under
+  // `order`/`data`, and named orderId / orderNumber / id. The choice-card email
+  // surfaces it as an "OT…" order number, so accept any of these.
+  const order = data?.order ?? data?.data ?? data;
+  const orderId =
+    order?.orderId ??
+    order?.orderNumber ??
+    order?.id ??
+    data?.orderId ??
+    data?.orderNumber ??
+    null;
+  const status = order?.status ?? data?.status ?? null;
+  return { orderId: orderId != null ? String(orderId) : null, status: status ?? null };
 }

@@ -18,6 +18,7 @@ import {
   LayoutGrid,
   UserCog,
   ChevronDown,
+  Gift,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { Badge } from '@/components/ui/badge'
@@ -125,6 +126,18 @@ export function Sidebar({
             )}>
               <ShieldCheck className={clsx('h-5 w-5 shrink-0', pathname === '/admin/dashboard' ? 'text-emerald-500' : '')} />
               {!collapsed && <span className="text-sm font-semibold">Admin Home</span>}
+            </div>
+          </Link>
+
+          <Link href="/admin/affiliates" onClick={onMobileClose} title={collapsed ? 'Affiliates' : undefined}>
+            <div className={clsx(
+              'flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200 cursor-pointer',
+              pathname?.startsWith('/admin/affiliates')
+                ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50'
+            )}>
+              <Gift className={clsx('h-5 w-5 shrink-0', pathname?.startsWith('/admin/affiliates') ? 'text-emerald-500' : '')} />
+              {!collapsed && <span className="text-sm font-semibold">Affiliates</span>}
             </div>
           </Link>
         </nav>

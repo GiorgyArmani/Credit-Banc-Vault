@@ -1,10 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Copy, Check } from "lucide-react";
+import { Copy, Check, Mail, MessageCircle, Share2, Send } from "lucide-react";
 
-// Small client island: shows the affiliate's referral link with a copy button.
+// Client island: the affiliate's referral link with a copy button + one-tap
+// share to the channels partners actually use. All share targets open the
+// platform's native compose window prefilled with the referral link.
+const SHARE_MESSAGE =
+  "Need business funding? Apply through my link and get funded fast with Credit Banc:";
+
 export function CopyLink({ url }: { url: string }) {
   const [copied, setCopied] = useState(false);
 
@@ -18,21 +22,71 @@ export function CopyLink({ url }: { url: string }) {
     }
   };
 
+  const nativeShare = async () => {
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: "Credit Banc", text: SHARE_MESSAGE, url });
+      } else {
+        copy();
+      }
+    } catch {
+      /* user dismissed the share sheet */
+    }
+  };
+
+  const msg = encodeURIComponent(`${SHARE_MESSAGE} ${url}`);
+  const channels = [
+    { label: "Email", icon: Mail, href: `mailto:?subject=${encodeURIComponent("Get funded with Credit Banc")}&body=${msg}` },
+    { label: "WhatsApp", icon: MessageCircle, href: `https://wa.me/?text=${msg}` },
+    { label: "SMS", icon: Send, href: `sms:?&body=${msg}` },
+    { label: "X", icon: Share2, href: `https://twitter.com/intent/tweet?text=${msg}` },
+  ];
+
   return (
-    <div className="flex flex-col sm:flex-row items-stretch gap-3">
-      <div className="flex-1 rounded-2xl border border-emerald-200 bg-white px-5 py-4 font-bold text-emerald-900 truncate">
-        {url}
+    <div className="space-y-4">
+      <div className="flex flex-col items-stretch gap-3">
+        <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 font-medium text-white/90 text-sm truncate">
+          {url}
+        </div>
+        <button
+          onClick={copy}
+          className="w-full inline-flex items-center justify-center gap-2 px-6 py-3 bg-cb-mint hover:bg-cb-mint/90 text-white font-bold rounded-xl shadow-lg shadow-cb-mint/20 transition-all active:scale-95"
+        >
+          {copied ? (
+            <><Check className="w-5 h-5" /> Copied</>
+          ) : (
+            <><Copy className="w-5 h-5" /> Copy link</>
+          )}
+        </button>
       </div>
-      <Button
-        onClick={copy}
-        className="h-auto px-6 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-2xl shadow-lg shadow-emerald-500/20"
-      >
-        {copied ? (
-          <span className="flex items-center gap-2"><Check className="w-5 h-5" /> Copied</span>
-        ) : (
-          <span className="flex items-center gap-2"><Copy className="w-5 h-5" /> Copy link</span>
-        )}
-      </Button>
+
+      {/* one-tap share channels */}
+      <div>
+        <span className="block text-xs font-bold uppercase tracking-[0.15em] text-white/40 mb-2">Share via</span>
+        <div className="grid grid-cols-2 gap-2">
+          {channels.map(({ label, icon: Icon, href }) => (
+            <a
+              key={label}
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={`Share via ${label}`}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 px-3 py-2.5 text-sm font-semibold text-white/80 hover:text-white transition-colors"
+            >
+              <Icon className="w-4 h-4" />
+              {label}
+            </a>
+          ))}
+        </div>
+        <button
+          onClick={nativeShare}
+          aria-label="Share"
+          className="sm:hidden w-full mt-2 inline-flex items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 px-3 py-2.5 text-sm font-semibold text-white/80 hover:text-white transition-colors"
+        >
+          <Share2 className="w-4 h-4" />
+          More options
+        </button>
+      </div>
     </div>
   );
 }

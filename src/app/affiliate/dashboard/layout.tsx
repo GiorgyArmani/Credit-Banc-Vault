@@ -9,9 +9,10 @@
 // Defense-in-depth on top of the proxy gate at src/proxy.ts.
 
 import { redirect } from 'next/navigation'
+import Image from 'next/image'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { LogoutButton } from '@/components/logout-button'
-import { Gift } from 'lucide-react'
 
 export default async function AffiliateDashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
@@ -33,17 +34,21 @@ export default async function AffiliateDashboardLayout({ children }: { children:
   }
 
   return (
-    <div className="min-h-screen bg-emerald-50/30">
-      <header className="border-b border-emerald-100 bg-white">
-        <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-9 h-9 rounded-xl bg-emerald-500 text-white flex items-center justify-center">
-              <Gift className="w-5 h-5" />
-            </div>
-            <span className="font-black uppercase tracking-tight text-emerald-950">
-              Affiliate Dashboard
-            </span>
-          </div>
+    <div className="min-h-screen bg-cb-cream font-body text-cb-ink">
+      <header className="sticky top-0 z-40 border-b border-black/5 bg-cb-cream/80 backdrop-blur-md">
+        <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
+          {/* logo */}
+          <Link href="/affiliate/dashboard" className="flex items-center group shrink-0">
+            <Image
+              src="/powered-by-shield.png"
+              alt="Credit Banc — Powered by Shield Advisory Group"
+              width={266}
+              height={45}
+              priority
+              className="h-9 w-auto transition-transform group-hover:scale-105"
+            />
+          </Link>
+
           <LogoutButton />
         </div>
       </header>
