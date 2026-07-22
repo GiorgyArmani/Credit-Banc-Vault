@@ -1,8 +1,10 @@
 "use client";
 
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, usePathname } from "next/navigation";
+import Link from "next/link";
 import type { DealSummary } from "./bank-analysis";
+import { LOAN_TYPES } from "@/data/loan-types";
 import { createClient } from "@/lib/supabase/client";
 import { notifyAdminsOfLenderMatchSaved } from "@/app/actions/lender-match-notifications";
 import { toast } from "@/lib/toast";
@@ -75,6 +77,30 @@ const SPECIALTY_COLORS: Record<string, string> = {
   General: "bg-slate-50 text-slate-700 border-slate-200",
 };
 
+// ─── Specialty normalization ──────────────────────────────────────────────────
+// Lender rows carry free-text specialties that drift ("SBA" vs "SBA Loan",
+// "LOC" vs "Line of Credit"). We collapse them to a stable key so the program
+// tabs don't show duplicates and the client's proposed loan type can be matched
+// against whatever spelling the data happens to use.
+const SPECIALTY_KEY_ALIASES: Record<string, string> = {
+  loc: "lineofcredit",
+  lineofcredit: "lineofcredit",
+  sba: "sba",
+  sbaloan: "sba",
+};
+
+function specialtyKey(raw: string | null | undefined): string {
+  const base = (raw ?? "Unknown")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "")
+    .replace(/loan$/, "");
+  return SPECIALTY_KEY_ALIASES[base] ?? base ?? "unknown";
+}
+
+// Canonical display label for a specialty key, preferring the app's own loan-type
+// taxonomy when one maps to the same key (so a "SBA" row still shows "SBA Loan").
+const LOAN_TYPE_BY_KEY = new Map(LOAN_TYPES.map((t) => [specialtyKey(t), t]));
+
 const DEFAULT_DEAL: DealSummary = {
   fico: 0,
   tibMonths: 0,
@@ -121,8 +147,19 @@ function countOverlap(lender: Lender, deal: DealSummary): number {
   return n;
 }
 
+// A lender's guidelines are "viable" (worth matching against) once the row
+// carries at least ONE real underwriting threshold — not all of them. The old
+// rule required min_fico AND time-in-business AND monthly revenue together,
+// which permanently flagged equipment/collateral lenders (4HF, titled-vehicle,
+// deferred programs) as "incomplete": they legitimately underwrite on credit +
+// collateral and have no monthly-revenue requirement. Any single populated
+// threshold — FICO, revenue, time-in-business, or a funding ceiling — means the
+// row is more than an empty shell and belongs in the matchable pool.
 function hasMinViableGuidelines(l: Lender): boolean {
-  return (l.min_fico ?? 0) > 0 && (l.time_in_business_months ?? 0) > 0 && (l.avg_monthly_revenue ?? 0) > 0;
+  return (l.min_fico ?? 0) > 0
+    || (l.avg_monthly_revenue ?? 0) > 0
+    || (l.time_in_business_months ?? 0) > 0
+    || (Number(l.max_funding) || 0) > 0;
 }
 
 // ─── Matching Engine ──────────────────────────────────────────────────────────
@@ -221,6 +258,9 @@ interface ClientOption {
   company_name: string;
   industry?: string;
   company_state?: string;
+  // Industry is captured at vault creation onto business_profiles (not the vault
+  // row), so we embed it here as the reliable source for the industry filter.
+  business_profiles?: { industry: string | null; is_primary: boolean; display_order: number }[];
   proposed_loan_type: string;
   loan_purpose: string;
   business_start_date: string;
@@ -241,6 +281,18 @@ interface ClientOption {
 
 export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, state: propState = "", industry: propIndustry = "" }: LenderMatchProps) {
   const searchParams = useSearchParams();
+  const pathname = usePathname();
+
+  // Sibling guidelines editor for the current context (admin↔admin, uw↔uw):
+  // /admin/uw/lender-match → /admin/uw/lender-guidelines, and likewise for the
+  // /underwriting routes. Falls back to the underwriting page if the path is
+  // unexpected. Used by the "Add guidelines" shortcut on Incomplete cards.
+  const guidelinesHref = (lenderName: string) => {
+    const base = pathname?.includes("/lender-match")
+      ? pathname.replace("/lender-match", "/lender-guidelines")
+      : "/underwriting/lender-guidelines";
+    return `${base}?edit=${encodeURIComponent(lenderName)}`;
+  };
   const [deal, setDeal] = useState<DealSummary>({ ...DEFAULT_DEAL, ...propDeal });
   const [filterState, setFilterState] = useState(propState || propDeal.state || "");
   const [filterIndustry, setFilterIndustry] = useState(propIndustry || propDeal.industry || "");
@@ -254,8 +306,22 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
   const [clientSearch, setClientSearch] = useState("");
   const [clientDropdownOpen, setClientDropdownOpen] = useState(false);
   const clientSearchRef = useRef<HTMLDivElement | null>(null);
-  const [specialtyFilter, setSpecialtyFilter] = useState("All");
+  // Multi-select program filter, keyed by normalized specialty. Empty = show all.
+  const [selectedSpecialties, setSelectedSpecialties] = useState<Set<string>>(new Set());
   const [showPassedOnly, setShowPassedOnly] = useState(false);
+
+  const toggleSpecialty = (key: string) =>
+    setSelectedSpecialties((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  // Which result sections are folded shut. Both open by default.
+  const [collapsedSections, setCollapsedSections] = useState<{ matched: boolean; incomplete: boolean }>({
+    matched: false,
+    incomplete: false,
+  });
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
 
   // Change 2: Approve / Reject decisions
@@ -282,7 +348,8 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
         owner_2_name, owner_2_ownership_pct,
         owner_3_name, owner_3_ownership_pct,
         owner_4_name, owner_4_ownership_pct,
-        owner_5_name, owner_5_ownership_pct
+        owner_5_name, owner_5_ownership_pct,
+        business_profiles ( industry, is_primary, display_order )
       `)
       .order("client_name", { ascending: true })
       .then(({ data }) => {
@@ -321,6 +388,20 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
     loadClientResults(clientId);
   }
 
+  // Fully reset the tool to its empty state. The ✕ used to only clear the
+  // selected id, leaving the loaded deal, filters, and results on screen — which
+  // read as a live match with no client. Wipe everything the deal drives.
+  function clearSelectedClient() {
+    setSelectedClientId("");
+    setClientSearch("");
+    setClientDropdownOpen(false);
+    setDeal({ ...DEFAULT_DEAL });
+    setFilterState("");
+    setFilterIndustry("");
+    setSelectedSpecialties(new Set());
+    setDecisions({});
+  }
+
   const loadDecisions = useCallback(async (clientId: string) => {
     if (!clientId) return;
     const supabase = createClient();
@@ -356,6 +437,19 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
 
     if (analysis && !aError) {
       const client = clientList.find((c) => c.id === clientId);
+      // Industry lives on business_profiles (primary business first), since the
+      // vault row's own industry column isn't populated at signup. Fall back
+      // through analysis → vault column → primary business for resilience.
+      const primaryBusinessIndustry =
+        (client?.business_profiles ?? [])
+          .slice()
+          .sort(
+            (a, b) =>
+              Number(b.is_primary) - Number(a.is_primary) ||
+              a.display_order - b.display_order
+          )
+          .map((b) => (b.industry ?? "").trim())
+          .find(Boolean) ?? "";
       const newDeal: DealSummary = {
         fico: analysis.fico || 0,
         tibMonths: analysis.tib_months || 0,
@@ -367,7 +461,7 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
         hasBankruptcy: analysis.has_bankruptcy || false,
         capitalRequested: Number(analysis.capital_requested) || 0,
         state: analysis.company_state || client?.company_state || "",
-        industry: analysis.industry || client?.industry || "",
+        industry: analysis.industry || client?.industry || primaryBusinessIndustry || "",
         businessName: analysis.business_name || client?.company_name || "",
         ownerName: analysis.owner_name || client?.client_name || "",
         proposedLoanType: client?.proposed_loan_type || "",
@@ -443,17 +537,55 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
 
   const passedCount = viableResults.filter((r) => r.passed).length;
   const disqualifiedCount = viableResults.length - passedCount;
-  const specialties = ["All", ...Array.from(new Set(lenderData.map((l) => l.specialty ?? "Unknown"))).sort()];
+  // Deduped program tabs. Rows with drifting spellings ("SBA" / "SBA Loan")
+  // collapse to one tab; the label prefers the app's loan-type name, else the
+  // most descriptive raw spelling seen.
+  const specialtyTabs = useMemo(() => {
+    const byKey = new Map<string, { key: string; label: string }>();
+    for (const l of lenderData) {
+      const raw = l.specialty ?? "Unknown";
+      const key = specialtyKey(raw);
+      const existing = byKey.get(key);
+      const canonical = LOAN_TYPE_BY_KEY.get(key);
+      const label = canonical ?? (existing && existing.label.length >= raw.length ? existing.label : raw);
+      byKey.set(key, { key, label });
+    }
+    return Array.from(byKey.values()).sort((a, b) => a.label.localeCompare(b.label));
+  }, [lenderData]);
 
   const applyFilters = (list: MatchResult[]) =>
     list.filter((r) => {
       if (showPassedOnly && !r.passed) return false;
-      if (specialtyFilter !== "All" && (r.lender.specialty ?? "Unknown") !== specialtyFilter) return false;
+      if (selectedSpecialties.size > 0 && !selectedSpecialties.has(specialtyKey(r.lender.specialty)))
+        return false;
       return true;
     });
 
   const filteredViable = applyFilters(viableResults);
   const filteredIncomplete = applyFilters(incompleteResults);
+
+  // When a client loads, default the program filter to their proposed loan
+  // type(s) so results lead with the right product; the team can then toggle
+  // other tabs to widen the search. Falls back to "all" when no lender offers
+  // that product. Keyed on the client + their proposed type so it never clobbers
+  // a manual toggle the user makes afterward.
+  useEffect(() => {
+    const keys = (deal.proposedLoanType || "")
+      .split(/[,/&]+/)
+      .map((s) => specialtyKey(s))
+      .filter((k) => k !== "unknown" && specialtyTabs.some((t) => t.key === k));
+    setSelectedSpecialties(new Set(keys));
+    // specialtyTabs is derived from lenderData; lenderData.length gates on load
+    // without re-firing on unrelated re-renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedClientId, deal.proposedLoanType, lenderData.length]);
+
+  // Three result buckets the analyst actually reasons about, scoped to what's
+  // currently shown: clean matches, matches with at least one flag to review,
+  // and lenders we can't score because their guidelines are empty.
+  const shownEligible = filteredViable.filter((r) => r.passed).length;
+  const shownFlagged = filteredViable.length - shownEligible;
+  const shownIncomplete = filteredIncomplete.length;
 
   const decisionKey = (lender: Lender) => `${lender.lender_name}-${lender.specialty ?? ""}`;
 
@@ -564,10 +696,10 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
       {/* Header */}
       <div className="rounded-xl border border-slate-200 p-4" style={{ background: "#ffffff" }}>
         <div className="flex items-center justify-between flex-wrap gap-3 mb-3">
-          <div>
+          <div className="flex-1 min-w-0">
             <div className="text-xs font-bold text-gray-500 uppercase tracking-widest">Lender Match</div>
             <div className="flex items-center gap-3 mt-2">
-              <div ref={clientSearchRef} className="relative min-w-[280px]">
+              <div ref={clientSearchRef} className="relative flex-1 min-w-[280px]">
                 <div className="relative">
                   <svg
                     className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none"
@@ -596,11 +728,7 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
                   {selectedClientId && (
                     <button
                       type="button"
-                      onClick={() => {
-                        setSelectedClientId("");
-                        setClientSearch("");
-                        setClientDropdownOpen(false);
-                      }}
+                      onClick={clearSelectedClient}
                       className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 text-sm leading-none"
                       aria-label="Clear selection"
                     >
@@ -774,20 +902,61 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
         </div>
       )}
 
-      {/* Specialty tabs */}
+      {/* Results summary — at-a-glance breakdown of the three result buckets */}
+      {dataEntered && (
+        <div className="grid grid-cols-3 gap-3">
+          <div className="rounded-xl border border-green-200 bg-green-50/60 px-4 py-3">
+            <div className="text-2xl font-black tabular-nums text-green-600">{shownEligible}</div>
+            <div className="text-[11px] font-bold uppercase tracking-wider text-green-700/80 mt-0.5">Eligible</div>
+            <div className="text-[10px] font-mono text-green-600/60 mt-0.5">meets all criteria</div>
+          </div>
+          <div className="rounded-xl border border-red-200 bg-red-50/50 px-4 py-3">
+            <div className="text-2xl font-black tabular-nums text-red-500">{shownFlagged}</div>
+            <div className="text-[11px] font-bold uppercase tracking-wider text-red-600/80 mt-0.5">Flagged</div>
+            <div className="text-[10px] font-mono text-red-500/60 mt-0.5">has issues to review</div>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+            <div className="text-2xl font-black tabular-nums text-slate-400">{shownIncomplete}</div>
+            <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mt-0.5">Incomplete</div>
+            <div className="text-[10px] font-mono text-slate-400 mt-0.5">no guidelines set</div>
+          </div>
+        </div>
+      )}
+
+      {/* Program tabs + results only render once a client's deal is loaded.
+          Without a deal there's nothing to check against, so the matcher flags
+          nothing and every lender trivially "passes" — a misleading full
+          Eligible list. Gate the whole block on dataEntered. */}
+      {dataEntered && (
+      <>
+      {/* Program tabs — multi-select. Empty selection = all programs. Defaults to
+          the client's proposed loan type when a client is loaded. */}
       <div className="flex items-center gap-2 flex-wrap">
-        {specialties.map((s) => (
-          <button
-            key={s}
-            onClick={() => setSpecialtyFilter(s)}
-            className={`px-2.5 py-1 text-xs font-mono uppercase tracking-wider rounded border transition-all ${specialtyFilter === s
-                ? "bg-emerald-600 border-emerald-600 text-white"
-                : "border-slate-200 text-gray-500 hover:border-emerald-500 hover:text-emerald-600"
-              }`}
-          >
-            {s}
-          </button>
-        ))}
+        <button
+          onClick={() => setSelectedSpecialties(new Set())}
+          className={`px-2.5 py-1 text-xs font-mono uppercase tracking-wider rounded border transition-all ${selectedSpecialties.size === 0
+              ? "bg-emerald-600 border-emerald-600 text-white"
+              : "border-slate-200 text-gray-500 hover:border-emerald-500 hover:text-emerald-600"
+            }`}
+        >
+          All
+        </button>
+        {specialtyTabs.map((tab) => {
+          const active = selectedSpecialties.has(tab.key);
+          return (
+            <button
+              key={tab.key}
+              onClick={() => toggleSpecialty(tab.key)}
+              aria-pressed={active}
+              className={`px-2.5 py-1 text-xs font-mono uppercase tracking-wider rounded border transition-all ${active
+                  ? "bg-emerald-600 border-emerald-600 text-white"
+                  : "border-slate-200 text-gray-500 hover:border-emerald-500 hover:text-emerald-600"
+                }`}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
         <button
           onClick={() => setShowPassedOnly(!showPassedOnly)}
           className={`px-3 py-1 text-xs font-mono uppercase tracking-wider rounded border transition-all ${showPassedOnly
@@ -798,18 +967,34 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
           {showPassedOnly ? "✓ Eligible Only" : "Show All"}
         </button>
         <span className="text-xs text-gray-600 font-mono ml-auto">
+          {selectedSpecialties.size > 0 && (
+            <button
+              onClick={() => setSelectedSpecialties(new Set())}
+              className="text-emerald-600 hover:text-emerald-700 underline mr-2"
+            >
+              clear {selectedSpecialties.size}
+            </button>
+          )}
           {filteredViable.length + filteredIncomplete.length} shown
         </span>
       </div>
 
       {/* Matched Lenders Section */}
       <div className="space-y-3">
-        <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => setCollapsedSections((s) => ({ ...s, matched: !s.matched }))}
+          className="flex items-center gap-3 w-full group"
+        >
           <div className="h-px flex-1 bg-slate-100" />
-          <span className="text-[10px] font-bold text-gray-500 uppercase tracking-[0.2em]">Matched Lenders ({filteredViable.length})</span>
+          <span className="flex items-center gap-1.5 text-[10px] font-bold text-gray-500 group-hover:text-gray-700 uppercase tracking-[0.2em] transition-colors">
+            <span className="text-[8px] leading-none inline-block w-2">{collapsedSections.matched ? "▶" : "▼"}</span>
+            Matched Lenders ({filteredViable.length})
+          </span>
           <div className="h-px flex-1 bg-slate-100" />
-        </div>
-        
+        </button>
+
+        {!collapsedSections.matched && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           {filteredViable.length === 0 && (
             <div className="lg:col-span-2 py-8 text-center border border-dashed border-slate-200 rounded-xl">
@@ -818,16 +1003,25 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
           )}
           {filteredViable.map((result, i) => renderLenderCard(result, `viable-${i}`))}
         </div>
+        )}
       </div>
 
       {/* Incomplete Guidelines Section */}
       <div className="space-y-3 pt-4">
-        <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => setCollapsedSections((s) => ({ ...s, incomplete: !s.incomplete }))}
+          className="flex items-center gap-3 w-full group"
+        >
           <div className="h-px flex-1 bg-slate-100" />
-          <span className="text-[10px] font-bold text-gray-500 uppercase tracking-[0.2em]">Incomplete Guidelines ({filteredIncomplete.length})</span>
+          <span className="flex items-center gap-1.5 text-[10px] font-bold text-gray-500 group-hover:text-gray-700 uppercase tracking-[0.2em] transition-colors">
+            <span className="text-[8px] leading-none inline-block w-2">{collapsedSections.incomplete ? "▶" : "▼"}</span>
+            Incomplete Guidelines ({filteredIncomplete.length})
+          </span>
           <div className="h-px flex-1 bg-slate-100" />
-        </div>
-        
+        </button>
+
+        {!collapsedSections.incomplete && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           {filteredIncomplete.length === 0 && (
             <div className="lg:col-span-2 py-8 text-center border border-dashed border-slate-200 rounded-xl">
@@ -836,7 +1030,10 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
           )}
           {filteredIncomplete.map((result, i) => renderLenderCard(result, `incomplete-${i}`, true))}
         </div>
+        )}
       </div>
+      </>
+      )}
     </div>
   );
 
@@ -859,8 +1056,22 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
         decision === "rejected" ? "#fff7ed" :
           result.passed && !isIncomplete ? "#ffffff" : "#f8fafc";
 
+    // Left accent stripe encodes the result bucket at a glance.
+    const accent =
+      decision === "approved" ? "border-l-emerald-500" :
+        decision === "rejected" ? "border-l-orange-400" :
+          isIncomplete ? "border-l-slate-300" :
+            result.passed ? "border-l-green-400" : "border-l-red-400";
+
+    // Status pill — the single most useful label for triaging a card.
+    const statusPill = isIncomplete
+      ? { text: "Incomplete", cls: "bg-slate-100 text-slate-500 border-slate-200" }
+      : result.passed
+        ? { text: "✓ Eligible", cls: "bg-green-100 text-green-700 border-green-300" }
+        : { text: `${result.flags.length} issue${result.flags.length === 1 ? "" : "s"}`, cls: "bg-red-100 text-red-700 border-red-300" };
+
     return (
-      <div key={key} className={`rounded-xl border transition-all ${cardBorder} ${isIncomplete ? 'opacity-70' : ''}`} style={{ background: cardBg }}>
+      <div key={key} className={`rounded-xl border border-l-4 transition-all ${cardBorder} ${accent} ${isIncomplete ? 'opacity-80' : ''}`} style={{ background: cardBg }}>
         <div
           className="flex items-start gap-3 px-3 pt-3 pb-2 cursor-pointer"
           onClick={() => setExpandedKey(isExpanded ? null : key)}
@@ -872,6 +1083,9 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-sm font-semibold text-slate-900 font-mono">{result.lender.lender_name}</span>
+              <span className={`text-[10px] font-mono font-bold uppercase tracking-wider border rounded px-1.5 py-0.5 ${statusPill.cls}`}>
+                {statusPill.text}
+              </span>
               {result.lender.specialty && (
                 <span className={`text-xs font-mono border rounded px-1.5 py-0.5 ${specColor}`}>
                   {result.lender.specialty}
@@ -915,17 +1129,28 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
           <span className="text-gray-600 text-xs flex-shrink-0 mt-1">{isExpanded ? "▲" : "▼"}</span>
         </div>
 
-        {/* Recommend toggle — UW selects which matches to send to admin for review */}
+        {/* Action row — Incomplete cards route straight to that lender's
+            guidelines editor; scored cards get the recommend-to-admin toggle. */}
         <div className="flex items-center gap-2 px-3 pb-3">
-          <button
-            onClick={() => toggleRecommended(result.lender)}
-            className={`flex-1 py-1.5 text-xs font-mono font-bold uppercase tracking-wider rounded border transition-all ${decision === "approved"
-                ? "bg-emerald-600 border-emerald-600 text-white"
-                : "border-emerald-300 text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-500"
-              }`}
-          >
-            {decision === "approved" ? "★ Recommended — click to remove" : "★ Recommend to Admin"}
-          </button>
+          {isIncomplete ? (
+            <Link
+              href={guidelinesHref(result.lender.lender_name)}
+              onClick={(e) => e.stopPropagation()}
+              className="flex-1 py-1.5 text-xs font-mono font-bold uppercase tracking-wider rounded border border-slate-300 text-slate-600 hover:bg-slate-100 hover:text-slate-800 hover:border-slate-400 transition-all text-center"
+            >
+              + Add guidelines
+            </Link>
+          ) : (
+            <button
+              onClick={() => toggleRecommended(result.lender)}
+              className={`flex-1 py-1.5 text-xs font-mono font-bold uppercase tracking-wider rounded border transition-all ${decision === "approved"
+                  ? "bg-emerald-600 border-emerald-600 text-white"
+                  : "border-emerald-300 text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-500"
+                }`}
+            >
+              {decision === "approved" ? "★ Recommended — click to remove" : "★ Recommend to Admin"}
+            </button>
+          )}
         </div>
 
         {isExpanded && (

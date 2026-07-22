@@ -19,8 +19,8 @@ export const PIPELINE_STEPS: { status: LoanStatus; label: string; shortLabel: st
   { status: "documents_received", label: "Documents Received", shortLabel: "Docs In" },
   { status: "under_review", label: "Under Review", shortLabel: "In Review" },
   { status: "lender_matched", label: "Lender Matched", shortLabel: "Matched" },
-  { status: "consulting_program", label: "Consulting Program", shortLabel: "Consulting" },
   { status: "funded", label: "Loan Funded", shortLabel: "Funded" },
+  { status: "consulting_program", label: "Consulting Program", shortLabel: "Consulting" },
 ];
 
 const DECLINED_STATUS: LoanStatus = "declined";

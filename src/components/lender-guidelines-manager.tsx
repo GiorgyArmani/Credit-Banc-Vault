@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "@/lib/toast";
 import { LOAN_TYPES } from "@/data/loan-types";
@@ -44,6 +44,22 @@ interface Lender {
 // Guidelines should be re-checked against the lender twice a year; past this we
 // flag the card as due for review.
 const REVIEW_INTERVAL_MS = 1000 * 60 * 60 * 24 * 183; // ~6 months
+
+// Mirror of hasMinViableGuidelines() in lender-match.tsx — a program row counts
+// as "complete" once it carries at least ONE real underwriting threshold (FICO,
+// revenue, time-in-business, or a funding ceiling). Keep these two definitions
+// in sync so this dashboard's "missing" count matches exactly what the matcher
+// drops into its "Incomplete Guidelines" bucket.
+function programComplete(
+  p: Pick<Lender, "min_fico" | "avg_monthly_revenue" | "time_in_business_months" | "max_funding">
+): boolean {
+  return (p.min_fico ?? 0) > 0
+    || (p.avg_monthly_revenue ?? 0) > 0
+    || (p.time_in_business_months ?? 0) > 0
+    || (Number(p.max_funding) || 0) > 0;
+}
+
+type StatusFilter = "all" | "complete" | "missing" | "due";
 
 interface GroupedLender {
   name: string;
@@ -90,6 +106,7 @@ export default function LenderGuidelinesManager() {
   const [lenders, setLenders] = useState<Lender[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [editingGroup, setEditingGroup] = useState<EditingGroup | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -110,7 +127,7 @@ export default function LenderGuidelinesManager() {
     setLoading(false);
   }
 
-  const groupedLenders = useMemo(() => {
+  const allGroups = useMemo(() => {
     const groups: Record<string, GroupedLender> = {};
     lenders.forEach(l => {
       if (!groups[l.lender_name]) {
@@ -118,12 +135,74 @@ export default function LenderGuidelinesManager() {
       }
       groups[l.lender_name].programs.push(l);
     });
+    return Object.values(groups).sort((a, b) => a.name.localeCompare(b.name));
+  }, [lenders]);
 
-    return Object.values(groups).filter(g =>
-      g.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      g.programs.some(p => (p.specialty || "").toLowerCase().includes(searchTerm.toLowerCase()))
-    ).sort((a, b) => a.name.localeCompare(b.name));
-  }, [lenders, searchTerm]);
+  // Dashboard counters. A lender is "complete" only when every one of its
+  // programs clears programComplete(); a single empty-shell program makes the
+  // whole lender show as missing, since that program would drop into the
+  // matcher's Incomplete bucket.
+  const metrics = useMemo(() => {
+    let completeLenders = 0;
+    let missingLenders = 0;
+    let dueLenders = 0;
+    let totalPrograms = 0;
+    let completePrograms = 0;
+    for (const g of allGroups) {
+      totalPrograms += g.programs.length;
+      completePrograms += g.programs.filter(programComplete).length;
+      if (g.programs.every(programComplete)) completeLenders++;
+      else missingLenders++;
+      if (groupReview(g).isDue) dueLenders++;
+    }
+    return {
+      totalLenders: allGroups.length,
+      totalPrograms,
+      completePrograms,
+      missingPrograms: totalPrograms - completePrograms,
+      completeLenders,
+      missingLenders,
+      dueLenders,
+    };
+    // groupReview is a stable function declaration; safe to omit from deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allGroups]);
+
+  const groupedLenders = useMemo(() => {
+    const term = searchTerm.toLowerCase();
+    return allGroups.filter(g => {
+      const matchesSearch =
+        g.name.toLowerCase().includes(term) ||
+        g.programs.some(p => (p.specialty || "").toLowerCase().includes(term));
+      if (!matchesSearch) return false;
+
+      const allComplete = g.programs.every(programComplete);
+      if (statusFilter === "complete") return allComplete;
+      if (statusFilter === "missing") return !allComplete;
+      if (statusFilter === "due") return groupReview(g).isDue;
+      return true;
+    });
+    // groupReview is a stable function declaration; safe to omit from deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allGroups, searchTerm, statusFilter]);
+
+  // Deep-link: /...lender-guidelines?edit=<lender_name> — used by the "Add
+  // guidelines" shortcut on Incomplete cards in Lender Match — auto-opens that
+  // lender's editor once its rows have loaded. Reads window.location directly so
+  // this page doesn't need a Suspense boundary for useSearchParams. Runs once.
+  const autoEditHandledRef = useRef(false);
+  useEffect(() => {
+    if (autoEditHandledRef.current || loading || lenders.length === 0) return;
+    autoEditHandledRef.current = true;
+    const target = new URLSearchParams(window.location.search).get("edit");
+    if (!target) return;
+    const group = allGroups.find(
+      g => g.name.toLowerCase() === target.toLowerCase()
+    );
+    if (group) startEditing(group);
+    // startEditing is a stable function declaration; safe to omit from deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, lenders, allGroups]);
 
   function startEditing(group: GroupedLender) {
     const progMap: Record<string, Partial<Lender>> = {};
@@ -327,6 +406,59 @@ export default function LenderGuidelinesManager() {
         </button>
       </div>
 
+      {/* Guideline-coverage metrics. The Complete / Missing / Due tiles double as
+          filters — click one to narrow the grid, click again to clear. */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        {([
+          { key: "all", label: "Lenders", value: metrics.totalLenders, sub: `${metrics.totalPrograms} programs`, tone: "slate", filter: "all" as StatusFilter },
+          { key: "programs", label: "Programs", value: metrics.totalPrograms, sub: `${metrics.completePrograms} complete`, tone: "slate", filter: "all" as StatusFilter },
+          { key: "complete", label: "Complete", value: metrics.completeLenders, sub: "all programs set", tone: "emerald", filter: "complete" as StatusFilter },
+          { key: "missing", label: "Missing Guidelines", value: metrics.missingLenders, sub: "needs data", tone: "rose", filter: "missing" as StatusFilter },
+          { key: "due", label: "Due for Review", value: metrics.dueLenders, sub: "6+ months old", tone: "amber", filter: "due" as StatusFilter },
+        ]).map(tile => {
+          const active = statusFilter === tile.filter && tile.filter !== "all";
+          const toneRing: Record<string, string> = {
+            slate: "hover:border-slate-300",
+            emerald: active ? "border-emerald-400 ring-2 ring-emerald-100" : "hover:border-emerald-300",
+            rose: active ? "border-rose-400 ring-2 ring-rose-100" : "hover:border-rose-300",
+            amber: active ? "border-amber-400 ring-2 ring-amber-100" : "hover:border-amber-300",
+          };
+          const toneText: Record<string, string> = {
+            slate: "text-slate-900",
+            emerald: "text-emerald-600",
+            rose: metrics.missingLenders > 0 ? "text-rose-600" : "text-slate-400",
+            amber: metrics.dueLenders > 0 ? "text-amber-600" : "text-slate-400",
+          };
+          const isFilterTile = tile.filter !== "all";
+          return (
+            <button
+              key={tile.key}
+              type="button"
+              onClick={() => isFilterTile && setStatusFilter(active ? "all" : tile.filter)}
+              className={`text-left bg-white border border-slate-200 rounded-xl px-4 py-3 transition-all ${toneRing[tile.tone]} ${isFilterTile ? "cursor-pointer" : "cursor-default"}`}
+            >
+              <div className={`text-2xl font-black tabular-nums ${toneText[tile.tone]}`}>{tile.value}</div>
+              <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mt-0.5">{tile.label}</div>
+              <div className="text-[10px] font-mono text-slate-400 mt-0.5">{tile.sub}</div>
+            </button>
+          );
+        })}
+      </div>
+
+      {statusFilter !== "all" && (
+        <div className="flex items-center gap-2 text-xs">
+          <span className="font-mono text-slate-500">
+            Filtered by <span className="font-bold text-slate-700">{statusFilter}</span> · {groupedLenders.length} shown
+          </span>
+          <button
+            onClick={() => setStatusFilter("all")}
+            className="font-mono text-emerald-600 hover:text-emerald-700 underline"
+          >
+            clear
+          </button>
+        </div>
+      )}
+
       {/* Content Area */}
       <div className="flex-1 overflow-auto">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pb-8">
@@ -337,18 +469,43 @@ export default function LenderGuidelinesManager() {
           ) : (
             groupedLenders.map(group => {
               const review = groupReview(group);
+              const completeCount = group.programs.filter(programComplete).length;
+              const isComplete = completeCount === group.programs.length;
               return (
               <div
                 key={group.name}
-                className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col justify-between hover:border-slate-400 transition-all group"
+                className={`bg-white border rounded-xl p-4 flex flex-col justify-between transition-all group border-l-4 ${
+                  isComplete
+                    ? "border-slate-200 border-l-emerald-400 hover:border-slate-400"
+                    : "border-slate-200 border-l-rose-400 hover:border-rose-300"
+                }`}
               >
                 <div>
                   <div className="flex items-start justify-between">
                     <div className="flex-1 min-w-0">
-                      <h3 className="text-slate-900 font-semibold truncate" title={group.name}>{group.name}</h3>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-slate-900 font-semibold truncate" title={group.name}>{group.name}</h3>
+                        {isComplete ? (
+                          <span className="flex-shrink-0 text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">
+                            Complete
+                          </span>
+                        ) : (
+                          <span className="flex-shrink-0 text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded bg-rose-100 text-rose-700">
+                            {group.programs.length - completeCount} missing
+                          </span>
+                        )}
+                      </div>
                       <div className="flex flex-wrap gap-1 mt-2">
                         {group.programs.map(p => (
-                          <span key={p.id} className="text-[10px] font-mono text-emerald-500 bg-emerald-400/10 border border-emerald-400/20 px-1.5 py-0.5 rounded">
+                          <span
+                            key={p.id}
+                            title={programComplete(p) ? undefined : "No underwriting thresholds set — shows as Incomplete in Lender Match"}
+                            className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
+                              programComplete(p)
+                                ? "text-emerald-500 bg-emerald-400/10 border-emerald-400/20"
+                                : "text-rose-500 bg-rose-400/10 border-rose-400/30"
+                            }`}
+                          >
                             {p.specialty || "General"}
                           </span>
                         ))}
