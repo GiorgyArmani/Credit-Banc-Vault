@@ -11,21 +11,12 @@ import { Textarea } from '@/components/ui/textarea'
 import { Progress } from '@/components/ui/progress'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { NaicsCombobox } from '@/components/ui/naics-combobox'
 import { ArrowLeft, Save, User, Target, DollarSign } from 'lucide-react'
 
 // ----- Cohesive options (same as onboarding) -----
 const YEARS_IN_BUSINESS = [
   'Less than 1 year', '1-2 years', '3-5 years', '6-10 years', 'More than 10 years',
-]
-
-const INDUSTRIES = [
-  'Accommodation and Food Services', 'Administrative and Support Services',
-  'Agriculture, Forestry, Fishing and Hunting', 'Arts, Entertainment, and Recreation',
-  'Construction', 'Educational Services', 'Finance and Insurance',
-  'Health Care and Social Assistance', 'Information', 'Manufacturing',
-  'Mining, Quarrying, and Oil and Gas Extraction', 'Other Services (except Public Administration)',
-  'Professional, Scientific, and Technical Services', 'Real Estate and Rental and Leasing',
-  'Retail Trade', 'Transportation and Warehousing', 'Utilities', 'Wholesale Trade'
 ]
 
 const BUSINESS_MODELS = [
@@ -207,17 +198,12 @@ export function BusinessProfileBuilder({
 
                   <div className="space-y-2">
                     <Label htmlFor="industry">Industry</Label>
-                    <Select
+                    <NaicsCombobox
+                      id="industry"
                       value={profile.industry || ''}
-                      onValueChange={(v) => updateProfile('industry', v)}
-                    >
-                      <SelectTrigger id="industry">
-                        <SelectValue placeholder="Select an option" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {INDUSTRIES.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
+                      onChange={(val) => updateProfile('industry', val)}
+                      placeholder="Select NAICS industry…"
+                    />
                   </div>
                 </div>
 

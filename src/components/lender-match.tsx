@@ -5,6 +5,8 @@ import { useSearchParams, usePathname } from "next/navigation";
 import Link from "next/link";
 import type { DealSummary } from "./bank-analysis";
 import { LOAN_TYPES } from "@/data/loan-types";
+import { NaicsCombobox } from "@/components/ui/naics-combobox";
+import { matchNaics } from "@/data/naics";
 import { createClient } from "@/lib/supabase/client";
 import { notifyAdminsOfLenderMatchSaved } from "@/app/actions/lender-match-notifications";
 import { toast } from "@/lib/toast";
@@ -12,8 +14,14 @@ import { toast } from "@/lib/toast";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Lender {
+  id: string;
   lender_name: string;
   specialty: string | null;
+  /** Optional tier within a specialty. NULL = a single, untiered program. A
+   *  lender offering several tiers of the same product carries one row per tier;
+   *  each is matched independently so a deal can qualify for Tier 3 but not
+   *  Tier 1. */
+  tier_label: string | null;
   min_fico: number | null;
   min_sbss: number | null;
   time_in_business_months: number | null;
@@ -407,12 +415,12 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
     const supabase = createClient();
     const { data } = await supabase
       .from("client_lender_assignments")
-      .select("lender_name, specialty, decision")
+      .select("lender_name, specialty, tier_label, decision")
       .eq("client_id", clientId);
     if (data) {
       const map: Record<string, LenderDecision> = {};
       data.forEach((row: any) => {
-        map[`${row.lender_name}-${row.specialty ?? ""}`] = row.decision;
+        map[`${row.lender_name}-${row.specialty ?? ""}-${row.tier_label ?? ""}`] = row.decision;
       });
       setDecisions(map);
     }
@@ -450,6 +458,10 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
           )
           .map((b) => (b.industry ?? "").trim())
           .find(Boolean) ?? "";
+      const rawIndustry = analysis.industry || client?.industry || primaryBusinessIndustry || "";
+      // Canonicalize to a NAICS title when we can confidently map the stored
+      // value; otherwise keep the raw text so nothing is lost.
+      const naicsIndustry = matchNaics(rawIndustry)?.title ?? rawIndustry;
       const newDeal: DealSummary = {
         fico: analysis.fico || 0,
         tibMonths: analysis.tib_months || 0,
@@ -461,7 +473,7 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
         hasBankruptcy: analysis.has_bankruptcy || false,
         capitalRequested: Number(analysis.capital_requested) || 0,
         state: analysis.company_state || client?.company_state || "",
-        industry: analysis.industry || client?.industry || primaryBusinessIndustry || "",
+        industry: naicsIndustry,
         businessName: analysis.business_name || client?.company_name || "",
         ownerName: analysis.owner_name || client?.client_name || "",
         proposedLoanType: client?.proposed_loan_type || "",
@@ -500,9 +512,11 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
       if (!error && data) {
         // Deduplicate only — no hasGuidelines filter here.
         // Filtering happens in useMemo against the actual loaded deal.
+        // Key includes tier_label so genuine tiers of the same product survive
+        // (a lender with 4 MCA tiers keeps all four); only exact dupes collapse.
         const uniqueMap = new Map<string, Lender>();
         (data as Lender[]).forEach((l) => {
-          const key = `${l.lender_name}-${l.specialty || ""}`;
+          const key = `${l.lender_name}-${l.specialty || ""}-${l.tier_label ?? ""}`;
           if (!uniqueMap.has(key)) uniqueMap.set(key, l);
         });
         setLenderData(Array.from(uniqueMap.values()));
@@ -587,7 +601,8 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
   const shownFlagged = filteredViable.length - shownEligible;
   const shownIncomplete = filteredIncomplete.length;
 
-  const decisionKey = (lender: Lender) => `${lender.lender_name}-${lender.specialty ?? ""}`;
+  const decisionKey = (lender: Lender) =>
+    `${lender.lender_name}-${lender.specialty ?? ""}-${lender.tier_label ?? ""}`;
 
   function setDecision(lender: Lender, next: LenderDecision) {
     const key = decisionKey(lender);
@@ -625,32 +640,32 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
     // Only insert lenders UW recommended (decision === "approved").
     // Skipped/unselected matches are simply not stored — admin sees a clean
     // list of recommendations on their review queue, not every machine match.
-    const rows = Object.entries(decisions)
-      .filter(([, d]) => d === "approved")
-      .map(([key]) => {
-        const dashIdx = key.indexOf("-");
-        const lenderName = key.slice(0, dashIdx);
-        const specialty = key.slice(dashIdx + 1) || null;
-        const matchedLender = lenderData.find(
-          (l) => l.lender_name === lenderName && (l.specialty ?? "") === (specialty ?? "")
-        );
-        return {
-          client_id: selectedClientId,
-          lender_name: lenderName,
-          specialty,
-          decision: "approved" as const,
-          payment_type: matchedLender?.payment_type ?? null,
-          min_funding: matchedLender?.min_funding ?? null,
-          max_funding: matchedLender?.max_funding ?? null,
-          assigned_at: new Date().toISOString(),
-          source: "match_tool",
-        };
-      });
+    // Iterate lenderData directly (rather than re-parsing the composite decision
+    // key) so tier_label / lender names containing "-" stay intact, and each
+    // recommended tier is snapshotted as its own row.
+    const assignedAt = new Date().toISOString();
+    const rows = lenderData
+      .filter((l) => decisions[decisionKey(l)] === "approved")
+      .map((l) => ({
+        client_id: selectedClientId,
+        lender_name: l.lender_name,
+        specialty: l.specialty ?? null,
+        tier_label: l.tier_label ?? null,
+        decision: "approved" as const,
+        payment_type: l.payment_type ?? null,
+        min_funding: l.min_funding ?? null,
+        max_funding: l.max_funding ?? null,
+        assigned_at: assignedAt,
+        source: "match_tool",
+      }));
 
     if (rows.length > 0) {
       await supabase.from("client_lender_assignments").insert(rows);
       const recommendedNames = rows
-        .map((r) => `${r.lender_name}${r.specialty ? ` (${r.specialty})` : ""}`)
+        .map((r) => {
+          const prog = [r.specialty, r.tier_label].filter(Boolean).join(" · ");
+          return `${r.lender_name}${prog ? ` (${prog})` : ""}`;
+        })
         .join(", ");
       await supabase.from("loan_status_history").insert({
         client_vault_id: selectedClientId,
@@ -844,15 +859,14 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
           </div>
           <div>
             <label className="text-xs text-gray-500 uppercase tracking-wider block mb-1">Industry / Business Type</label>
-            <input
-              type="text"
+            <NaicsCombobox
               value={filterIndustry}
-              onChange={(e) => {
-                setFilterIndustry(e.target.value);
-                setDeal((prev) => ({ ...prev, industry: e.target.value }));
+              onChange={(val) => {
+                setFilterIndustry(val);
+                setDeal((prev) => ({ ...prev, industry: val }));
               }}
-              placeholder="e.g. Restaurant, Trucking..."
-              className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1.5 text-sm font-mono text-slate-900 focus:outline-none focus:border-emerald-500 transition-colors"
+              placeholder="Select NAICS industry…"
+              triggerClassName="bg-slate-50 py-1.5 rounded"
             />
           </div>
         </div>
@@ -1089,6 +1103,11 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
               {result.lender.specialty && (
                 <span className={`text-xs font-mono border rounded px-1.5 py-0.5 ${specColor}`}>
                   {result.lender.specialty}
+                </span>
+              )}
+              {result.lender.tier_label && (
+                <span className="text-xs font-mono border rounded px-1.5 py-0.5 bg-slate-100 text-slate-600 border-slate-300">
+                  {result.lender.tier_label}
                 </span>
               )}
               {(minF || maxF) && (

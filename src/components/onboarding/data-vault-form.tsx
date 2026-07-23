@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { SignaturePad } from "@/components/ui/signature-pad"
+import { NaicsCombobox } from "@/components/ui/naics-combobox"
 import { Loader2, Lock, Sparkles, ShieldCheck } from "lucide-react"
 import { toast } from "@/lib/toast"
 import clsx from "clsx"
@@ -194,13 +195,12 @@ export function DataVaultForm({ onComplete }: DataVaultFormProps) {
                         >
                             Industry <span className="text-red-400">*</span>
                         </Label>
-                        <Input
+                        <NaicsCombobox
                             id="industry"
-                            placeholder="e.g., Healthcare, Retail, Technology"
                             value={formData.industry}
-                            onChange={(e) => setFormData(prev => ({ ...prev, industry: e.target.value }))}
-                            required
-                            className="h-14 rounded-xl border-emerald-100 bg-white/50 focus-visible:ring-emerald-500/20 font-bold text-emerald-950 placeholder:text-emerald-950/20 shadow-sm"
+                            onChange={(val) => setFormData(prev => ({ ...prev, industry: val }))}
+                            placeholder="Select your NAICS industry…"
+                            triggerClassName="h-14 rounded-xl border-emerald-100 bg-white/50 font-bold text-emerald-950 shadow-sm"
                         />
                     </div>
 

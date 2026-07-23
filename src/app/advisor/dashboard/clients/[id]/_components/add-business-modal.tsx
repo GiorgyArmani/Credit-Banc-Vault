@@ -6,6 +6,7 @@ import { toast } from "@/lib/toast";
 import { createClient } from "@/lib/supabase/client";
 import { CLIENT_SCOPED_DOC_CODES } from "@/lib/document-scope";
 import { FUNDING_OPTIONS } from "@/data/loan-types";
+import { formatPhoneInput } from "@/lib/phone";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface AddBusinessModalProps {
@@ -287,7 +288,7 @@ export function AddBusinessModal({ client_vault_id, open, on_close, on_created }
                 <input type="number" value={employees_count} onChange={(e) => set_employees_count(e.target.value)} className={input_cls} />
               </Field>
               <Field label="Business Phone">
-                <input type="tel" value={phone} onChange={(e) => set_phone(e.target.value)} className={input_cls} />
+                <input type="tel" inputMode="tel" maxLength={14} value={phone} onChange={(e) => set_phone(formatPhoneInput(e.target.value))} className={input_cls} />
               </Field>
               <div className="md:col-span-2 flex items-center gap-2">
                 <input

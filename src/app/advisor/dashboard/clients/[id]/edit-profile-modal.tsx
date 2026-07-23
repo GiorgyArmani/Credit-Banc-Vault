@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { formatPhoneInput, isValidUsPhone } from "@/lib/phone";
 import { FUNDING_OPTIONS } from "@/data/loan-types";
 import {
     Select,
@@ -61,7 +62,7 @@ const FUNDING_URGENCY = ['Immediately', '1–3 Weeks', '3 Weeks +'];
 const formSchema = z.object({
     client_name: z.string().min(2, "Name must be at least 2 characters"),
     client_email: z.string().email("Invalid email address"),
-    client_phone: z.string().min(7, "Phone number is too short"),
+    client_phone: z.string().refine(isValidUsPhone, "Enter a valid 10-digit US phone number"),
     company_name: z.string().min(1, "Company name is required"),
     company_city: z.string().min(1, "City is required"),
     company_state: z.string().min(1, "State is required"),
@@ -233,7 +234,15 @@ export function EditProfileModal({ isOpen, onClose, onSuccess, clientData, busin
                                         <FormItem>
                                             <FormLabel className="text-[10px] font-black uppercase tracking-widest text-emerald-900/60 ml-1">Phone Number</FormLabel>
                                             <FormControl>
-                                                <Input {...field} className="h-12 rounded-xl border-emerald-100 bg-emerald-50/30 focus:bg-white font-bold" />
+                                                <Input
+                                                    {...field}
+                                                    type="tel"
+                                                    inputMode="tel"
+                                                    maxLength={14}
+                                                    value={formatPhoneInput(field.value ?? "")}
+                                                    onChange={(e) => field.onChange(formatPhoneInput(e.target.value))}
+                                                    className="h-12 rounded-xl border-emerald-100 bg-emerald-50/30 focus:bg-white font-bold"
+                                                />
                                             </FormControl>
                                             <FormMessage />
                                         </FormItem>

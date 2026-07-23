@@ -26,6 +26,7 @@ interface LenderGuideline {
     id: string;
     lender_name: string;
     specialty: string | null;
+    tier_label: string | null;
     payment_type: string | null;
     min_funding: number | null;
     max_funding: number | null;
@@ -36,6 +37,7 @@ interface LenderAssignment {
     client_id: string;
     lender_name: string;
     specialty: string | null;
+    tier_label: string | null;
     decision: 'approved' | 'rejected';
     payment_type: string | null;
     min_funding: number | null;
@@ -124,7 +126,7 @@ export function AdminLenderReviewCard({ clientId }: Props) {
     async function fetch_lender_options() {
         const { data, error } = await supabase
             .from("lender_guidelines")
-            .select("id, lender_name, specialty, payment_type, min_funding, max_funding")
+            .select("id, lender_name, specialty, tier_label, payment_type, min_funding, max_funding")
             .order("lender_name", { ascending: true });
         if (error) {
             console.error("AdminLenderReviewCard lender_guidelines fetch error:", error);
@@ -315,6 +317,11 @@ export function AdminLenderReviewCard({ clientId }: Props) {
                                                                 {lender.specialty}
                                                             </Badge>
                                                         )}
+                                                        {lender.tier_label && (
+                                                            <Badge variant="outline" className="text-[8px] font-black tracking-widest uppercase py-0 px-2 border-slate-300 text-slate-600 bg-slate-100">
+                                                                {lender.tier_label}
+                                                            </Badge>
+                                                        )}
                                                     </div>
                                                     {(lender.min_funding != null || lender.max_funding != null) && (
                                                         <span className="text-[10px] text-slate-400 font-medium">
@@ -389,6 +396,11 @@ export function AdminLenderReviewCard({ clientId }: Props) {
                                                     {a.specialty && (
                                                         <Badge variant="outline" className="text-[8px] font-black tracking-widest uppercase py-0 px-2 border-slate-200 text-slate-500">
                                                             {a.specialty}
+                                                        </Badge>
+                                                    )}
+                                                    {a.tier_label && (
+                                                        <Badge variant="outline" className="text-[8px] font-black tracking-widest uppercase py-0 px-2 border-slate-300 text-slate-600 bg-slate-100">
+                                                            {a.tier_label}
                                                         </Badge>
                                                     )}
                                                     {a.source === 'admin_manual' && (

@@ -21,7 +21,8 @@ import { createClient } from '@supabase/supabase-js';
 import { createClient as createServerSupabaseClient } from '@/lib/supabase/server';
 import { send_client_welcome_email } from '@/lib/email';
 import { syncUnifiedClientData, generateSecurePassword } from '@/lib/user-management';
-import { ghlSearchContacts, ghlUpdateContact, ghlGetContact } from '@/lib/ghl-api';
+import { ghlSearchContacts, ghlFindContacts, ghlUpdateContact, ghlGetContact, extractGhlDuplicateContactId } from '@/lib/ghl-api';
+import { formatPhoneUS, isValidUsPhone, phoneKey, toE164 } from '@/lib/phone';
 import { generateOnboardingMagicLink, pushMagicLinkToGhl } from '@/lib/magic-link';
 import { linkReferralLeadToVault } from '@/lib/affiliates';
 
@@ -177,6 +178,17 @@ export async function POST(request: Request) {
       );
     }
 
+    // Canonicalise the phone once, before the duplicate guard / GHL lookup /
+    // vault write read it. Vault keeps the display form, GHL gets E.164.
+    if (!isValidUsPhone(body.client_phone)) {
+      return NextResponse.json(
+        { success: false, error: 'Please enter a valid 10-digit US phone number.' },
+        { status: 400 }
+      );
+    }
+    body.client_phone = formatPhoneUS(body.client_phone);
+    const client_phone_e164 = toE164(body.client_phone)!;
+
     if (!is_valid_positive_number(body.capital_requested)) {
       return NextResponse.json(
         { success: false, error: 'Funding amount requested must be a number greater than 0' },
@@ -250,12 +262,23 @@ export async function POST(request: Request) {
       // appointment) and round-robin set its owner. Find it, read assignedTo,
       // and resolve the matching active vault advisor. If we can't, we hard
       // block: there is no "unassigned" — the contact already has an owner.
-      const existing = await ghlSearchContacts({
+      const { contacts: existing, searchFailed } = await ghlFindContacts({
         email: body.client_email.toLowerCase(),
         phone: body.client_phone,
         name: client_name,
         locationId: process.env.GHL_LOCATION_ID!,
       });
+
+      // "GHL is down" and "the contact isn't there" both come back empty, but
+      // they need different instructions — telling a setter to go book an
+      // appointment that already exists sends them on a wild goose chase.
+      if (searchFailed) {
+        console.error(`❌ client-signup-speed: setter ${session_user.id} — GHL contact search unavailable for ${body.client_email}`);
+        return NextResponse.json(
+          { success: false, error: 'GoHighLevel is not responding right now, so we can’t confirm the contact’s owner. Wait a moment and try again.' },
+          { status: 503 }
+        );
+      }
 
       if (existing.length === 0) {
         console.error(`❌ client-signup-speed: setter ${session_user.id} — no GHL contact for ${body.client_email}`);
@@ -392,14 +415,15 @@ export async function POST(request: Request) {
         }
       }
 
-      const normalizedPhone = (body.client_phone || '').replace(/\D/g, '');
-      if (normalizedPhone.length >= 10) {
+      // Compared on the 10-digit key so legacy rows in any format still match.
+      const normalizedPhone = phoneKey(body.client_phone);
+      if (normalizedPhone) {
         const { data: phoneCandidates } = await supabase_admin
           .from('client_data_vault')
           .select('id, client_name, client_phone, user_id');
         const phoneDup = (phoneCandidates || []).find(
           (v: { client_phone: string | null; user_id: string | null }) =>
-            (v.client_phone || '').replace(/\D/g, '') === normalizedPhone && v.user_id !== user_id
+            phoneKey(v.client_phone) === normalizedPhone && v.user_id !== user_id
         );
         if (phoneDup) {
           console.warn(`🚫 Duplicate client blocked (phone): ${body.client_phone} already belongs to ${phoneDup.client_name} (${phoneDup.id})`);
@@ -470,7 +494,7 @@ export async function POST(request: Request) {
     const custom_fields = [
       create_custom_field('GHL_CF_CLIENTS_NAME', client_name, 'htTNeG6SjgBb816NXzrM'),
       create_custom_field('GHL_CF_BUSINESS_NAME', body.company_name, '4wCc6YtOB59baJTrMOsZ'),
-      create_custom_field('GHL_CF_CLIENTS_PHONE', body.client_phone, 'BUdnGXCgH53LOYqZdEam'),
+      create_custom_field('GHL_CF_CLIENTS_PHONE', client_phone_e164, 'BUdnGXCgH53LOYqZdEam'),
       create_custom_field('GHL_CF_CLIENT_EMAIL', body.client_email, 'QSNzz62RcqhaEgqyP8hg'),
       create_custom_field('GHL_CF_COMPANY_STATE', body.company_state, 'qjSxhRyhQUzlGkyCHeV4'),
       create_custom_field('GHL_CF_COMPANY_CITY', body.company_city, 'sD6tg1NRCj9uHsc7xdZW'),
@@ -495,18 +519,11 @@ export async function POST(request: Request) {
     const advisor_phone: string | null = advisor_row.phone || null;
 
     console.log('🔍 Searching for existing GHL contact...');
-    // Setters already located the contact above (to read its round-robin owner),
-    // so reuse that id instead of searching again.
-    const existingContacts = setter_ghl_contact_id
-      ? [{ id: setter_ghl_contact_id }]
-      : await ghlSearchContacts({
-          email: body.client_email.toLowerCase(),
-          phone: body.client_phone,
-          name: client_name,
-          locationId: process.env.GHL_LOCATION_ID!
-        });
 
-    let ghl_contact_id: string;
+    // The GHL contact is a mirror, not a prerequisite — a rejected CRM write
+    // must never cost the rep the client they're on the phone with.
+    let ghl_contact_id: string | null = null;
+    let ghl_sync_error: string | null = null;
 
     // The speed form captures a single full name — split it for GHL's
     // first/last fields. Address/state are collected later in onboarding Step 1.
@@ -515,7 +532,7 @@ export async function POST(request: Request) {
       firstName: ghl_first_name || client_name,
       lastName: ghl_last_parts.join(' ') || '',
       email: body.client_email.toLowerCase(),
-      phone: body.client_phone || '',
+      phone: client_phone_e164, // GHL stores E.164 — send it that way or it dedupes badly
       companyName: body.company_name,
       city: body.company_city || '',
       state: body.company_state,
@@ -530,37 +547,54 @@ export async function POST(request: Request) {
       ghl_contact_payload.assignedTo = advisor_ghl_user_id;
     }
 
-    if (existingContacts.length > 0) {
-      ghl_contact_id = existingContacts[0].id;
-      console.log(`✅ Found existing GHL contact: ${ghl_contact_id}`);
-      await ghlUpdateContact(ghl_contact_id, ghl_contact_payload);
-      console.log(`✅ GHL contact updated with speed form data: ${ghl_contact_id}`);
-    } else {
-      console.log('📝 No existing contact found, creating new GHL contact...');
-      try {
-        ghl_contact_id = await ghl_upsert_contact({
-          locationId: process.env.GHL_LOCATION_ID,
-          tags: ['vault-user'],
-          ...ghl_contact_payload,
-        });
-        console.log(`✅ GHL contact created: ${ghl_contact_id}`);
-      } catch (ghl_error: any) {
-        // Same "duplicated contacts" collision handling as the standard flow
-        if (ghl_error.message.includes('duplicated contacts')) {
-          console.log('⚠️ GHL duplicate contact detected. Extracting ID...');
-          const error_json_str = ghl_error.message.split('): ')[1];
-          const error_json = JSON.parse(error_json_str);
-          if (error_json.meta?.contactId) {
-            ghl_contact_id = error_json.meta.contactId;
-            console.log(`✅ Linked to existing GHL contact via error metadata: ${ghl_contact_id}`);
-            await ghlUpdateContact(ghl_contact_id, ghl_contact_payload);
-          } else {
-            throw ghl_error;
-          }
-        } else {
-          throw ghl_error;
+    try {
+      // Setters already located the contact above (to read its round-robin
+      // owner), so reuse that id instead of searching again.
+      const existingContacts = setter_ghl_contact_id
+        ? [{ id: setter_ghl_contact_id }]
+        : await ghlSearchContacts({
+            email: body.client_email.toLowerCase(),
+            phone: body.client_phone,
+            name: client_name,
+            locationId: process.env.GHL_LOCATION_ID!
+          });
+
+      if (existingContacts.length > 0) {
+        ghl_contact_id = existingContacts[0].id;
+        console.log(`✅ Found existing GHL contact: ${ghl_contact_id}`);
+      } else {
+        console.log('📝 No existing contact found, creating new GHL contact...');
+        try {
+          ghl_contact_id = await ghl_upsert_contact({
+            locationId: process.env.GHL_LOCATION_ID,
+            tags: ['vault-user'],
+            ...ghl_contact_payload,
+          });
+          console.log(`✅ GHL contact created: ${ghl_contact_id}`);
+        } catch (ghl_error: any) {
+          // Same "duplicated contacts" collision handling as the standard flow:
+          // GHL hands back the id of the contact we collided with — adopt it.
+          const duplicate_id = extractGhlDuplicateContactId(ghl_error?.message || '');
+          if (!duplicate_id) throw ghl_error;
+          ghl_contact_id = duplicate_id;
+          console.log(`✅ GHL duplicate collision — linked to existing contact: ${ghl_contact_id}`);
         }
       }
+
+      // Sync the form data onto whichever contact we landed on. A rejected
+      // update is not fatal — the id is what keeps the vault linked.
+      if (ghl_contact_id) {
+        try {
+          await ghlUpdateContact(ghl_contact_id, ghl_contact_payload);
+          console.log(`✅ GHL contact updated with speed form data: ${ghl_contact_id}`);
+        } catch (update_err: any) {
+          ghl_sync_error = `Contact ${ghl_contact_id} linked but not updated: ${update_err?.message || update_err}`;
+          console.error(`⚠️ GHL contact update failed (non-fatal): ${ghl_sync_error}`);
+        }
+      }
+    } catch (ghl_step_err: any) {
+      ghl_sync_error = `GHL sync failed during signup: ${ghl_step_err?.message || ghl_step_err}`;
+      console.error(`⚠️ ${ghl_sync_error} — continuing without a GHL contact`);
     }
 
     // ========== STEP 4: SAVE TO CLIENT_DATA_VAULT ==========
@@ -574,8 +608,8 @@ export async function POST(request: Request) {
       advisor_name: advisor_name,
       advisor_id: advisor_id,
       ghl_contact_id: ghl_contact_id || null,
-      ghl_last_sync_at: ghl_contact_id ? now_iso : null,
-      ghl_sync_error: !ghl_contact_id ? 'GHL sync failed during signup' : null,
+      ghl_last_sync_at: ghl_contact_id && !ghl_sync_error ? now_iso : null,
+      ghl_sync_error: ghl_sync_error || (!ghl_contact_id ? 'GHL sync failed during signup' : null),
 
       // Speed-flow control
       signup_flow: 'speed',
@@ -713,14 +747,26 @@ export async function POST(request: Request) {
       ...(credit_tag_map[body.credit_score] ? [credit_tag_map[body.credit_score]] : []),
     ])];
 
-    await ghl_add_tags(ghl_contact_id, tags_to_apply);
-    console.log(`✅ Tags applied to GHL contact: ${tags_to_apply.join(', ')}`);
+    if (ghl_contact_id) {
+      try {
+        await ghl_add_tags(ghl_contact_id, tags_to_apply);
+        console.log(`✅ Tags applied to GHL contact: ${tags_to_apply.join(', ')}`);
+      } catch (tag_err: any) {
+        console.error('⚠️ GHL tag apply failed (non-fatal):', tag_err);
+      }
+    } else {
+      console.warn('⚠️ No GHL contact id — skipping tag apply');
+    }
 
     // ========== STEP 7: MAGIC LINK (the rep shares it during the call) ==========
     const magic_link = await generateOnboardingMagicLink(body.client_email.toLowerCase());
-    if (magic_link) {
-      await pushMagicLinkToGhl(ghl_contact_id, magic_link);
-    } else {
+    if (magic_link && ghl_contact_id) {
+      try {
+        await pushMagicLinkToGhl(ghl_contact_id, magic_link);
+      } catch (link_err: any) {
+        console.error('⚠️ Magic link push to GHL failed (non-fatal):', link_err);
+      }
+    } else if (!magic_link) {
       console.error('⚠️ Magic link generation failed — welcome email will fall back to the login URL');
     }
 

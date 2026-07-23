@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Stepper, { Step, type StepperHandle } from "@/components/ui/stepper";
+import { formatPhoneInput, isValidUsPhone, toE164 } from "@/lib/phone";
 import { CalendarCheck, CheckCircle2, Gift } from "lucide-react";
 import {
   LOAN_AMOUNT_OPTIONS,
@@ -78,7 +79,9 @@ export function ReferralLeadForm({
   const [qualified, setQualified] = useState(false);
 
   const firstName = name.trim().split(/\s+/)[0] || "";
-  const contactValid = !!(phone.trim() && email.trim());
+  // A partial phone is the one thing that breaks the whole downstream chain
+  // (GHL match, SMS, advisor callback), so it gates the step.
+  const contactValid = isValidUsPhone(phone) && !!email.trim();
   const greetingName = firstName ? firstName.charAt(0).toUpperCase() + firstName.slice(1) : "";
 
   // Prefilled GHL booking widget url — GHL fills the booking form from these
@@ -90,7 +93,9 @@ export function ReferralLeadForm({
     const last = rest.join(" ");
     if (last) url.searchParams.set("last_name", last);
     if (email.trim()) url.searchParams.set("email", email.trim().toLowerCase());
-    if (phone.trim()) url.searchParams.set("phone", phone.trim());
+    // GHL's booking widget expects E.164 — hand it the same form we push to the CRM.
+    const e164 = toE164(phone);
+    if (e164) url.searchParams.set("phone", e164);
     return url.toString();
   }, [name, email, phone]);
 
@@ -397,10 +402,12 @@ export function ReferralLeadForm({
             <Input
               id="ref-phone"
               type="tel"
+              inputMode="tel"
+              maxLength={14}
               placeholder="(555) 555-5555"
               required
               value={phone}
-              onChange={(e) => setPhone(e.target.value)}
+              onChange={(e) => setPhone(formatPhoneInput(e.target.value))}
               className={inputClass}
             />
           </div>

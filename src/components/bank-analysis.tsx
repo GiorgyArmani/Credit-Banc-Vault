@@ -6,6 +6,7 @@ import LenderMatch from "./lender-match";
 import { createClient } from "@/lib/supabase/client";
 import BankAnalysisPDF, { type BankAnalysisPDFData } from "./pdf/bank-analysis-pdf";
 import { LOAN_TYPES } from "@/data/loan-types";
+import { NaicsCombobox } from "@/components/ui/naics-combobox";
 import { toast } from "@/lib/toast";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -1901,7 +1902,7 @@ export default function BankAnalysis() {
                   </div>
                   <div>
                     <label className="text-[9px] text-slate-500 uppercase tracking-widest block mb-1.5">Industry</label>
-                    <TextInput value={industry} onChange={setIndustry} placeholder="Industry type..." />
+                    <NaicsCombobox value={industry} onChange={(val) => setIndustry(val)} placeholder="Select NAICS industry…" triggerClassName="text-sm" />
                   </div>
                   <div>
                     <label className="text-[9px] text-slate-500 uppercase tracking-widest block mb-1.5">Proposed Loan Type</label>

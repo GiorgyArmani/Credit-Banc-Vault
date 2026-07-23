@@ -2,6 +2,7 @@
 
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
+import { formatPhoneInput } from "@/lib/phone";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -247,9 +248,11 @@ export function AdvisorSignUpForm({
                   <Input
                     id="phone"
                     type="tel"
-                    placeholder="+1 (555) 000-0000"
+                    inputMode="tel"
+                    maxLength={14}
+                    placeholder="(555) 000-0000"
                     value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
+                    onChange={(e) => setPhone(formatPhoneInput(e.target.value))}
                     className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
                   />
                 </div>

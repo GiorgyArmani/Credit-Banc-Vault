@@ -14,6 +14,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ghlUpsertContact, ghlResolveFieldId } from "@/lib/ghl-api";
 import { evaluatePrequal } from "@/lib/referral-prequal";
+import { formatPhoneUS, isValidUsPhone, toE164 } from "@/lib/phone";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,7 +36,7 @@ export async function POST(
     const [firstName, ...restName] = fullName.split(/\s+/);
     const lastName = restName.join(" ");
     const email = String(body.email || "").trim().toLowerCase();
-    const phone = String(body.phone || "").trim();
+    const rawPhone = String(body.phone || "").trim();
     const businessName = String(body.business_name || "").trim();
 
     const loanAmount = String(body.loan_amount || "").trim();
@@ -43,12 +44,22 @@ export async function POST(
     const monthlyRevenue = String(body.monthly_revenue || "").trim();
     const timeInBusiness = String(body.time_in_business || "").trim();
 
-    if (!firstName || !email || !phone) {
+    if (!firstName || !email || !rawPhone) {
       return NextResponse.json(
         { message: "Please provide your name, email, and phone." },
         { status: 400 }
       );
     }
+    // Public form — sanitize before anything is stored or pushed to GHL, so a
+    // referred lead lines up with the vault client it later becomes.
+    if (!isValidUsPhone(rawPhone)) {
+      return NextResponse.json(
+        { message: "Please enter a valid 10-digit US phone number." },
+        { status: 400 }
+      );
+    }
+    const phone = formatPhoneUS(rawPhone);
+    const phoneE164 = toE164(rawPhone)!;
     if (!loanAmount || !ficoBand || !monthlyRevenue || !timeInBusiness) {
       return NextResponse.json(
         { message: "Please answer all the pre-qualification questions." },
@@ -87,7 +98,6 @@ export async function POST(
     ]);
     const isDuplicate = Boolean(existingLead || existingClient);
 
-    const normalizedPhone = phone.replace(/\D/g, "");
     const answerCols = {
       loan_amount: loanAmount,
       fico_band: ficoBand,
@@ -103,7 +113,7 @@ export async function POST(
           first_name: firstName,
           last_name: lastName || null,
           email,
-          phone: phone || null,
+          phone,
           business_name: businessName || null,
           status: "disqualified",
           qualified: false,
@@ -144,7 +154,7 @@ export async function POST(
           lastName: lastName || null,
           name: fullName,
           email,
-          phone: phone || null,
+          phone: phoneE164,
           companyName: businessName || null,
           country: "US",
           locationId,
@@ -164,7 +174,7 @@ export async function POST(
       first_name: firstName,
       last_name: lastName || null,
       email,
-      phone: normalizedPhone.length >= 10 ? phone : phone || null,
+      phone,
       business_name: businessName || null,
       status: "qualified",
       qualified: true,

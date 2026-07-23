@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
 import { ghlAddTags, ghlUpdateContact } from "@/lib/ghl-api";
+import { formatPhoneUS, isValidUsPhone, toE164 } from "@/lib/phone";
 import { syncUnifiedClientData } from "@/lib/user-management";
 import { updateLoanStatus } from "@/app/actions/pipeline";
 import { ghlSyncDocument } from "@/lib/ghl-document-sync";
@@ -515,6 +516,15 @@ export async function updateClientProfile(clientId: string, data: any) {
         const supabaseAdmin = createAdminClient();
         const newEmail = data.client_email.trim().toLowerCase();
 
+        // Canonicalise the phone the same way signup does: display form in the
+        // vault, E.164 to GHL. The client-side schema already rejects partials,
+        // so anything invalid here came from a non-form caller.
+        if (!isValidUsPhone(data.client_phone)) {
+            throw new Error("Enter a valid 10-digit US phone number.");
+        }
+        const newPhone = formatPhoneUS(data.client_phone);
+        const newPhoneE164 = toE164(newPhone)!;
+
         // 2b. Pre-flight: check if the new email is already taken by a DIFFERENT auth user
         const { data: existingAuthUsers } = await supabaseAdmin.auth.admin.listUsers({
             perPage: 1000,
@@ -534,7 +544,7 @@ export async function updateClientProfile(clientId: string, data: any) {
             .update({
                 client_name: data.client_name,
                 client_email: newEmail,
-                client_phone: data.client_phone,
+                client_phone: newPhone,
                 company_name: data.company_name,
                 company_city: data.company_city,
                 company_state: data.company_state,
@@ -564,7 +574,7 @@ export async function updateClientProfile(clientId: string, data: any) {
             email: newEmail,
             clientName: data.client_name,
             companyName: data.company_name,
-            phone: data.client_phone,
+            phone: newPhone,
             city: data.company_city,
             state: data.company_state,
             zipCode: data.company_zip_code
@@ -593,7 +603,7 @@ export async function updateClientProfile(clientId: string, data: any) {
                     firstName: data.client_name.split(' ')[0],
                     lastName: data.client_name.split(' ').slice(1).join(' ') || '',
                     email: newEmail,
-                    phone: data.client_phone,
+                    phone: newPhoneE164,
                     companyName: data.company_name,
                     city: data.company_city,
                     state: data.company_state,
@@ -605,19 +615,20 @@ export async function updateClientProfile(clientId: string, data: any) {
                     ghlError.message.includes("duplicated contacts");
 
                 if (isDuplicateEmailError) {
-                    // Retry without the email field — update everything else
-                    console.warn("[GHL] Email conflict on update — retrying without email field.");
+                    // Retry without the identity fields — email AND phone are both
+                    // dedupe keys in GHL, so dropping only the email still collides
+                    // when it's the phone that belongs to another contact.
+                    console.warn("[GHL] Duplicate conflict on update — retrying without email/phone.");
                     try {
                         await ghlUpdateContact(client.ghl_contact_id, {
                             firstName: data.client_name.split(' ')[0],
                             lastName: data.client_name.split(' ').slice(1).join(' ') || '',
-                            phone: data.client_phone,
                             companyName: data.company_name,
                             city: data.company_city,
                             state: data.company_state,
                             postalCode: data.company_zip_code,
                         });
-                        console.warn("[GHL] Contact updated without email (email conflict in GHL).");
+                        console.warn("[GHL] Contact updated without email/phone (duplicate conflict in GHL).");
                     } catch (retryError) {
                         console.error("GHL retry also failed (non-fatal):", retryError);
                     }
@@ -741,12 +752,21 @@ export async function updateBusinessProfile(clientId: string, businessProfileId:
         // 3. Shared client identity → client_data_vault. Email change is
         //    conflict-checked + synced to auth, mirroring updateClientProfile.
         const newEmail = (data.client_email || "").trim().toLowerCase();
+        // Same phone contract as updateClientProfile: display form stored,
+        // E.164 pushed to GHL. Only touch it when a value was actually sent.
         const identityUpdate: any = {
             client_name: data.client_name,
-            client_phone: data.client_phone,
             credit_score: data.credit_score,
             updated_at: new Date().toISOString(),
         };
+        let identityPhoneE164: string | null = null;
+        if (data.client_phone) {
+            if (!isValidUsPhone(data.client_phone)) {
+                throw new Error("Enter a valid 10-digit US phone number.");
+            }
+            identityUpdate.client_phone = formatPhoneUS(data.client_phone);
+            identityPhoneE164 = toE164(data.client_phone);
+        }
         let emailChanged = false;
         if (newEmail) {
             const { data: vaultRow } = await supabaseAdmin
@@ -778,7 +798,7 @@ export async function updateBusinessProfile(clientId: string, businessProfileId:
                     firstName: (data.client_name || "").split(" ")[0],
                     lastName: (data.client_name || "").split(" ").slice(1).join(" ") || "",
                     ...(emailChanged ? { email: newEmail } : {}),
-                    phone: data.client_phone,
+                    ...(identityPhoneE164 ? { phone: identityPhoneE164 } : {}),
                 });
             } catch (ghlError) {
                 console.error("GHL identity sync (non-fatal):", ghlError);

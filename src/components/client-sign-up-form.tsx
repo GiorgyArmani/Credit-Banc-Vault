@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useRouter, usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { formatPhoneInput, isValidUsPhone } from "@/lib/phone";
 import { ReferralPartnerSelect } from "@/components/referral-partner-select";
 import {
   ChevronRight,
@@ -564,6 +565,12 @@ export default function ClientSignupForm() {
         throw new Error(`Please complete all required fields: ${missing.join(", ")}.`);
       }
 
+      // The phone is the client's SMS channel and the key we match GHL contacts
+      // on — a partial number breaks both, so it never reaches the server.
+      if (!isValidUsPhone(client_phone)) {
+        throw new Error("Enter a valid 10-digit US phone number.");
+      }
+
       // Require at least one requested document. Creating a vault with an empty
       // request leaves the client with nothing to upload and produces the
       // "empty doc request" clients — block it at the source.
@@ -905,8 +912,10 @@ export default function ClientSignupForm() {
                       <Input
                         id="client_phone"
                         type="tel"
+                        inputMode="tel"
+                        maxLength={14}
                         value={client_phone}
-                        onChange={(e) => set_client_phone(e.target.value)}
+                        onChange={(e) => set_client_phone(formatPhoneInput(e.target.value))}
                         className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
                         placeholder="(555) 123-4567"
                         required

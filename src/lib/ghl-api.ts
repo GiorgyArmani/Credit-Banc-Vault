@@ -1,4 +1,6 @@
 // src/lib/ghl.ts
+import { phoneKey as normalizePhone } from "./phone";
+
 const BASE = process.env.GHL_BASE ?? "https://services.leadconnectorhq.com";
 
 function authHeaders() {
@@ -168,58 +170,145 @@ export async function ghlRemoveContactFollowers(contactId: string, followers: st
 }
 
 /**
- * Search for existing contacts in GHL by email, phone, or name
- * This is used to find contacts that were added in bulk before vault account creation
+ * Last 10 digits of a phone number — the only form that compares reliably.
+ * The vault stores the display form ("(555) 123-4567") while GHL stores E.164
+ * ("+15551234567"), so a raw string compare never matches.
+ */
+export { normalizePhone };
+
+/**
+ * One page of GHL's fuzzy contact search, unfiltered.
+ * GHL's own timeout on this endpoint is 30s and it answers with a 400 when it
+ * trips — long enough to stall a signup the advisor is watching, so we give up
+ * first and let the caller move on.
+ */
+async function ghlQueryContacts(locationId: string, query: string): Promise<any[]> {
+  const res = await fetch(
+    `${BASE}/contacts/?locationId=${locationId}&query=${encodeURIComponent(query)}`,
+    { method: "GET", headers: authHeaders(), signal: AbortSignal.timeout(CONTACT_SEARCH_TIMEOUT_MS) }
+  );
+  const data = await handle(res);
+  // API returns { contacts: [...] }
+  return data?.contacts || [];
+}
+
+const CONTACT_SEARCH_TIMEOUT_MS = 12_000;
+
+export type GhlContactMatch = { id: string; email?: string; phone?: string; contactName?: string };
+
+/**
+ * Search for existing contacts in GHL by email, phone, or name.
+ * This is used to find contacts that were added in bulk before vault account
+ * creation — typically a pre-qualified lead the setter already spoke to.
+ *
+ * GHL only takes ONE query string, so we search email first and fall back to
+ * phone when that finds nothing. Skipping the phone pass is what used to push
+ * pre-qualified contacts (same phone, different email) down the "create" path,
+ * where GHL rejects the write with a duplicated-contacts 400.
+ *
+ * Returns `searchFailed` so callers that treat "no contact" as a hard block can
+ * tell an empty CRM from an unreachable one — GHL times this endpoint out often
+ * enough that the difference matters to the message an advisor sees.
+ *
  * @param query - Search criteria (email is the most reliable)
- * @returns Array of matching contacts with their IDs
+ */
+export async function ghlFindContacts(query: {
+  email?: string;
+  phone?: string;
+  name?: string;
+  locationId: string;
+}): Promise<{ contacts: GhlContactMatch[]; searchFailed: boolean }> {
+  const { email, phone, name, locationId } = query;
+  const normalizedPhone = normalizePhone(phone);
+
+  // Try each identifier on its own — most unique first — and stop at the first
+  // one that produces a verified match.
+  const searchTerms = [
+    email || null,
+    normalizedPhone.length >= 10 ? normalizedPhone : null,
+    name || null,
+  ].filter((t): t is string => !!t);
+
+  if (searchTerms.length === 0) {
+    return { contacts: [], searchFailed: false };
+  }
+
+  const matches = (contact: any): boolean => {
+    if (email && contact.email?.toLowerCase() === email.toLowerCase()) return true;
+    if (normalizedPhone.length >= 10 && normalizePhone(contact.phone) === normalizedPhone) return true;
+    if (name && contact.contactName?.toLowerCase().includes(name.toLowerCase())) return true;
+    return false;
+  };
+
+  // Each term is tried independently: a failed email lookup must not cost us
+  // the phone lookup behind it.
+  let failures = 0;
+  for (const term of searchTerms) {
+    let contacts: any[];
+    try {
+      contacts = await ghlQueryContacts(locationId, term);
+    } catch (error: any) {
+      failures++;
+      console.error(`[ghl] contact search failed for "${term}":`, error?.message || error);
+      continue;
+    }
+
+    // GHL search is fuzzy, so we verify every hit before trusting it.
+    const verified = contacts.filter(matches);
+    if (verified.length === 0) continue;
+
+    return {
+      contacts: verified.map((contact: any) => ({
+        id: contact.id,
+        email: contact.email,
+        phone: contact.phone,
+        contactName: contact.contactName,
+      })),
+      searchFailed: false,
+    };
+  }
+
+  const searchFailed = failures === searchTerms.length;
+  if (searchFailed) {
+    console.error(`[ghl] contact search unavailable — all ${failures} lookup(s) failed`);
+  }
+  return { contacts: [], searchFailed };
+}
+
+/**
+ * Contacts-only wrapper around {@link ghlFindContacts} for callers that treat a
+ * failed search the same as an empty one — they fall back to /contacts/upsert,
+ * which dedupes on email/phone server-side, so a missed match can't strand a
+ * duplicate contact.
  */
 export async function ghlSearchContacts(query: {
   email?: string;
   phone?: string;
   name?: string;
   locationId: string;
-}): Promise<Array<{ id: string; email?: string; phone?: string; contactName?: string }>> {
-  const { email, phone, name, locationId } = query;
+}): Promise<GhlContactMatch[]> {
+  const { contacts } = await ghlFindContacts(query);
+  return contacts;
+}
 
-  // Build search query - prioritize email as it's the most unique identifier
-  const searchQuery = email || phone || name;
-
-  if (!searchQuery) {
-    return [];
-  }
-
+/**
+ * Pull the existing contact id out of GHL's "duplicated contacts" 400.
+ * GHL answers a colliding create with
+ *   { message: "...duplicated contacts...", meta: { contactId, matchingField } }
+ * wrapped in whatever prefix the caller's fetch helper added, so we scan for
+ * the JSON body rather than assuming a delimiter.
+ * Returns null when the error is something else.
+ */
+export function extractGhlDuplicateContactId(message: string): string | null {
+  if (!message || !message.toLowerCase().includes('duplicated contacts')) return null;
+  const start = message.indexOf('{');
+  if (start === -1) return null;
   try {
-    const res = await fetch(`${BASE}/contacts/?locationId=${locationId}&query=${encodeURIComponent(searchQuery)}`, {
-      method: "GET",
-      headers: authHeaders(),
-    });
-
-    const data = await handle(res);
-
-    // API returns { contacts: [...] }
-    const contacts = data?.contacts || [];
-
-    // Filter results to find exact matches
-    // GHL search can be fuzzy, so we verify the match
-    return contacts.filter((contact: any) => {
-      if (email && contact.email?.toLowerCase() === email.toLowerCase()) {
-        return true;
-      }
-      if (phone && contact.phone === phone) {
-        return true;
-      }
-      if (name && contact.contactName?.toLowerCase().includes(name.toLowerCase())) {
-        return true;
-      }
-      return false;
-    }).map((contact: any) => ({
-      id: contact.id,
-      email: contact.email,
-      phone: contact.phone,
-      contactName: contact.contactName
-    }));
-  } catch (error) {
-    console.error('Error searching GHL contacts:', error);
-    return []; // Return empty array on error to allow fallback to upsert
+    const parsed = JSON.parse(message.slice(start));
+    return parsed?.meta?.contactId || parsed?.meta?.contact?.id || null;
+  } catch {
+    // Fall back to a direct scan — the body may be truncated or double-wrapped.
+    const m = message.match(/"contactId"\s*:\s*"([^"]+)"/);
+    return m ? m[1] : null;
   }
 }

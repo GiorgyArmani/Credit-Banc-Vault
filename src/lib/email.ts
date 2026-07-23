@@ -2873,7 +2873,7 @@ export function generate_outstanding_docs_reminder_html(data: OutstandingDocsRem
 </html>`;
 }
 
-function escape_html(value: string): string {
+export function escape_html(value: string): string {
   return String(value)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")

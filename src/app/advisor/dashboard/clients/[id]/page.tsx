@@ -76,6 +76,13 @@ import { SubmitUnderwritingCTA } from "./_components/submit-underwriting-cta";
 import { ClientFollowersCard } from "./_components/client-followers-card";
 import { listClientFollowers, type FollowerRow } from "./follower-actions";
 import { ClientNotesCard, type FileNote } from "./_components/client-notes-card";
+// M2 / Communications Hub — hidden until the outbound-email identity question is
+// settled (advisors sit on creditbanc.io, Mailgun sends from creditbanc.net, and
+// creditbanc.io is at DMARC p=quarantine, so "from the advisor" would be
+// spam-foldered until creditbanc.io is added as a Mailgun sending domain).
+// Everything behind this — table, adapters, webhooks — is built and inert; only
+// the entry point is withdrawn. Restore both this import and the section below.
+// import { CommunicationsTimeline } from "./_components/communications-timeline";
 import { AdminLenderReviewCard } from "@/components/admin/admin-lender-review-card";
 import { CollapsibleSection, broadcast_toggle_all } from "./_components/collapsible-section";
 import { isClientScopedDoc, matchesActiveBusiness, normalizeSupabaseJoin } from "@/lib/document-scope";
@@ -2216,6 +2223,35 @@ export default function AdvisorClientDetailsPage() {
                         <AdminLenderReviewCard clientId={client_profile.id} />
                     </CollapsibleSection>
                 )}
+
+                {/* ── Contact history (calls / texts / emails) ───────────
+                    HIDDEN — M2 / Communications Hub. Contact WITH the client, as
+                    opposed to the staff-to-staff notes in the Internal
+                    Communication panel below. Self-fetches its own rows; logging
+                    one refreshes the activity-age badge, since reaching a client
+                    is what keeps a file from going stale.
+
+                    Withdrawn from the page until the sending identity is decided
+                    (see the import note above). Uncomment this block and its
+                    import to bring it back — nothing else needs changing.
+
+                <CollapsibleSection
+                    clientId={client_profile.id}
+                    slug="contact-history"
+                    title="Contact History"
+                    summary="Calls, texts & emails with the client"
+                    defaultOpen
+                >
+                    <CommunicationsTimeline
+                        client_id={client_profile.id}
+                        client_name={client_profile.client_name}
+                        client_phone={client_profile.client_phone}
+                        client_email={client_profile.client_email}
+                        business_profile_id={active_business_id}
+                        on_logged={() => set_last_activity_at(new Date().toISOString())}
+                    />
+                </CollapsibleSection>
+                */}
 
                 {/* ── Docs + Communication 2-col grid ───────────────── */}
                 <CollapsibleSection

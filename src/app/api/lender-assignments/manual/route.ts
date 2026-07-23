@@ -49,7 +49,7 @@ export async function POST(request: Request) {
 
     const { data: guideline, error: guideline_error } = await supabase_admin
       .from("lender_guidelines")
-      .select("id, lender_name, specialty, payment_type, min_funding, max_funding")
+      .select("id, lender_name, specialty, tier_label, payment_type, min_funding, max_funding")
       .eq("id", lender_guideline_id)
       .single();
     if (guideline_error || !guideline) {
@@ -82,6 +82,7 @@ export async function POST(request: Request) {
         business_profile_id,
         lender_name: guideline.lender_name,
         specialty: guideline.specialty,
+        tier_label: guideline.tier_label,
         payment_type: guideline.payment_type,
         min_funding: guideline.min_funding,
         max_funding: guideline.max_funding,

@@ -25,6 +25,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { useRouter, usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { formatPhoneInput, isValidUsPhone } from "@/lib/phone";
 import {
   Building2,
   DollarSign,
@@ -169,6 +170,9 @@ export default function SpeedClientSignUpForm({ isSetter = false }: { isSetter?:
       ];
       const missing = required.filter(([v]) => !v.trim()).map(([, label]) => label);
       if (missing.length > 0) return `Please complete: ${missing.join(", ")}`;
+      // The phone is the client's SMS channel and the key we match GHL contacts
+      // on — a partial number breaks both, so it never reaches the server.
+      if (!isValidUsPhone(client_phone)) return "Enter a valid 10-digit US phone number.";
     }
     if (n === 2) {
       const required: [string, string][] = [
@@ -423,7 +427,7 @@ export default function SpeedClientSignUpForm({ isSetter = false }: { isSetter?:
                     </div>
                     <div>
                       <Label htmlFor="client_phone" className={labelClass}>Cell Phone # *</Label>
-                      <Input id="client_phone" type="tel" value={client_phone} onChange={(e) => set_client_phone(e.target.value)} className={inputClass} placeholder="(555) 123-4567" required />
+                      <Input id="client_phone" type="tel" inputMode="tel" maxLength={14} value={client_phone} onChange={(e) => set_client_phone(formatPhoneInput(e.target.value))} className={inputClass} placeholder="(555) 123-4567" required />
                     </div>
                     <div>
                       <Label htmlFor="client_email" className={labelClass}>Email Address *</Label>

@@ -9,6 +9,11 @@ interface Lender {
   id: string;
   lender_name: string;
   specialty: string | null;
+  /** Optional tier name within a specialty. NULL = a single, untiered program.
+   *  Lenders that offer several tiers of the same product (e.g. 4 MCA tiers,
+   *  each with its own thresholds + funding range) carry one row per tier, all
+   *  sharing a specialty and distinguished by this label. */
+  tier_label: string | null;
   min_fico: number | null;
   min_sbss: number | null;
   time_in_business_months: number | null;
@@ -59,6 +64,13 @@ function programComplete(
     || (Number(p.max_funding) || 0) > 0;
 }
 
+// A program row's display name — specialty, plus its tier label when it's one of
+// several tiers of the same product.
+function programLabel(p: Pick<Lender, "specialty" | "tier_label">): string {
+  const spec = p.specialty || "General";
+  return p.tier_label ? `${spec} · ${p.tier_label}` : spec;
+}
+
 type StatusFilter = "all" | "complete" | "missing" | "due";
 
 interface GroupedLender {
@@ -69,7 +81,9 @@ interface GroupedLender {
 interface EditingGroup {
   lender_name: string;
   originalName: string;
-  programs: Record<string, Partial<Lender>>; // specialty -> guidelines
+  // Each specialty maps to an ORDERED list of tier rows (≥1). A single-tier
+  // program is just an array of length 1 with tier_label = null.
+  programs: Record<string, Partial<Lender>[]>;
   activeSpecialty: string;
 }
 
@@ -77,6 +91,7 @@ interface EditingGroup {
 const AVAILABLE_SPECIALTIES = LOAN_TYPES;
 
 const INITIAL_LENDER_FIELDS: Omit<Lender, "id" | "lender_name" | "specialty"> = {
+  tier_label: null,
   min_fico: 0,
   min_sbss: 0,
   time_in_business_months: 0,
@@ -101,6 +116,215 @@ const INITIAL_LENDER_FIELDS: Omit<Lender, "id" | "lender_name" | "specialty"> = 
   consolidation_positions: 0,
   additional_info: "",
 };
+
+// ─── Tier fields ──────────────────────────────────────────────────────────────
+// Renders the full threshold + restriction form for a single tier row. Bound to
+// its tier via onField / onNumber (the parent closes over the tier index), so
+// several tiers can stack under one specialty tab.
+function TierFields({
+  tier,
+  onField,
+  onNumber,
+}: {
+  tier: Partial<Lender>;
+  onField: (field: keyof Lender, value: any) => void;
+  onNumber: (field: keyof Lender, value: string, isFloat?: boolean) => void;
+}) {
+  return (
+    <>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Min FICO</label>
+          <input
+            type="number"
+            value={tier.min_fico ?? ""}
+            onChange={e => onNumber("min_fico", e.target.value)}
+            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Min SBSS</label>
+          <input
+            type="number"
+            value={tier.min_sbss ?? ""}
+            onChange={e => onNumber("min_sbss", e.target.value)}
+            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Min TIB (Mo)</label>
+          <input
+            type="number"
+            value={tier.time_in_business_months ?? ""}
+            onChange={e => onNumber("time_in_business_months", e.target.value)}
+            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Min Revenue</label>
+          <input
+            type="number"
+            value={tier.avg_monthly_revenue ?? ""}
+            onChange={e => onNumber("avg_monthly_revenue", e.target.value, true)}
+            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Avg Daily Bal</label>
+          <input
+            type="number"
+            value={tier.avg_daily_balance ?? ""}
+            onChange={e => onNumber("avg_daily_balance", e.target.value, true)}
+            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Max Neg Days</label>
+          <input
+            type="number"
+            value={tier.negative_days ?? ""}
+            onChange={e => onNumber("negative_days", e.target.value)}
+            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Min Deposits</label>
+          <input
+            type="number"
+            value={tier.monthly_deposits ?? ""}
+            onChange={e => onNumber("monthly_deposits", e.target.value)}
+            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Min Positions</label>
+          <input
+            type="number"
+            min={0}
+            value={tier.min_positions ?? ""}
+            onChange={e => onNumber("min_positions", e.target.value)}
+            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400"
+            placeholder="0 = first position"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Max Positions</label>
+          <input
+            type="number"
+            value={tier.number_of_positions ?? ""}
+            onChange={e => onNumber("number_of_positions", e.target.value)}
+            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Min Funding</label>
+          <input
+            type="number"
+            value={tier.min_funding ?? ""}
+            onChange={e => onNumber("min_funding", e.target.value, true)}
+            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Max Funding</label>
+          <input
+            type="number"
+            value={tier.max_funding ?? ""}
+            onChange={e => onNumber("max_funding", e.target.value, true)}
+            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Consol. Positions</label>
+          <input
+            type="number"
+            value={tier.consolidation_positions ?? ""}
+            onChange={e => onNumber("consolidation_positions", e.target.value)}
+            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Min Ownership %</label>
+          <input
+            type="number"
+            value={tier.ownership_percentage ?? ""}
+            onChange={e => onNumber("ownership_percentage", e.target.value, true)}
+            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Tax Liens Limit</label>
+          <input
+            type="text"
+            value={tier.tax_liens_limit ?? ""}
+            onChange={e => onField("tax_liens_limit", e.target.value)}
+            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Holdback %</label>
+          <input
+            type="number"
+            value={tier.holdback_percentage ?? ""}
+            onChange={e => onNumber("holdback_percentage", e.target.value, true)}
+            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400"
+          />
+        </div>
+      </div>
+
+      <section className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Restricted States</label>
+          <input
+            type="text"
+            value={tier.restricted_states || ""}
+            onChange={e => onField("restricted_states", e.target.value.toUpperCase())}
+            placeholder="e.g. CA, NY, PR"
+            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Payment Type</label>
+          <input
+            type="text"
+            value={tier.payment_type || ""}
+            onChange={e => onField("payment_type", e.target.value)}
+            placeholder="e.g. Daily ACH, Weekly"
+            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Preferred Industries</label>
+          <textarea
+            value={tier.preferred_industries || ""}
+            onChange={e => onField("preferred_industries", e.target.value)}
+            rows={2}
+            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400 resize-none"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Restricted Industries</label>
+          <textarea
+            value={tier.restricted_industries || ""}
+            onChange={e => onField("restricted_industries", e.target.value)}
+            rows={2}
+            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400 resize-none"
+          />
+        </div>
+      </section>
+
+      <section className="mt-6">
+        <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Additional Information / Internal Notes</label>
+        <textarea
+          value={tier.additional_info || ""}
+          onChange={e => onField("additional_info", e.target.value)}
+          rows={4}
+          className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400 resize-none"
+        />
+      </section>
+    </>
+  );
+}
 
 export default function LenderGuidelinesManager() {
   const [lenders, setLenders] = useState<Lender[]>([]);
@@ -204,17 +428,25 @@ export default function LenderGuidelinesManager() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, lenders, allGroups]);
 
-  function startEditing(group: GroupedLender) {
-    const progMap: Record<string, Partial<Lender>> = {};
-    group.programs.forEach(p => {
-      progMap[p.specialty || "General"] = { ...p };
+  // Group a lender's DB rows into per-specialty tier lists, preserving the tier
+  // order they were stored in (tiers with no created ordering fall back to the
+  // order returned by the query).
+  function toProgramMap(programs: Lender[]): Record<string, Partial<Lender>[]> {
+    const map: Record<string, Partial<Lender>[]> = {};
+    programs.forEach(p => {
+      const key = p.specialty || "General";
+      (map[key] ??= []).push({ ...p });
     });
+    return map;
+  }
 
+  function startEditing(group: GroupedLender) {
+    const progMap = toProgramMap(group.programs);
     setEditingGroup({
       lender_name: group.name,
       originalName: group.name,
       programs: progMap,
-      activeSpecialty: group.programs[0]?.specialty || "MCA",
+      activeSpecialty: group.programs[0]?.specialty || "General",
     });
   }
 
@@ -222,7 +454,7 @@ export default function LenderGuidelinesManager() {
     setEditingGroup({
       lender_name: "",
       originalName: "",
-      programs: { "MCA": { lender_name: "", specialty: "MCA", ...INITIAL_LENDER_FIELDS } },
+      programs: { "MCA": [{ lender_name: "", specialty: "MCA", ...INITIAL_LENDER_FIELDS }] },
       activeSpecialty: "MCA",
     });
   }
@@ -234,25 +466,34 @@ export default function LenderGuidelinesManager() {
     }
     setIsSaving(true);
 
+    // Flatten every specialty's tier rows into a single list of rows to persist.
+    const editorTiers = Object.entries(editingGroup.programs).flatMap(([spec, tiers]) =>
+      tiers.map(t => ({ spec, data: t }))
+    );
     const dbPrograms = lenders.filter(l => l.lender_name === editingGroup.originalName);
-    const newPrograms = Object.entries(editingGroup.programs);
+    const editorIds = new Set(
+      editorTiers.map(({ data }) => data.id).filter((id): id is string => Boolean(id))
+    );
 
     try {
-      // 1. Handle Deletions (programs present in DB but not in editor)
-      const toDelete = dbPrograms.filter(dbp => !editingGroup.programs[dbp.specialty || "General"]);
+      // 1. Deletions — DB rows (tiers included) whose id is no longer present in
+      //    the editor. Diffing by id (not by specialty) is what lets multiple
+      //    tiers of one specialty be added, removed, and re-saved cleanly.
+      const toDelete = dbPrograms.filter(dbp => !editorIds.has(dbp.id));
       for (const p of toDelete) {
         await supabase.from("lender_guidelines").delete().eq("id", p.id);
       }
 
-      // 2. Handle Upserts (updates and inserts)
-      // Saving counts as a review — stamp now so the 6-month clock resets.
+      // 2. Upserts (updates and inserts). Saving counts as a review — stamp now
+      //    so the 6-month clock resets.
       const reviewed_now = new Date().toISOString();
-      for (const [spec, data] of newPrograms) {
+      for (const { spec, data } of editorTiers) {
         const { id, ...cleanData } = data;
         const payload = {
           ...cleanData,
           lender_name: editingGroup.lender_name,
           specialty: spec === "General" ? null : spec,
+          tier_label: data.tier_label ?? null,
           last_reviewed_at: reviewed_now,
         };
 
@@ -263,7 +504,8 @@ export default function LenderGuidelinesManager() {
         }
       }
 
-      // 3. Handle Renames (Update remaining rows in DB if name changed)
+      // 3. Renames — any straggler rows still under the old name (defensive;
+      //    id-keyed updates above already carry the new name).
       if (editingGroup.originalName && editingGroup.lender_name !== editingGroup.originalName) {
         await supabase.from("lender_guidelines")
           .update({ lender_name: editingGroup.lender_name })
@@ -319,45 +561,87 @@ export default function LenderGuidelinesManager() {
     toast.success(`${name} marked as reviewed`);
   }
 
-  const handleFieldChange = (field: keyof Lender, value: any) => {
+  // Patch a single tier of the active specialty.
+  const updateTier = (tierIdx: number, patch: Partial<Lender>) => {
     if (!editingGroup) return;
     const active = editingGroup.activeSpecialty;
+    const tiers = editingGroup.programs[active] ?? [];
+    const next = tiers.map((t, i) => (i === tierIdx ? { ...t, ...patch } : t));
     setEditingGroup({
       ...editingGroup,
-      programs: {
-        ...editingGroup.programs,
-        [active]: { ...editingGroup.programs[active], [field]: value }
-      }
+      programs: { ...editingGroup.programs, [active]: next },
     });
   };
 
-  const handleNumberChange = (field: keyof Lender, value: string, isFloat = false) => {
+  const handleFieldChange = (field: keyof Lender, value: any, tierIdx: number) => {
+    updateTier(tierIdx, { [field]: value } as Partial<Lender>);
+  };
+
+  const handleNumberChange = (field: keyof Lender, value: string, isFloat: boolean, tierIdx: number) => {
     if (value === "") {
-      handleFieldChange(field, null);
+      updateTier(tierIdx, { [field]: null } as Partial<Lender>);
       return;
     }
     const num = isFloat ? parseFloat(value) : parseInt(value);
-    handleFieldChange(field, isNaN(num) ? null : num);
+    updateTier(tierIdx, { [field]: isNaN(num) ? null : num } as Partial<Lender>);
+  };
+
+  // Append a new tier to the active specialty, pre-filled by copying the last
+  // tier (like the Bank Analysis "+ Add Account" seeds from the prior account).
+  // When the specialty goes from 1 → 2 tiers we backfill the first tier's label
+  // to "Tier 1" so both rows read clearly.
+  const addTier = () => {
+    if (!editingGroup) return;
+    const active = editingGroup.activeSpecialty;
+    const tiers = editingGroup.programs[active] ?? [];
+    const base = tiers[tiers.length - 1] ?? { specialty: active === "General" ? null : active, ...INITIAL_LENDER_FIELDS };
+    const { id, ...rest } = base;
+    const newTier: Partial<Lender> = {
+      ...rest,
+      specialty: active === "General" ? null : active,
+      lender_name: editingGroup.lender_name,
+      tier_label: `Tier ${tiers.length + 1}`,
+    };
+    const seeded = tiers.map((t, i) =>
+      i === 0 && !t.tier_label ? { ...t, tier_label: "Tier 1" } : t
+    );
+    setEditingGroup({
+      ...editingGroup,
+      programs: { ...editingGroup.programs, [active]: [...seeded, newTier] },
+    });
+  };
+
+  const removeTier = (tierIdx: number) => {
+    if (!editingGroup) return;
+    const active = editingGroup.activeSpecialty;
+    const tiers = editingGroup.programs[active] ?? [];
+    if (tiers.length <= 1) return;
+    const next = tiers.filter((_, i) => i !== tierIdx);
+    setEditingGroup({
+      ...editingGroup,
+      programs: { ...editingGroup.programs, [active]: next },
+    });
+  };
+
+  const setTierLabel = (tierIdx: number, value: string) => {
+    updateTier(tierIdx, { tier_label: value || null });
   };
 
   const copyGuidelinesFrom = (sourceSpec: string) => {
     if (!editingGroup || !sourceSpec) return;
-    const sourceData = editingGroup.programs[sourceSpec];
+    const sourceData = editingGroup.programs[sourceSpec]?.[0];
     if (!sourceData) return;
 
-    // Copy all fields except ID and Specialty
-    const currentActive = editingGroup.activeSpecialty;
-    const { id, specialty, lender_name, ...fieldsToCopy } = sourceData;
+    // Copy all fields except ID, Specialty, and tier label into the active
+    // specialty's first tier.
+    const active = editingGroup.activeSpecialty;
+    const { id, specialty, lender_name, tier_label, ...fieldsToCopy } = sourceData;
+    const tiers = editingGroup.programs[active] ?? [];
+    const next = tiers.map((t, i) => (i === 0 ? { ...t, ...fieldsToCopy } : t));
 
     setEditingGroup({
       ...editingGroup,
-      programs: {
-        ...editingGroup.programs,
-        [currentActive]: {
-          ...editingGroup.programs[currentActive],
-          ...fieldsToCopy
-        }
-      }
+      programs: { ...editingGroup.programs, [active]: next },
     });
     toast.success(`Guidelines copied from ${sourceSpec}`);
   };
@@ -378,12 +662,17 @@ export default function LenderGuidelinesManager() {
         toast.error("At least one program is required");
       }
     } else {
-      // Copy current guidelines to new program to speed up setup
-      const currentData = editingGroup.programs[editingGroup.activeSpecialty] || INITIAL_LENDER_FIELDS;
-      next[spec] = { ...currentData, id: undefined, specialty: spec, lender_name: editingGroup.lender_name };
+      // Copy the active specialty's first tier to speed up setting up the new
+      // program; drop id/tier_label so it's a fresh untiered row.
+      const currentData = editingGroup.programs[editingGroup.activeSpecialty]?.[0] || INITIAL_LENDER_FIELDS;
+      const { id, ...rest } = currentData as Partial<Lender>;
+      next[spec] = [{ ...rest, specialty: spec, tier_label: null, lender_name: editingGroup.lender_name }];
       setEditingGroup({ ...editingGroup, programs: next, activeSpecialty: spec });
     }
   };
+
+  const activeTiers = editingGroup ? editingGroup.programs[editingGroup.activeSpecialty] ?? [] : [];
+  const isMultiTier = activeTiers.length > 1;
 
   return (
     <div className="flex flex-col h-full space-y-4">
@@ -506,7 +795,7 @@ export default function LenderGuidelinesManager() {
                                 : "text-rose-500 bg-rose-400/10 border-rose-400/30"
                             }`}
                           >
-                            {p.specialty || "General"}
+                            {programLabel(p)}
                           </span>
                         ))}
                       </div>
@@ -616,19 +905,27 @@ export default function LenderGuidelinesManager() {
 
                 {/* Program Tabs and Actions */}
                 <div className="flex items-center justify-between border-b border-slate-200">
-                  <div className="flex items-center gap-2">
-                    {Object.keys(editingGroup.programs).map(spec => (
-                      <button
-                        key={spec}
-                        onClick={() => setEditingGroup({ ...editingGroup, activeSpecialty: spec })}
-                        className={`px-4 py-2 text-xs font-bold uppercase tracking-widest transition-all border-b-2 ${editingGroup.activeSpecialty === spec
-                            ? "border-emerald-400 text-emerald-500"
-                            : "border-transparent text-slate-500 hover:text-slate-700"
-                          }`}
-                      >
-                        {spec}
-                      </button>
-                    ))}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {Object.keys(editingGroup.programs).map(spec => {
+                      const tierCount = editingGroup.programs[spec]?.length ?? 0;
+                      return (
+                        <button
+                          key={spec}
+                          onClick={() => setEditingGroup({ ...editingGroup, activeSpecialty: spec })}
+                          className={`px-4 py-2 text-xs font-bold uppercase tracking-widest transition-all border-b-2 ${editingGroup.activeSpecialty === spec
+                              ? "border-emerald-400 text-emerald-500"
+                              : "border-transparent text-slate-500 hover:text-slate-700"
+                            }`}
+                        >
+                          {spec}
+                          {tierCount > 1 && (
+                            <span className="ml-1.5 text-[9px] font-mono text-emerald-500 bg-emerald-400/10 rounded px-1 py-0.5 align-middle">
+                              {tierCount} tiers
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
 
                   {/* Copy Action */}
@@ -650,211 +947,66 @@ export default function LenderGuidelinesManager() {
                 </div>
               </div>
 
-              {/* Guidelines Form for Active Specialty */}
+              {/* Guidelines Form for Active Specialty — one block per tier */}
               <div className="p-6 space-y-8">
-                {editingGroup.programs[editingGroup.activeSpecialty] ? (
-                  <>
-                    <section>
-                      <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-sm font-bold text-emerald-500 uppercase tracking-widest">
-                          {editingGroup.activeSpecialty} Qualification Thresholds
-                        </h3>
-                        {Object.keys(editingGroup.programs).length > 1 && (
-                          <span className="text-[10px] text-slate-500 font-mono italic">Settings apply only to this tab</span>
-                        )}
-                      </div>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Min FICO</label>
-                          <input
-                            type="number"
-                            value={editingGroup.programs[editingGroup.activeSpecialty].min_fico ?? ""}
-                            onChange={e => handleNumberChange("min_fico", e.target.value)}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400"
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Min SBSS</label>
-                          <input
-                            type="number"
-                            value={editingGroup.programs[editingGroup.activeSpecialty].min_sbss ?? ""}
-                            onChange={e => handleNumberChange("min_sbss", e.target.value)}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400"
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Min TIB (Mo)</label>
-                          <input
-                            type="number"
-                            value={editingGroup.programs[editingGroup.activeSpecialty].time_in_business_months ?? ""}
-                            onChange={e => handleNumberChange("time_in_business_months", e.target.value)}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400"
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Min Revenue</label>
-                          <input
-                            type="number"
-                            value={editingGroup.programs[editingGroup.activeSpecialty].avg_monthly_revenue ?? ""}
-                            onChange={e => handleNumberChange("avg_monthly_revenue", e.target.value, true)}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400"
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Avg Daily Bal</label>
-                          <input
-                            type="number"
-                            value={editingGroup.programs[editingGroup.activeSpecialty].avg_daily_balance ?? ""}
-                            onChange={e => handleNumberChange("avg_daily_balance", e.target.value, true)}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400"
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Max Neg Days</label>
-                          <input
-                            type="number"
-                            value={editingGroup.programs[editingGroup.activeSpecialty].negative_days ?? ""}
-                            onChange={e => handleNumberChange("negative_days", e.target.value)}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400"
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Min Deposits</label>
-                          <input
-                            type="number"
-                            value={editingGroup.programs[editingGroup.activeSpecialty].monthly_deposits ?? ""}
-                            onChange={e => handleNumberChange("monthly_deposits", e.target.value)}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400"
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Min Positions</label>
-                          <input
-                            type="number"
-                            min={0}
-                            value={editingGroup.programs[editingGroup.activeSpecialty].min_positions ?? ""}
-                            onChange={e => handleNumberChange("min_positions", e.target.value)}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400"
-                            placeholder="0 = first position"
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Max Positions</label>
-                          <input
-                            type="number"
-                            value={editingGroup.programs[editingGroup.activeSpecialty].number_of_positions ?? ""}
-                            onChange={e => handleNumberChange("number_of_positions", e.target.value)}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400"
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Min Funding</label>
-                          <input
-                            type="number"
-                            value={editingGroup.programs[editingGroup.activeSpecialty].min_funding ?? ""}
-                            onChange={e => handleNumberChange("min_funding", e.target.value, true)}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400"
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Max Funding</label>
-                          <input
-                            type="number"
-                            value={editingGroup.programs[editingGroup.activeSpecialty].max_funding ?? ""}
-                            onChange={e => handleNumberChange("max_funding", e.target.value, true)}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400"
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Consol. Positions</label>
-                          <input
-                            type="number"
-                            value={editingGroup.programs[editingGroup.activeSpecialty].consolidation_positions ?? ""}
-                            onChange={e => handleNumberChange("consolidation_positions", e.target.value)}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400"
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Min Ownership %</label>
-                          <input
-                            type="number"
-                            value={editingGroup.programs[editingGroup.activeSpecialty].ownership_percentage ?? ""}
-                            onChange={e => handleNumberChange("ownership_percentage", e.target.value, true)}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400"
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Tax Liens Limit</label>
-                          <input
-                            type="text"
-                            value={editingGroup.programs[editingGroup.activeSpecialty].tax_liens_limit ?? ""}
-                            onChange={e => handleFieldChange("tax_liens_limit", e.target.value)}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400"
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Holdback %</label>
-                          <input
-                            type="number"
-                            value={editingGroup.programs[editingGroup.activeSpecialty].holdback_percentage ?? ""}
-                            onChange={e => handleNumberChange("holdback_percentage", e.target.value, true)}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400"
-                          />
-                        </div>
-                      </div>
-                    </section>
+                {activeTiers.length > 0 ? (
+                  <section>
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-sm font-bold text-emerald-500 uppercase tracking-widest">
+                        {editingGroup.activeSpecialty} Qualification Thresholds
+                      </h3>
+                      {Object.keys(editingGroup.programs).length > 1 && (
+                        <span className="text-[10px] text-slate-500 font-mono italic">Settings apply only to this tab</span>
+                      )}
+                    </div>
 
-                    <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Restricted States</label>
-                        <input
-                          type="text"
-                          value={editingGroup.programs[editingGroup.activeSpecialty].restricted_states || ""}
-                          onChange={e => handleFieldChange("restricted_states", e.target.value.toUpperCase())}
-                          placeholder="e.g. CA, NY, PR"
-                          className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400"
-                        />
-                      </div>
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Payment Type</label>
-                        <input
-                          type="text"
-                          value={editingGroup.programs[editingGroup.activeSpecialty].payment_type || ""}
-                          onChange={e => handleFieldChange("payment_type", e.target.value)}
-                          placeholder="e.g. Daily ACH, Weekly"
-                          className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400"
-                        />
-                      </div>
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Preferred Industries</label>
-                        <textarea
-                          value={editingGroup.programs[editingGroup.activeSpecialty].preferred_industries || ""}
-                          onChange={e => handleFieldChange("preferred_industries", e.target.value)}
-                          rows={2}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400 resize-none"
-                        />
-                      </div>
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Restricted Industries</label>
-                        <textarea
-                          value={editingGroup.programs[editingGroup.activeSpecialty].restricted_industries || ""}
-                          onChange={e => handleFieldChange("restricted_industries", e.target.value)}
-                          rows={2}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400 resize-none"
-                        />
-                      </div>
-                    </section>
+                    <div className="space-y-6">
+                      {activeTiers.map((tier, tierIdx) => (
+                        <div
+                          key={tierIdx}
+                          className={isMultiTier ? "rounded-xl border border-slate-200 p-5 bg-slate-50/40" : ""}
+                        >
+                          {isMultiTier && (
+                            <div className="flex items-center justify-between mb-4 gap-3">
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                  Tier {tierIdx + 1}
+                                </span>
+                                <input
+                                  type="text"
+                                  value={tier.tier_label ?? ""}
+                                  onChange={e => setTierLabel(tierIdx, e.target.value)}
+                                  placeholder={`Tier ${tierIdx + 1}`}
+                                  className="bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-xs text-slate-900 focus:outline-none focus:border-emerald-400 w-44"
+                                />
+                              </div>
+                              <button
+                                onClick={() => removeTier(tierIdx)}
+                                className="text-[10px] font-mono uppercase tracking-wider text-slate-400 hover:text-rose-600 border border-slate-200 hover:border-rose-300 rounded px-2 py-1 transition-colors"
+                              >
+                                Remove tier
+                              </button>
+                            </div>
+                          )}
+                          <TierFields
+                            tier={tier}
+                            onField={(field, value) => handleFieldChange(field, value, tierIdx)}
+                            onNumber={(field, value, isFloat) => handleNumberChange(field, value, !!isFloat, tierIdx)}
+                          />
+                        </div>
+                      ))}
+                    </div>
 
-                    <section>
-                      <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Additional Information / Internal Notes</label>
-                      <textarea
-                        value={editingGroup.programs[editingGroup.activeSpecialty].additional_info || ""}
-                        onChange={e => handleFieldChange("additional_info", e.target.value)}
-                        rows={4}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400 resize-none"
-                      />
-                    </section>
-                  </>
+                    {/* Add another tier of this same product. Mirrors the Bank
+                        Analysis "+ Add Account" pattern — each tier is scored
+                        independently by Lender Match. */}
+                    <button
+                      onClick={addTier}
+                      className="mt-6 text-xs text-emerald-600 hover:text-emerald-700 font-mono border border-emerald-500/40 hover:border-emerald-500/70 rounded-lg px-4 py-2 transition-colors uppercase tracking-wider"
+                    >
+                      + Add Tier
+                    </button>
+                  </section>
                 ) : (
                   <div className="py-20 text-center">
                     <p className="text-slate-500 font-mono">No active program selected.</p>
