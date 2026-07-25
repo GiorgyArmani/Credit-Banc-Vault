@@ -481,7 +481,8 @@ export default function LenderGuidelinesManager() {
       //    tiers of one specialty be added, removed, and re-saved cleanly.
       const toDelete = dbPrograms.filter(dbp => !editorIds.has(dbp.id));
       for (const p of toDelete) {
-        await supabase.from("lender_guidelines").delete().eq("id", p.id);
+        const { error } = await supabase.from("lender_guidelines").delete().eq("id", p.id);
+        if (error) throw error;
       }
 
       // 2. Upserts (updates and inserts). Saving counts as a review — stamp now
@@ -497,19 +498,19 @@ export default function LenderGuidelinesManager() {
           last_reviewed_at: reviewed_now,
         };
 
-        if (id) {
-          await supabase.from("lender_guidelines").update(payload).eq("id", id);
-        } else {
-          await supabase.from("lender_guidelines").insert(payload);
-        }
+        const { error } = id
+          ? await supabase.from("lender_guidelines").update(payload).eq("id", id)
+          : await supabase.from("lender_guidelines").insert(payload);
+        if (error) throw error;
       }
 
       // 3. Renames — any straggler rows still under the old name (defensive;
       //    id-keyed updates above already carry the new name).
       if (editingGroup.originalName && editingGroup.lender_name !== editingGroup.originalName) {
-        await supabase.from("lender_guidelines")
+        const { error } = await supabase.from("lender_guidelines")
           .update({ lender_name: editingGroup.lender_name })
           .eq("lender_name", editingGroup.originalName);
+        if (error) throw error;
       }
 
       await fetchLenders();
@@ -517,7 +518,8 @@ export default function LenderGuidelinesManager() {
       toast.success("All program guidelines saved");
     } catch (err) {
       console.error("Save error:", err);
-      toast.error("Error saving guidelines");
+      const msg = (err as { message?: string })?.message;
+      toast.error(msg ? `Error saving guidelines: ${msg}` : "Error saving guidelines");
     } finally {
       setIsSaving(false);
     }
