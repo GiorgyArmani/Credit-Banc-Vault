@@ -36,8 +36,19 @@ import {
     BarChart3,
     Slack,
     Send,
-    Search
+    Search,
+    Archive
 } from "lucide-react";
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import DocumentPreviewModal from "@/components/pdf/pdf-viewer";
 import {
     Dialog,
@@ -82,6 +93,17 @@ import { isClientScopedDoc, matchesActiveBusiness, normalizeSupabaseJoin, format
 // Slack deal-channel integration is built but not yet tested end-to-end.
 // Flip to `true` to re-enable the "Create / Open Slack Channel" button.
 const SLACK_FEATURE_ENABLED = true;
+
+/**
+ * Deep link to a deal channel. The ?team= param is not optional on Enterprise
+ * Grid: without it Slack resolves the channel against whichever workspace the
+ * browser has active, and errors out if the channel does not live there.
+ */
+function slack_deep_link(channel_id: string): string {
+    const team_id = process.env.NEXT_PUBLIC_SLACK_TEAM_ID;
+    const team_param = team_id ? `&team=${team_id}` : '';
+    return `https://slack.com/app_redirect?channel=${channel_id}${team_param}`;
+}
 
 enum ComponentState {
     LOADING = "LOADING",
@@ -338,6 +360,38 @@ export default function UnderwritingClientDetailsPage() {
         }
     }
 
+    // Archive the deal's Slack channel. Clears the stored channel id server-side,
+    // so the UI falls back to the "Create Slack Channel" button afterwards. Also
+    // the recovery path when someone archives or deletes the channel directly in
+    // Slack — the server treats an already-gone channel as success and unlinks it.
+    async function archive_slack_channel() {
+        set_show_archive_slack_confirm(false);
+        set_is_archiving_slack_channel(true);
+        try {
+            const res = await fetch('/api/slack/archive-channel', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ client_id }),
+            });
+            const result = await res.json();
+            if (!res.ok || !result?.success) {
+                toast.error(result?.error || 'Failed to archive Slack channel');
+                return;
+            }
+            set_slack_channel({ id: null, name: null });
+            toast.success(
+                result.unreachable
+                    ? 'Channel is no longer reachable in Slack — unlinked. You can create a new one.'
+                    : 'Slack channel archived'
+            );
+        } catch (err: any) {
+            console.error('archive_slack_channel error:', err);
+            toast.error('An unexpected error occurred');
+        } finally {
+            set_is_archiving_slack_channel(false);
+        }
+    }
+
     // Pending per-row admin review changes (assignment_id -> { decision, notes }).
     // Buffered locally so the admin can mark several lenders before submitting in one batch.
     const [pending_admin_reviews, set_pending_admin_reviews] = useState<
@@ -467,6 +521,8 @@ export default function UnderwritingClientDetailsPage() {
     // Slack deal-channel state (created from the docs-approved gate).
     const [slack_channel, set_slack_channel] = useState<{ id: string | null; name: string | null }>({ id: null, name: null });
     const [is_creating_slack_channel, set_is_creating_slack_channel] = useState(false);
+    const [is_archiving_slack_channel, set_is_archiving_slack_channel] = useState(false);
+    const [show_archive_slack_confirm, set_show_archive_slack_confirm] = useState(false);
 
     // Renaming state
     const [renaming_file, set_renaming_file] = useState<{ id: string; label: string } | null>(null);
@@ -2310,16 +2366,29 @@ export default function UnderwritingClientDetailsPage() {
                         </div>
                         {SLACK_FEATURE_ENABLED && (
                             slack_channel.id ? (
-                                <a
-                                    href={`https://slack.com/app_redirect?channel=${slack_channel.id}`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-2 h-11 px-5 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/20 text-white font-black uppercase tracking-widest text-[10px] transition-all"
-                                >
-                                    <Slack className="w-4 h-4 text-emerald-400" />
-                                    Open Slack Channel
-                                    <ExternalLink className="w-3 h-3 opacity-60" />
-                                </a>
+                                <>
+                                    <a
+                                        href={slack_deep_link(slack_channel.id)}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-2 h-11 px-5 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/20 text-white font-black uppercase tracking-widest text-[10px] transition-all"
+                                    >
+                                        <Slack className="w-4 h-4 text-emerald-400" />
+                                        Open Slack Channel
+                                        <ExternalLink className="w-3 h-3 opacity-60" />
+                                    </a>
+                                    <Button
+                                        onClick={() => set_show_archive_slack_confirm(true)}
+                                        disabled={is_archiving_slack_channel}
+                                        className="h-11 px-5 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 font-black uppercase tracking-widest text-[10px] disabled:opacity-40 disabled:cursor-not-allowed"
+                                    >
+                                        {is_archiving_slack_channel ? (
+                                            <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Archiving…</>
+                                        ) : (
+                                            <><Archive className="w-4 h-4 mr-2" /> Archive Channel</>
+                                        )}
+                                    </Button>
+                                </>
                             ) : (
                                 <>
                                     <Button
@@ -2344,6 +2413,36 @@ export default function UnderwritingClientDetailsPage() {
                     </div>
                 </CardContent>
             </Card>
+
+            <AlertDialog
+                open={show_archive_slack_confirm}
+                onOpenChange={set_show_archive_slack_confirm}
+            >
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Archive this Slack channel?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            {slack_channel.name && (
+                                <>
+                                    <span className="font-semibold text-slate-700">#{slack_channel.name}</span>{" "}
+                                </>
+                            )}
+                            will stop receiving deal updates and will be unlinked from this file.
+                            The channel history stays in Slack, and a new channel can be created
+                            for this deal afterwards.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={archive_slack_channel}
+                            className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
+                        >
+                            Archive channel
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 pb-20">
                 {/* Information Column */}

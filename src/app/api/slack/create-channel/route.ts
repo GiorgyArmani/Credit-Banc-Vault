@@ -3,8 +3,8 @@
 // POST /api/slack/create-channel  { client_id }
 //   Creates a dedicated Slack channel for a UW deal and persists its id on
 //   client_data_vault. Idempotent — if a channel already exists for the client
-//   it's returned as-is. Invites the UW team, the file's advisor, the approvers
-//   (Matt/Luigi), and the bot (so it can post later notifications).
+//   it's returned as-is. Invites the UW team, the file's advisor, and the
+//   approvers (Matt/Luigi).
 //
 // AuthZ: admin OR underwriting (requireStaff).
 
@@ -103,12 +103,13 @@ export async function POST(request: Request) {
       }
     }
 
-    // Invite the UW team, bot, approvers, and the file's advisor.
+    // Invite the UW team, approvers, and the file's advisor. The bot is the
+    // channel creator, so it is already a member — inviting it would just
+    // return cant_invite_self.
     const inviteIds = [
       ...getUwUserIds(),
       ...getApproverUserIds(),
       resolveAdvisorSlackId(advisor_email) || '',
-      process.env.SLACK_BOT_USER_ID || '',
     ];
     await slackInviteUsers(channelId, inviteIds);
 
