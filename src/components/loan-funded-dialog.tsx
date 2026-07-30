@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { DollarSign, Calendar, User, Hash, FileText, Send, Loader2 } from "lucide-react";
+import { DollarSign, User, Hash, FileText, Send, Loader2 } from "lucide-react";
 import { fundLoanAction } from "@/app/underwriting/dashboard/actions";
 import { toast } from "@/lib/toast";
 
@@ -73,7 +73,6 @@ export function LoanFundedDialog({
         useOfProceeds: "",
         slackChannel: defaultSlackChannel,
         salesRepFunded: defaultSalesRep,
-        dateFunded: today(),
         lenderFunded: "",
         dateOfSubmission: "",
         fundingDate: today(),
@@ -154,14 +153,9 @@ export function LoanFundedDialog({
                 </DialogHeader>
 
                 <form onSubmit={handleSubmit} className="space-y-6 py-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5 items-start">
                         <div className="space-y-2">
                             <Label htmlFor="totalAmountFunded" className="text-xs font-black uppercase tracking-widest text-slate-400">Total Amount Funded</Label>
-                            {amountRequested != null && (
-                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                                    Requested: <span className="text-slate-600">{amountRequested.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })}</span>
-                                </p>
-                            )}
                             <div className="relative">
                                 <DollarSign className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
                                 <Input
@@ -174,6 +168,14 @@ export function LoanFundedDialog({
                                     required
                                 />
                             </div>
+                            {/* Hint sits BELOW the input, not between label and input —
+                                above it, this line made the cell taller than the one
+                                beside it and knocked the whole row out of alignment. */}
+                            {amountRequested != null && (
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                                    Requested: <span className="text-slate-600">{amountRequested.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })}</span>
+                                </p>
+                            )}
                         </div>
 
                         <div className="space-y-2">
@@ -181,10 +183,13 @@ export function LoanFundedDialog({
                             <div className="relative">
                                 <FileText className="absolute left-3 top-3 w-4 h-4 text-slate-400 z-10" />
                                 <Select value={lenderChoice} onValueChange={handleLenderSelect}>
-                                    <SelectTrigger id="lenderChoice" className="w-full pl-10 h-10 rounded-2xl border-slate-200 bg-white text-sm focus:ring-2 focus:ring-emerald-500">
+                                    {/* min-w-0 + a truncating value: lender names run long
+                                        ("American Capital — Approved") and would otherwise
+                                        push the trigger past its grid column. */}
+                                    <SelectTrigger id="lenderChoice" className="w-full min-w-0 pl-10 h-10 rounded-2xl border-slate-200 bg-white text-sm focus:ring-2 focus:ring-emerald-500 [&>span]:truncate [&>span]:text-left">
                                         <SelectValue placeholder="Select lender…" />
                                     </SelectTrigger>
-                                    <SelectContent className="rounded-xl">
+                                    <SelectContent className="rounded-xl max-w-[min(28rem,90vw)]">
                                         {lenderOptions.map((o) => (
                                             <SelectItem key={o.assignmentId} value={o.assignmentId}>
                                                 {o.lenderName} — {o.stateLabel}
@@ -241,53 +246,36 @@ export function LoanFundedDialog({
 
                         <div className="space-y-2">
                             <Label htmlFor="fundingDate" className="text-xs font-black uppercase tracking-widest text-slate-400">Funding Date</Label>
-                            <div className="relative">
-                                <Calendar className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
-                                <Input
-                                    id="fundingDate"
-                                    name="fundingDate"
-                                    type="date"
-                                    className="pl-10 rounded-2xl border-slate-200 focus:ring-emerald-500"
-                                    value={formData.fundingDate}
-                                    onChange={handleChange}
-                                    required
-                                />
-                            </div>
-                        </div>
-
-                        <div className="space-y-2">
-                            <Label htmlFor="dateFunded" className="text-xs font-black uppercase tracking-widest text-slate-400">Date they were Funded</Label>
-                            <div className="relative">
-                                <Calendar className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
-                                <Input
-                                    id="dateFunded"
-                                    name="dateFunded"
-                                    type="date"
-                                    className="pl-10 rounded-2xl border-slate-200 focus:ring-emerald-500"
-                                    value={formData.dateFunded}
-                                    onChange={handleChange}
-                                    required
-                                />
-                            </div>
+                            {/* No leading icon on date inputs — the browser already
+                                renders its own calendar button, and two calendars in
+                                one field read as a glitch. */}
+                            <Input
+                                id="fundingDate"
+                                name="fundingDate"
+                                type="date"
+                                className="rounded-2xl border-slate-200 focus:ring-emerald-500"
+                                value={formData.fundingDate}
+                                onChange={handleChange}
+                                required
+                            />
                         </div>
 
                         <div className="space-y-2">
                             <Label htmlFor="dateOfSubmission" className="text-xs font-black uppercase tracking-widest text-slate-400">Date of Submission</Label>
-                            <div className="relative">
-                                <Calendar className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
-                                <Input
-                                    id="dateOfSubmission"
-                                    name="dateOfSubmission"
-                                    type="date"
-                                    className="pl-10 rounded-2xl border-slate-200 focus:ring-emerald-500"
-                                    value={formData.dateOfSubmission}
-                                    onChange={handleChange}
-                                    required
-                                />
-                            </div>
+                            <Input
+                                id="dateOfSubmission"
+                                name="dateOfSubmission"
+                                type="date"
+                                className="rounded-2xl border-slate-200 focus:ring-emerald-500"
+                                value={formData.dateOfSubmission}
+                                onChange={handleChange}
+                                required
+                            />
                         </div>
 
-                        <div className="space-y-2">
+                        {/* Odd field out — spans the full width instead of being
+                            stranded alone in the left column. */}
+                        <div className="space-y-2 md:col-span-2">
                             <Label htmlFor="slackChannel" className="text-xs font-black uppercase tracking-widest text-slate-400">Slack Channel</Label>
                             <div className="relative">
                                 <Hash className="absolute left-3 top-3 w-4 h-4 text-slate-400" />

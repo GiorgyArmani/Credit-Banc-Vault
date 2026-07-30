@@ -146,7 +146,6 @@ export async function fundLoanAction(clientId: string, data: {
     useOfProceeds: string;
     slackChannel: string;
     salesRepFunded: string;
-    dateFunded: string;
     lenderFunded: string;
     dateOfSubmission: string;
     fundingDate: string;
@@ -194,7 +193,10 @@ export async function fundLoanAction(clientId: string, data: {
             { id: process.env.USE_OF_PROCEEDS, value: data.useOfProceeds },
             { id: process.env.SLACK_CHANNEL, value: data.slackChannel },
             { id: process.env.SALES_REP_FUNDED, value: data.salesRepFunded },
-            { id: process.env.DATE_FUNDED, value: data.dateFunded },
+            // DATE_FUNDED (the "date they were funded" GHL field) is no longer
+            // collected: at the moment UW marks a deal funded, only the funding
+            // date is known — the money can land in the client's account days
+            // later. FUNDING_DATE below is the one UW can actually attest to.
             { id: process.env.LENDER_FUNDED, value: data.lenderFunded },
             { id: process.env.DATE_OF_SUBMISSION, value: data.dateOfSubmission },
             { id: process.env.FUNDING_DATE, value: data.fundingDate },
