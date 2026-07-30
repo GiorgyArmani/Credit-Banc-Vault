@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { ghlUpdateContact, ghlAddTags } from '@/lib/ghl-api';
 import { syncUnifiedClientData } from '@/lib/user-management';
 
@@ -75,8 +76,15 @@ export async function POST(request: Request) {
             console.log('✅ Successfully stored data in client_data_vault');
         }
 
-        // 3. Sync to business_profiles and users
-        await syncUnifiedClientData(supabase, {
+        // 3. Sync to business_profiles and users.
+        //    Service role: the caller here is the CLIENT (role='free'), and
+        //    public.users is an RBAC table they cannot update under RLS — the
+        //    upsert failed with 42501 "(USING expression)" and was swallowed as a
+        //    log line. Every write inside the sync is scoped to this verified
+        //    user.id, so the admin client is not widening anything; it matches
+        //    what the client-signup routes already pass.
+        //    See [[rls_client_writes_need_service_role]].
+        await syncUnifiedClientData(createAdminClient(), {
             userId: user.id,
             email: vaultData.client_email,
             clientName: vaultData.client_name,

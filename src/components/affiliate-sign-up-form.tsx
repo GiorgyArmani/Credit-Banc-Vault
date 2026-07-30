@@ -2,15 +2,21 @@
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Link from "next/link";
 import { useState } from "react";
 import { Gift, ArrowRight, Lock, CheckCircle } from "lucide-react";
+import { formatPhoneInput, isValidUsPhone } from "@/lib/phone";
 
 // Public affiliate self-signup form. Embedded on the marketing landing page.
 // No invite code (public program). On success it shows an inline confirmation;
 // the affiliate then logs in through the unified vault login (/auth/login).
+//
+// The contact opt-in is MANDATORY — it is the email/SMS consent record for the
+// "I Know Someone" Club, so signup is blocked without it (also enforced
+// server-side in /api/post-signup-affiliate, which stores the consent stamp).
 export function AffiliateSignUpForm({
   className,
   ...props
@@ -18,8 +24,10 @@ export function AffiliateSignUpForm({
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [repeatPassword, setRepeatPassword] = useState("");
+  const [contactOptIn, setContactOptIn] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -28,6 +36,13 @@ export function AffiliateSignUpForm({
     e.preventDefault();
     setIsLoading(true);
     setError(null);
+
+    // Phone is what the SMS half of the opt-in below actually needs.
+    if (!isValidUsPhone(phone)) {
+      setError("Please enter a valid 10-digit US phone number");
+      setIsLoading(false);
+      return;
+    }
 
     if (password !== repeatPassword) {
       setError("Passwords do not match");
@@ -41,6 +56,12 @@ export function AffiliateSignUpForm({
       return;
     }
 
+    if (!contactOptIn) {
+      setError("Please check the contact opt-in box so we can send you referral updates.");
+      setIsLoading(false);
+      return;
+    }
+
     try {
       const res = await fetch("/api/post-signup-affiliate", {
         method: "POST",
@@ -49,7 +70,9 @@ export function AffiliateSignUpForm({
           firstName: firstName.trim(),
           lastName: lastName.trim(),
           email: email.trim().toLowerCase(),
+          phone: phone.trim(),
           password,
+          contactOptIn,
         }),
       });
 
@@ -100,9 +123,9 @@ export function AffiliateSignUpForm({
           <div className="w-11 h-11 rounded-xl bg-cb-mint/10 flex items-center justify-center mb-5">
             <Gift className="h-6 w-6 text-cb-mint" />
           </div>
-          <h3 className="font-manrope text-3xl font-extrabold tracking-tight text-cb-ink leading-tight">Become an Affiliate</h3>
+          <h3 className="font-manrope text-3xl font-extrabold tracking-tight text-cb-ink leading-tight">Join the Club</h3>
           <p className="text-sm font-semibold text-cb-mint mt-2">
-            Sign up free — earn $500 for every funded referral.
+            Free to join. No referral limits. What&rsquo;ve you got to lose?
           </p>
         </div>
           <form onSubmit={handleAffiliateSignUp}>
@@ -148,6 +171,21 @@ export function AffiliateSignUpForm({
                 />
               </div>
 
+              <div className="grid gap-3">
+                <Label htmlFor="aff-phone" className="text-[11px] font-bold uppercase tracking-[0.15em] text-cb-mint/70 ml-1">Mobile Phone</Label>
+                <Input
+                  id="aff-phone"
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  placeholder="(555) 123-4567"
+                  required
+                  value={phone}
+                  onChange={(e) => setPhone(formatPhoneInput(e.target.value))}
+                  className="h-14 rounded-xl border-cb-mint/20 bg-white focus:border-cb-mint focus:ring-cb-mint/30 transition-all font-medium px-5"
+                />
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="grid gap-3">
                   <Label htmlFor="aff-password" className="text-[11px] font-bold uppercase tracking-[0.15em] text-cb-mint/70 ml-1">Password</Label>
@@ -176,6 +214,64 @@ export function AffiliateSignUpForm({
                 </div>
               </div>
 
+              {/* Mandatory contact opt-in — this is the consent record. */}
+              <div
+                className={cn(
+                  "rounded-xl border p-5 transition-colors",
+                  contactOptIn
+                    ? "border-cb-mint/40 bg-cb-mint/5"
+                    : "border-cb-mint/20 bg-white"
+                )}
+              >
+                <div className="flex items-start gap-4">
+                  <Checkbox
+                    id="aff-contact-opt-in"
+                    checked={contactOptIn}
+                    onCheckedChange={(checked) => setContactOptIn(checked === true)}
+                    aria-required="true"
+                    className="mt-1 h-5 w-5 rounded-md border-cb-mint/50 data-[state=checked]:bg-cb-mint data-[state=checked]:border-cb-mint data-[state=checked]:text-white focus-visible:ring-cb-mint/40"
+                  />
+                  <div className="grid gap-2">
+                    <Label
+                      htmlFor="aff-contact-opt-in"
+                      className="font-manrope text-base font-bold text-cb-ink leading-tight cursor-pointer"
+                    >
+                      Fine, You May Contact Me
+                    </Label>
+                    <p className="text-sm text-cb-ink/60 leading-relaxed">
+                      I&rsquo;m okay with the occasional email or text from Credit Banc about the
+                      &ldquo;I Know Someone&rdquo; Club, referral updates, and other reasonably
+                      important club business. Please use this power responsibly.
+                    </p>
+                    <p className="text-[11px] text-cb-ink/40 leading-relaxed">
+                      Message frequency varies. Message and data rates may apply. Reply STOP to
+                      unsubscribe.
+                    </p>
+                    <p className="text-[11px] text-cb-ink/40 leading-relaxed">
+                      I also agree to the{" "}
+                      <Link
+                        href="/terms"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-bold text-cb-mint hover:underline"
+                      >
+                        Terms and Conditions
+                      </Link>{" "}
+                      and{" "}
+                      <a
+                        href="https://www.creditbanc.io/privacypolicy"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-bold text-cb-mint hover:underline"
+                      >
+                        Privacy Policy
+                      </a>
+                      .
+                    </p>
+                  </div>
+                </div>
+              </div>
+
               {error && (
                 <div className="rounded-xl bg-red-50 p-4 border border-red-100 flex items-center gap-3">
                   <Lock className="w-4 h-4 text-red-500" />
@@ -195,7 +291,7 @@ export function AffiliateSignUpForm({
                   </div>
                 ) : (
                   <div className="flex items-center justify-center gap-2">
-                    <span>Create Affiliate Account</span>
+                    <span>Create My Affiliate Account</span>
                     <ArrowRight className="w-6 h-6" />
                   </div>
                 )}

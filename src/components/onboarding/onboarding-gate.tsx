@@ -57,7 +57,11 @@ export default function OnboardingGate({ children }: OnboardingGateProps) {
       try {
         const history = await getClientPipelineHistory(vaultId!)
         if (history.length === 1 && history[0].status === 'created') {
-          await updateLoanStatus(vaultId!, 'onboarding', 'Client accessed the vault for the first time')
+          // Client-triggered: the actor is role='free', and loan_status_history
+          // writes are staff-only under RLS, so this must use the service role.
+          await updateLoanStatus(vaultId!, 'onboarding', 'Client accessed the vault for the first time', {
+            useServiceRole: true,
+          })
           console.log('✅ Pipeline status auto-advanced to "onboarding"')
         }
       } catch (err) {

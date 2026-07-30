@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { ghlAddTags } from "@/lib/ghl-api";
 import { send_advisor_vault_submission_notification } from "@/lib/email";
 import { updateLoanStatus } from "@/app/actions/pipeline";
@@ -78,9 +79,13 @@ export async function POST() {
             console.error("Error creating submission record:", submissionError);
         }
 
-        // 5. Update Pipeline Status to Under Review
+        // 5. Update Pipeline Status to Under Review.
+        //    Client-triggered, so it must go through the service role — the
+        //    caller is role='free' and loan_status_history writes are staff-only.
         try {
-            await updateLoanStatus(clientData.id, 'under_review', 'Vault submitted by client');
+            await updateLoanStatus(clientData.id, 'under_review', 'Vault submitted by client', {
+                useServiceRole: true,
+            });
             console.log(`✅ Pipeline status updated to "under_review" for client: ${clientData.id}`);
         } catch (pipeline_error) {
             console.error("⚠️ Error updating pipeline status (non-fatal):", pipeline_error);
@@ -91,9 +96,12 @@ export async function POST() {
             const advisor: any = clientData.advisors;
             const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://vault.creditbanc.io";
 
-            // A. In-app notification for advisor if they have a user_id
+            // A. In-app notification for advisor if they have a user_id.
+            //    Service role: the actor here is the CLIENT, and notification
+            //    inserts are staff-only under RLS (every other notification
+            //    write in the app goes through the admin client too).
             if (advisor.user_id) {
-                await supabase.from("in_app_notifications").insert({
+                await createAdminClient().from("in_app_notifications").insert({
                     user_id: advisor.user_id,
                     client_id: clientData.id,
                     title: "New Vault Submission",

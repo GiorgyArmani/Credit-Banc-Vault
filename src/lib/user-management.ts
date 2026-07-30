@@ -51,7 +51,7 @@ export async function syncUnifiedClientData(
         email,
         clientName,
         companyName,
-        role = 'free',
+        role,
         industry,
         phone,
         state,
@@ -65,15 +65,24 @@ export async function syncUnifiedClientData(
     const lastName = clientName.split(' ').slice(1).join(' ') || '';
 
     // 1. Sync public.users (Critical for RBAC)
+    //
+    //    `role` is written ONLY when the caller passes one. It used to default to
+    //    'free', which meant any re-sync of an existing user (e.g. the onboarding
+    //    step-1 route, which passes no role) would UPDATE their role down to
+    //    'free' — silently demoting a staff member who ever crossed this path.
+    //    Omitting the column leaves it untouched on update, and public.users.role
+    //    is NOT NULL DEFAULT 'free', so a fresh insert still lands on 'free'.
+    const userPayload: Record<string, unknown> = {
+        id: userId,
+        email: email.toLowerCase(),
+        first_name: firstName,
+        last_name: lastName,
+    };
+    if (role) userPayload.role = role;
+
     const { error: userError } = await supabase
         .from('users')
-        .upsert({
-            id: userId,
-            email: email.toLowerCase(),
-            first_name: firstName,
-            last_name: lastName,
-            role: role,
-        }, { onConflict: 'id' });
+        .upsert(userPayload, { onConflict: 'id' });
 
     if (userError) {
         console.error('[User Sync] Error upserting public.users:', userError);
