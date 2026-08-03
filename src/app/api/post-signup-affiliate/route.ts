@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { ghlUpsertContact } from "@/lib/ghl-api";
+import { send_affiliate_welcome_email } from "@/lib/email";
 import { formatPhoneUS, isValidUsPhone, toE164 } from "@/lib/phone";
 
 export const runtime = "nodejs";
@@ -19,6 +20,18 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
   { auth: { persistSession: false } }
 );
+
+/**
+ * Value written to the native GHL contact type (`{{contact.type}}`, shown as
+ * "Contact type" on the record). This location defines its own set — Funding
+ * Lead, Client, Affiliate, Business Advisor, Personal Network, Podcast Guest.
+ *
+ * LOWERCASE on purpose. GHL normalizes the stored value away from the UI label:
+ * verified against a live contact, the "Affiliate" option reads back as
+ * `"affiliate"` and "Funding Lead" reads back as `"lead"`. Don't "fix" the
+ * casing to match the dropdown. Overridable via env if the set ever changes.
+ */
+const AFFILIATE_CONTACT_TYPE = process.env.GHL_AFFILIATE_CONTACT_TYPE || "affiliate";
 
 // Build a URL-safe referral code from the name plus a short random suffix.
 function slugifyName(first: string, last: string): string {
@@ -155,16 +168,22 @@ export async function POST(req: NextRequest) {
       throw new Error("Could not generate a unique referral code");
     }
 
-    // Step 4: Mirror the affiliate into GHL as a contact tagged `affiliate-partner`
-    //         — that tag is what the CRM segments the "I Know Someone" Club on.
-    //         The mandatory opt-in above is the consent behind it. Best-effort:
-    //         the vault account is already live, so a GHL hiccup must not fail
-    //         the signup. See [[ghl_integration_contract]].
+    // Step 4: Mirror the affiliate into GHL as a contact carrying the single
+    //         `affiliate` tag. The mandatory opt-in above is the consent behind
+    //         it. Best-effort: the vault account is already live, so a GHL hiccup
+    //         must not fail the signup. See [[ghl_integration_contract]].
+    //
+    //         NOTE: this replaced the previous `affiliate-partner` +
+    //         `vault-affiliate:<code>` pair. Any GHL workflow or smart list still
+    //         filtering on `affiliate-partner` must be repointed at `affiliate`,
+    //         and contacts created before this change keep the old tag until
+    //         backfilled. Referred LEADS are unaffected — they get their own
+    //         `vault-affiliate:<code>` tag from /api/refer/[code]/submit.
     let ghlContactId: string | null = null;
     try {
       const locationId = process.env.GHL_LOCATION_ID;
       if (locationId) {
-        ghlContactId = await ghlUpsertContact({
+        const contact = {
           firstName: cleanFirst,
           lastName: cleanLast,
           name: `${cleanFirst} ${cleanLast}`.trim(),
@@ -172,8 +191,22 @@ export async function POST(req: NextRequest) {
           phone: phoneE164,
           country: "US",
           locationId,
-          tags: ["affiliate-partner", `vault-affiliate:${referralCode}`],
-        });
+          tags: ["affiliate"],
+        };
+
+        try {
+          ghlContactId = await ghlUpsertContact({ ...contact, type: AFFILIATE_CONTACT_TYPE });
+        } catch (typeErr) {
+          // If GHL rejects the contact type, don't lose the contact over it —
+          // the tag is what the CRM segments on. Retry without the type and log
+          // loudly so the correct value can be set via GHL_AFFILIATE_CONTACT_TYPE.
+          console.error(
+            `[post-signup-affiliate] GHL rejected contact type "${AFFILIATE_CONTACT_TYPE}" — retrying without it. ` +
+              `Set GHL_AFFILIATE_CONTACT_TYPE to the value this location stores for Affiliate.`,
+            typeErr
+          );
+          ghlContactId = await ghlUpsertContact(contact);
+        }
       } else {
         console.warn("[post-signup-affiliate] Missing GHL_LOCATION_ID — no CRM contact created");
       }
@@ -197,6 +230,28 @@ export async function POST(req: NextRequest) {
       .eq("user_id", userId);
     if (consentErr) {
       console.warn("post-signup-affiliate: could not stamp contact consent:", consentErr.message);
+    }
+
+    // Step 6: Welcome email carrying their referral link. Best-effort — the
+    // account and the link already exist, and the dashboard shows the same link,
+    // so a mail hiccup must not fail a signup the user completed successfully.
+    try {
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://vault.creditbanc.io";
+      const reward = Number(process.env.AFFILIATE_COMMISSION_AMOUNT ?? 500);
+      await send_affiliate_welcome_email({
+        affiliate_name: cleanFirst || "there",
+        affiliate_email: cleanEmail,
+        referral_url: `${appUrl}/r/${referralCode}`,
+        dashboard_url: `${appUrl}/affiliate/dashboard`,
+        reward_amount: reward.toLocaleString("en-US", {
+          style: "currency",
+          currency: "USD",
+          maximumFractionDigits: 0,
+        }),
+        terms_url: `${appUrl}/affiliate`,
+      });
+    } catch (mailErr) {
+      console.error("[post-signup-affiliate] welcome email failed (account created anyway):", mailErr);
     }
 
     return NextResponse.json({

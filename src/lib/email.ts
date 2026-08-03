@@ -2402,6 +2402,25 @@ export async function send_loan_funded_notification(data: LoanFundedNotification
  * Sent to an affiliate when one of their referrals gets funded and the fixed
  * reward is dispatched via Giftronaut.
  */
+/**
+ * From header for EVERY affiliate-facing email. The program has its own sending
+ * identity (SMTP_FROM_AFFILIATE_EMAIL = affiliate@vault.creditbanc.net) so its
+ * deliverability reputation, replies and unsubscribes stay separate from client
+ * and advisor mail — those build very different sending histories.
+ *
+ * Falls back to the general sender so a missing env var degrades to "sent from
+ * the wrong address" rather than "not sent at all". Any new affiliate email
+ * should use this rather than reading the env vars again.
+ * See [[affiliate_program]].
+ */
+function affiliate_from_header(): string {
+  const from_email =
+    process.env.SMTP_FROM_AFFILIATE_EMAIL || process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  const from_name =
+    process.env.SMTP_FROM_AFFILIATE_NAME || process.env.SMTP_FROM_NAME || 'Credit Banc';
+  return `${from_name} <${from_email}>`;
+}
+
 export interface AffiliatePayoutNotificationData {
   affiliate_name: string;
   affiliate_email: string;
@@ -2478,8 +2497,10 @@ export function generate_affiliate_payout_notification_html(data: AffiliatePayou
   `;
 }
 
+// No escape_email_strings here — escaping belongs to the HTML templates only.
+// Escaping the plain-text body surfaced literal "&amp;" / "&#39;" to any
+// affiliate whose name contains & or an apostrophe.
 export function generate_affiliate_payout_notification_text(data: AffiliatePayoutNotificationData): string {
-  data = escape_email_strings(data);
   return [
     `Hi ${data.affiliate_name},`,
     ``,
@@ -2495,15 +2516,190 @@ export function generate_affiliate_payout_notification_text(data: AffiliatePayou
 export async function send_affiliate_payout_notification(data: AffiliatePayoutNotificationData) {
   const transporter = create_smtp_transporter();
 
-  const from_email = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
-  const from_name = process.env.SMTP_FROM_NAME || 'Credit Banc Vault';
-
   const mail_options: any = {
-    from: `${from_name} <${from_email}>`,
+    from: affiliate_from_header(),
     to: data.affiliate_email,
     subject: `🎉 You earned a ${data.reward_amount} referral reward!`,
     html: generate_affiliate_payout_notification_html(data),
     text: generate_affiliate_payout_notification_text(data),
+  };
+
+  return await transporter.sendMail(mail_options);
+}
+
+/**
+ * ============================================================================
+ * AFFILIATE WELCOME EMAIL
+ * ============================================================================
+ * Sent once, immediately after a public affiliate signup. Its whole job is to
+ * hand over the one thing the affiliate actually needs — their personal
+ * referral link — and set the expectation for how the reward works.
+ *
+ * Sent FROM the dedicated affiliate identity (SMTP_FROM_AFFILIATE_EMAIL) so
+ * program mail is separable from client/advisor mail at the mailbox provider.
+ * See [[affiliate_program]].
+ */
+export interface AffiliateWelcomeEmailData {
+  affiliate_name: string;
+  affiliate_email: string;
+  /** The affiliate's personal link, e.g. https://vault.creditbanc.io/r/jane-doe-4f2a */
+  referral_url: string;
+  dashboard_url: string;
+  /** Pre-formatted, e.g. "$500". */
+  reward_amount: string;
+  /** Public program page carrying the full terms. */
+  terms_url: string;
+}
+
+export function generate_affiliate_welcome_email_html(data: AffiliateWelcomeEmailData): string {
+  data = escape_email_strings(data);
+  const { affiliate_name, referral_url, dashboard_url, reward_amount, terms_url } = data;
+
+  const steps: [string, string][] = [
+    ['Share your link', 'Send it to any business owner who might want capital. No pitch required — the link does the work.'],
+    ['They apply', 'Your link opens a short pre-qualification. We take it from there.'],
+    [`Get ${reward_amount}`, 'When their deal funds, your gift card goes out. No cap on how many you refer.'],
+  ];
+
+  const steps_html = steps
+    .map(
+      ([title, body], i) => `
+              <tr>
+                <td style="padding: 0 0 20px;">
+                  <table role="presentation" style="border-collapse: collapse;">
+                    <tr>
+                      <td valign="top" style="width: 32px; padding-right: 14px;">
+                        <div style="width: 28px; height: 28px; border-radius: 14px; background-color: #10b981; color: #ffffff; font-size: 14px; font-weight: 700; text-align: center; line-height: 28px;">${i + 1}</div>
+                      </td>
+                      <td valign="top">
+                        <p style="margin: 0 0 4px; color: #1e293b; font-size: 16px; font-weight: 600;">${title}</p>
+                        <p style="margin: 0; color: #475569; font-size: 15px; line-height: 1.6;">${body}</p>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>`
+    )
+    .join('');
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Welcome to the "I Know Someone" Club</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f6f9fc;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse;">
+    <tr>
+      <td align="center" style="padding: 40px 0;">
+        <table role="presentation" style="width: 600px; max-width: 100%; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+
+          <!-- Header -->
+          <tr>
+            <td style="padding: 40px 40px 24px; text-align: center; background-color: #10b981;">
+              <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 700;">You're in 🎉</h1>
+              <p style="margin: 8px 0 0; color: #d1fae5; font-size: 15px;">The &ldquo;I Know Someone&rdquo; Club</p>
+            </td>
+          </tr>
+
+          <!-- Intro -->
+          <tr>
+            <td style="padding: 36px 40px 8px;">
+              <h2 style="margin: 0 0 16px; color: #1e293b; font-size: 20px; font-weight: 600;">Hi ${affiliate_name},</h2>
+              <p style="margin: 0 0 24px; color: #475569; font-size: 16px; line-height: 1.6;">
+                Your account is live. Here's your personal referral link — every business owner who applies through it is tracked back to you.
+              </p>
+            </td>
+          </tr>
+
+          <!-- The link -->
+          <tr>
+            <td style="padding: 0 40px 28px;">
+              <div style="background-color: #f0fdf4; border: 1px solid #dcfce7; border-radius: 12px; padding: 20px; text-align: center;">
+                <p style="margin: 0 0 10px; color: #166534; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;">Your referral link</p>
+                <p style="margin: 0; font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; font-size: 15px; word-break: break-all;">
+                  <a href="${referral_url}" style="color: #047857; text-decoration: none;">${referral_url}</a>
+                </p>
+              </div>
+            </td>
+          </tr>
+
+          <!-- How it works -->
+          <tr>
+            <td style="padding: 0 40px 8px;">
+              <p style="margin: 0 0 20px; color: #1e293b; font-size: 16px; font-weight: 600;">How it works</p>
+              <table role="presentation" style="width: 100%; border-collapse: collapse;">
+                ${steps_html}
+              </table>
+            </td>
+          </tr>
+
+          <!-- CTA -->
+          <tr>
+            <td style="padding: 16px 40px 36px; text-align: center;">
+              <a href="${dashboard_url}" style="display: inline-block; padding: 14px 32px; background-color: #10b981; color: #ffffff; font-size: 16px; font-weight: 600; text-decoration: none; border-radius: 8px;">Open my dashboard</a>
+              <p style="margin: 16px 0 0; color: #64748b; font-size: 14px; line-height: 1.6;">
+                Track your referrals, clicks and rewards any time.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding: 24px 40px 32px; background-color: #f8fafc; border-top: 1px solid #e2e8f0; text-align: center;">
+              <p style="margin: 0 0 8px; color: #64748b; font-size: 13px; line-height: 1.6;">
+                Rewards are issued after a referred deal funds and closing conditions are complete.
+                <a href="${terms_url}" style="color: #047857; text-decoration: underline;">Full program terms</a>.
+              </p>
+              <p style="margin: 0; color: #94a3b8; font-size: 12px;">© ${new Date().getFullYear()} Credit Banc Vault</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+// NOTE: no escape_email_strings here — escaping belongs to the HTML templates
+// only, otherwise a name containing & or ' surfaces as a literal "&amp;".
+export function generate_affiliate_welcome_email_text(data: AffiliateWelcomeEmailData): string {
+  const { affiliate_name, referral_url, dashboard_url, reward_amount, terms_url } = data;
+  return [
+    `Hi ${affiliate_name},`,
+    ``,
+    `You're in — welcome to the "I Know Someone" Club.`,
+    ``,
+    `Your personal referral link:`,
+    `${referral_url}`,
+    ``,
+    `How it works:`,
+    `1. Share your link with any business owner who might want capital.`,
+    `2. They apply through it — we take it from there.`,
+    `3. When their deal funds, your ${reward_amount} gift card goes out. No cap on referrals.`,
+    ``,
+    `Track referrals and rewards: ${dashboard_url}`,
+    ``,
+    `Rewards are issued after a referred deal funds and closing conditions are`,
+    `complete. Full program terms: ${terms_url}`,
+    ``,
+    `© ${new Date().getFullYear()} Credit Banc Vault`,
+  ].join("\n");
+}
+
+export async function send_affiliate_welcome_email(data: AffiliateWelcomeEmailData) {
+  const transporter = create_smtp_transporter();
+
+  const mail_options: any = {
+    from: affiliate_from_header(),
+    to: data.affiliate_email,
+    subject: `You're in — here's your referral link`,
+    html: generate_affiliate_welcome_email_html(data),
+    text: generate_affiliate_welcome_email_text(data),
   };
 
   return await transporter.sendMail(mail_options);

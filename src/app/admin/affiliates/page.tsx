@@ -15,6 +15,7 @@ import { Gift } from "lucide-react";
 export const dynamic = "force-dynamic";
 
 const PAYOUT_LABELS: Record<string, string> = {
+  queued: "Queued",
   pending: "Pending",
   sent: "Sent",
   delivered: "Delivered",
@@ -27,16 +28,27 @@ function fmtMoney(n: number): string {
 }
 
 /**
- * A payout the guardrails stopped before sending: still `pending`, with the
- * reason stamped on `error` by createAffiliatePayoutForFundedVault. It needs an
- * admin decision, so it reads as "Held" rather than a routine "Pending".
+ * A payout the guardrails stopped: `hold_reason` is set, so the cron worker will
+ * never auto-send it. It needs an admin decision, hence "Held" rather than the
+ * routine "Queued".
  */
-function isHeld(p: { status: string; error?: string | null }): boolean {
-  return p.status === "pending" && Boolean(p.error?.startsWith("HELD:"));
+function isHeld(p: { status: string; hold_reason?: string | null }): boolean {
+  return Boolean(p.hold_reason) && p.status !== "sent" && p.status !== "delivered" && p.status !== "canceled";
 }
 
-function stripHeldPrefix(err: string): string {
-  return err.startsWith("HELD:") ? err.slice("HELD:".length).trim() : err;
+/** Still inside the 24h review window — the worker hasn't been allowed to send yet. */
+function isWaiting(p: { status: string; hold_reason?: string | null; release_at?: string | null }): boolean {
+  if (isHeld(p) || p.status === "sent" || p.status === "delivered" || p.status === "canceled") return false;
+  return Boolean(p.release_at) && new Date(p.release_at as string) > new Date();
+}
+
+/** "in 14h" / "in 40m" — how long until the gift card is created. */
+function untilRelease(iso: string): string {
+  const ms = new Date(iso).getTime() - Date.now();
+  if (ms <= 0) return "any minute";
+  const hours = Math.floor(ms / 3_600_000);
+  if (hours >= 1) return `in ${hours}h`;
+  return `in ${Math.max(1, Math.round(ms / 60_000))}m`;
 }
 
 function fmtDate(iso: string | null): string {
@@ -58,7 +70,7 @@ export default async function AdminAffiliatesPage() {
   const [{ data: affiliates }, { data: leads }, { data: payouts }] = await Promise.all([
     db.from("affiliates").select("id, referral_code, first_name, last_name, email, link_clicks, status, created_at").order("created_at", { ascending: false }),
     db.from("referral_leads").select("affiliate_id, status"),
-    db.from("affiliate_payouts").select("id, affiliate_id, commission_amount, status, giftronaut_order_id, error, created_at, affiliates(first_name, last_name, email)").order("created_at", { ascending: false }),
+    db.from("affiliate_payouts").select("id, affiliate_id, commission_amount, status, giftronaut_order_id, error, hold_reason, release_at, attempts, created_at, affiliates(first_name, last_name, email)").order("created_at", { ascending: false }),
   ]);
 
   const affRows = affiliates ?? [];
@@ -75,7 +87,11 @@ export default async function AdminAffiliatesPage() {
   const paidByAff = new Map<string, number>();
   for (const p of payoutRows) {
     if (!p.affiliate_id) continue;
-    fundedByAff.set(p.affiliate_id, (fundedByAff.get(p.affiliate_id) ?? 0) + 1);
+    // A canceled payout means the deal didn't actually fund (or was reverted
+    // inside the review window) — it must not inflate the funded count.
+    if (p.status !== "canceled") {
+      fundedByAff.set(p.affiliate_id, (fundedByAff.get(p.affiliate_id) ?? 0) + 1);
+    }
     if (p.status === "sent" || p.status === "delivered") {
       paidByAff.set(p.affiliate_id, (paidByAff.get(p.affiliate_id) ?? 0) + Number(p.commission_amount || 0));
     }
@@ -168,6 +184,8 @@ export default async function AdminAffiliatesPage() {
               <tbody>
                 {payoutRows.map((p: any) => {
                   const aff = p.affiliates;
+                  const held = isHeld(p);
+                  const waiting = isWaiting(p);
                   return (
                     <tr key={p.id} className="border-t border-emerald-50 font-bold text-emerald-950">
                       <td className="px-6 py-4">
@@ -181,26 +199,40 @@ export default async function AdminAffiliatesPage() {
                             "inline-block rounded-full px-3 py-1 text-xs uppercase tracking-wide " +
                             (p.status === "failed"
                               ? "bg-red-50 text-red-600"
-                              : isHeld(p)
+                              : held
                                 ? "bg-amber-50 text-amber-700"
-                                : "bg-emerald-50 text-emerald-700")
+                                : p.status === "canceled"
+                                  ? "bg-slate-100 text-slate-500"
+                                  : waiting
+                                    ? "bg-sky-50 text-sky-700"
+                                    : "bg-emerald-50 text-emerald-700")
                           }
                         >
-                          {isHeld(p) ? "Held" : PAYOUT_LABELS[p.status] ?? p.status}
+                          {held ? "Held" : PAYOUT_LABELS[p.status] ?? p.status}
                         </span>
-                        {/* Why a payout is sitting unsent — a held row needs an
-                            admin decision, so the reason has to be visible here
-                            rather than only in the server logs. */}
-                        {p.error && (
+                        {/* Why a payout is sitting unsent. A queued row is on the
+                            24h clock and still cancellable, so say when it goes —
+                            that window is the only chance to stop the money. */}
+                        {waiting && (
+                          <div className="mt-1 text-xs font-bold text-sky-700">
+                            Sends {untilRelease(p.release_at)}
+                          </div>
+                        )}
+                        {(p.hold_reason || p.error) && (
                           <div className="mt-1 max-w-xs text-xs font-medium text-emerald-900/60">
-                            {stripHeldPrefix(p.error)}
+                            {p.hold_reason || p.error}
                           </div>
                         )}
                       </td>
                       <td className="px-6 py-4 text-emerald-900/50 font-mono text-xs">{p.giftronaut_order_id || "—"}</td>
                       <td className="px-6 py-4 text-emerald-900/60">{fmtDate(p.created_at)}</td>
                       <td className="px-6 py-4">
-                        <PayoutActions payoutId={p.id} status={p.status} held={isHeld(p)} />
+                        <PayoutActions
+                          payoutId={p.id}
+                          status={p.status}
+                          held={held}
+                          releaseAt={p.release_at}
+                        />
                       </td>
                     </tr>
                   );

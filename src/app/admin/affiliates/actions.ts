@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { sendGiftCard } from "@/lib/giftronaut";
+import { processAffiliatePayout } from "@/lib/affiliates";
 import { revalidatePath } from "next/cache";
 
 async function requireAdminUser() {
@@ -20,9 +20,12 @@ async function requireAdminUser() {
 }
 
 /**
- * Retry a failed Giftronaut send for an existing payout row (admin only). Reuses
- * the payout id as the idempotency key, so if the original actually went through
- * Giftronaut this won't double-charge.
+ * Send a payout now (admin only) — used both to release a held row and to retry
+ * a failed one. Delegates to processAffiliatePayout so the admin path and the
+ * cron worker enforce exactly the same rules; `admin: true` overrides the 24h
+ * gate, the hold and the attempt cap, but NOT the check that the deal is still
+ * marked funded. The payout id stays the idempotency key, so releasing a row
+ * whose original send actually reached Giftronaut won't double-charge.
  */
 export async function retryAffiliatePayout(
   payoutId: string
@@ -31,50 +34,58 @@ export async function retryAffiliatePayout(
   if (!admin) return { success: false, error: "Forbidden" };
 
   const db = createAdminClient();
+  const result = await processAffiliatePayout(db, payoutId, {
+    admin: true,
+    actorLabel: `admin ${admin.email ?? admin.id}`,
+  });
 
+  revalidatePath("/admin/affiliates");
+
+  if (result.outcome === "sent") return { success: true };
+  if (result.outcome === "failed") return { success: false, error: result.error };
+  return { success: false, error: result.reason };
+}
+
+/**
+ * Cancel a payout before it sends (admin only). This is the point of the 24h
+ * gate: a deal marked funded by mistake can be pulled back before any money
+ * moves. Refuses once the gift card exists — a sent card can't be recalled.
+ */
+export async function cancelAffiliatePayout(
+  payoutId: string,
+  reason?: string
+): Promise<{ success: boolean; error?: string }> {
+  const admin = await requireAdminUser();
+  if (!admin) return { success: false, error: "Forbidden" };
+
+  const db = createAdminClient();
   const { data: payout } = await db
     .from("affiliate_payouts")
-    .select("id, commission_amount, status, affiliates(first_name, last_name, email, giftronaut_email)")
+    .select("id, status")
     .eq("id", payoutId)
     .maybeSingle();
 
   if (!payout) return { success: false, error: "Payout not found" };
   if (payout.status === "sent" || payout.status === "delivered") {
-    return { success: false, error: "Payout already sent" };
+    return { success: false, error: "Gift card already sent — it can't be canceled" };
   }
+  if (payout.status === "canceled") return { success: true };
 
-  const aff: any = payout.affiliates;
-  const email = aff?.giftronaut_email || aff?.email;
-  if (!email) return { success: false, error: "Affiliate has no email" };
+  const note = reason?.trim() || "Canceled by an admin before release";
+  const { error } = await db
+    .from("affiliate_payouts")
+    .update({
+      status: "canceled",
+      hold_reason: null,
+      error: `${note} (${admin.email ?? admin.id})`,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", payoutId)
+    .not("status", "in", "(sent,delivered)");
 
-  const nowIso = new Date().toISOString();
-  try {
-    const result = await sendGiftCard({
-      email,
-      firstName: aff?.first_name,
-      lastName: aff?.last_name,
-      amount: Number(payout.commission_amount || 0),
-      idempotencyKey: payout.id,
-    });
-    await db
-      .from("affiliate_payouts")
-      .update({
-        status: "sent",
-        giftronaut_order_id: result.orderId,
-        giftronaut_status: result.status,
-        error: null,
-        sent_at: nowIso,
-        updated_at: nowIso,
-      })
-      .eq("id", payout.id);
-  } catch (err: any) {
-    await db
-      .from("affiliate_payouts")
-      .update({ status: "failed", error: String(err?.message ?? err), updated_at: nowIso })
-      .eq("id", payout.id);
-    return { success: false, error: String(err?.message ?? err) };
-  }
+  if (error) return { success: false, error: error.message };
 
+  console.warn(`[affiliates] payout ${payoutId} canceled by admin ${admin.id}: ${note}`);
   revalidatePath("/admin/affiliates");
   return { success: true };
 }

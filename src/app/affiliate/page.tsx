@@ -69,7 +69,7 @@ export default function AffiliateSignupPage() {
             {/* pitch */}
             <div>
               <div className="inline-flex items-center space-x-2 bg-white border border-black/5 rounded-full px-4 py-2 mb-10 shadow-sm">
-                <Badge className="bg-cb-mint text-cb-navy hover:bg-cb-mint font-bold border-none shadow-sm">PARTNERS</Badge>
+                
                 <span className="text-sm text-cb-gray font-bold uppercase tracking-[0.2em]">Affiliate Program</span>
               </div>
 

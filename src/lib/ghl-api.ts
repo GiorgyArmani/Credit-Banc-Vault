@@ -26,6 +26,13 @@ export type GhlContactPayload = {
   website?: string | null;
   timezone?: string | null;
   dnd?: boolean;
+  /**
+   * Native GHL contact type — the `{{contact.type}}` merge field, shown as
+   * "Contact type" on the contact record. This location defines its own set
+   * (Funding Lead, Client, Affiliate, Business Advisor, Personal Network,
+   * Podcast Guest) rather than the stock lead/customer pair.
+   */
+  type?: string | null;
   tags?: string[];
   companyName?: string | null;
   country?: string | null;

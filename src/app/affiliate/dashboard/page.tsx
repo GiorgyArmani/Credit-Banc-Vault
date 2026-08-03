@@ -28,7 +28,10 @@ const STATUS_META: Record<string, { label: string; cls: string }> = {
 
 // Payout status → affiliate-facing label (`failed` shown as the softer
 // "Processing" so partners never see a raw failure) + pill colors.
+// The affiliate never needs to see our internal review machinery — a queued,
+// pending or retrying payout is all the same thing from their side: on its way.
 const PAYOUT_META: Record<string, { label: string; cls: string }> = {
+  queued: { label: "Processing", cls: "bg-amber-50 text-amber-600" },
   pending: { label: "Pending", cls: "bg-amber-50 text-amber-600" },
   sent: { label: "Sent", cls: "bg-cb-mint/10 text-cb-mint" },
   delivered: { label: "Delivered", cls: "bg-cb-mint/10 text-cb-mint" },
@@ -96,12 +99,15 @@ export default async function AffiliateDashboardPage() {
   const payoutRows = payouts ?? [];
 
   const totalReferrals = leadRows.length;
-  const fundedCount = payoutRows.length;
+  // A canceled payout is a deal that didn't hold up — don't count it as funded.
+  const fundedCount = payoutRows.filter((p) => p.status !== "canceled").length;
   const earned = payoutRows
     .filter((p) => p.status === "sent" || p.status === "delivered")
     .reduce((sum, p) => sum + Number(p.commission_amount || 0), 0);
+  // Everything still on its way: queued behind the 24h review window, or a send
+  // the system is retrying.
   const pending = payoutRows
-    .filter((p) => p.status === "pending" || p.status === "failed")
+    .filter((p) => p.status === "queued" || p.status === "pending" || p.status === "failed")
     .reduce((sum, p) => sum + Number(p.commission_amount || 0), 0);
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://vault.creditbanc.io";
