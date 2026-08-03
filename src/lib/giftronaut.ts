@@ -65,6 +65,18 @@ async function getAccessToken(): Promise<string> {
 async function resolveChoiceProductId(amount: number): Promise<string> {
   const envId = process.env.GIFTRONAUT_PRODUCT_ID;
   if (envId) return envId;
+
+  // No explicit product id. Against the LIVE account, auto-resolving means we
+  // order whatever the catalog happens to return — so it is opt-in only. Set
+  // GIFTRONAUT_PRODUCT_ID in every environment that spends real money; the
+  // fallback exists for sandbox convenience and must be enabled deliberately.
+  if (process.env.GIFTRONAUT_ALLOW_CATALOG_FALLBACK !== "true") {
+    throw new Error(
+      "GIFTRONAUT_PRODUCT_ID is not set. Set it to the choice-card product you intend to send " +
+        "(or set GIFTRONAUT_ALLOW_CATALOG_FALLBACK=true to auto-resolve from the catalog — sandbox only)."
+    );
+  }
+
   if (cachedProductId) return cachedProductId;
 
   const token = await getAccessToken();
@@ -77,22 +89,37 @@ async function resolveChoiceProductId(amount: number): Promise<string> {
     throw new Error(`Giftronaut catalog lookup failed: ${res.status} ${await res.text()}`);
   }
 
+  // Only the fields we actually read — the catalog response is external and its
+  // shape varies, so everything here is optional.
+  type CatalogProduct = {
+    productId?: string | number;
+    id?: string | number;
+    prices?: unknown;
+  };
+
   const data = await res.json();
-  const products: any[] = Array.isArray(data)
+  const products: CatalogProduct[] = Array.isArray(data)
     ? data
     : data.products ?? data.data ?? data.items ?? [];
   if (!products.length) {
     throw new Error("No Giftronaut choice-card products available in the catalog");
   }
 
-  // Prefer a product whose [min, max] range covers the reward amount.
-  const covers = (p: any) => {
-    const prices = Array.isArray(p?.prices) ? p.prices : [];
+  // Require a product whose [min, max] range actually covers the reward amount.
+  // The old `?? products[0]` fallback would happily order an unrelated product
+  // when nothing matched — never guess when the order costs real money.
+  const covers = (p: CatalogProduct) => {
+    const prices = Array.isArray(p?.prices) ? (p.prices as (number | null)[]) : [];
     const min = prices[0];
     const max = prices[1];
     return (min == null || amount >= min) && (max == null || amount <= max);
   };
-  const pick = products.find(covers) ?? products[0];
+  const pick = products.find(covers);
+  if (!pick) {
+    throw new Error(
+      `No Giftronaut choice-card product covers $${amount}. Set GIFTRONAUT_PRODUCT_ID explicitly.`
+    );
+  }
   const id = pick?.productId ?? pick?.id;
   if (!id) throw new Error("Giftronaut choice-card product has no id");
 

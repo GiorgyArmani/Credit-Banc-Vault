@@ -2,14 +2,7 @@
 
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { BrandCard, Eyebrow, CTA, FIELD } from "@/components/marketing/brand-chrome";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Link from "next/link";
@@ -86,83 +79,83 @@ export default function LoginForm({
 
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
-      <Card className="shadow-2xl border-emerald-50 rounded-[3rem] overflow-hidden bg-white/80 backdrop-blur-xl">
-        <CardHeader className="p-10 text-center">
-          <CardTitle className="text-4xl font-black text-emerald-950 uppercase tracking-tighter mb-2 leading-none">Login</CardTitle>
-          <CardDescription className="text-sm font-bold text-emerald-900/40 uppercase tracking-widest mt-2">
-            Access the Credit Banc Vault
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="p-10 pt-0">
-          <form onSubmit={handleLogin}>
-            <div className="flex flex-col gap-8">
-              {/* Email Input Field */}
-              <div className="grid gap-3">
-                <Label htmlFor="email" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 ml-1">Email Address</Label>
-                <div className="relative">
-                  <Mail className="absolute left-5 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-900/20" />
-                  <Input
-                    id="email"
-                    type="email"
-                    placeholder="name@company.com"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold pl-12 pr-6"
-                  />
-                </div>
+      <BrandCard>
+        <Eyebrow className="mb-3">Access the vault</Eyebrow>
+        <h1 className="font-headline text-4xl font-extrabold leading-tight tracking-tight text-cb-ink">
+          Welcome <span className="text-cb-mint">back</span>
+        </h1>
+
+        <form onSubmit={handleLogin} className="mt-8">
+          <div className="flex flex-col gap-6">
+            {/* Email Input Field */}
+            <div className="grid gap-2">
+              <Label htmlFor="email" className={FIELD.label}>
+                Email address
+              </Label>
+              <div className="relative">
+                <Mail className={FIELD.icon} />
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="name@company.com"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className={FIELD.inputWithIcon}
+                />
               </div>
-
-              {/* Password Input Field */}
-              <div className="grid gap-3">
-                <div className="flex items-center justify-between px-1">
-                  <Label htmlFor="password" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 ml-1">Password</Label>
-                  <Link
-                    href="/auth/forgot-password"
-                    className="text-[10px] font-black uppercase tracking-widest text-emerald-600 hover:text-emerald-500 transition-colors"
-                  >
-                    Forgot Password?
-                  </Link>
-                </div>
-                <div className="relative">
-                  <Lock className="absolute left-5 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-900/20" />
-                  <Input
-                    id="password"
-                    type="password"
-                    required
-                    value={password}
-                    name="password"
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold pl-12 pr-6"
-                  />
-                </div>
-              </div>
-
-              {/* Error Message Display */}
-              {error && (
-                <div className="rounded-2xl bg-red-50 p-4 border border-red-100">
-                  <p className="text-sm font-bold text-red-500">{error}</p>
-                </div>
-              )}
-
-              {/* Submit Button */}
-              <Button type="submit" className="h-16 bg-emerald-500 hover:bg-emerald-600 text-white font-black rounded-2xl shadow-xl shadow-emerald-500/20 transition-all active:scale-95 text-lg" disabled={isLoading}>
-                {isLoading ? (
-                  <div className="flex items-center gap-3">
-                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                    <span>Signing in...</span>
-                  </div>
-                ) : (
-                  <div className="flex items-center justify-center gap-2">
-                    <span>Sign In</span>
-                    <ArrowRight className="w-6 h-6" />
-                  </div>
-                )}
-              </Button>
             </div>
-          </form>
-        </CardContent>
-      </Card>
+
+            {/* Password Input Field */}
+            <div className="grid gap-2">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="password" className={FIELD.label}>
+                  Password
+                </Label>
+                <Link
+                  href="/auth/forgot-password"
+                  className="font-label text-[10px] font-bold uppercase tracking-[0.2em] text-cb-mint transition-colors hover:underline"
+                >
+                  Forgot password?
+                </Link>
+              </div>
+              <div className="relative">
+                <Lock className={FIELD.icon} />
+                <Input
+                  id="password"
+                  type="password"
+                  required
+                  value={password}
+                  name="password"
+                  onChange={(e) => setPassword(e.target.value)}
+                  className={FIELD.inputWithIcon}
+                />
+              </div>
+            </div>
+
+            {/* Error Message Display */}
+            {error && <p className={FIELD.error}>{error}</p>}
+
+            {/* Submit Button */}
+            <button type="submit" className={`${CTA.primary} group w-full`} disabled={isLoading}>
+              {isLoading ? (
+                <>
+                  <span
+                    aria-hidden
+                    className="h-4 w-4 animate-spin rounded-full border-2 border-primary-fixed/30 border-t-primary-fixed"
+                  />
+                  Signing in…
+                </>
+              ) : (
+                <>
+                  Sign in
+                  <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
+                </>
+              )}
+            </button>
+          </div>
+        </form>
+      </BrandCard>
     </div>
   );
 }

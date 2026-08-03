@@ -275,12 +275,33 @@ export async function fundLoanAction(clientId: string, data: {
         //    This is the in-vault source of truth (powers the admin funded-$ KPI
         //    and renewal tracking). GHL above is the signaling layer; this is the
         //    record. Non-fatal — a missing deal row must not block the tag/email.
-        if (data.businessProfileId) {
+        //
+        //    This dialog is now the ONLY route to a `funded` pipeline status, and
+        //    updateLoanStatus refuses `funded` without a funded funding_deals row.
+        //    So when the caller didn't supply a business (a client whose vault has
+        //    no active business selected), resolve the primary one here rather
+        //    than skipping the write and stranding the transition.
+        let fundedBusinessProfileId = data.businessProfileId ?? null;
+        if (!fundedBusinessProfileId) {
+            const { data: primaryBusiness } = await supabaseAdmin
+                .from("business_profiles")
+                .select("id")
+                .eq("client_vault_id", clientId)
+                .order("created_at", { ascending: true })
+                .limit(1)
+                .maybeSingle();
+            fundedBusinessProfileId = primaryBusiness?.id ?? null;
+            if (fundedBusinessProfileId) {
+                console.log(`fundLoanAction: resolved primary business ${fundedBusinessProfileId} for ${clientId}`);
+            }
+        }
+
+        if (fundedBusinessProfileId) {
             try {
                 const { data: deal } = await supabaseAdmin
                     .from("funding_deals")
                     .select("id")
-                    .eq("business_profile_id", data.businessProfileId)
+                    .eq("business_profile_id", fundedBusinessProfileId)
                     .order("display_order", { ascending: true })
                     .limit(1)
                     .maybeSingle();
@@ -307,7 +328,7 @@ export async function fundLoanAction(clientId: string, data: {
                     // KPI reads the real funded amount instead of the requested.
                     const { error: insertErr } = await supabaseAdmin
                         .from("funding_deals")
-                        .insert({ business_profile_id: data.businessProfileId, ...fundedFields });
+                        .insert({ business_profile_id: fundedBusinessProfileId, ...fundedFields });
                     if (insertErr) {
                         console.error("fundLoanAction Error: Failed to create funding_deal:", insertErr);
                     }
@@ -335,20 +356,37 @@ export async function fundLoanAction(clientId: string, data: {
 
         // 8. Record the pipeline transition. Reuses updateLoanStatus, which writes
         //    loan_status_history (drives the admin funded-$ KPI) and fires the
-        //    advisor "Loan Funded 🎉" in-app notification. Non-fatal.
+        //    advisor "Loan Funded 🎉" in-app notification.
+        //
+        //    updateLoanStatus now REQUIRES the funded funding_deals row written in
+        //    step 6, so a failure there cascades into the status being refused.
+        //    That must not report as a clean success: the deal would look funded
+        //    in GHL and email while the pipeline still says otherwise. Surface it
+        //    so UW knows to retry rather than assuming it landed.
+        let statusWarning: string | null = null;
         try {
-            await updateLoanStatus(
+            const statusRes = await updateLoanStatus(
                 clientId,
                 "funded",
                 `Funded by ${data.lenderFunded || "lender"} — ${data.totalAmountFunded}`
             );
+            if (!statusRes.success) {
+                statusWarning = statusRes.error || "Pipeline status was not updated.";
+                console.error("fundLoanAction: funded transition refused:", statusWarning);
+            }
         } catch (statusError) {
+            statusWarning = statusError instanceof Error ? statusError.message : String(statusError);
             console.error("fundLoanAction Error: Failed to record funded transition:", statusError);
-            // Non-fatal
         }
 
         revalidateClientSurfaces(clientId);
-        return { success: true };
+        if (statusWarning) {
+            return {
+                success: true as const,
+                warning: `The funding details were saved, but the pipeline status did not move to Funded: ${statusWarning}`,
+            };
+        }
+        return { success: true as const };
     } catch (error: any) {
         console.error("fundLoanAction error:", error);
         return { success: false, error: error.message };

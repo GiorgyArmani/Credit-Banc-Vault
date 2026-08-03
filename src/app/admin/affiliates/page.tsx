@@ -26,6 +26,19 @@ function fmtMoney(n: number): string {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 }
 
+/**
+ * A payout the guardrails stopped before sending: still `pending`, with the
+ * reason stamped on `error` by createAffiliatePayoutForFundedVault. It needs an
+ * admin decision, so it reads as "Held" rather than a routine "Pending".
+ */
+function isHeld(p: { status: string; error?: string | null }): boolean {
+  return p.status === "pending" && Boolean(p.error?.startsWith("HELD:"));
+}
+
+function stripHeldPrefix(err: string): string {
+  return err.startsWith("HELD:") ? err.slice("HELD:".length).trim() : err;
+}
+
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
@@ -45,7 +58,7 @@ export default async function AdminAffiliatesPage() {
   const [{ data: affiliates }, { data: leads }, { data: payouts }] = await Promise.all([
     db.from("affiliates").select("id, referral_code, first_name, last_name, email, link_clicks, status, created_at").order("created_at", { ascending: false }),
     db.from("referral_leads").select("affiliate_id, status"),
-    db.from("affiliate_payouts").select("id, affiliate_id, commission_amount, status, giftronaut_order_id, created_at, affiliates(first_name, last_name, email)").order("created_at", { ascending: false }),
+    db.from("affiliate_payouts").select("id, affiliate_id, commission_amount, status, giftronaut_order_id, error, created_at, affiliates(first_name, last_name, email)").order("created_at", { ascending: false }),
   ]);
 
   const affRows = affiliates ?? [];
@@ -168,16 +181,26 @@ export default async function AdminAffiliatesPage() {
                             "inline-block rounded-full px-3 py-1 text-xs uppercase tracking-wide " +
                             (p.status === "failed"
                               ? "bg-red-50 text-red-600"
-                              : "bg-emerald-50 text-emerald-700")
+                              : isHeld(p)
+                                ? "bg-amber-50 text-amber-700"
+                                : "bg-emerald-50 text-emerald-700")
                           }
                         >
-                          {PAYOUT_LABELS[p.status] ?? p.status}
+                          {isHeld(p) ? "Held" : PAYOUT_LABELS[p.status] ?? p.status}
                         </span>
+                        {/* Why a payout is sitting unsent — a held row needs an
+                            admin decision, so the reason has to be visible here
+                            rather than only in the server logs. */}
+                        {p.error && (
+                          <div className="mt-1 max-w-xs text-xs font-medium text-emerald-900/60">
+                            {stripHeldPrefix(p.error)}
+                          </div>
+                        )}
                       </td>
                       <td className="px-6 py-4 text-emerald-900/50 font-mono text-xs">{p.giftronaut_order_id || "—"}</td>
                       <td className="px-6 py-4 text-emerald-900/60">{fmtDate(p.created_at)}</td>
                       <td className="px-6 py-4">
-                        <PayoutActions payoutId={p.id} status={p.status} />
+                        <PayoutActions payoutId={p.id} status={p.status} held={isHeld(p)} />
                       </td>
                     </tr>
                   );

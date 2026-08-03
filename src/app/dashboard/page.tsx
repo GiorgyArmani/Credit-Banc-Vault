@@ -16,7 +16,9 @@ import { useOnboardingStatus } from '@/components/onboarding/use-onboarding-stat
 import WebsiteTour from '@/components/tour/website-tour';
 import { Button } from '@/components/ui/button';
 import { LoanPipelineFull } from '@/components/loan-pipeline-status';
-import { getClientPipelineHistory, updateLoanStatus, PipelineStatusEntry, LoanStatus } from '@/app/actions/pipeline';
+// Read-only: the client dashboard shows the step the file is on. Clients have no
+// pipeline write access, so the staff-only updateLoanStatus is not imported here.
+import { getClientPipelineHistory, PipelineStatusEntry, LoanStatus } from '@/app/actions/pipeline';
 import { BusinessTabStrip, type BusinessTab } from '@/app/advisor/dashboard/clients/[id]/_components/business-tab-strip';
 import { CollapsibleSection, broadcast_toggle_all } from '@/app/advisor/dashboard/clients/[id]/_components/collapsible-section';
 import { PendingContractsBanner } from '@/components/onboarding/pending-contracts-banner';
@@ -181,7 +183,7 @@ function DashboardContent() {
   }, [searchParams, allComponentsReady]);
 
   return (
-    <div className="min-h-screen bg-white relative overflow-hidden">
+    <div className="min-h-screen bg-cb-cream relative overflow-hidden">
       {/* subtle mint glow */}
       <div className="absolute top-0 right-0 w-[50%] h-[50%] bg-emerald-50/50 blur-[120px] rounded-full pointer-events-none" />
       <div className="absolute bottom-0 left-0 w-[40%] h-[40%] bg-blue-50/30 blur-[120px] rounded-full pointer-events-none" />

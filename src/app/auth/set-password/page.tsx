@@ -4,11 +4,9 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Lock, ArrowRight } from "lucide-react";
+import { BrandAuthShell, BrandCard, Eyebrow, CTA } from "@/components/marketing/brand-chrome";
 
 export default function SetPasswordPage() {
   const supabase = createClient();
@@ -77,46 +75,63 @@ export default function SetPasswordPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#f0fdf7] relative overflow-hidden flex items-center justify-center">
-        {/* aurora-glow effect for consistency */}
-        <div className="absolute inset-0 bg-gradient-to-br from-emerald-100/30 via-white/80 to-white pointer-events-none" />
-        <div className="text-center relative z-10">
-          <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-emerald-500 mx-auto mb-6"></div>
-          <p className="text-emerald-950/40 text-lg font-black uppercase tracking-widest">Verifying session...</p>
+      <BrandAuthShell width="md">
+        <div className="text-center">
+          <div
+            aria-hidden
+            className="mx-auto mb-6 h-14 w-14 animate-spin rounded-full border-4 border-cb-mint/20 border-t-cb-mint"
+          />
+          <p className="font-label text-xs font-bold uppercase tracking-[0.3em] text-cb-gray">
+            Verifying session
+          </p>
         </div>
-      </div>
+      </BrandAuthShell>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#f0fdf7] relative overflow-hidden flex items-center justify-center p-4">
-      {/* aurora-glow effect for consistency */}
-      <div className="absolute inset-0 bg-gradient-to-br from-emerald-100/30 via-white/80 to-white pointer-events-none" />
-      <div className="absolute top-0 right-0 w-[50%] h-[50%] bg-emerald-200/10 blur-[120px] rounded-full pointer-events-none animate-aurora" />
-      <div className="absolute bottom-0 left-0 w-[40%] h-[40%] bg-blue-100/5 blur-[120px] rounded-full pointer-events-none animate-aurora" style={{ animationDelay: '-3s' }} />
+    <BrandAuthShell width="md">
+      <BrandCard>
+        <Eyebrow className="mb-3">Account security</Eyebrow>
+        <h1 className="font-headline text-3xl font-extrabold tracking-tight text-cb-ink md:text-4xl">
+          Set your <span className="text-cb-mint">password</span>
+        </h1>
+        <p className="mt-3 text-[15px] leading-relaxed text-cb-ink/70">
+          {email ? (
+            <>
+              Account for <b className="font-bold text-cb-ink">{email}</b>
+            </>
+          ) : (
+            "You're authenticated via a secure link."
+          )}
+        </p>
 
-      <Card className="w-full max-w-md shadow-2xl border-emerald-50 rounded-[3rem] overflow-hidden relative z-10 bg-white/80 backdrop-blur-xl">
-        <CardHeader className="p-10">
-          <CardTitle className="text-3xl font-black text-emerald-950 uppercase tracking-tighter">Set Password</CardTitle>
-          <CardDescription className="text-sm font-bold text-emerald-900/40 mt-2">
-            {email ? <>Account for <b className="text-emerald-950 font-black">{email}</b></> : "You're authenticated via a secure link."}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="p-10 pt-0">
+        <div className="mt-8">
           {!mustSet ? (
-            <div className="text-sm font-bold text-emerald-950/60 leading-relaxed text-center">
+            <p className="text-[15px] leading-relaxed text-cb-ink/70">
               Your password is already set. Continue to your{" "}
-              <a className="text-emerald-600 underline font-black" href="/dashboard">dashboard</a>.
-            </div>
+              <a className="font-bold text-cb-mint hover:underline" href="/dashboard">
+                dashboard
+              </a>
+              .
+            </p>
           ) : ok ? (
-            <div className="text-emerald-600 font-bold text-center flex items-center justify-center gap-2">
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-emerald-600"></div>
+            <p className="flex items-center gap-3 text-[15px] font-semibold text-cb-ink/70">
+              <span
+                aria-hidden
+                className="h-4 w-4 animate-spin rounded-full border-2 border-cb-mint/20 border-t-cb-mint"
+              />
               Password updated. Redirecting…
-            </div>
+            </p>
           ) : (
             <form onSubmit={onSubmit} className="space-y-6">
-              <div className="grid gap-4">
-                <Label htmlFor="pwd1" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 ml-1">New password</Label>
+              <div className="grid gap-2">
+                <Label
+                  htmlFor="pwd1"
+                  className="font-label text-[10px] font-bold uppercase tracking-[0.2em] text-cb-gray"
+                >
+                  New password
+                </Label>
                 <Input
                   id="pwd1"
                   type="password"
@@ -124,11 +139,16 @@ export default function SetPasswordPage() {
                   value={pwd1}
                   onChange={(e) => setPwd1(e.target.value)}
                   required
-                  className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
+                  className="h-12 rounded-xl border-black/10 bg-white px-4 font-medium"
                 />
               </div>
-              <div className="grid gap-4">
-                <Label htmlFor="pwd2" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 ml-1">Repeat password</Label>
+              <div className="grid gap-2">
+                <Label
+                  htmlFor="pwd2"
+                  className="font-label text-[10px] font-bold uppercase tracking-[0.2em] text-cb-gray"
+                >
+                  Repeat password
+                </Label>
                 <Input
                   id="pwd2"
                   type="password"
@@ -136,20 +156,24 @@ export default function SetPasswordPage() {
                   value={pwd2}
                   onChange={(e) => setPwd2(e.target.value)}
                   required
-                  className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
+                  className="h-12 rounded-xl border-black/10 bg-white px-4 font-medium"
                 />
               </div>
-              {err && <p className="text-sm font-bold text-red-600 bg-red-50 p-4 rounded-2xl border border-red-100">{err}</p>}
-              <Button type="submit" className="h-14 w-full bg-emerald-500 hover:bg-emerald-600 text-white font-black rounded-2xl shadow-xl shadow-emerald-500/20 transition-all active:scale-95" disabled={submitting}>
+              {err && (
+                <p className="rounded-xl border border-error-container bg-error-container/40 p-4 text-sm font-semibold text-on-error-container">
+                  {err}
+                </p>
+              )}
+              <button type="submit" className={`${CTA.primary} w-full`} disabled={submitting}>
                 {submitting ? "Saving…" : "Save password"}
-              </Button>
-              <p className="text-[10px] font-bold text-emerald-900/30 text-center uppercase tracking-widest leading-relaxed">
-                Minimum 8 characters. You’ll be redirected to your dashboard.
+              </button>
+              <p className="text-center text-xs leading-relaxed text-cb-ink/50">
+                Minimum 8 characters. You&apos;ll be redirected to your dashboard.
               </p>
             </form>
           )}
-        </CardContent>
-      </Card>
-    </div>
+        </div>
+      </BrandCard>
+    </BrandAuthShell>
   );
 }

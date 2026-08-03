@@ -1652,7 +1652,7 @@ export default function BankAnalysis() {
   ];
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
+    <div className="min-h-screen bg-cb-cream text-cb-ink">
       {/* Top bar */}
       <div className="border-b border-slate-200 bg-white">
         <div className="max-w-[1600px] mx-auto px-4 py-3 flex items-center justify-between">

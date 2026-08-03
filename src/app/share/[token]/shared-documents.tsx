@@ -34,44 +34,44 @@ export function SharedDocuments({ documents }: { documents: SharedDocument[] }) 
       <div className="space-y-6">
         {grouped.map(([label, docs]) => (
           <section key={label}>
-            <h2 className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-2 px-1">
+            <h2 className="mb-2 px-1 font-label text-[11px] font-bold uppercase tracking-[0.2em] text-cb-gray">
               {label}
             </h2>
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm divide-y divide-slate-100 overflow-hidden">
+            <div className="overflow-hidden rounded-2xl border border-black/5 bg-white shadow-[0_1px_2px_rgba(0,3,33,0.04)] divide-y divide-black/5">
               {docs.map((doc) => (
                 <div
                   key={doc.id}
-                  className="flex items-center justify-between gap-3 p-4 hover:bg-slate-50/60 transition-colors"
+                  className="flex items-center justify-between gap-3 p-4 transition-colors hover:bg-cb-cream/50"
                 >
                   <button
                     type="button"
                     onClick={() => set_preview(doc)}
-                    className="flex items-center gap-3 min-w-0 text-left flex-1"
+                    className="flex min-w-0 flex-1 items-center gap-3 text-left"
                   >
-                    <div className="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center shrink-0">
-                      <FileText className="h-4 w-4 text-slate-400" />
-                    </div>
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-cb-mint/10 text-cb-mint">
+                      <FileText className="h-4 w-4" />
+                    </span>
                     <div className="min-w-0">
-                      <p className="text-sm font-semibold text-slate-800 truncate">
+                      <p className="truncate text-sm font-semibold text-cb-ink">
                         {doc.display_name}
                       </p>
                       {doc.size != null && (
-                        <p className="text-[11px] text-slate-400">{format_size(doc.size)}</p>
+                        <p className="text-[11px] text-cb-gray">{format_size(doc.size)}</p>
                       )}
                     </div>
                   </button>
-                  <div className="flex items-center gap-1.5 shrink-0">
+                  <div className="flex shrink-0 items-center gap-1.5">
                     <button
                       type="button"
                       onClick={() => set_preview(doc)}
-                      className="flex items-center gap-1.5 px-3 py-2 text-slate-600 hover:bg-slate-100 rounded-lg text-[11px] font-bold transition-colors"
+                      className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-[11px] font-bold text-cb-ink/60 transition-colors hover:bg-black/[0.04]"
                     >
                       <Eye className="h-3.5 w-3.5" />
                       View
                     </button>
                     <a
                       href={doc.download_url}
-                      className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold transition-colors"
+                      className="flex items-center gap-1.5 rounded-lg bg-cb-navy px-3 py-2 text-[11px] font-bold text-primary-fixed transition-transform hover:scale-[1.03]"
                     >
                       <Download className="h-3.5 w-3.5" />
                       Download

@@ -42,7 +42,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <OnboardingGate>
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen bg-cb-cream font-body text-cb-ink">
         <Sidebar
           mobileOpen={mobileOpen}
           onMobileClose={() => setMobileOpen(false)}

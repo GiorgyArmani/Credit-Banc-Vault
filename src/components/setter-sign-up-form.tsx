@@ -1,19 +1,18 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
 import {
-    Card,
-    CardContent,
-    CardDescription,
-    CardHeader,
-    CardTitle
-} from "@/components/ui/card";
+    BrandCard,
+    BrandIconTile,
+    Eyebrow,
+    CTA,
+    FIELD,
+} from "@/components/marketing/brand-chrome";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { Zap, ArrowRight, Lock } from "lucide-react";
+import { Zap, ArrowRight } from "lucide-react";
 
 export function SetterSignUpForm({
     className,
@@ -77,22 +76,23 @@ export function SetterSignUpForm({
 
     return (
         <div className={cn("flex flex-col gap-6", className)} {...props}>
-            <Card className="shadow-2xl border-emerald-100 rounded-[3rem] overflow-hidden bg-white/90 backdrop-blur-xl">
-                <CardHeader className="p-10 text-center bg-emerald-950 text-white">
-                    <div className="mx-auto w-16 h-16 bg-white/10 rounded-2xl flex items-center justify-center mb-6 backdrop-blur-sm border border-white/20">
-                        <Zap className="h-8 w-8 text-emerald-400" />
-                    </div>
-                    <CardTitle className="text-4xl font-black uppercase tracking-tighter mb-2 leading-none">Setter Access</CardTitle>
-                    <CardDescription className="text-sm font-bold text-emerald-300/60 uppercase tracking-widest mt-2">
-                        Appointment setter registration
-                    </CardDescription>
-                </CardHeader>
-                <CardContent className="p-10">
+            <BrandCard>
+                <div className="text-center">
+                    <BrandIconTile size="lg" className="mb-6">
+                        <Zap className="h-8 w-8" />
+                    </BrandIconTile>
+                    <Eyebrow className="mb-3">Appointment setter registration</Eyebrow>
+                    <h1 className="font-headline text-4xl font-extrabold leading-tight tracking-tight text-cb-ink">
+                        Setter <span className="text-cb-mint">access</span>
+                    </h1>
+                </div>
+
+                <div className="mt-10">
                     <form onSubmit={handleSetterSignUp}>
                         <div className="flex flex-col gap-8">
 
                             <div className="grid gap-3">
-                                <Label htmlFor="invite-code" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 ml-1">Invite Code</Label>
+                                <Label htmlFor="invite-code" className={FIELD.label}>Invite Code</Label>
                                 <Input
                                     id="invite-code"
                                     type="text"
@@ -100,13 +100,13 @@ export function SetterSignUpForm({
                                     required
                                     value={inviteCode}
                                     onChange={(e) => setInviteCode(e.target.value)}
-                                    className="h-14 rounded-2xl border-emerald-100 bg-white focus:ring-emerald-500 transition-all font-bold px-6"
+                                    className={FIELD.input}
                                 />
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div className="grid gap-3">
-                                    <Label htmlFor="first-name" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 ml-1">First Name</Label>
+                                    <Label htmlFor="first-name" className={FIELD.label}>First Name</Label>
                                     <Input
                                         id="first-name"
                                         type="text"
@@ -114,12 +114,12 @@ export function SetterSignUpForm({
                                         required
                                         value={firstName}
                                         onChange={(e) => setFirstName(e.target.value)}
-                                        className="h-14 rounded-2xl border-emerald-100 bg-white focus:ring-emerald-500 transition-all font-bold px-6"
+                                        className={FIELD.input}
                                     />
                                 </div>
 
                                 <div className="grid gap-3">
-                                    <Label htmlFor="last-name" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 ml-1">Last Name</Label>
+                                    <Label htmlFor="last-name" className={FIELD.label}>Last Name</Label>
                                     <Input
                                         id="last-name"
                                         type="text"
@@ -127,13 +127,13 @@ export function SetterSignUpForm({
                                         required
                                         value={lastName}
                                         onChange={(e) => setLastName(e.target.value)}
-                                        className="h-14 rounded-2xl border-emerald-100 bg-white focus:ring-emerald-500 transition-all font-bold px-6"
+                                        className={FIELD.input}
                                     />
                                 </div>
                             </div>
 
                             <div className="grid gap-3">
-                                <Label htmlFor="email" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 ml-1">Team Email</Label>
+                                <Label htmlFor="email" className={FIELD.label}>Team Email</Label>
                                 <Input
                                     id="email"
                                     type="email"
@@ -141,13 +141,13 @@ export function SetterSignUpForm({
                                     required
                                     value={email}
                                     onChange={(e) => setEmail(e.target.value)}
-                                    className="h-14 rounded-2xl border-emerald-100 bg-white focus:ring-emerald-500 transition-all font-bold px-6"
+                                    className={FIELD.input}
                                 />
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4">
                                 <div className="grid gap-3">
-                                    <Label htmlFor="password" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 ml-1">Password</Label>
+                                    <Label htmlFor="password" className={FIELD.label}>Password</Label>
                                     <Input
                                         id="password"
                                         type="password"
@@ -155,12 +155,12 @@ export function SetterSignUpForm({
                                         required
                                         value={password}
                                         onChange={(e) => setPassword(e.target.value)}
-                                        className="h-14 rounded-2xl border-emerald-100 bg-white focus:ring-emerald-500 transition-all font-bold px-6"
+                                        className={FIELD.input}
                                     />
                                 </div>
 
                                 <div className="grid gap-3">
-                                    <Label htmlFor="repeat-password" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 ml-1">Confirm Password</Label>
+                                    <Label htmlFor="repeat-password" className={FIELD.label}>Confirm Password</Label>
                                     <Input
                                         id="repeat-password"
                                         type="password"
@@ -168,43 +168,41 @@ export function SetterSignUpForm({
                                         required
                                         value={repeatPassword}
                                         onChange={(e) => setRepeatPassword(e.target.value)}
-                                        className="h-14 rounded-2xl border-emerald-100 bg-white focus:ring-emerald-500 transition-all font-bold px-6"
+                                        className={FIELD.input}
                                     />
                                 </div>
                             </div>
 
-                            {error && (
-                                <div className="rounded-2xl bg-red-50 p-4 border border-red-100 flex items-center gap-3">
-                                    <Lock className="w-4 h-4 text-red-500" />
-                                    <p className="text-sm font-bold text-red-500">{error}</p>
-                                </div>
-                            )}
+                            {error && <p className={FIELD.error}>{error}</p>}
 
-                            <Button
+                            <button
                                 type="submit"
-                                className="h-16 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-2xl shadow-xl shadow-emerald-500/20 transition-all active:scale-95 text-lg"
+                                className={`${CTA.primary} group w-full`}
                                 disabled={isLoading}
                             >
                                 {isLoading ? (
-                                    <div className="flex items-center gap-3">
-                                        <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                                        <span>Creating Account...</span>
-                                    </div>
+                                    <>
+                                        <span
+                                            aria-hidden
+                                            className="h-4 w-4 animate-spin rounded-full border-2 border-primary-fixed/30 border-t-primary-fixed"
+                                        />
+                                        Creating account…
+                                    </>
                                 ) : (
-                                    <div className="flex items-center justify-center gap-2">
-                                        <span>Create Setter Account</span>
-                                        <ArrowRight className="w-6 h-6" />
-                                    </div>
+                                    <>
+                                        Create setter account
+                                        <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
+                                    </>
                                 )}
-                            </Button>
+                            </button>
                         </div>
 
-                        <div className="mt-10 text-center border-t border-emerald-50 pt-8">
-                            <span className="text-emerald-900/30 font-bold text-sm">Authorized Personnel Only</span>
-                        </div>
+                        <p className="mt-8 border-t border-black/5 pt-8 text-center font-label text-xs font-bold uppercase tracking-[0.2em] text-cb-gray">
+                            Authorized personnel only
+                        </p>
                     </form>
-                </CardContent>
-            </Card>
+                </div>
+            </BrandCard>
         </div>
     );
 }

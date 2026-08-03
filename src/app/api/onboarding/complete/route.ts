@@ -33,11 +33,21 @@ export async function POST(request: Request) {
                 .single();
 
             if (vault) {
-                const { updateLoanStatus } = await import('@/app/actions/pipeline');
+                const { recordPipelineTransition } = await import('@/lib/pipeline-core');
                 // Onboarding is now finished — advance the pipeline past the
                 // onboarding stage into documents_requested. The dashboard's
                 // auto-transition becomes a no-op once this runs.
-                await updateLoanStatus(vault.id, 'documents_requested', 'Client completed onboarding (Profile & Contract)', { useServiceRole: true });
+                //
+                // Recorded server-side: clients have no pipeline write access.
+                // The vault was resolved by `user_id = user.id` just above, and
+                // the status is fixed here rather than supplied by the caller.
+                await recordPipelineTransition({
+                    clientVaultId: vault.id,
+                    newStatus: 'documents_requested',
+                    note: 'Client completed onboarding (Profile & Contract)',
+                    actorUserId: user.id,
+                    actorRole: 'client',
+                });
                 console.log('✅ Pipeline status advanced past onboarding → documents_requested');
             }
         } catch (pipeline_error) {

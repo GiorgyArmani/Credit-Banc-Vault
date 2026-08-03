@@ -2,20 +2,13 @@
 
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { BrandCard, Eyebrow, CTA, FIELD } from "@/components/marketing/brand-chrome";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import { toast } from "@/lib/toast";
-import { Lock, Check, Copy } from "lucide-react";
+import { Lock } from "lucide-react";
 
 export function UpdatePasswordForm({
   className,
@@ -115,32 +108,40 @@ export function UpdatePasswordForm({
   if (!sessionChecked) {
     return (
       <div className={cn("flex flex-col gap-6", className)} {...props}>
-        <Card className="shadow-2xl border-emerald-50 rounded-[3rem] overflow-hidden bg-white/80 backdrop-blur-xl">
-          <CardContent className="p-10">
-            <div className="flex flex-col items-center gap-4">
-              <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-emerald-500"></div>
-              <p className="text-center text-emerald-900/40 font-bold">Verifying reset link...</p>
-            </div>
-          </CardContent>
-        </Card>
+        <BrandCard>
+          <div className="flex flex-col items-center gap-5">
+            <div
+              aria-hidden
+              className="h-10 w-10 animate-spin rounded-full border-4 border-cb-mint/20 border-t-cb-mint"
+            />
+            <p className="font-label text-xs font-bold uppercase tracking-[0.3em] text-cb-gray">
+              Verifying reset link
+            </p>
+          </div>
+        </BrandCard>
       </div>
     );
   }
 
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
-      <Card className="shadow-2xl border-emerald-50 rounded-[3rem] overflow-hidden bg-white/80 backdrop-blur-xl">
-        <CardHeader className="p-10">
-          <CardTitle className="text-3xl font-black text-emerald-950 uppercase tracking-tighter">Reset Your Password</CardTitle>
-          <CardDescription className="text-sm font-bold text-emerald-900/40 mt-2">
-            Please enter your new password below.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="p-10 pt-0">
-          <form onSubmit={handlePasswordUpdate}>
-            <div className="flex flex-col gap-6">
-              <div className="grid gap-4">
-                <Label htmlFor="password" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 ml-1">New password</Label>
+      <BrandCard>
+        <Eyebrow className="mb-3">Account recovery</Eyebrow>
+        <h1 className="font-headline text-3xl font-extrabold leading-tight tracking-tight text-cb-ink">
+          Pick a new <span className="text-cb-mint">password</span>
+        </h1>
+        <p className="mt-3 text-[15px] leading-relaxed text-cb-ink/70">
+          Enter it twice so we know it stuck.
+        </p>
+
+        <form onSubmit={handlePasswordUpdate} className="mt-8">
+          <div className="flex flex-col gap-6">
+            <div className="grid gap-2">
+              <Label htmlFor="password" className={FIELD.label}>
+                New password
+              </Label>
+              <div className="relative">
+                <Lock className={FIELD.icon} />
                 <Input
                   id="password"
                   type="password"
@@ -150,11 +151,16 @@ export function UpdatePasswordForm({
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   disabled={!!error}
-                  className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
+                  className={FIELD.inputWithIcon}
                 />
               </div>
-              <div className="grid gap-4">
-                <Label htmlFor="confirmPassword" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 ml-1">Confirm password</Label>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="confirmPassword" className={FIELD.label}>
+                Confirm password
+              </Label>
+              <div className="relative">
+                <Lock className={FIELD.icon} />
                 <Input
                   id="confirmPassword"
                   type="password"
@@ -164,31 +170,30 @@ export function UpdatePasswordForm({
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   disabled={!!error}
-                  className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
+                  className={FIELD.inputWithIcon}
                 />
               </div>
-              {error && (
-                <div className="rounded-2xl bg-red-50 p-4 text-sm font-bold text-red-600 border border-red-100">
-                  {error}
-                </div>
-              )}
-              <Button type="submit" className="h-14 bg-emerald-500 hover:bg-emerald-600 text-white font-black rounded-2xl shadow-xl shadow-emerald-500/20 transition-all active:scale-95" disabled={isLoading || !!error}>
-                {isLoading ? "Updating password..." : "Update password"}
-              </Button>
-              {error && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-14 border-2 border-emerald-100 text-emerald-950 font-black rounded-2xl hover:bg-emerald-50 transition-all active:scale-95"
-                  onClick={() => router.push("/auth/forgot-password")}
-                >
-                  Request new reset link
-                </Button>
-              )}
             </div>
-          </form>
-        </CardContent>
-      </Card>
+            {error && <p className={FIELD.error}>{error}</p>}
+            <button
+              type="submit"
+              className={`${CTA.primary} w-full`}
+              disabled={isLoading || !!error}
+            >
+              {isLoading ? "Updating password…" : "Update password"}
+            </button>
+            {error && (
+              <button
+                type="button"
+                className={`${CTA.ghost} w-full`}
+                onClick={() => router.push("/auth/forgot-password")}
+              >
+                Request new reset link
+              </button>
+            )}
+          </div>
+        </form>
+      </BrandCard>
     </div>
   );
 }

@@ -42,7 +42,7 @@ export function UnderwritingShell({ children }: { children: React.ReactNode }) {
     }, [pathname])
 
     return (
-        <div className="min-h-screen bg-slate-50">
+        <div className="min-h-screen bg-cb-cream font-body text-cb-ink">
             <Sidebar
                 mobileOpen={mobileOpen}
                 onMobileClose={() => setMobileOpen(false)}
@@ -72,7 +72,7 @@ export function UnderwritingShell({ children }: { children: React.ReactNode }) {
                 </header>
 
                 {/* Topbar (Desktop) */}
-                <header className="hidden md:flex sticky top-0 z-30 w-full px-8 py-3 h-16 bg-slate-50 border-b border-slate-200 shadow-sm items-center justify-between transition-all">
+                <header className="hidden md:flex sticky top-0 z-30 w-full px-8 py-3 h-16 bg-cb-cream border-b border-black/5 shadow-sm items-center justify-between transition-all">
                     <div className="flex items-center gap-8 flex-1">
                         <GlobalSearch />
                     </div>

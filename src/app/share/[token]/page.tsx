@@ -7,6 +7,7 @@
 
 import { resolveShareLink } from "@/lib/share-links";
 import { ShieldCheck, FileText, Lock } from "lucide-react";
+import { BrandAuthShell, BrandNotice } from "@/components/marketing/brand-chrome";
 import { SharedDocuments } from "./shared-documents";
 
 export const dynamic = "force-dynamic";
@@ -32,20 +33,14 @@ function format_date(iso: string): string {
 
 function InvalidState() {
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
-      <div className="max-w-md w-full bg-white rounded-3xl border border-slate-200 shadow-sm p-10 text-center">
-        <div className="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-5">
-          <Lock className="h-6 w-6 text-slate-400" />
-        </div>
-        <h1 className="text-xl font-black text-slate-900 tracking-tight mb-2">
-          This link is no longer available
-        </h1>
-        <p className="text-sm text-slate-500 leading-relaxed">
-          The share link has expired or been revoked. Please contact your Credit Banc
-          representative for an updated link.
+    <BrandAuthShell width="md" showFooter={false}>
+      <BrandNotice icon={<Lock className="h-8 w-8" />} title="This link is no longer available">
+        <p>
+          The share link has expired or been revoked. Contact your Credit Banc representative for
+          an updated one.
         </p>
-      </div>
-    </div>
+      </BrandNotice>
+    </BrandAuthShell>
   );
 }
 
@@ -60,43 +55,57 @@ export default async function SharePage({
   if (!share) return <InvalidState />;
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      {/* Brand header */}
-      <header className="bg-emerald-900 text-white">
-        <div className="max-w-3xl mx-auto px-6 py-5 flex items-center gap-3">
-          <div className="bg-emerald-700/60 p-2 rounded-xl">
-            <ShieldCheck className="h-5 w-5" />
-          </div>
+    <div className="min-h-screen bg-cb-cream font-body text-cb-ink">
+      {/* Navy brand band. No nav — this page is handed to an outside lender. */}
+      <header className="relative overflow-hidden bg-cb-navy text-white">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full bg-cb-mint/10 blur-3xl"
+        />
+        <div className="relative z-10 mx-auto flex max-w-3xl items-center gap-4 px-6 py-6">
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/10">
+            <ShieldCheck className="h-5 w-5 text-cb-mint" />
+          </span>
           <div>
-            <p className="text-[10px] font-black uppercase tracking-[0.25em] text-emerald-300">
+            <p className="font-label text-[10px] font-bold uppercase tracking-[0.3em] text-cb-mint">
               Credit Banc
             </p>
-            <p className="text-sm font-bold">Secure Document Package</p>
+            <p className="font-headline text-base font-extrabold tracking-tight">
+              Secure Document Package
+            </p>
           </div>
         </div>
+        <div
+          aria-hidden
+          className="absolute bottom-0 left-0 h-px w-full bg-gradient-to-r from-transparent via-cb-mint/30 to-transparent"
+        />
       </header>
 
-      <main className="max-w-3xl mx-auto px-6 py-8">
+      <main className="mx-auto max-w-3xl px-6 py-10">
         {/* Summary card */}
-        <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-7 mb-6">
-          <h1 className="text-2xl font-black text-slate-900 tracking-tight">
+        <div className="mb-6 rounded-2xl border border-black/5 bg-white p-7 shadow-[0_1px_2px_rgba(0,3,33,0.04)]">
+          <h1 className="font-headline text-2xl font-extrabold tracking-tight text-cb-ink">
             {share.company_name}
           </h1>
           {share.label && (
-            <p className="text-sm font-semibold text-emerald-700 mt-1">{share.label}</p>
+            <p className="mt-1 text-sm font-semibold text-cb-mint">{share.label}</p>
           )}
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-3 text-xs font-medium text-slate-500">
-            <span>{share.documents.length} document{share.documents.length === 1 ? "" : "s"}</span>
-            <span className="opacity-40">•</span>
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs font-medium text-cb-gray">
+            <span>
+              {share.documents.length} document{share.documents.length === 1 ? "" : "s"}
+            </span>
+            <span aria-hidden className="opacity-40">
+              •
+            </span>
             <span>Available until {format_date(share.expires_at)}</span>
           </div>
         </div>
 
         {/* Documents */}
         {share.documents.length === 0 ? (
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-10 text-center">
-            <FileText className="h-10 w-10 text-slate-300 mx-auto mb-3" />
-            <p className="text-sm font-semibold text-slate-500">
+          <div className="rounded-2xl border border-black/5 bg-white p-10 text-center shadow-[0_1px_2px_rgba(0,3,33,0.04)]">
+            <FileText className="mx-auto mb-3 h-10 w-10 text-cb-gray/40" />
+            <p className="text-sm font-semibold text-cb-ink/50">
               No approved documents are available yet.
             </p>
           </div>
@@ -104,7 +113,7 @@ export default async function SharePage({
           <SharedDocuments documents={share.documents} />
         )}
 
-        <p className="text-[11px] text-slate-400 text-center mt-8 leading-relaxed">
+        <p className="mt-10 text-center text-[11px] leading-relaxed text-cb-ink/40">
           Confidential. These documents are shared securely by Credit Banc for the purpose of
           financing review. Do not redistribute.
         </p>

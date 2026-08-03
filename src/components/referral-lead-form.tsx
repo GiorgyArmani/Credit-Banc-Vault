@@ -247,7 +247,7 @@ export function ReferralLeadForm({
   // booking calendar takes over so it isn't redundant with "You're pre-qualified".
   const hero = (
     <div className="text-center mb-12">
-      <div className="mx-auto w-16 h-16 bg-cb-mint text-white rounded-2xl flex items-center justify-center mb-6 shadow-xl shadow-cb-mint/25">
+      <div className="mx-auto w-16 h-16 bg-cb-mint text-cb-navy rounded-2xl flex items-center justify-center mb-6 shadow-xl shadow-cb-mint/25">
         <Gift className="h-8 w-8" />
       </div>
       {affiliateFirstName && (
@@ -291,7 +291,7 @@ export function ReferralLeadForm({
           <p className="text-red-500 font-medium mb-8">{error}</p>
           <Button
             onClick={submit}
-            className="h-14 px-8 bg-cb-mint hover:bg-cb-mint/90 text-white font-bold rounded-xl shadow-lg shadow-cb-mint/25 text-lg transition-all hover:scale-[1.02] active:scale-95"
+            className="h-14 px-8 bg-cb-mint hover:bg-cb-mint/90 text-cb-navy font-bold rounded-xl shadow-lg shadow-cb-mint/25 text-lg transition-all hover:scale-[1.02] active:scale-95"
           >
             Try again
           </Button>
@@ -378,7 +378,7 @@ export function ReferralLeadForm({
                   className={
                     "text-left px-5 py-4 rounded-xl border font-semibold transition-all active:scale-[0.99] " +
                     (selected
-                      ? "border-cb-mint bg-cb-mint text-white shadow-lg shadow-cb-mint/20"
+                      ? "border-cb-mint bg-cb-mint text-cb-navy shadow-lg shadow-cb-mint/20"
                       : "border-cb-mint/20 bg-white text-cb-ink hover:border-cb-mint hover:bg-cb-mint/5")
                   }
                 >

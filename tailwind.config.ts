@@ -38,7 +38,9 @@ const config = {
           800: "#166534",
           900: "#14532d",
           950: "#052e16",
-          foreground: "#ffffff",
+          // Navy, not white: white on mint is ~1.9:1 and fails contrast. The
+          // marketing site's mint CTAs are navy-on-mint.
+          foreground: "#202536",
         },
         secondary: {
           DEFAULT: "hsl(var(--secondary))",
@@ -66,7 +68,7 @@ const config = {
         },
         // Material 3 Surface Tokens
         surface: {
-          DEFAULT: "#fdfdfd",
+          DEFAULT: "#faf9f6", // cream — the marketing-site page background
           variant: "#e1e3de",
           container: {
             low: "#f7f9f2",
@@ -76,16 +78,37 @@ const config = {
           }
         },
         "on-surface": {
-          DEFAULT: "#191c1a",
-          variant: "#414942",
+          DEFAULT: "#1a1c1a",
+          variant: "#3d4a42",
         },
         "on-primary-fixed": {
+          DEFAULT: "#002114",
           variant: "#002114",
         },
         outline: {
-          DEFAULT: "#717971",
-          variant: "#c1c9be",
+          DEFAULT: "#6d7a72",
+          variant: "#bccac0",
         },
+        // --- Landing-site role tokens (paste-compatibility layer) ---
+        // The names all creditbanc.io markup is written against. Without these,
+        // pasted marketing markup silently renders unstyled colors.
+        "on-secondary-fixed": {
+          DEFAULT: "#202536", // navy — EVERY headline on light backgrounds
+          variant: "#3f4565",
+        },
+        "primary-container": "#55cf9e", // mint fill for chips, pills, icon tiles
+        "on-primary-container": "#00553b", // deep green text on mint
+        "primary-fixed": {
+          DEFAULT: "#a6f0ce", // pale mint — text on navy buttons
+          dim: "#55cf9e",
+        },
+        "surface-bright": "#faf9f6",
+        "surface-dim": "#dbdad7",
+        "surface-tint": "#55cf9e",
+        "inverse-surface": "#2f312f",
+        "inverse-on-surface": "#f2f1ee",
+        "secondary-container": "#d0d5fd",
+        "cream-card": "#fdf8e8", // warm floating-card fill (hero cards)
         tertiary: {
           fixed: {
             DEFAULT: "#d9e3ff",
@@ -108,6 +131,12 @@ const config = {
           gray: "#939598", // muted text
           cream: "#faf9f6", // warm off-white page background
           ink: "#1a1c1a", // near-black text
+          // gradient stops — do not invent new greens, use these
+          emerald900: "#0d3b2a",
+          emerald800: "#10402c",
+          emerald700: "#1f6b4e",
+          emerald600: "#2ea878",
+          emerald400: "#7bdcb0",
         },
         // Simplified color palette
         emerald: {
@@ -125,15 +154,20 @@ const config = {
         },
       },
       fontFamily: {
-        headline: ["Manrope", "sans-serif"],
-        body: ["Inter", "sans-serif"],
-        label: ["Inter", "sans-serif"],
-        manrope: ["Manrope", "sans-serif"],
+        // Fed by next/font/google in src/app/layout.tsx; the literal names are
+        // kept as fallbacks so the classes still resolve if the vars are missing.
+        headline: ["var(--font-manrope)", "Manrope", "system-ui", "sans-serif"],
+        body: ["var(--font-inter)", "Inter", "system-ui", "sans-serif"],
+        label: ["var(--font-inter)", "Inter", "system-ui", "sans-serif"],
+        manrope: ["var(--font-manrope)", "Manrope", "sans-serif"],
       },
       borderRadius: {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
+        xl: "0.75rem",
+        "2xl": "1rem", // the default card radius
+        "3xl": "1.5rem",
       },
       keyframes: {
         "accordion-down": {
@@ -156,7 +190,7 @@ const config = {
       },
     },
   },
-  plugins: [require("tailwindcss-animate")],
+  plugins: [require("tailwindcss-animate"), require("@tailwindcss/typography")],
 } satisfies Config
 
 export default config

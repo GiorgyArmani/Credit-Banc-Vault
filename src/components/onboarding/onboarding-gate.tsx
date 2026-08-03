@@ -4,7 +4,7 @@ import { useRouter, usePathname } from 'next/navigation'
 import { useOnboardingStatus } from './use-onboarding-status'
 import { PremiumLoader } from '../ui/premium-loader'
 import { motion, AnimatePresence } from 'framer-motion'
-import { updateLoanStatus, getClientPipelineHistory } from '@/app/actions/pipeline'
+import { startClientOnboarding } from '@/app/actions/pipeline'
 
 type OnboardingGateProps = { children: ReactNode }
 
@@ -55,15 +55,10 @@ export default function OnboardingGate({ children }: OnboardingGateProps) {
 
     async function syncPipeline() {
       try {
-        const history = await getClientPipelineHistory(vaultId!)
-        if (history.length === 1 && history[0].status === 'created') {
-          // Client-triggered: the actor is role='free', and loan_status_history
-          // writes are staff-only under RLS, so this must use the service role.
-          await updateLoanStatus(vaultId!, 'onboarding', 'Client accessed the vault for the first time', {
-            useServiceRole: true,
-          })
-          console.log('✅ Pipeline status auto-advanced to "onboarding"')
-        }
+        // Clients have no write access to the pipeline. This action takes no
+        // arguments: it resolves the caller's own vault server-side, fixes the
+        // status itself, and no-ops unless the file is still at 'created'.
+        await startClientOnboarding()
       } catch (err) {
         console.error('⚠️ Pipeline auto-sync error:', err)
       }

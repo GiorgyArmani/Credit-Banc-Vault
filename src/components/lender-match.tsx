@@ -97,12 +97,16 @@ const SPECIALTY_KEY_ALIASES: Record<string, string> = {
   sbaloan: "sba",
 };
 
+// Untagged programs reach us two ways: specialty NULL (rows predating the
+// program-tag system) and specialty "" (blank saves). `??` only catches the
+// first, which left blank-string rows keyed to "" — a nameless tab in the
+// program filter. Normalize both, plus whitespace, into the Unknown bucket.
 function specialtyKey(raw: string | null | undefined): string {
-  const base = (raw ?? "Unknown")
+  const base = (raw?.trim() || "Unknown")
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "")
     .replace(/loan$/, "");
-  return SPECIALTY_KEY_ALIASES[base] ?? base ?? "unknown";
+  return SPECIALTY_KEY_ALIASES[base] ?? base;
 }
 
 // Canonical display label for a specialty key, preferring the app's own loan-type
@@ -557,7 +561,7 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
   const specialtyTabs = useMemo(() => {
     const byKey = new Map<string, { key: string; label: string }>();
     for (const l of lenderData) {
-      const raw = l.specialty ?? "Unknown";
+      const raw = l.specialty?.trim() || "Unknown";
       const key = specialtyKey(raw);
       const existing = byKey.get(key);
       const canonical = LOAN_TYPE_BY_KEY.get(key);
@@ -799,7 +803,7 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
           {[
             { label: "FICO", value: deal.fico && deal.fico > 0 ? String(deal.fico) : null },
             { label: "TIB", value: deal.tibMonths && deal.tibMonths > 0 ? `${deal.tibMonths}mo${deal.businessStartDate ? ` (${deal.businessStartDate})` : ""}` : null },
-            { label: "Avg Revenue", value: deal.avgRevenue && deal.avgRevenue > 0 ? fmt$(deal.avgRevenue) : null },
+            { label: "Avg Monthly Revenue", value: deal.avgRevenue && deal.avgRevenue > 0 ? fmt$(deal.avgRevenue) : null },
             { label: "Neg Days", value: deal.totalNegDays && deal.totalNegDays > 0 ? String(deal.totalNegDays) : null },
             { label: "Positions", value: deal.numOpenPositions && deal.numOpenPositions > 0 ? String(deal.numOpenPositions) : null },
             { label: "Requested", value: deal.capitalRequested && deal.capitalRequested > 0 ? fmt$(deal.capitalRequested) : null },
@@ -1178,7 +1182,7 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
               {([
                 ["Min FICO", result.lender.min_fico ?? "—"],
                 ["Min TIB", result.lender.time_in_business_months ? `${result.lender.time_in_business_months}mo` : "—"],
-                ["Min Revenue", result.lender.avg_monthly_revenue ? fmt$(result.lender.avg_monthly_revenue) : "—"],
+                ["Min Monthly Revenue", result.lender.avg_monthly_revenue ? fmt$(result.lender.avg_monthly_revenue) : "—"],
                 ["Max Neg Days", result.lender.negative_days ?? "—"],
                 ["Min Positions", result.lender.min_positions ?? "—"],
                 ["Max Positions", result.lender.number_of_positions ?? "—"],

@@ -50,7 +50,7 @@ export const STAGE_MAP: PipelineStage[] = [
   { label: "Docs Received",   status: "documents_received",  color: "bg-cyan-400",    accent: "text-cyan-600",   description: "Required documents are in and ready to be packaged for underwriting review." },
   { label: "Underwriting",    status: "under_review",        color: "bg-purple-400",  accent: "text-purple-600", description: "Vault submitted and under active underwriting review." },
   { label: "Offer Received",  status: "lender_matched",      color: "bg-indigo-400",  accent: "text-indigo-600", description: "Matched with a lender and an offer is on the table for the client." },
-  { label: "Deal Funded",     status: "funded",              color: "bg-emerald-500", accent: "text-emerald-600", description: "Deal closed and funded. 🎉" },
+  { label: "Deal Funded",     status: "funded",              color: "bg-emerald-500", accent: "text-emerald-600", description: "Deal closed and funded. 🎉 Set only from Underwriting's \"Loan Funded\" dialog, which records the lender, amount and term — cards can't be dragged in here." },
   { label: "Consulting Program", status: "consulting_program", color: "bg-teal-400", accent: "text-teal-600", description: "Post-funding consultative track — nurturing a funded client toward renewal and their next round of capital through credit building, tax planning, lien resolution, operations, and accounting." },
   { label: "Closed Lost",     status: "declined",            color: "bg-red-500",     accent: "text-red-600",    description: "Declined or lost. No longer active in the pipeline." },
 ];
@@ -258,6 +258,7 @@ export function PipelineBoard({
                   collapsed={isCollapsed}
                   onToggleCollapsed={() => toggleCollapsed(stage.status)}
                   onDrop={(dealId, newStage) => onDrop(dealId, newStage as LoanStatus)}
+                  dropDisabled={stage.status === "funded"}
                 >
                   {stageDeals.map(deal => (
                     <PipelineDealCard

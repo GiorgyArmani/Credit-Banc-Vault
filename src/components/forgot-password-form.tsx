@@ -1,14 +1,13 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+  BrandCard,
+  BrandIconTile,
+  Eyebrow,
+  CTA,
+  FIELD,
+} from "@/components/marketing/brand-chrome";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Link from "next/link";
@@ -55,62 +54,60 @@ export function ForgotPasswordForm({
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       {success ? (
-        <Card className="shadow-2xl border-emerald-50 rounded-[3rem] overflow-hidden bg-white/80 backdrop-blur-xl">
-          <CardHeader className="p-10 text-center">
-            <div className="mx-auto w-20 h-20 bg-emerald-50 rounded-[2rem] flex items-center justify-center mb-6 border border-emerald-100 shadow-inner">
-              <Mail className="w-10 h-10 text-emerald-500" />
-            </div>
-            <CardTitle className="text-3xl font-black text-emerald-950 uppercase tracking-tighter">Check Your Email</CardTitle>
-            <CardDescription className="text-sm font-bold text-emerald-900/40 mt-2">Password reset instructions sent</CardDescription>
-          </CardHeader>
-          <CardContent className="p-10 pt-0">
-            <p className="text-sm font-bold text-emerald-950/60 leading-relaxed text-center">
-              If you registered using your email and password, you will receive
-              a password reset email shortly.
-            </p>
-          </CardContent>
-        </Card>
+        <BrandCard className="text-center">
+          <BrandIconTile size="lg" className="mb-7">
+            <Mail className="h-8 w-8" />
+          </BrandIconTile>
+          <Eyebrow className="mb-3">Instructions sent</Eyebrow>
+          <h1 className="font-headline text-3xl font-extrabold leading-tight tracking-tight text-cb-ink">
+            Check your <span className="text-cb-mint">email</span>
+          </h1>
+          <p className="mt-4 text-[15px] leading-relaxed text-cb-ink/70">
+            If you registered with your email and password, a reset link is on its way.
+          </p>
+        </BrandCard>
       ) : (
-        <Card className="shadow-2xl border-emerald-50 rounded-[3rem] overflow-hidden bg-white/80 backdrop-blur-xl">
-          <CardHeader className="p-10">
-            <CardTitle className="text-3xl font-black text-emerald-950 uppercase tracking-tighter">Reset Password</CardTitle>
-            <CardDescription className="text-sm font-bold text-emerald-900/40 mt-2">
-              Type in your email and we&apos;ll send you a link to reset your
-              password
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="p-10 pt-0">
-            <form onSubmit={handleForgotPassword}>
-              <div className="flex flex-col gap-6">
-                <div className="grid gap-4">
-                  <Label htmlFor="email" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 ml-1">Email Address</Label>
+        <BrandCard>
+          <Eyebrow className="mb-3">Account recovery</Eyebrow>
+          <h1 className="font-headline text-3xl font-extrabold leading-tight tracking-tight text-cb-ink">
+            Reset your <span className="text-cb-mint">password</span>
+          </h1>
+          <p className="mt-3 text-[15px] leading-relaxed text-cb-ink/70">
+            Give us your email and we&apos;ll send you a link to set a new one.
+          </p>
+
+          <form onSubmit={handleForgotPassword} className="mt-8">
+            <div className="flex flex-col gap-6">
+              <div className="grid gap-2">
+                <Label htmlFor="email" className={FIELD.label}>
+                  Email address
+                </Label>
+                <div className="relative">
+                  <Mail className={FIELD.icon} />
                   <Input
                     id="email"
                     type="email"
-                    placeholder="m@example.com"
+                    placeholder="name@company.com"
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
+                    className={FIELD.inputWithIcon}
                   />
                 </div>
-                {error && <p className="text-sm font-bold text-red-500 bg-red-50 p-4 rounded-2xl border border-red-100">{error}</p>}
-                <Button type="submit" className="h-14 bg-emerald-500 hover:bg-emerald-600 text-white font-black rounded-2xl shadow-xl shadow-emerald-500/20 transition-all active:scale-95" disabled={isLoading}>
-                  {isLoading ? "Sending..." : "Send reset email"}
-                </Button>
               </div>
-              <div className="mt-8 text-center text-sm">
-                <span className="text-emerald-900/40 font-bold">Already have an account? </span>
-                <Link
-                  href="/auth/login"
-                  className="text-emerald-600 font-black uppercase tracking-widest text-xs hover:underline"
-                >
-                  Login
-                </Link>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
+              {error && <p className={FIELD.error}>{error}</p>}
+              <button type="submit" className={`${CTA.primary} w-full`} disabled={isLoading}>
+                {isLoading ? "Sending…" : "Send reset email"}
+              </button>
+            </div>
+            <p className="mt-8 text-center text-sm text-cb-ink/50">
+              Already have an account?{" "}
+              <Link href="/auth/login" className="font-bold text-cb-mint hover:underline">
+                Log in
+              </Link>
+            </p>
+          </form>
+        </BrandCard>
       )}
     </div>
   );

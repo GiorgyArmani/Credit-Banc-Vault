@@ -5,8 +5,31 @@
 body {
   /* Inter is the app-wide body font (matches the creditbanc.io brand config).
      Kept as an unlayered rule so it wins over UA defaults; @layer base below
-     also applies font-body for token consistency. */
-  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+     also applies font-body for token consistency. The var is supplied by
+     next/font/google in src/app/layout.tsx. */
+  font-family: var(--font-inter), 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+@layer components {
+  /* The marketing-site CTA fill. Prefer this over .editorial-gradient for
+     buttons so they match creditbanc.io exactly. */
+  .signature-gradient {
+    background: linear-gradient(135deg, #2ea878 0%, #55cf9e 100%);
+  }
+
+  .glass-nav {
+    background-color: rgba(255, 255, 255, 0.8);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+  }
+
+  .text-deep-navy {
+    color: var(--cb-navy);
+  }
+
+  .bg-deep-navy {
+    background-color: var(--cb-navy);
+  }
 }
 
 @layer utilities {
@@ -28,8 +51,38 @@ body {
 }
 
 @layer base {
+  :root {
+    --cb-navy: #202536;
+    --cb-mint: #55cf9e;
+    --cb-gray: #939598;
+    --cb-white: #ffffff;
+  }
+
+  html {
+    /* Fixed/sticky headers would otherwise park anchor targets underneath
+       themselves. */
+    scroll-padding-top: 6rem;
+  }
+
+  body {
+    /* Safety net against horizontal scroll from full-bleed elements vs. the
+       scrollbar. `clip` (not `hidden`) does not create a scroll container, so
+       it won't break `position: sticky` descendants. */
+    overflow-x: clip;
+  }
+
   ::selection {
-    @apply bg-emerald-100 text-emerald-900;
+    @apply bg-primary-container text-on-primary-container;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 }
 
@@ -41,8 +94,10 @@ body {
     --card-foreground: 0 0% 3.9%;
     --popover: 0 0% 100%;
     --popover-foreground: 0 0% 3.9%;
-    --primary: 0 0% 9%;
-    --primary-foreground: 0 0% 98%;
+    /* Mint, so any shadcn variant reading the raw var stays on-brand instead of
+       fighting the mint `primary` class from tailwind.config.ts. */
+    --primary: 154 55% 57%; /* #55cf9e */
+    --primary-foreground: 222 25% 17%; /* #202536 navy — readable on mint */
     --secondary: 0 0% 96.1%;
     --secondary-foreground: 0 0% 9%;
     --muted: 0 0% 96.1%;
@@ -53,7 +108,7 @@ body {
     --destructive-foreground: 0 0% 98%;
     --border: 0 0% 89.8%;
     --input: 0 0% 89.8%;
-    --ring: 0 0% 3.9%;
+    --ring: 154 55% 57%; /* mint focus ring */
     --chart-1: 12 76% 61%;
     --chart-2: 173 58% 39%;
     --chart-3: 197 37% 24%;
@@ -89,7 +144,7 @@ body {
     --destructive-foreground: 0 0% 98%;
     --border: 0 0% 14.9%;
     --input: 0 0% 14.9%;
-    --ring: 0 0% 83.1%;
+    --ring: 154 55% 57%;
     --chart-1: 220 70% 50%;
     --chart-2: 160 60% 45%;
     --chart-3: 30 80% 55%;
@@ -115,17 +170,19 @@ body {
     @apply bg-background text-foreground font-body antialiased;
   }
 
-  .font-headline {
-    font-family: 'Manrope', sans-serif;
+  /* Two-font hierarchy: Manrope for every heading, Inter for body. Applied at
+     base level so dashboard screens inherit it without touching each file.
+     Utilities still win, so an explicit font or tracking class overrides this. */
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-headline tracking-tight;
   }
 
-  .font-body {
-    font-family: 'Inter', sans-serif;
-  }
-
-  .font-manrope {
-    font-family: 'Manrope', sans-serif;
-  }
+  /* NOTE: font-headline / font-body / font-manrope are Tailwind utilities from
+     theme.fontFamily (fed by next/font vars). Do not re-declare them here — a
+     hardcoded family would shadow the token and reintroduce the FOUT. */
 }
 
 

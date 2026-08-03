@@ -8,7 +8,6 @@
 
 import { useEffect, useState } from "react";
 import { AlertCircle, Copy, CheckCircle2, Mail, RotateCcw } from "lucide-react";
-import { Button } from "@/components/ui/button";
 
 const SUPPORT_EMAIL = "support@creditbanc.io";
 
@@ -53,67 +52,69 @@ export default function RouteError({
     `&body=${encodeURIComponent(report)}`;
 
   return (
-    <div className="min-h-screen bg-red-950/5 flex items-center justify-center p-4">
-      <div className="bg-white rounded-[3rem] shadow-2xl max-w-lg w-full p-10 md:p-12 relative overflow-hidden border border-red-50">
-        <div className="absolute top-0 right-0 w-32 h-32 bg-red-50 rounded-full blur-3xl -mr-10 -mt-10" />
+    <div className="min-h-screen bg-cb-cream font-body text-cb-ink flex items-center justify-center p-4">
+      <div className="relative w-full max-w-lg overflow-hidden rounded-3xl border border-black/5 bg-white p-8 shadow-xl md:p-12">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -right-10 -top-10 h-32 w-32 rounded-full bg-error-container blur-3xl"
+        />
 
-        <div className="text-center mb-8 relative z-10">
-          <div className="mx-auto w-20 h-20 bg-red-50 rounded-[2rem] flex items-center justify-center mb-6 border border-red-100 shadow-inner">
-            <AlertCircle className="w-10 h-10 text-red-500" />
-          </div>
-          <h2 className="text-3xl font-black text-red-950 uppercase tracking-tighter mb-2">
+        <div className="relative z-10 mb-8 text-center">
+          <span className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-error-container text-error">
+            <AlertCircle className="h-8 w-8" />
+          </span>
+          <h2 className="font-headline text-3xl font-extrabold tracking-tight text-cb-ink">
             Something broke on this page
           </h2>
-          <p className="text-red-950/40 font-bold">
+          <p className="mt-3 text-[15px] leading-relaxed text-cb-ink/60">
             Try again, or copy the details below and send them to support.
           </p>
         </div>
 
-        <div className="bg-red-50/60 rounded-[2rem] p-6 mb-6 border border-red-100 relative z-10">
-          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-red-900/40 mb-3">
+        <div className="relative z-10 mb-6 rounded-2xl border border-error-container bg-error-container/30 p-6">
+          <p className="mb-3 font-label text-[10px] font-bold uppercase tracking-[0.2em] text-on-error-container/60">
             What happened
           </p>
-          <p className="text-sm font-bold text-red-950 break-words select-all whitespace-pre-wrap mb-4">
+          <p className="mb-4 select-all whitespace-pre-wrap break-words text-sm font-semibold text-on-error-container">
             {error.message || "Unknown error"}
           </p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 text-[11px] font-bold text-red-900/50 select-all border-t border-red-100 pt-3">
+          <div className="grid select-all grid-cols-1 gap-1 border-t border-error-container pt-3 text-[11px] font-semibold text-on-error-container/60 sm:grid-cols-2">
             <span className="truncate">Page: {where || "—"}</span>
             {error.digest && (
-              <span className="sm:text-right truncate">Ref: {error.digest}</span>
+              <span className="truncate sm:text-right">Ref: {error.digest}</span>
             )}
           </div>
         </div>
 
-        <div className="flex flex-col sm:flex-row gap-3 relative z-10">
-          <Button
+        <div className="relative z-10 flex flex-col gap-3 sm:flex-row">
+          <button
             type="button"
-            variant="outline"
             onClick={copy}
-            className="flex-1 h-14 border-2 border-red-100 text-red-950 font-black rounded-2xl hover:bg-red-50 transition-all active:scale-95"
+            className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg border border-black/10 px-5 py-3.5 text-sm font-bold text-cb-ink transition-colors hover:bg-black/[0.03]"
           >
             {copied ? (
               <>
-                <CheckCircle2 className="w-5 h-5 mr-2" /> Copied
+                <CheckCircle2 className="h-4 w-4" /> Copied
               </>
             ) : (
               <>
-                <Copy className="w-5 h-5 mr-2" /> Copy details
+                <Copy className="h-4 w-4" /> Copy details
               </>
             )}
-          </Button>
+          </button>
           <a
             href={mailto}
-            className="flex-1 h-14 inline-flex items-center justify-center gap-2 border-2 border-red-100 text-red-950 font-black rounded-2xl hover:bg-red-50 transition-all active:scale-95"
+            className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg border border-black/10 px-5 py-3.5 text-sm font-bold text-cb-ink transition-colors hover:bg-black/[0.03]"
           >
-            <Mail className="w-5 h-5" /> Email support
+            <Mail className="h-4 w-4" /> Email support
           </a>
-          <Button
+          <button
             type="button"
             onClick={() => reset()}
-            className="flex-1 h-14 bg-red-500 hover:bg-red-600 text-white font-black rounded-2xl shadow-xl shadow-red-500/20 transition-all active:scale-95"
+            className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-cb-navy px-5 py-3.5 text-sm font-bold text-primary-fixed transition-transform hover:scale-[1.03] active:scale-[0.98]"
           >
-            <RotateCcw className="w-5 h-5 mr-2" /> Try again
-          </Button>
+            <RotateCcw className="h-4 w-4" /> Try again
+          </button>
         </div>
       </div>
     </div>

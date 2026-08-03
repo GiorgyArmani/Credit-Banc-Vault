@@ -180,7 +180,7 @@ const Stepper = forwardRef<StepperHandle, StepperProps>(function Stepper(
             <button
               type="button"
               onClick={isLastStep ? handleComplete : handleNext}
-              className="flex items-center justify-center rounded-full bg-cb-mint px-6 py-3 text-sm font-bold tracking-tight text-white shadow-lg shadow-cb-mint/25 transition-all hover:bg-cb-mint/90 hover:scale-[1.02] active:scale-95 disabled:pointer-events-none disabled:opacity-40"
+              className="flex items-center justify-center rounded-full bg-cb-mint px-6 py-3 text-sm font-bold tracking-tight text-cb-navy shadow-lg shadow-cb-mint/25 transition-all hover:bg-cb-mint/90 hover:scale-[1.02] active:scale-95 disabled:pointer-events-none disabled:opacity-40"
               {...nextButtonProps}
             >
               {isLastStep ? completeButtonText : nextButtonText}

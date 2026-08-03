@@ -88,7 +88,7 @@ export function AdvisorShell({ children }: { children: React.ReactNode }) {
   if (isEmbed) return <>{children}</>
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-cb-cream font-body text-cb-ink">
       <Sidebar
         mobileOpen={mobileOpen}
         onMobileClose={() => setMobileOpen(false)}
@@ -118,7 +118,7 @@ export function AdvisorShell({ children }: { children: React.ReactNode }) {
         </header>
 
         {/* Topbar (Desktop) */}
-        <header className="hidden md:flex sticky top-0 z-30 w-full px-8 py-3 h-16 bg-slate-50 dark:bg-slate-900 shadow-sm dark:shadow-none docked full-width no-border tonal-shift items-center justify-between">
+        <header className="hidden md:flex sticky top-0 z-30 w-full px-8 py-3 h-16 bg-cb-cream dark:bg-slate-900 shadow-sm dark:shadow-none docked full-width no-border tonal-shift items-center justify-between">
           <div className="flex items-center gap-8 flex-1">
             <GlobalSearch />
           </div>

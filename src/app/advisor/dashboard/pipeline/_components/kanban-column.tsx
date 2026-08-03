@@ -13,6 +13,12 @@ interface KanbanColumnProps {
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
   onDrop: (dealId: string, newStage: string) => void;
+  /**
+   * Refuse drops into this column. Used for Deal Funded, which is set only by
+   * Underwriting's "Loan Funded" dialog (it records lender/amount/term) — the
+   * server rejects the transition anyway, so the board shouldn't invite it.
+   */
+  dropDisabled?: boolean;
   children: ReactNode;
 }
 
@@ -32,11 +38,15 @@ export function KanbanColumn({
   collapsed = false,
   onToggleCollapsed,
   onDrop,
+  dropDisabled = false,
   children,
 }: KanbanColumnProps) {
   const [isOver, setIsOver] = useState(false);
 
   const handleDragOver = (e: React.DragEvent) => {
+    // Not calling preventDefault leaves the drop unregistered, so the browser
+    // shows the "no drop" cursor instead of a target that would be rejected.
+    if (dropDisabled) return;
     e.preventDefault();
     setIsOver(true);
   };
@@ -46,6 +56,7 @@ export function KanbanColumn({
   };
 
   const handleDrop = (e: React.DragEvent) => {
+    if (dropDisabled) return;
     e.preventDefault();
     setIsOver(false);
     const dealId = e.dataTransfer.getData("dealId");

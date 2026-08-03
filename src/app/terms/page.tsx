@@ -8,8 +8,8 @@
 // headlines / Inter body. See [[brand_design_system]], [[affiliate_program]].
 
 import Link from "next/link";
-import Image from "next/image";
 import type { Metadata } from "next";
+import { BrandHeader, BrandFooter, Eyebrow } from "@/components/marketing/brand-chrome";
 
 export const metadata: Metadata = {
   title: "Terms and Conditions | Credit Banc",
@@ -140,30 +140,19 @@ const SECTIONS: { title: string; body: React.ReactNode[] }[] = [
 export default function TermsPage() {
   return (
     <div className="min-h-screen bg-cb-cream font-body text-cb-ink selection:bg-cb-mint/20">
-      {/* header */}
-      <header className="sticky top-0 z-50 w-full border-b border-black/5 bg-cb-cream/80 backdrop-blur-md">
-        <div className="max-w-4xl mx-auto px-4 h-20 flex items-center justify-between">
-          <Link href="/" className="flex items-center group">
-            <Image
-              src="/powered-by-shield.png"
-              alt="Credit Banc — Powered by Shield Advisory Group"
-              width={1128}
-              height={191}
-              priority
-              className="h-12 w-auto transition-transform group-hover:scale-105"
-            />
-          </Link>
+      <BrandHeader
+        action={
           <Link
             href="/affiliate"
             className="text-sm font-semibold text-cb-gray hover:text-cb-ink transition-colors"
           >
             Back to <span className="text-cb-mint font-bold">the Club</span>
           </Link>
-        </div>
-      </header>
+        }
+      />
 
       <main className="max-w-4xl mx-auto px-4 py-16 md:py-24">
-        <p className="text-xs font-bold uppercase tracking-[0.3em] text-cb-mint mb-4">Legal</p>
+        <Eyebrow className="mb-4">Legal</Eyebrow>
         <h1 className="font-manrope text-4xl md:text-5xl font-extrabold tracking-tight leading-tight text-cb-ink">
           Terms and Conditions
         </h1>
@@ -221,34 +210,7 @@ export default function TermsPage() {
         </div>
       </main>
 
-      {/* footer */}
-      <footer className="bg-cb-navy text-white py-16 relative overflow-hidden">
-        <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-cb-mint/30 to-transparent" />
-        <div className="max-w-4xl mx-auto px-4 relative z-10 flex flex-col sm:flex-row items-center justify-between gap-6">
-          <div className="flex flex-col sm:flex-row items-center gap-4 sm:gap-8">
-            <p className="text-white/30 text-xs font-bold uppercase tracking-[0.3em]">
-              © {new Date().getFullYear()} Credit Banc. All rights reserved.
-            </p>
-            <a
-              href={PRIVACY_POLICY_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-white/50 hover:text-white text-xs font-bold uppercase tracking-[0.3em] transition-colors"
-            >
-              Privacy
-            </a>
-          </div>
-          <a
-            href="https://creditbanc.io"
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="creditbanc.io"
-            className="group inline-flex items-center transition-opacity hover:opacity-80"
-          >
-            <Image src="/CBLOGOWHITE.png" alt="Credit Banc" width={1000} height={200} className="h-8 w-auto" />
-          </a>
-        </div>
-      </footer>
+      <BrandFooter />
     </div>
   );
 }

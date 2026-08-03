@@ -1,13 +1,40 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { signWell } from '@/lib/signwell';
 import { ghlSyncDocument } from '@/lib/ghl-document-sync';
+import { releaseSpeedFormDocs } from '@/lib/speed-form';
 
 export const dynamic = 'force-dynamic';
 
 /**
+ * Release a speed-form client's parked document requests once their contract is
+ * confirmed signed.
+ *
+ * The signature is the gate for the doc request, but there are TWO paths to a
+ * completed contract: the SignWell webhook, and this route (the onboarding
+ * embed's fallback poll). Only the webhook released the docs, so a client whose
+ * contract completed through the embed — the normal in-app path — landed on
+ * "Docs Requested" with an empty checklist and never got the request email.
+ *
+ * Uses the SERVICE ROLE deliberately: releaseSpeedFormDocs writes
+ * client_dynamic_documents and client_data_vault, which are staff-owned under
+ * RLS. Passing this route's user-scoped client would be denied SILENTLY.
+ *
+ * No-ops for standard-flow clients and for anything already released.
+ */
+async function releaseDocsIfSpeedForm(clientVaultId: string) {
+    try {
+        await releaseSpeedFormDocs(createAdminClient(), clientVaultId);
+    } catch (releaseErr) {
+        // Best-effort: never let the doc release undo the contract sync.
+        console.error('⚠️ Speed-form doc release threw (non-fatal):', releaseErr);
+    }
+}
+
+/**
  * POST /api/onboarding/sync-contract
- * 
+ *
  * Manually triggers the sync of a completed SignWell contract.
  * Used as a fallback when the webhook is delayed or fails.
  */
@@ -67,6 +94,9 @@ export async function POST(request: Request) {
                 .from('client_data_vault')
                 .update({ contract_completed: true, updated_at: new Date().toISOString() })
                 .eq('user_id', user.id);
+            // Also the recovery path: a client whose contract synced before this
+            // fix still has their requests parked, and re-polling releases them.
+            await releaseDocsIfSpeedForm(client_data.id);
             return NextResponse.json({ success: true, message: 'Already synced', already_synced: true });
         }
 
@@ -182,6 +212,13 @@ export async function POST(request: Request) {
                 updated_at: new Date().toISOString()
             })
             .eq('user_id', user.id);
+
+        // 5.5 Speed-form flow: the signature gates the document request. Seed
+        //     client_dynamic_documents from the parked pending_document_requests,
+        //     apply the requested_* GHL tags, and email the client. Mirrors step
+        //     7.6 of the SignWell webhook. Runs before the GHL sync below, which
+        //     has its own early return.
+        await releaseDocsIfSpeedForm(client_data.id);
 
         // 6. Sync to GoHighLevel
         console.log(`📤 Pushing ${docRecord.id} to GHL...`);

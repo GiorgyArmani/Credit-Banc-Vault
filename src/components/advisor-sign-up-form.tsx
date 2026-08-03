@@ -3,14 +3,7 @@
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { formatPhoneInput } from "@/lib/phone";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle
-} from "@/components/ui/card";
+import { BrandCard, Eyebrow, CTA, FIELD } from "@/components/marketing/brand-chrome";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Link from "next/link";
@@ -147,35 +140,46 @@ export function AdvisorSignUpForm({
 
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
-      <Card className="shadow-2xl border-emerald-50 rounded-[3rem] overflow-hidden bg-white/80 backdrop-blur-xl">
-        <CardHeader className="p-10 text-center">
-          <CardTitle className="text-4xl font-black text-emerald-950 uppercase tracking-tighter mb-2 leading-none">Advisor Access</CardTitle>
-          <CardDescription className="text-sm font-bold text-emerald-900/40 uppercase tracking-widest mt-2">
-            Create your account to manage applications
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="p-10 pt-0">
-          <form onSubmit={handleAdvisorSignUp}>
+      <BrandCard>
+        <div className="text-center">
+          <Eyebrow className="mb-3">Advisor access</Eyebrow>
+          <h1 className="font-headline text-4xl font-extrabold leading-tight tracking-tight text-cb-ink">
+            Create your <span className="text-cb-mint">account</span>
+          </h1>
+          <p className="mt-3 text-[15px] leading-relaxed text-cb-ink/70">
+            Everything you need to manage applications, in one place.
+          </p>
+        </div>
+
+        <form onSubmit={handleAdvisorSignUp} className="mt-10">
             <div className="flex flex-col gap-8">
 
               {/* Profile Picture Upload Space */}
-              <div className="flex flex-col items-center gap-6 py-4">
-                <div className="relative group cross-cursor" onClick={triggerUpload}>
-                  <div className="absolute inset-0 bg-emerald-500 rounded-[2.5rem] blur-2xl opacity-20 group-hover:opacity-40 transition-opacity" />
-                  <Avatar className="h-32 w-32 border-4 border-white shadow-2xl relative z-10 rounded-[2.5rem] overflow-hidden bg-emerald-50 transition-transform group-hover:scale-105 active:scale-95 duration-500">
+              <div className="flex flex-col items-center gap-6">
+                <button
+                  type="button"
+                  className="relative group rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cb-mint focus-visible:ring-offset-2"
+                  onClick={triggerUpload}
+                  aria-label="Upload a profile photo"
+                >
+                  <div
+                    aria-hidden
+                    className="absolute inset-0 bg-cb-mint rounded-2xl blur-2xl opacity-20 group-hover:opacity-40 transition-opacity"
+                  />
+                  <Avatar className="h-28 w-28 border-4 border-white shadow-xl relative z-10 rounded-2xl overflow-hidden bg-cb-mint/10 transition-transform group-hover:scale-105 active:scale-95 duration-300">
                     <AvatarImage src={previewUrl || undefined} className="object-cover" />
-                    <AvatarFallback className="bg-emerald-50 text-emerald-500 rounded-[2.5rem]">
-                      <User className="h-16 w-16" />
+                    <AvatarFallback className="bg-cb-mint/10 text-cb-mint rounded-2xl">
+                      <User className="h-12 w-12" />
                     </AvatarFallback>
                   </Avatar>
-                  <div className="absolute -bottom-2 -right-2 bg-emerald-500 text-white p-3 rounded-2xl shadow-xl z-20 border-4 border-white transform transition-transform group-hover:rotate-12">
+                  <div className="absolute -bottom-2 -right-2 bg-cb-mint text-cb-navy p-2.5 rounded-xl shadow-lg z-20 border-4 border-white transition-transform group-hover:rotate-12">
                     <Camera className="w-4 h-4" />
                   </div>
-                </div>
+                </button>
 
                 <div className="text-center">
-                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/30 mb-1">Advisor Identity</p>
-                  <p className="text-xs font-bold text-emerald-900/40">JPG, PNG or WEBP. Max 2MB.</p>
+                  <p className={`${FIELD.label} mb-1`}>Advisor identity</p>
+                  <p className="text-xs text-cb-ink/50">JPG, PNG or WEBP. Max 2MB.</p>
                 </div>
 
                 <Input
@@ -189,7 +193,7 @@ export function AdvisorSignUpForm({
               </div>
 
               <div className="grid gap-3">
-                <Label htmlFor="invite-code" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 ml-1">Invite Code</Label>
+                <Label htmlFor="invite-code" className={FIELD.label}>Invite Code</Label>
                 <Input
                   id="invite-code"
                   type="text"
@@ -197,13 +201,13 @@ export function AdvisorSignUpForm({
                   required
                   value={inviteCode}
                   onChange={(e) => setInviteCode(e.target.value)}
-                  className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
+                  className={FIELD.input}
                 />
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="grid gap-3">
-                  <Label htmlFor="first-name" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 ml-1">First Name</Label>
+                  <Label htmlFor="first-name" className={FIELD.label}>First Name</Label>
                   <Input
                     id="first-name"
                     type="text"
@@ -211,12 +215,12 @@ export function AdvisorSignUpForm({
                     required
                     value={firstName}
                     onChange={(e) => setFirstName(e.target.value)}
-                    className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
+                    className={FIELD.input}
                   />
                 </div>
 
                 <div className="grid gap-3">
-                  <Label htmlFor="last-name" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 ml-1">Last Name</Label>
+                  <Label htmlFor="last-name" className={FIELD.label}>Last Name</Label>
                   <Input
                     id="last-name"
                     type="text"
@@ -224,14 +228,14 @@ export function AdvisorSignUpForm({
                     required
                     value={lastName}
                     onChange={(e) => setLastName(e.target.value)}
-                    className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
+                    className={FIELD.input}
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="grid gap-3">
-                  <Label htmlFor="email" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 ml-1">Work Email</Label>
+                  <Label htmlFor="email" className={FIELD.label}>Work Email</Label>
                   <Input
                     id="email"
                     type="email"
@@ -239,12 +243,12 @@ export function AdvisorSignUpForm({
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
+                    className={FIELD.input}
                   />
                 </div>
 
                 <div className="grid gap-3">
-                  <Label htmlFor="phone" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 ml-1">Phone (Optional)</Label>
+                  <Label htmlFor="phone" className={FIELD.label}>Phone (Optional)</Label>
                   <Input
                     id="phone"
                     type="tel"
@@ -253,14 +257,14 @@ export function AdvisorSignUpForm({
                     placeholder="(555) 000-0000"
                     value={phone}
                     onChange={(e) => setPhone(formatPhoneInput(e.target.value))}
-                    className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
+                    className={FIELD.input}
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4">
                 <div className="grid gap-3">
-                  <Label htmlFor="password" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 ml-1">Password</Label>
+                  <Label htmlFor="password" className={FIELD.label}>Password</Label>
                   <Input
                     id="password"
                     type="password"
@@ -268,12 +272,12 @@ export function AdvisorSignUpForm({
                     required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
+                    className={FIELD.input}
                   />
                 </div>
 
                 <div className="grid gap-3">
-                  <Label htmlFor="repeat-password" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 ml-1">Confirm Password</Label>
+                  <Label htmlFor="repeat-password" className={FIELD.label}>Confirm Password</Label>
                   <Input
                     id="repeat-password"
                     type="password"
@@ -281,48 +285,39 @@ export function AdvisorSignUpForm({
                     required
                     value={repeatPassword}
                     onChange={(e) => setRepeatPassword(e.target.value)}
-                    className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
+                    className={FIELD.input}
                   />
                 </div>
               </div>
 
-              {error && (
-                <div className="rounded-2xl bg-red-50 p-4 border border-red-100">
-                  <p className="text-sm font-bold text-red-500">{error}</p>
-                </div>
-              )}
+              {error && <p className={FIELD.error}>{error}</p>}
 
-              <Button
-                type="submit"
-                className="h-16 bg-emerald-500 hover:bg-emerald-600 text-white font-black rounded-2xl shadow-xl shadow-emerald-500/20 transition-all active:scale-95 text-lg"
-                disabled={isLoading}
-              >
+              <button type="submit" className={`${CTA.primary} group w-full`} disabled={isLoading}>
                 {isLoading ? (
-                  <div className="flex items-center gap-3">
-                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                    <span>Initializing Access...</span>
-                  </div>
+                  <>
+                    <span
+                      aria-hidden
+                      className="h-4 w-4 animate-spin rounded-full border-2 border-primary-fixed/30 border-t-primary-fixed"
+                    />
+                    Creating account…
+                  </>
                 ) : (
-                  <div className="flex items-center justify-center gap-2">
-                    <span>Create Advisor Account</span>
-                    <ArrowRight className="w-6 h-6" />
-                  </div>
+                  <>
+                    Create advisor account
+                    <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
+                  </>
                 )}
-              </Button>
+              </button>
             </div>
 
-            <div className="mt-10 text-center">
-              <span className="text-emerald-900/40 font-bold">Joined before? </span>
-              <Link
-                href="/auth/login"
-                className="text-emerald-600 font-black uppercase tracking-widest text-xs hover:underline"
-              >
-                Sign In
+            <p className="mt-8 text-center text-sm text-cb-ink/50">
+              Joined before?{" "}
+              <Link href="/auth/login" className="font-bold text-cb-mint hover:underline">
+                Sign in
               </Link>
-            </div>
+            </p>
           </form>
-        </CardContent>
-      </Card>
+      </BrandCard>
     </div>
   );
 }

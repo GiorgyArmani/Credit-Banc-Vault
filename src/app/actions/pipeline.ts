@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { createAffiliatePayoutForFundedVault } from "@/lib/affiliates";
+import { recordPipelineTransition } from "@/lib/pipeline-core";
 import { revalidatePath } from "next/cache";
 
 export type LoanStatus =
@@ -77,103 +77,123 @@ export async function getBulkLatestStatus(
 }
 
 /**
- * Advance or update the pipeline status for a client
+ * Roles allowed to move a deal through the pipeline. Everyone else — clients
+ * (role='free') and affiliates — has NO write access to the funding process at
+ * all; they only ever read the step their own file is on.
+ */
+const STAFF_ROLES = new Set(["admin", "underwriting", "advisor", "setter"]);
+
+/**
+ * Roles allowed to record `funded`. Narrower than STAFF_ROLES because this
+ * transition pays an affiliate a real gift card downstream — setters never touch
+ * the pipeline, so they are excluded. See [[affiliate_program]].
+ */
+const FUNDED_ROLES = new Set(["admin", "underwriting", "advisor"]);
+
+/** Resolve the caller's role with the service role, so RLS can't mask it. */
+async function resolveActor(): Promise<{ userId: string; role: string } | null> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  const { data: actorRow } = await createAdminClient()
+    .from("users")
+    .select("role")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  return { userId: user.id, role: actorRow?.role ?? "unknown" };
+}
+
+/**
+ * Advance or update the pipeline status for a client. STAFF ONLY.
+ *
+ * This is a server action, so any authenticated user can invoke it with crafted
+ * arguments — the role check has to live here, not in the UI that calls it. A
+ * client or affiliate calling this gets Forbidden regardless of the status or
+ * vault they name; the client-triggered transitions run server-side instead (see
+ * startClientOnboarding and the vault/onboarding API routes).
  */
 export async function updateLoanStatus(
   clientVaultId: string,
   newStatus: LoanStatus,
-  note?: string,
-  options?: { useServiceRole?: boolean }
+  note?: string
 ): Promise<{ success: boolean; error?: string }> {
-  const supabase = await createClient();
+  const actor = await resolveActor();
+  if (!actor) return { success: false, error: "Unauthenticated" };
 
+  if (!STAFF_ROLES.has(actor.role)) {
+    console.warn(
+      `[pipeline] BLOCKED "${newStatus}" on ${clientVaultId} by non-staff ${actor.role} ${actor.userId}`
+    );
+    return { success: false, error: "Forbidden" };
+  }
+
+  if (newStatus === "funded" && !FUNDED_ROLES.has(actor.role)) {
+    console.warn(
+      `[pipeline] BLOCKED funded transition on ${clientVaultId} by ${actor.role} ${actor.userId}`
+    );
+    return { success: false, error: "Forbidden" };
+  }
+
+  const result = await recordPipelineTransition({
+    clientVaultId,
+    newStatus,
+    note,
+    actorUserId: actor.userId,
+    actorRole: actor.role,
+  });
+
+  if (result.success) {
+    revalidatePath("/underwriting/dashboard");
+    revalidatePath("/advisor/dashboard");
+  }
+  return result;
+}
+
+/**
+ * The ONE pipeline write a client may trigger: stamping `onboarding` the first
+ * time they open their vault.
+ *
+ * Deliberately takes no arguments. The vault is resolved from the caller's own
+ * session, so a client cannot name someone else's file, and the status is fixed
+ * here rather than passed in. It only fires while the file is still at `created`
+ * — after that it is a no-op, so it can't be replayed to disturb a live file.
+ */
+export async function startClientOnboarding(): Promise<{ success: boolean; error?: string }> {
+  const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
+  if (!user) return { success: false, error: "Unauthenticated" };
 
-  if (!user) {
-    return { success: false, error: "Unauthenticated" };
-  }
+  const db = createAdminClient();
 
-  // Client-triggered transitions (e.g. completing onboarding) can't write to
-  // loan_status_history under RLS. When the caller opts in, use the
-  // service-role client for the DB ops while still recording the authenticated
-  // user as the actor.
-  const db = options?.useServiceRole ? createAdminClient() : supabase;
+  const { data: vault } = await db
+    .from("client_data_vault")
+    .select("id")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (!vault?.id) return { success: false, error: "No vault for this user" };
 
-  // Get the latest status to avoid redundant consecutive entries
-  const { data: latestEntry } = await db
+  // Only from a file that has never moved past `created`.
+  const { data: history } = await db
     .from("loan_status_history")
     .select("status")
-    .eq("client_vault_id", clientVaultId)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .single();
+    .eq("client_vault_id", vault.id);
 
-  if (latestEntry?.status === newStatus) {
-    // Same-status calls are no-ops regardless of note. Kanban drops always
-    // pass a "Moved in Pipeline" note, so without this skip, re-dropping a
-    // card on its current column would insert a duplicate history row —
-    // breaking funded-event dedupe on the admin dashboard.
+  const rows = history ?? [];
+  if (rows.length !== 1 || rows[0].status !== "created") {
     return { success: true };
   }
 
-  // Get the actor's role
-  const { data: userData } = await db
-    .from("users")
-    .select("role")
-    .eq("id", user.id)
-    .single();
-
-  const { error } = await db.from("loan_status_history").insert({
-    client_vault_id: clientVaultId,
-    status: newStatus,
-    changed_by: user.id,
-    changed_by_role: userData?.role || "unknown",
-    note: note || null,
+  return recordPipelineTransition({
+    clientVaultId: vault.id,
+    newStatus: "onboarding",
+    note: "Client accessed the vault for the first time",
+    actorUserId: user.id,
+    actorRole: "client",
   });
-
-  if (error) {
-    console.error("[pipeline] updateLoanStatus error:", error);
-    return { success: false, error: error.message };
-  }
-
-  // Create in-app notification for the advisor
-  if (newStatus === "funded" || newStatus === "lender_matched" || newStatus === "declined") {
-    const statusLabels: Record<string, string> = {
-      funded: "Loan Funded 🎉",
-      lender_matched: "Lender Matched",
-      declined: "Application Declined",
-    };
-
-    // Get advisor user_id for this client
-    const { data: vaultData } = await db
-      .from("client_data_vault")
-      .select("advisor_id, client_name, advisors(user_id)")
-      .eq("id", clientVaultId)
-      .single();
-
-    const advisorUserId = (vaultData?.advisors as any)?.user_id;
-    if (advisorUserId) {
-      await db.from("in_app_notifications").insert({
-        user_id: advisorUserId,
-        client_id: clientVaultId,
-        title: statusLabels[newStatus],
-        message: `${vaultData?.client_name} status updated to "${statusLabels[newStatus]}"`,
-      });
-    }
-  }
-
-  // Affiliate reward: if a referred deal just funded, pay the affiliate their
-  // fixed reward via Giftronaut. Always uses the service role (the affiliate
-  // tables are RLS-locked); idempotent + non-throwing, so it never blocks the
-  // status transition. Only fires on the same-status-deduped funded insert above.
-  if (newStatus === "funded") {
-    await createAffiliatePayoutForFundedVault(createAdminClient(), clientVaultId);
-  }
-
-  revalidatePath("/underwriting/dashboard");
-  revalidatePath("/advisor/dashboard");
-
-  return { success: true };
 }

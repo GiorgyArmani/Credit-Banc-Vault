@@ -1393,7 +1393,9 @@ export default function AdvisorClientDetailsPage() {
                 set_current_pipeline_status(newStatus);
                 toast.success(`Pipeline updated to ${newStatus}`);
             } else {
-                toast.error("Failed to update pipeline");
+                // Carries the real reason — e.g. `funded` requires Underwriting's
+                // Loan Funded dialog, which records lender/amount/term.
+                toast.error(res.error || "Failed to update pipeline");
             }
         } catch (err) {
             console.error('❌ Pipeline update error:', err);

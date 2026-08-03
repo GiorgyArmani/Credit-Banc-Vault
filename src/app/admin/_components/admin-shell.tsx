@@ -48,7 +48,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   }, [pathname])
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-cb-cream font-body text-cb-ink">
       <Sidebar
         mobileOpen={mobileOpen}
         onMobileClose={() => setMobileOpen(false)}
@@ -91,7 +91,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <main className="flex-1 bg-slate-50">
+        <main className="flex-1 bg-cb-cream">
           <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
             {children}
           </div>

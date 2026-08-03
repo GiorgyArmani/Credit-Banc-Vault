@@ -50,7 +50,7 @@ export function CopyLink({ url }: { url: string }) {
         </div>
         <button
           onClick={copy}
-          className="w-full inline-flex items-center justify-center gap-2 px-6 py-3 bg-cb-mint hover:bg-cb-mint/90 text-white font-bold rounded-xl shadow-lg shadow-cb-mint/20 transition-all active:scale-95"
+          className="w-full inline-flex items-center justify-center gap-2 px-6 py-3 bg-cb-mint hover:bg-cb-mint/90 text-cb-navy font-bold rounded-xl shadow-lg shadow-cb-mint/20 transition-all active:scale-95"
         >
           {copied ? (
             <><Check className="w-5 h-5" /> Copied</>

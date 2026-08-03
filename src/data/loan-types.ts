@@ -30,6 +30,7 @@ export const FUNDING_OPTIONS: readonly string[] = [
     "Acquisition",
     "Personal Term Loan",
     "MCA",
+    "Consolidation",
     "AR Loan",
     "Other",
 ];

@@ -855,11 +855,15 @@ export default function UnderwritingClientDetailsPage() {
         try {
             const res = await updateLoanStatus(client_id, newStatus);
             if (res.success) {
-                toast.success(`Status updated to "${newStatus.replace(/_/g, " ")}"`); 
+                toast.success(`Status updated to "${newStatus.replace(/_/g, " ")}"`);
                 // Refresh pipeline
                 const history = await getClientPipelineHistory(client_id);
                 set_pipeline_history(history);
                 set_current_pipeline_status(newStatus);
+            } else {
+                // Surfacing this matters: `funded` is rejected unless the Loan
+                // Funded dialog recorded the deal, and the reason says so.
+                toast.error(res.error || "Failed to update status");
             }
         } finally {
             set_is_advancing_status(false);

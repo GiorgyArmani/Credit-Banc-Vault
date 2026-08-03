@@ -6,6 +6,7 @@ import Image from "next/image"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Reveal } from "@/components/ui/reveal"
 import {
   Shield,
   Zap,
@@ -98,7 +99,7 @@ export function LandingPage() {
               <Button variant="ghost" size="sm" className="font-bold uppercase tracking-wide text-cb-ink hover:text-cb-mint hover:bg-transparent" asChild>
                 <Link href="/auth/login">Log In</Link>
               </Button>
-              <Button size="sm" className="rounded-full bg-cb-mint hover:bg-cb-mint/90 text-white font-bold uppercase tracking-wide px-7 h-10 shadow-md shadow-cb-mint/20" asChild>
+              <Button size="sm" className="rounded-full bg-cb-mint hover:bg-cb-mint/90 text-cb-navy font-bold uppercase tracking-wide px-7 h-10 shadow-md shadow-cb-mint/20" asChild>
                 <a href="https://creditbanc.io/apply-now" target="_blank" rel="noopener noreferrer">Apply Now</a>
               </Button>
             </div>
@@ -153,7 +154,7 @@ export function LandingPage() {
                   <Button variant="outline" size="lg" className="w-full rounded-full font-bold uppercase tracking-wide" asChild>
                     <Link href="/auth/login" onClick={() => setMobileMenuOpen(false)}>Log In</Link>
                   </Button>
-                  <Button size="lg" className="w-full rounded-full bg-cb-mint hover:bg-cb-mint/90 text-white font-bold uppercase tracking-wide" asChild>
+                  <Button size="lg" className="w-full rounded-full bg-cb-mint hover:bg-cb-mint/90 text-cb-navy font-bold uppercase tracking-wide" asChild>
                     <a href="https://creditbanc.io/apply-now" target="_blank" rel="noopener noreferrer">Apply Now</a>
                   </Button>
                 </div>
@@ -171,7 +172,7 @@ export function LandingPage() {
         <div className="absolute bottom-0 right-1/4 w-[50%] h-[50%] bg-cb-mint/5 blur-[130px] rounded-full animate-aurora" style={{ animationDelay: '-4s' }} />
 
         <div className="container relative z-10 mx-auto px-4 pt-28 pb-24 text-center">
-          <div className="max-w-4xl mx-auto">
+          <Reveal className="max-w-4xl mx-auto" distance={24}>
             {/* beta-tag-inline */}
 
 
@@ -188,7 +189,7 @@ export function LandingPage() {
 
             {/* cta-buttons: Primary and secondary call-to-action buttons */}
             <div className="flex flex-col sm:flex-row gap-5 justify-center items-center">
-              <Button size="lg" className="text-xl px-12 py-9 h-auto bg-cb-mint text-white hover:bg-cb-mint/90 font-bold transition-all hover:scale-105 shadow-2xl shadow-cb-mint/30 active:scale-95" asChild>
+              <Button size="lg" className="text-xl px-12 py-9 h-auto bg-cb-mint text-cb-navy hover:bg-cb-mint/90 font-bold transition-all hover:scale-105 shadow-2xl shadow-cb-mint/30 active:scale-95" asChild>
                 <a href="https://creditbanc.io/apply-now" target="_blank" rel="noopener noreferrer">
                   Start Now
                   <ArrowRight className="ml-3 h-6 w-6" />
@@ -207,7 +208,7 @@ export function LandingPage() {
                 Already registered? <span className="text-cb-mint">Log in</span>
               </Link>
             </div>
-          </div>
+          </Reveal>
         </div>
 
         {/* subtle divider */}
@@ -218,7 +219,8 @@ export function LandingPage() {
       <section id="features" className="container mx-auto px-4 py-24 relative">
         <div className="grid md:grid-cols-3 gap-10">
           {pillars.map((p, i) => (
-            <Card key={i} className="text-center border border-black/5 shadow-sm hover:shadow-2xl transition-all duration-500 group hover:-translate-y-2 bg-white rounded-3xl overflow-hidden">
+            <Reveal key={i} delay={i * 0.12}>
+            <Card className="text-center border border-black/5 shadow-sm hover:shadow-2xl transition-all duration-500 group hover:-translate-y-2 bg-white rounded-3xl overflow-hidden">
               <CardHeader className="pt-12">
                 {/* pillar-icon: Icon representing each value proposition */}
                 <div className="mx-auto mb-8 flex h-20 w-20 items-center justify-center rounded-2xl bg-cb-mint/10 group-hover:bg-cb-mint transition-all duration-500 shadow-inner group-hover:shadow-cb-mint/50">
@@ -230,6 +232,7 @@ export function LandingPage() {
                 <CardDescription className="text-lg text-cb-ink/50 leading-relaxed font-medium">{p.description}</CardDescription>
               </CardContent>
             </Card>
+            </Reveal>
           ))}
         </div>
       </section>
@@ -238,17 +241,17 @@ export function LandingPage() {
       <section id="how-it-works" className="bg-white/60 py-32 border-y border-black/5">
         <div className="container mx-auto px-4">
           {/* section-header: Title and subtitle for the steps section */}
-          <div className="text-center mb-20">
+          <Reveal className="text-center mb-20">
             <h2 className="font-manrope text-5xl md:text-6xl font-extrabold text-cb-ink mb-6 tracking-tight">How It Works</h2>
             <div className="inline-block h-1.5 w-20 bg-cb-mint rounded-full mb-6" />
             <p className="text-xl text-cb-gray font-bold uppercase tracking-widest">Three steps. No surprises.</p>
-          </div>
+          </Reveal>
 
           {/* steps-grid: Interactive cards showing the process */}
           <div className="grid lg:grid-cols-3 gap-10">
             {steps.map((s, idx) => (
+              <Reveal key={idx} delay={idx * 0.12}>
               <Card
-                key={idx}
                 className={`border border-black/5 shadow-xl transition-all duration-500 rounded-3xl p-4 ${activeStep === idx ? " ring-8 ring-cb-mint/5 bg-white scale-[1.05]" : "bg-white/60 opacity-80"}`}
                 onMouseEnter={() => setActiveStep(idx)}
               >
@@ -263,11 +266,12 @@ export function LandingPage() {
                   <CardDescription className="text-xl text-cb-ink/50 leading-relaxed font-medium">{s.desc}</CardDescription>
                 </CardHeader>
               </Card>
+              </Reveal>
             ))}
           </div>
 
           {/* required-docs-callout: Highlighted information about required documents */}
-          <div className="mt-24 max-w-5xl mx-auto rounded-3xl border border-black/5 p-12 md:p-16 bg-white shadow-2xl relative overflow-hidden">
+          <Reveal className="mt-24 max-w-5xl mx-auto rounded-3xl border border-black/5 p-12 md:p-16 bg-white shadow-2xl relative overflow-hidden">
             <div className="relative z-10">
               <div className="mb-12 text-center">
                 <h3 className="font-manrope text-3xl font-extrabold text-cb-ink mb-4 tracking-tight">Required Documents to Start</h3>
@@ -292,7 +296,7 @@ export function LandingPage() {
                 The Vault tells you what’s needed, flags what’s missing, and skips everything that isn’t.
               </p>
             </div>
-          </div>
+          </Reveal>
         </div>
       </section>
 
@@ -307,7 +311,7 @@ export function LandingPage() {
             {/* pitch */}
             <div className="text-white">
               <div className="inline-flex items-center space-x-2 bg-white/5 border border-cb-mint/20 rounded-full px-4 py-2 mb-8">
-                <Badge className="bg-cb-mint text-white hover:bg-cb-mint font-bold border-none">PARTNERS</Badge>
+                <Badge className="bg-cb-mint text-cb-navy hover:bg-cb-mint font-bold border-none">PARTNERS</Badge>
                 <span className="text-sm text-white/50 font-bold uppercase tracking-[0.2em]">Affiliate Program</span>
               </div>
               <h2 className="font-manrope text-4xl md:text-6xl font-extrabold mb-8 tracking-tight leading-tight">
@@ -347,7 +351,7 @@ export function LandingPage() {
               </p>
               <Button
                 size="lg"
-                className="text-lg px-10 py-8 h-auto bg-cb-mint text-white hover:bg-cb-mint/90 font-bold rounded-xl shadow-2xl shadow-cb-mint/30 transition-all hover:scale-105 active:scale-95"
+                className="text-lg px-10 py-8 h-auto bg-cb-mint text-cb-navy hover:bg-cb-mint/90 font-bold rounded-xl shadow-2xl shadow-cb-mint/30 transition-all hover:scale-105 active:scale-95"
                 asChild
               >
                 <Link href="/affiliate">
@@ -371,7 +375,7 @@ export function LandingPage() {
           <p className="text-xl md:text-2xl text-white/60 mb-14 max-w-3xl mx-auto leading-relaxed font-medium">
             Schedule a call with our advisors to get your account created and start uploading documents to the <span className="text-cb-mint font-bold uppercase tracking-widest">Credit Banc Vault</span>.
           </p>
-          <Button size="lg" className="text-2xl px-14 py-10 h-auto bg-cb-mint text-white hover:bg-cb-mint/90 font-bold transition-all hover:scale-105 shadow-2xl shadow-cb-mint/40 active:scale-95" asChild>
+          <Button size="lg" className="text-2xl px-14 py-10 h-auto bg-cb-mint text-cb-navy hover:bg-cb-mint/90 font-bold transition-all hover:scale-105 shadow-2xl shadow-cb-mint/40 active:scale-95" asChild>
             <a href="https://creditbanc.io/apply-now" target="_blank" rel="noopener noreferrer" className="flex items-center">
               Start Now
             </a>

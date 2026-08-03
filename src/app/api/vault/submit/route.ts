@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ghlAddTags } from "@/lib/ghl-api";
 import { send_advisor_vault_submission_notification } from "@/lib/email";
-import { updateLoanStatus } from "@/app/actions/pipeline";
+import { recordPipelineTransition } from "@/lib/pipeline-core";
 
 export const dynamic = 'force-dynamic';
 
@@ -80,11 +80,17 @@ export async function POST() {
         }
 
         // 5. Update Pipeline Status to Under Review.
-        //    Client-triggered, so it must go through the service role — the
-        //    caller is role='free' and loan_status_history writes are staff-only.
+        //    Recorded server-side: the client has no pipeline write access. The
+        //    vault above was fetched by `user_id = user.id`, so ownership is
+        //    already proven, and the status is fixed here rather than supplied
+        //    by the caller.
         try {
-            await updateLoanStatus(clientData.id, 'under_review', 'Vault submitted by client', {
-                useServiceRole: true,
+            await recordPipelineTransition({
+                clientVaultId: clientData.id,
+                newStatus: 'under_review',
+                note: 'Vault submitted by client',
+                actorUserId: user.id,
+                actorRole: 'client',
             });
             console.log(`✅ Pipeline status updated to "under_review" for client: ${clientData.id}`);
         } catch (pipeline_error) {

@@ -4,6 +4,16 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "@/lib/toast";
 import { LOAN_TYPES } from "@/data/loan-types";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface Lender {
   id: string;
@@ -161,7 +171,7 @@ function TierFields({
           />
         </div>
         <div className="space-y-1.5">
-          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Min Revenue</label>
+          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Min Monthly Revenue</label>
           <input
             type="number"
             value={tier.avg_monthly_revenue ?? ""}
@@ -333,6 +343,10 @@ export default function LenderGuidelinesManager() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [editingGroup, setEditingGroup] = useState<EditingGroup | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  // Pending destructive actions, held so they can be confirmed in-app rather
+  // than through a native window.confirm().
+  const [programToRemove, setProgramToRemove] = useState<string | null>(null);
+  const [lenderToDelete, setLenderToDelete] = useState<string | null>(null);
 
   const supabase = createClient();
 
@@ -526,7 +540,6 @@ export default function LenderGuidelinesManager() {
   }
 
   async function handleDeleteGroup(name: string) {
-    if (!confirm(`Are you sure you want to remove ALL programs for ${name}?`)) return;
     const { error } = await supabase.from("lender_guidelines").delete().eq("lender_name", name);
     if (!error) {
       setLenders(prev => prev.filter(l => l.lender_name !== name));
@@ -629,40 +642,84 @@ export default function LenderGuidelinesManager() {
     updateTier(tierIdx, { tier_label: value || null });
   };
 
+  // Replace the active program's tiers with a full copy of the source program's
+  // — every tier, not just the first. A 4-tier MCA copied onto Line of Credit
+  // yields 4 Line of Credit tiers with the same thresholds and labels.
+  //
+  // Two things this must get right:
+  //  - Never carry the source rows' `id`. Two editor rows sharing one DB id
+  //    would make handleSave update that row twice, the second write stamping
+  //    the destination's specialty onto it — silently destroying the source
+  //    program.
+  //  - Reuse the destination's own ids positionally, so tiers that already
+  //    existed are UPDATEd rather than deleted and re-INSERTed. Surplus
+  //    destination tiers fall out of the editor and are deleted on save, which
+  //    is what "replace with a copy" should mean.
   const copyGuidelinesFrom = (sourceSpec: string) => {
     if (!editingGroup || !sourceSpec) return;
-    const sourceData = editingGroup.programs[sourceSpec]?.[0];
-    if (!sourceData) return;
+    const sourceTiers = editingGroup.programs[sourceSpec];
+    if (!sourceTiers?.length) return;
 
-    // Copy all fields except ID, Specialty, and tier label into the active
-    // specialty's first tier.
     const active = editingGroup.activeSpecialty;
-    const { id, specialty, lender_name, tier_label, ...fieldsToCopy } = sourceData;
-    const tiers = editingGroup.programs[active] ?? [];
-    const next = tiers.map((t, i) => (i === 0 ? { ...t, ...fieldsToCopy } : t));
+    const destTiers = editingGroup.programs[active] ?? [];
+
+    const next = sourceTiers.map((src, i) => {
+      const { id: _sourceId, specialty, lender_name, ...fieldsToCopy } = src;
+      return {
+        ...fieldsToCopy,
+        id: destTiers[i]?.id, // undefined past the destination's length → INSERT
+        specialty: active === "General" ? null : active,
+        lender_name: editingGroup.lender_name,
+      } as Partial<Lender>;
+    });
 
     setEditingGroup({
       ...editingGroup,
       programs: { ...editingGroup.programs, [active]: next },
     });
-    toast.success(`Guidelines copied from ${sourceSpec}`);
+
+    const dropped = Math.max(0, destTiers.length - sourceTiers.length);
+    toast.success(
+      sourceTiers.length > 1
+        ? `Copied ${sourceTiers.length} tiers from ${sourceSpec}${dropped ? ` (${dropped} replaced)` : ""}`
+        : `Guidelines copied from ${sourceSpec}`
+    );
+  };
+
+  // Drop a whole program (all of its tiers) from the editor. The rows are only
+  // deleted from the DB on save, where handleSave diffs by id.
+  //
+  // This is the only way to clear the legacy "General" program: rows written
+  // before the program-tag system carry specialty = NULL, which toProgramMap
+  // surfaces under the "General" key. "General" is not in AVAILABLE_SPECIALTIES,
+  // so it has no chip to toggle — without a control on the tab itself it was
+  // unreachable, and the row kept showing up in Lender Match as "Unknown".
+  const removeSpecialty = (spec: string) => {
+    if (!editingGroup) return;
+    const next = { ...editingGroup.programs };
+    if (!next[spec]) return;
+
+    if (Object.keys(next).length <= 1) {
+      toast.error("At least one program is required — add the replacement first");
+      return;
+    }
+
+    delete next[spec];
+    const remaining = Object.keys(next);
+    setEditingGroup({
+      ...editingGroup,
+      programs: next,
+      activeSpecialty: remaining.includes(editingGroup.activeSpecialty)
+        ? editingGroup.activeSpecialty
+        : remaining[0],
+    });
   };
 
   const toggleSpecialty = (spec: string) => {
     if (!editingGroup) return;
     const next = { ...editingGroup.programs };
     if (next[spec]) {
-      if (Object.keys(next).length > 1) {
-        delete next[spec];
-        const remaining = Object.keys(next);
-        setEditingGroup({
-          ...editingGroup,
-          programs: next,
-          activeSpecialty: remaining.includes(editingGroup.activeSpecialty) ? editingGroup.activeSpecialty : remaining[0]
-        });
-      } else {
-        toast.error("At least one program is required");
-      }
+      removeSpecialty(spec);
     } else {
       // Copy the active specialty's first tier to speed up setting up the new
       // program; drop id/tier_label so it's a fresh untiered row.
@@ -806,7 +863,7 @@ export default function LenderGuidelinesManager() {
                       <button onClick={() => startEditing(group)} className="p-1.5 text-slate-500 hover:text-emerald-500 transition-colors">
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-5M16.242 5.242a2.828 2.828 0 114 4L11.828 15.172a4 4 0 01-1.414.942l-2.829.942.942-2.828a4 4 0 01.942-1.414l7.409-7.409z" /></svg>
                       </button>
-                      <button onClick={() => handleDeleteGroup(group.name)} className="p-1.5 text-slate-500 hover:text-rose-600 transition-colors">
+                      <button onClick={() => setLenderToDelete(group.name)} className="p-1.5 text-slate-500 hover:text-rose-600 transition-colors">
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                       </button>
                     </div>
@@ -910,22 +967,55 @@ export default function LenderGuidelinesManager() {
                   <div className="flex items-center gap-2 flex-wrap">
                     {Object.keys(editingGroup.programs).map(spec => {
                       const tierCount = editingGroup.programs[spec]?.length ?? 0;
+                      const isActive = editingGroup.activeSpecialty === spec;
+                      // Rows written before the program-tag system (specialty NULL).
+                      const isLegacy = spec === "General";
+                      const canRemove = Object.keys(editingGroup.programs).length > 1;
                       return (
-                        <button
+                        // Not nested buttons — the tab and its remove control are
+                        // siblings, so both stay keyboard-reachable.
+                        <div
                           key={spec}
-                          onClick={() => setEditingGroup({ ...editingGroup, activeSpecialty: spec })}
-                          className={`px-4 py-2 text-xs font-bold uppercase tracking-widest transition-all border-b-2 ${editingGroup.activeSpecialty === spec
-                              ? "border-emerald-400 text-emerald-500"
-                              : "border-transparent text-slate-500 hover:text-slate-700"
+                          className={`flex items-center border-b-2 transition-all ${isActive
+                              ? "border-emerald-400"
+                              : "border-transparent"
                             }`}
                         >
-                          {spec}
-                          {tierCount > 1 && (
-                            <span className="ml-1.5 text-[9px] font-mono text-emerald-500 bg-emerald-400/10 rounded px-1 py-0.5 align-middle">
-                              {tierCount} tiers
-                            </span>
+                          <button
+                            onClick={() => setEditingGroup({ ...editingGroup, activeSpecialty: spec })}
+                            className={`pl-4 py-2 text-xs font-bold uppercase tracking-widest transition-all ${canRemove ? "pr-1" : "pr-4"
+                              } ${isActive
+                                ? "text-emerald-500"
+                                : isLegacy
+                                  ? "text-amber-600 hover:text-amber-700"
+                                  : "text-slate-500 hover:text-slate-700"
+                              }`}
+                            title={isLegacy ? "Legacy program with no product tag — retag or remove it" : undefined}
+                          >
+                            {spec}
+                            {isLegacy && (
+                              <span className="ml-1.5 text-[9px] font-mono text-amber-600 bg-amber-400/10 rounded px-1 py-0.5 align-middle normal-case tracking-normal">
+                                untagged
+                              </span>
+                            )}
+                            {tierCount > 1 && (
+                              <span className="ml-1.5 text-[9px] font-mono text-emerald-500 bg-emerald-400/10 rounded px-1 py-0.5 align-middle">
+                                {tierCount} tiers
+                              </span>
+                            )}
+                          </button>
+                          {canRemove && (
+                            <button
+                              type="button"
+                              onClick={() => setProgramToRemove(spec)}
+                              aria-label={`Remove ${spec} program`}
+                              title={`Remove ${spec} program`}
+                              className="pr-3 pl-1 py-2 text-slate-300 hover:text-rose-500 transition-colors leading-none text-sm"
+                            >
+                              ×
+                            </button>
                           )}
-                        </button>
+                        </div>
                       );
                     })}
                   </div>
@@ -941,7 +1031,14 @@ export default function LenderGuidelinesManager() {
                         <option value="" disabled>Copy guidelines from...</option>
                         {Object.keys(editingGroup.programs)
                           .filter(s => s !== editingGroup.activeSpecialty)
-                          .map(s => <option key={s} value={s}>{s}</option>)
+                          .map(s => {
+                            const n = editingGroup.programs[s]?.length ?? 0;
+                            return (
+                              <option key={s} value={s}>
+                                {s}{n > 1 ? ` (${n} tiers)` : ""}
+                              </option>
+                            );
+                          })
                         }
                       </select>
                     </div>
@@ -1035,6 +1132,87 @@ export default function LenderGuidelinesManager() {
           </div>
         </div>
       )}
+
+      {/* Remove one program from the lender being edited. Applied on save, so the
+          wording says so — the editor modal is z-50 and Radix portals after it. */}
+      <AlertDialog
+        open={!!programToRemove}
+        onOpenChange={(open) => { if (!open) setProgramToRemove(null); }}
+      >
+        <AlertDialogContent className="z-[60]">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Remove the {programToRemove} program?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {(() => {
+                const tiers = programToRemove
+                  ? editingGroup?.programs[programToRemove]?.length ?? 0
+                  : 0;
+                return (
+                  <>
+                    This drops{" "}
+                    <span className="font-semibold text-slate-700">
+                      {programToRemove}
+                    </span>
+                    {tiers > 1 ? ` and all ${tiers} of its tiers` : ""} from{" "}
+                    <span className="font-semibold text-slate-700">
+                      {editingGroup?.lender_name}
+                    </span>
+                    , including its qualification thresholds. Nothing is deleted
+                    until you save.
+                  </>
+                );
+              })()}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (programToRemove) removeSpecialty(programToRemove);
+                setProgramToRemove(null);
+              }}
+              className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
+            >
+              Remove program
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete a lender and every program under it. Immediate, not deferred. */}
+      <AlertDialog
+        open={!!lenderToDelete}
+        onOpenChange={(open) => { if (!open) setLenderToDelete(null); }}
+      >
+        <AlertDialogContent className="z-[60]">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove {lenderToDelete}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently deletes{" "}
+              <span className="font-semibold text-slate-700">
+                {lenderToDelete
+                  ? allGroups.find(g => g.name === lenderToDelete)?.programs.length ?? 0
+                  : 0}
+              </span>{" "}
+              program(s) and all of their guidelines. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (lenderToDelete) handleDeleteGroup(lenderToDelete);
+                setLenderToDelete(null);
+              }}
+              className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
+            >
+              Delete lender
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

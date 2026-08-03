@@ -104,7 +104,7 @@ export function AffiliateSignUpForm({
           </p>
           <Button
             asChild
-            className="h-14 px-8 bg-cb-mint hover:bg-cb-mint/90 text-white font-bold rounded-xl shadow-lg shadow-cb-mint/25 text-lg transition-all hover:scale-[1.02] active:scale-95"
+            className="h-14 px-8 bg-cb-mint hover:bg-cb-mint/90 text-cb-navy font-bold rounded-xl shadow-lg shadow-cb-mint/25 text-lg transition-all hover:scale-[1.02] active:scale-95"
           >
             <Link href="/auth/login">
               Log in to your dashboard
@@ -229,7 +229,7 @@ export function AffiliateSignUpForm({
                     checked={contactOptIn}
                     onCheckedChange={(checked) => setContactOptIn(checked === true)}
                     aria-required="true"
-                    className="mt-1 h-5 w-5 rounded-md border-cb-mint/50 data-[state=checked]:bg-cb-mint data-[state=checked]:border-cb-mint data-[state=checked]:text-white focus-visible:ring-cb-mint/40"
+                    className="mt-1 h-5 w-5 rounded-md border-cb-mint/50 data-[state=checked]:bg-cb-mint data-[state=checked]:border-cb-mint data-[state=checked]:text-cb-navy focus-visible:ring-cb-mint/40"
                   />
                   <div className="grid gap-2">
                     <Label
@@ -281,7 +281,7 @@ export function AffiliateSignUpForm({
 
               <Button
                 type="submit"
-                className="h-16 bg-cb-mint hover:bg-cb-mint/90 text-white font-bold rounded-xl shadow-lg shadow-cb-mint/25 transition-all hover:scale-[1.02] active:scale-95 text-lg"
+                className="h-16 bg-cb-mint hover:bg-cb-mint/90 text-cb-navy font-bold rounded-xl shadow-lg shadow-cb-mint/25 transition-all hover:scale-[1.02] active:scale-95 text-lg"
                 disabled={isLoading}
               >
                 {isLoading ? (

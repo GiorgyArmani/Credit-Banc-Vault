@@ -7,7 +7,9 @@ import { ContractCheckStep } from "@/components/onboarding/contract-check-step";
 import { SetPasswordStep } from "@/components/onboarding/set-password-step";
 import { useOnboardingStatus } from "@/components/onboarding/use-onboarding-status";
 import { PremiumLoader } from "@/components/ui/premium-loader";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
+import { BrandBackdrop, Eyebrow } from "@/components/marketing/brand-chrome";
+import { EASE } from "@/lib/motion";
 
 export default function OnboardingPage() {
   const router = useRouter();
@@ -76,15 +78,13 @@ export default function OnboardingPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f0fdf7] relative overflow-hidden flex flex-col items-center justify-center p-4 md:p-8">
-      {/* aurora-glow effect */}
-      <div className="absolute inset-0 bg-gradient-to-br from-emerald-100/50 via-white/80 to-white pointer-events-none" />
-      <div className="absolute top-0 left-1/4 w-[60%] h-[60%] bg-emerald-300/10 blur-[130px] rounded-full animate-aurora pointer-events-none" />
+    <main className="min-h-screen bg-cb-cream font-body text-cb-ink relative overflow-hidden flex flex-col items-center justify-center p-4 md:p-8">
+      <BrandBackdrop />
 
       <div className="w-full max-w-4xl relative z-10">
         <motion.div
           key="onboarding-card"
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: 0, y: 24 }}
           animate={signWellActive ? {
             opacity: 0,
             scale: 0.95,
@@ -94,31 +94,38 @@ export default function OnboardingPage() {
             scale: 1,
             display: 'block'
           }}
-          transition={{ duration: 0.4 }}
-          className="bg-white border border-emerald-100 rounded-[3rem] shadow-2xl overflow-hidden"
+          transition={{ duration: 0.4, ease: EASE }}
+          className="overflow-hidden rounded-3xl border border-black/5 bg-white shadow-xl"
         >
           {/* Header */}
-          <div className="p-10 md:p-14 border-b border-emerald-50 bg-white">
-            <h1 className="text-4xl md:text-5xl font-black tracking-tighter text-emerald-950 uppercase">
+          <div className="border-b border-black/5 p-8 md:p-12">
+            <Eyebrow className="mb-4">
+              {step === "form"
+                ? "Step 1 of 3"
+                : step === "contract_check"
+                  ? "Step 2 of 3"
+                  : "Step 3 of 3"}
+            </Eyebrow>
+            <h1 className="font-headline text-4xl font-extrabold leading-tight tracking-tight text-cb-ink md:text-5xl">
               {step === "form"
                 ? "Business Profile"
                 : step === "contract_check"
                   ? "Application Signing"
                   : "Create Your Password"}
             </h1>
-            <p className="text-emerald-900/40 mt-4 text-xl font-bold">
+            <p className="mt-4 max-w-2xl text-lg leading-relaxed text-cb-ink/60">
               {step === "form"
                 ? "Let's start by getting some details about your business."
                 : step === "contract_check"
-                  ? "Almost there! Please review and sign your funding application."
-                  : "Last step — secure your account with a password of your own."}
+                  ? "Almost there. Review and sign your funding application."
+                  : "Last step. Secure your account with a password of your own."}
             </p>
 
             {/* Progress indicator */}
-            <div className="flex gap-3 mt-10">
-              <div className={`h-2 flex-1 rounded-full transition-all duration-700 ${step === "form" ? "bg-emerald-500 shadow-lg shadow-emerald-500/20" : "bg-emerald-500/20"}`} />
-              <div className={`h-2 flex-1 rounded-full transition-all duration-700 ${step === "contract_check" ? "bg-emerald-500 shadow-lg shadow-emerald-500/20" : step === "set_password" ? "bg-emerald-500/20" : "bg-emerald-100"}`} />
-              <div className={`h-2 flex-1 rounded-full transition-all duration-700 ${step === "set_password" ? "bg-emerald-500 shadow-lg shadow-emerald-500/20" : "bg-emerald-100"}`} />
+            <div className="mt-10 flex gap-3">
+              <div className={`h-2 flex-1 rounded-full transition-all duration-700 ${step === "form" ? "bg-cb-mint" : "bg-cb-mint/30"}`} />
+              <div className={`h-2 flex-1 rounded-full transition-all duration-700 ${step === "contract_check" ? "bg-cb-mint" : step === "set_password" ? "bg-cb-mint/30" : "bg-black/5"}`} />
+              <div className={`h-2 flex-1 rounded-full transition-all duration-700 ${step === "set_password" ? "bg-cb-mint" : "bg-black/5"}`} />
             </div>
           </div>
 
@@ -146,11 +153,11 @@ export default function OnboardingPage() {
 
         {/* Support / Help text - also hide during signing to keep view clear */}
         {!signWellActive && (
-          <p className="mt-10 text-center text-emerald-900/40 text-sm font-bold tracking-tight">
+          <p className="mt-10 text-center text-sm text-cb-ink/50">
             Need help? Contact our support team at{" "}
             <a
               href="mailto:support@creditbanc.io"
-              className="text-emerald-600 underline hover:text-emerald-700 transition"
+              className="font-bold text-cb-mint hover:underline"
             >
               support@creditbanc.io
             </a>

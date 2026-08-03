@@ -120,7 +120,13 @@ export function LoanFundedDialog({
                 fundedAssignmentId,
             });
             if (result.success) {
-                toast.success("Loan Funded successfully!");
+                // A warning means the figures saved but the pipeline status was
+                // refused — surfaced so UW doesn't assume the deal fully landed.
+                if ("warning" in result && result.warning) {
+                    toast.error(result.warning);
+                } else {
+                    toast.success("Loan Funded successfully!");
+                }
                 setIsOpen(false);
                 if (onSuccess) onSuccess();
             } else {

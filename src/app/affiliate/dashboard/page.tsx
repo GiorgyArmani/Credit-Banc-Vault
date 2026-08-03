@@ -132,7 +132,7 @@ export default async function AffiliateDashboardPage() {
             <div
               className={clsx(
                 "w-10 h-10 rounded-xl flex items-center justify-center mb-4",
-                s.accent ? "bg-cb-mint text-white" : "bg-cb-mint/10 text-cb-mint"
+                s.accent ? "bg-cb-mint text-cb-navy" : "bg-cb-mint/10 text-cb-mint"
               )}
             >
               <s.icon className="w-5 h-5" />

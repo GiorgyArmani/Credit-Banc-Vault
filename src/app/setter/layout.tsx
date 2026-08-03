@@ -34,7 +34,7 @@ export default async function SetterLayout({ children }: { children: React.React
   }
 
   return (
-    <div className="min-h-screen bg-emerald-50/30">
+    <div className="min-h-screen bg-cb-cream font-body text-cb-ink">
       <header className="border-b border-emerald-100 bg-white">
         <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
