@@ -4,10 +4,17 @@
 //
 // A `funded` pipeline transition does not create a gift card any more; it only
 // enqueues an affiliate_payouts row with `release_at` = now + 24h (see
-// createAffiliatePayoutForFundedVault). This job runs hourly, picks up rows
-// whose gate has passed, and hands each to processAffiliatePayout — which
-// re-verifies the deal is STILL funded before ordering anything. A deal
-// un-funded inside the window is canceled here rather than paid.
+// createAffiliatePayoutForFundedVault). This job picks up rows whose gate has
+// passed and hands each to processAffiliatePayout — which re-verifies the deal
+// is STILL funded before ordering anything. A deal un-funded inside the window
+// is canceled here rather than paid.
+//
+// CADENCE: registered DAILY in vercel.json (`0 17 * * *`). Vercel's Hobby plan
+// rejects anything more frequent at deploy time, so the schedule is written to
+// the lowest common denominator. The consequence is latency, never a premature
+// send: `release_at` is still a hard floor, so the real wait is 24h to ~48h
+// depending on where a deal's funding lands relative to the daily run. Moving to
+// hourly (`15 * * * *`) needs no code change — only the plan and vercel.json.
 //
 // It deliberately does NOT re-derive eligibility itself. Every rule lives in
 // lib/affiliates.ts so the cron path and the admin release control cannot drift
@@ -31,10 +38,18 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-/** Rows handled per run. Bounds both wall-clock and blast radius. */
-const BATCH_SIZE = 25;
+/**
+ * Rows handled per run. Bounds both wall-clock and blast radius. Anything over
+ * the limit waits for the next run — a full day at the current cadence — so this
+ * sits well above any plausible daily volume for a $500-per-funded-deal program.
+ */
+const BATCH_SIZE = 50;
 
-/** How long a failed row waits before the worker retries it. */
+/**
+ * How long a failed row waits before the worker retries it. Below the current
+ * daily cadence, so in practice every failure gets exactly one retry per run;
+ * it becomes the real bound only if the schedule tightens.
+ */
 const RETRY_BACKOFF_MINUTES = 60;
 
 function hasCronSecret(req: Request): boolean {
