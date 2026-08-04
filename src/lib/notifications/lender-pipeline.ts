@@ -42,11 +42,45 @@ const EVENT_COPY: Record<LenderPipelineEvent, { title: (lender: string) => strin
   },
 };
 
+// The note UW typed into the "Lender response" panel, labelled by event. Same
+// wording as note_label() in components/lender/lender-response-panel.tsx so the
+// Slack post and the UI call the same field the same thing.
+const NOTE_LABEL: Record<LenderPipelineEvent, string> = {
+  submitted: 'Lender response note',
+  approved_by_lender: 'Offer / stips / requested documents',
+  declined_by_lender: 'Decline reasons',
+};
+
+// The note column caps at 5000 chars; clip well below that so one verbose
+// decline can't bury the channel.
+const NOTE_MAX = 1200;
+
+/**
+ * Renders the lender-response note as a Slack blockquote. Returns '' when there
+ * is no note, so callers can concatenate it unconditionally.
+ */
+function formatNoteBlock(label: string, notes: string | null | undefined): string {
+  const body = (notes ?? '').trim();
+  if (!body) return '';
+  const clipped = body.length > NOTE_MAX ? `${body.slice(0, NOTE_MAX)}…` : body;
+  const quoted = clipped
+    .split('\n')
+    .map((line) => (line.trim() ? `> ${line}` : '>'))
+    .join('\n');
+  return `\n*${label}:*\n${quoted}`;
+}
+
 interface AssignmentRow {
   id: string;
   client_id: string;
   lender_name: string;
   specialty: string | null;
+  /**
+   * UW's typed note for this lender, if it already exists when the status
+   * flips. Included in the Slack post so the channel gets the decline reasons /
+   * offer terms in the same message as the verdict — not just the verdict.
+   */
+  response_notes?: string | null;
 }
 
 /**
@@ -144,7 +178,8 @@ export async function notifyAdminsOfLenderPipelineEvent(
       const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://vault.creditbanc.io';
       const mentions = formatMentions([...getApproverUserIds(), resolveAdvisorSlackId(advisor_email)]);
       const text =
-        `${mentions ? mentions + ' ' : ''}${copy.slack(lender_label, company_name)}\n` +
+        `${mentions ? mentions + ' ' : ''}${copy.slack(lender_label, company_name)}` +
+        `${formatNoteBlock(NOTE_LABEL[event], assignment.response_notes)}\n` +
         `${baseUrl}/admin/clients/${client_id}`;
       await slackPostMessage(slack_channel_id, text);
     }
@@ -153,4 +188,62 @@ export async function notifyAdminsOfLenderPipelineEvent(
   }
 
   return { notified, emailed };
+}
+
+/**
+ * Slack follow-up for a note typed AFTER the status was already flipped — the
+ * normal UW order of operations (mark declined, then expand the panel and type
+ * why). Without this the channel would only ever see the bare verdict, since
+ * notifyAdminsOfLenderPipelineEvent fires before the note exists.
+ *
+ * Deliberately quiet: no @-mentions (the verdict post already pinged everyone),
+ * and callers only invoke it the FIRST time a note is recorded, so later typo
+ * fixes don't re-post. Best-effort — never throws.
+ */
+export async function notifyLenderResponseNoteRecorded(
+  assignment_id: string,
+  notes: string
+): Promise<void> {
+  const body = (notes ?? '').trim();
+  if (!body) return;
+
+  try {
+    const { data: assignment } = await supabase_admin
+      .from('client_lender_assignments')
+      .select('client_id, lender_name, specialty, status')
+      .eq('id', assignment_id)
+      .maybeSingle();
+
+    const status = (assignment as any)?.status as LenderPipelineEvent | undefined;
+    const client_id = (assignment as any)?.client_id as string | undefined;
+    // Only lender verdicts are worth announcing; a note on a still-awaiting
+    // row is UW scratch work.
+    if (!client_id || (status !== 'approved_by_lender' && status !== 'declined_by_lender')) return;
+
+    const { data: client_row } = await supabase_admin
+      .from('client_data_vault')
+      .select('company_name, slack_channel_id')
+      .eq('id', client_id)
+      .maybeSingle();
+
+    const channel_id = (client_row as any)?.slack_channel_id as string | null;
+    if (!channel_id) return;
+
+    const company_name = (client_row as any)?.company_name as string | undefined;
+    const lender_label = `${(assignment as any).lender_name}${
+      (assignment as any).specialty ? ` (${(assignment as any).specialty})` : ''
+    }`;
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://vault.creditbanc.io';
+    const headline =
+      status === 'declined_by_lender'
+        ? `📝 Decline reasons recorded for *${lender_label}*${company_name ? ` — ${company_name}` : ''}.`
+        : `📝 Offer / stips recorded for *${lender_label}*${company_name ? ` — ${company_name}` : ''}.`;
+
+    await slackPostMessage(
+      channel_id,
+      `${headline}${formatNoteBlock(NOTE_LABEL[status], body)}\n${baseUrl}/admin/clients/${client_id}`
+    );
+  } catch (err) {
+    console.error('notifyLenderResponseNoteRecorded error (non-fatal):', err);
+  }
 }

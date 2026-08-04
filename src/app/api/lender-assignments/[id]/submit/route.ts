@@ -13,7 +13,7 @@
 //
 // AuthZ: admin OR underwriting (see require-staff).
 
-import { NextResponse } from 'next/server';
+import { NextResponse, after } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { requireStaff } from '@/lib/auth/require-staff';
 import { slackPostMessage } from '@/lib/slack-api';
@@ -84,16 +84,24 @@ export async function PATCH(
     }
 
     // Trigger #1: notify admins that this specific lender was just submitted
-    // (in-app + email + Slack). Fire-and-forget — never block the transition.
-    void notifyAdminsOfLenderPipelineEvent(
-      {
-        id: existing.id,
-        client_id: (existing as any).client_id,
-        lender_name: (existing as any).lender_name,
-        specialty: (updated as any)?.specialty ?? null,
-      },
-      'submitted'
-    ).catch((e) => console.error('submit notify error (non-fatal):', e));
+    // (in-app + email + Slack). Deferred with after() so it survives the
+    // response being returned — a bare detached promise is killed when the
+    // serverless function freezes.
+    after(async () => {
+      try {
+        await notifyAdminsOfLenderPipelineEvent(
+          {
+            id: existing.id,
+            client_id: (existing as any).client_id,
+            lender_name: (existing as any).lender_name,
+            specialty: (updated as any)?.specialty ?? null,
+          },
+          'submitted'
+        );
+      } catch (e) {
+        console.error('submit notify error (non-fatal):', e);
+      }
+    });
 
     // Trigger #2: if EVERY admin-approved lender for this client is now out the
     // door (status submitted / approved_by_lender / funded), post a Slack

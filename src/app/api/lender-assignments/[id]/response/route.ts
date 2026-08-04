@@ -13,7 +13,7 @@
 //
 // AuthZ: admin OR underwriting (see require-staff).
 
-import { NextResponse } from 'next/server';
+import { NextResponse, after } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { requireStaff } from '@/lib/auth/require-staff';
 import { notifyAdminsOfLenderPipelineEvent } from '@/lib/notifications/lender-pipeline';
@@ -60,7 +60,7 @@ export async function PATCH(
 
     const { data: existing, error: fetch_error } = await supabase_admin
       .from('client_lender_assignments')
-      .select('id, client_id, lender_name, specialty, status')
+      .select('id, client_id, lender_name, specialty, status, response_notes')
       .eq('id', id)
       .maybeSingle();
 
@@ -97,16 +97,29 @@ export async function PATCH(
     }
 
     // Notify admins (in-app + email + Slack) so the admin portal status stays
-    // in sync. Fire-and-forget — never block the transition.
-    void notifyAdminsOfLenderPipelineEvent(
-      {
-        id: existing.id,
-        client_id: (existing as any).client_id,
-        lender_name: (existing as any).lender_name,
-        specialty: (existing as any).specialty ?? null,
-      },
-      next_status as LenderPipelineEvent
-    ).catch((e) => console.error('response notify error (non-fatal):', e));
+    // in sync. Deferred with after() rather than a bare `void` promise: on
+    // Vercel the function is frozen the moment the response is returned, so a
+    // detached promise with no awaited work behind it never finishes — which is
+    // exactly why lender verdicts stopped reaching Slack while /submit (which
+    // awaits its own Slack summary) kept working. after() keeps it alive.
+    after(async () => {
+      try {
+        await notifyAdminsOfLenderPipelineEvent(
+          {
+            id: existing.id,
+            client_id: (existing as any).client_id,
+            lender_name: (existing as any).lender_name,
+            specialty: (existing as any).specialty ?? null,
+            // Include the note if UW already typed it — the channel gets the
+            // decline reasons / offer terms in the same message as the verdict.
+            response_notes: (existing as any).response_notes ?? null,
+          },
+          next_status as LenderPipelineEvent
+        );
+      } catch (e) {
+        console.error('response notify error (non-fatal):', e);
+      }
+    });
 
     return NextResponse.json({ success: true, assignment: updated });
   } catch (err: any) {
