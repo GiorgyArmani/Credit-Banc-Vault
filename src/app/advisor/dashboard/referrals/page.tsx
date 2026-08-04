@@ -1,6 +1,6 @@
 // src/app/advisor/dashboard/referrals/page.tsx
 //
-// Staff view of affiliate referral leads that haven't become vaults yet. This is
+// Staff view of affiliate leads that haven't become vaults yet. This is
 // the human pre-qualification step: advisors contact/qualify/disqualify a lead
 // before creating a vault for it. Attribution to the affiliate is linked
 // AUTOMATICALLY at vault creation, so there's no "convert" button here — staff
@@ -20,7 +20,7 @@ function fmtDate(iso: string | null): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-export default async function ReferralLeadsPage() {
+export default async function AffiliateLeadsPage() {
   const supabase = await createClient();
   const {
     data: { user },
@@ -32,7 +32,7 @@ export default async function ReferralLeadsPage() {
   // Pending, qualified referrals only — converted leads graduated to a vault and
   // disqualified ones were filtered out at intake.
   const { data: leads } = await db
-    .from("referral_leads")
+    .from("affiliate_leads")
     .select("id, first_name, last_name, email, phone, business_name, status, created_at, loan_amount, fico_band, monthly_revenue, time_in_business, affiliates(first_name, last_name)")
     .neq("status", "converted")
     .neq("status", "disqualified")
@@ -57,7 +57,7 @@ export default async function ReferralLeadsPage() {
       <div className="rounded-3xl border border-emerald-100 bg-white overflow-hidden">
         {rows.length === 0 ? (
           <div className="px-6 py-16 text-center text-emerald-900/40 font-bold">
-            No pending referral leads right now.
+            No pending affiliate leads right now.
           </div>
         ) : (
           <div className="overflow-x-auto">

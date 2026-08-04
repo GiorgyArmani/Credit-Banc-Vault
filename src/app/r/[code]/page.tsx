@@ -8,7 +8,7 @@
 // migration security note). See [[role_model]].
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { ReferralLeadForm } from "@/components/referral-lead-form";
+import { AffiliateLeadForm } from "@/components/affiliate-lead-form";
 
 export const dynamic = "force-dynamic";
 
@@ -47,7 +47,7 @@ export default async function ReferralLandingPage({
           {active ? (
             // The form renders its own hero (and hides it once the booking
             // calendar takes over on qualify).
-            <ReferralLeadForm code={code} affiliateFirstName={affiliate?.first_name ?? null} />
+            <AffiliateLeadForm code={code} affiliateFirstName={affiliate?.first_name ?? null} />
           ) : (
             <div className="rounded-3xl bg-white border border-black/5 shadow-xl p-12 text-center">
               <h2 className="font-manrope text-2xl font-extrabold text-cb-ink mb-3">This link isn't active</h2>

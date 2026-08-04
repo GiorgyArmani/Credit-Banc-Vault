@@ -8,11 +8,11 @@ const ALLOWED_STATUSES = ["new", "contacted", "qualified", "disqualified"] as co
 type LeadStatus = (typeof ALLOWED_STATUSES)[number];
 
 /**
- * Staff pre-qualification: move a referral lead through the pipeline before it
+ * Staff pre-qualification: move an affiliate lead through the pipeline before it
  * becomes a vault. Advisors and admins only. 'converted' is set automatically by
  * the vault-creation flow, so it's not a manual option here.
  */
-export async function updateReferralLeadStatus(
+export async function updateAffiliateLeadStatus(
   leadId: string,
   status: LeadStatus
 ): Promise<{ success: boolean; error?: string }> {
@@ -38,7 +38,7 @@ export async function updateReferralLeadStatus(
 
   const db = createAdminClient();
   const { error } = await db
-    .from("referral_leads")
+    .from("affiliate_leads")
     .update({ status, updated_at: new Date().toISOString() })
     .eq("id", leadId)
     .neq("status", "converted"); // don't override a converted lead

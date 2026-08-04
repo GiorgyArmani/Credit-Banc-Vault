@@ -84,7 +84,7 @@ export default async function AffiliateDashboardPage() {
 
   const [{ data: leads }, { data: payouts }] = await Promise.all([
     db
-      .from("referral_leads")
+      .from("affiliate_leads")
       .select("id, first_name, last_name, business_name, status, created_at")
       .eq("affiliate_id", affiliate.id)
       .order("created_at", { ascending: false }),

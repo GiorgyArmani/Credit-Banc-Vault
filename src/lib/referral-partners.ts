@@ -13,7 +13,7 @@ import { REFERRAL_PARTNERS } from "@/data/referral-partners";
  * (the affiliates pattern). See [[ghl_integration_contract]].
  *
  * This is the INTERNAL referral-partner program, distinct from the public affiliate
- * program (affiliates / referral_leads). See [[affiliate_program]].
+ * program (affiliates / affiliate_leads). See [[affiliate_program]].
  */
 export async function getActiveReferralPartners(
   db: SupabaseClient

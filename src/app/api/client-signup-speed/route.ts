@@ -24,7 +24,7 @@ import { syncUnifiedClientData, generateSecurePassword } from '@/lib/user-manage
 import { ghlSearchContacts, ghlFindContacts, ghlUpdateContact, ghlGetContact, extractGhlDuplicateContactId } from '@/lib/ghl-api';
 import { formatPhoneUS, isValidUsPhone, phoneKey, toE164 } from '@/lib/phone';
 import { generateOnboardingMagicLink, pushMagicLinkToGhl } from '@/lib/magic-link';
-import { linkReferralLeadToVault } from '@/lib/affiliates';
+import { linkAffiliateLeadToVault } from '@/lib/affiliates';
 
 const supabase_admin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -703,9 +703,9 @@ export async function POST(request: Request) {
     console.log(`✅ Data saved to client_data_vault: ${vault_id}`);
 
     // If this client came in through an affiliate referral link, link the
-    // pending referral lead to this vault so the funded-payout hook can credit
+    // pending affiliate lead to this vault so the funded-payout hook can credit
     // the affiliate. Best-effort — never blocks signup.
-    await linkReferralLeadToVault(supabase_admin, {
+    await linkAffiliateLeadToVault(supabase_admin, {
       vaultId: vault_id,
       email: body.client_email,
       ghlContactId: ghl_contact_id || null,

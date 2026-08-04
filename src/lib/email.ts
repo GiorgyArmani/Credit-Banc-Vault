@@ -2421,16 +2421,40 @@ function affiliate_from_header(): string {
   return `${from_name} <${from_email}>`;
 }
 
+/**
+ * Hero art, inlined as an attachment for the same reason as the welcome hero —
+ * see AFFILIATE_WELCOME_HERO_CID below.
+ */
+const AFFILIATE_FUNDED_HERO_CID = "affiliate_funded_hero";
+const AFFILIATE_FUNDED_HERO_FILE = "Your referral funded.png";
+
 export interface AffiliatePayoutNotificationData {
   affiliate_name: string;
   affiliate_email: string;
   reward_amount: string; // pre-formatted, e.g. "$500"
   login_url: string;
+  /**
+   * Who funded — the referred company, falling back to the contact's name.
+   * Optional because the copy has to still read correctly for a payout whose
+   * vault row we could not resolve; see referral_label() for the fallback.
+   */
+  referral_name?: string | null;
+}
+
+/**
+ * Subject of the "X officially funded" sentence. A blank/unknown referral must
+ * never render as an empty gap or a literal "null", so it degrades to a phrase
+ * that still scans as English.
+ */
+function referral_label(name?: string | null): string {
+  const clean = (name ?? "").trim();
+  return clean || "Your referral";
 }
 
 export function generate_affiliate_payout_notification_html(data: AffiliatePayoutNotificationData): string {
   data = escape_email_strings(data);
   const { affiliate_name, reward_amount, login_url } = data;
+  const referral = referral_label(data.referral_name);
 
   return `
 <!DOCTYPE html>
@@ -2438,53 +2462,88 @@ export function generate_affiliate_payout_notification_html(data: AffiliatePayou
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>You earned a ${reward_amount} reward!</title>
+  <title>Cue the Confetti. Your Referral Funded!</title>
 </head>
-<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f6f9fc;">
-  <table role="presentation" style="width: 100%; border-collapse: collapse;">
-    <tr>
-      <td align="center" style="padding: 40px 0;">
-        <table role="presentation" style="width: 600px; max-width: 100%; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #faf9f6;">
+  <!-- Preheader: shown in the inbox preview, hidden in the body. -->
+  <div style="display: none; max-height: 0; overflow: hidden; opacity: 0; mso-hide: all;">
+    ${referral} funded through Credit Banc — your ${reward_amount} gift card is on the way.
+  </div>
 
-          <!-- Header -->
+  <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #faf9f6;">
+    <tr>
+      <td align="center" style="padding: 32px 12px;">
+        <table role="presentation" style="width: 600px; max-width: 100%; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 6px 24px rgba(32, 37, 54, 0.08);">
+
+          <!-- Hero art -->
           <tr>
-            <td style="padding: 40px 40px 20px; text-align: center; background-color: #10b981;">
-              <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 700;">🎉 Reward Earned!</h1>
+            <td style="padding: 0; line-height: 0; background-color: #ffffff;">
+              <img src="cid:${AFFILIATE_FUNDED_HERO_CID}" alt="Your referral funded!" width="600" style="border: 0; display: block; width: 100%; max-width: 600px; height: auto;">
             </td>
           </tr>
 
           <!-- Message -->
           <tr>
-            <td style="padding: 40px 40px 20px;">
-              <h2 style="margin: 0 0 16px; color: #1e293b; font-size: 20px; font-weight: 600;">Hi ${affiliate_name},</h2>
-              <p style="margin: 0 0 16px; color: #475569; font-size: 16px; line-height: 1.6;">
-                Great news — one of your referrals just got funded! Your <strong>${reward_amount}</strong> reward is on its way to your inbox via Giftronaut.
+            <td style="padding: 8px 40px 0;">
+              <h1 style="margin: 0 0 16px; color: #202536; font-size: 22px; font-weight: 700; line-height: 1.35;">Hi ${affiliate_name},</h1>
+              <p style="margin: 0 0 20px; color: #4b5563; font-size: 16px; line-height: 1.65;">
+                Pop the champagne. Pour something expensive. Or just take a victory lap around the kitchen.
               </p>
-
-              <div style="background-color: #f0fdf4; border: 1px solid #dcfce7; border-radius: 12px; padding: 24px; margin-bottom: 24px; text-align: center;">
-                <p style="margin: 0; color: #166534; font-size: 32px; font-weight: 700;">${reward_amount}</p>
-                <p style="margin: 8px 0 0; color: #166534; font-size: 14px;">Referral reward</p>
-              </div>
-
-              <p style="margin: 0 0 24px; color: #475569; font-size: 16px; line-height: 1.6;">
-                Keep sharing your referral link to earn more. You can track all your referrals and rewards in your affiliate dashboard.
+              <p style="margin: 0 0 24px; color: #4b5563; font-size: 16px; line-height: 1.65;">
+                <strong style="color: #202536;">${referral}</strong> officially funded through Credit Banc, which means another small business got the help it needed thanks to you.
               </p>
             </td>
           </tr>
 
-          <!-- Action Button -->
+          <!-- The reward -->
           <tr>
-            <td style="padding: 0 40px 40px;" align="center">
-              <a href="${login_url}" style="display: inline-block; background-color: #10b981; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-size: 16px; font-weight: 600;">
-                Go to Affiliate Dashboard
-              </a>
+            <td style="padding: 0 40px 28px;">
+              <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #f2fbf7; border: 1px solid #cdeee0; border-radius: 12px;">
+                <tr>
+                  <td style="padding: 24px; text-align: center;">
+                    <p style="margin: 0 0 6px; color: #00553b; font-size: 34px; font-weight: 800; line-height: 1.1;">${reward_amount}</p>
+                    <p style="margin: 0; color: #00553b; font-size: 15px; line-height: 1.6;">
+                      It also means you've earned a ${reward_amount} gift card. Keep an eye out for an email from <strong>Giftronaut</strong> within the next three business days so you can choose your reward.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Thanks -->
+          <tr>
+            <td style="padding: 0 40px;">
+              <p style="margin: 0 0 20px; color: #4b5563; font-size: 16px; line-height: 1.65;">
+                Thanks for making the introduction.
+              </p>
+              <p style="margin: 0 0 24px; color: #202536; font-size: 18px; font-weight: 700; line-height: 1.45;">
+                Turns out, knowing someone really does pay.
+              </p>
+              <p style="margin: 0 0 28px; color: #4b5563; font-size: 16px; line-height: 1.65;">
+                Keep sharing your link. There may be another business owner in your contacts who could use a hand.
+              </p>
+            </td>
+          </tr>
+
+          <!-- CTA -->
+          <tr>
+            <td style="padding: 0 40px 32px; text-align: center;">
+              <a href="${login_url}" style="display: inline-block; padding: 16px 34px; background-color: #202536; color: #a6f0ce; font-size: 16px; font-weight: 700; text-decoration: none; border-radius: 10px; letter-spacing: 0.02em;">OPEN MY AFFILIATE DASHBOARD</a>
+            </td>
+          </tr>
+
+          <!-- Sign-off -->
+          <tr>
+            <td style="padding: 0 40px 40px;">
+              <p style="margin: 0; color: #6b7280; font-size: 15px;">The Credit Banc Team</p>
             </td>
           </tr>
 
           <!-- Footer -->
           <tr>
-            <td style="padding: 40px; text-align: center; color: #94a3b8; font-size: 13px; line-height: 1.6; border-top: 1px solid #f1f5f9;">
-              <p style="margin: 0;">© ${new Date().getFullYear()} Credit Banc Vault. This is an automated notification.</p>
+            <td style="padding: 24px 40px 32px; background-color: #202536; text-align: center;">
+              <p style="margin: 0; color: #8b90a0; font-size: 12px; line-height: 1.6;">© ${new Date().getFullYear()} Credit Banc</p>
             </td>
           </tr>
 
@@ -2501,15 +2560,32 @@ export function generate_affiliate_payout_notification_html(data: AffiliatePayou
 // Escaping the plain-text body surfaced literal "&amp;" / "&#39;" to any
 // affiliate whose name contains & or an apostrophe.
 export function generate_affiliate_payout_notification_text(data: AffiliatePayoutNotificationData): string {
+  const referral = referral_label(data.referral_name);
   return [
     `Hi ${data.affiliate_name},`,
     ``,
-    `Great news — one of your referrals just got funded!`,
-    `Your ${data.reward_amount} reward is on its way via Giftronaut.`,
+    `Pop the champagne. Pour something expensive. Or just take a victory lap`,
+    `around the kitchen.`,
     ``,
-    `Track your referrals and rewards: ${data.login_url}`,
+    `${referral} officially funded through Credit Banc, which means another small`,
+    `business got the help it needed thanks to you.`,
     ``,
-    `© ${new Date().getFullYear()} Credit Banc Vault`,
+    `It also means you've earned a ${data.reward_amount} gift card. Keep an eye out for an email`,
+    `from Giftronaut within the next three business days so you can choose your`,
+    `reward.`,
+    ``,
+    `Thanks for making the introduction.`,
+    ``,
+    `Turns out, knowing someone really does pay.`,
+    ``,
+    `Keep sharing your link. There may be another business owner in your contacts`,
+    `who could use a hand.`,
+    ``,
+    `Open your affiliate dashboard: ${data.login_url}`,
+    ``,
+    `The Credit Banc Team`,
+    ``,
+    `© ${new Date().getFullYear()} Credit Banc`,
   ].join("\n");
 }
 
@@ -2519,9 +2595,16 @@ export async function send_affiliate_payout_notification(data: AffiliatePayoutNo
   const mail_options: any = {
     from: affiliate_from_header(),
     to: data.affiliate_email,
-    subject: `🎉 You earned a ${data.reward_amount} referral reward!`,
+    subject: `Cue the Confetti. Your Referral Funded!`,
     html: generate_affiliate_payout_notification_html(data),
     text: generate_affiliate_payout_notification_text(data),
+    attachments: [
+      {
+        filename: "your-referral-funded.png",
+        path: path.join(process.cwd(), "public", AFFILIATE_FUNDED_HERO_FILE),
+        cid: AFFILIATE_FUNDED_HERO_CID,
+      },
+    ],
   };
 
   return await transporter.sendMail(mail_options);
@@ -2538,7 +2621,24 @@ export async function send_affiliate_payout_notification(data: AffiliatePayoutNo
  * Sent FROM the dedicated affiliate identity (SMTP_FROM_AFFILIATE_EMAIL) so
  * program mail is separable from client/advisor mail at the mailbox provider.
  * See [[affiliate_program]].
+ *
+ * VOICE: this one is deliberately not written like the transactional mail. The
+ * "I Know Someone" Club copy is approved marketing copy — keep the jokes, keep
+ * the line breaks. Palette follows the hero art (navy headlines, mint rule,
+ * amber accent, cream page) rather than the emerald transactional shell, so
+ * artwork and body read as one piece. See [[brand_design_system]].
  */
+
+/**
+ * Hero art, inlined as a nodemailer attachment rather than a remote <img>.
+ * Gmail proxies/blocks remote images on first contact from a new sender, and
+ * this is the FIRST mail an affiliate ever gets from the program identity —
+ * exactly the moment a broken hero costs the most. Same pattern as
+ * send_client_welcome_email.
+ */
+const AFFILIATE_WELCOME_HERO_CID = "affiliate_welcome_hero";
+const AFFILIATE_WELCOME_HERO_FILE = "Welcome to the club.png";
+
 export interface AffiliateWelcomeEmailData {
   affiliate_name: string;
   affiliate_email: string;
@@ -2555,105 +2655,131 @@ export function generate_affiliate_welcome_email_html(data: AffiliateWelcomeEmai
   data = escape_email_strings(data);
   const { affiliate_name, referral_url, dashboard_url, reward_amount, terms_url } = data;
 
-  const steps: [string, string][] = [
-    ['Share your link', 'Send it to any business owner who might want capital. No pitch required — the link does the work.'],
-    ['They apply', 'Your link opens a short pre-qualification. We take it from there.'],
-    [`Get ${reward_amount}`, 'When their deal funds, your gift card goes out. No cap on how many you refer.'],
-  ];
-
-  const steps_html = steps
-    .map(
-      ([title, body], i) => `
-              <tr>
-                <td style="padding: 0 0 20px;">
-                  <table role="presentation" style="border-collapse: collapse;">
-                    <tr>
-                      <td valign="top" style="width: 32px; padding-right: 14px;">
-                        <div style="width: 28px; height: 28px; border-radius: 14px; background-color: #10b981; color: #ffffff; font-size: 14px; font-weight: 700; text-align: center; line-height: 28px;">${i + 1}</div>
-                      </td>
-                      <td valign="top">
-                        <p style="margin: 0 0 4px; color: #1e293b; font-size: 16px; font-weight: 600;">${title}</p>
-                        <p style="margin: 0; color: #475569; font-size: 15px; line-height: 1.6;">${body}</p>
-                      </td>
-                    </tr>
-                  </table>
-                </td>
-              </tr>`
-    )
-    .join('');
-
   return `
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Welcome to the "I Know Someone" Club</title>
+  <title>You're In. Go Know Someone.</title>
 </head>
-<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f6f9fc;">
-  <table role="presentation" style="width: 100%; border-collapse: collapse;">
-    <tr>
-      <td align="center" style="padding: 40px 0;">
-        <table role="presentation" style="width: 600px; max-width: 100%; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #faf9f6;">
+  <!-- Preheader: shown in the inbox preview, hidden in the body. -->
+  <div style="display: none; max-height: 0; overflow: hidden; opacity: 0; mso-hide: all;">
+    Your affiliate dashboard is live and your personal referral link is ready. Now go know someone.
+  </div>
 
-          <!-- Header -->
+  <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #faf9f6;">
+    <tr>
+      <td align="center" style="padding: 32px 12px;">
+        <table role="presentation" style="width: 600px; max-width: 100%; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 6px 24px rgba(32, 37, 54, 0.08);">
+
+          <!-- Hero art -->
           <tr>
-            <td style="padding: 40px 40px 24px; text-align: center; background-color: #10b981;">
-              <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 700;">You're in 🎉</h1>
-              <p style="margin: 8px 0 0; color: #d1fae5; font-size: 15px;">The &ldquo;I Know Someone&rdquo; Club</p>
+            <td style="padding: 0; line-height: 0; background-color: #ffffff;">
+              <img src="cid:${AFFILIATE_WELCOME_HERO_CID}" alt="Welcome to the club." width="600" style="border: 0; display: block; width: 100%; max-width: 600px; height: auto;">
             </td>
           </tr>
 
           <!-- Intro -->
           <tr>
-            <td style="padding: 36px 40px 8px;">
-              <h2 style="margin: 0 0 16px; color: #1e293b; font-size: 20px; font-weight: 600;">Hi ${affiliate_name},</h2>
-              <p style="margin: 0 0 24px; color: #475569; font-size: 16px; line-height: 1.6;">
-                Your account is live. Here's your personal referral link — every business owner who applies through it is tracked back to you.
+            <td style="padding: 8px 40px 0;">
+              <h1 style="margin: 0 0 16px; color: #202536; font-size: 22px; font-weight: 700; line-height: 1.35;">Hi ${affiliate_name}, you're officially in!</h1>
+              <p style="margin: 0 0 24px; color: #4b5563; font-size: 16px; line-height: 1.65;">
+                Thanks for joining Credit Banc&rsquo;s &ldquo;I Know Someone&rdquo; Club. Your affiliate dashboard is live, your personal referral link is ready, and somewhere in your contacts is a business owner who should probably hear from you.
               </p>
             </td>
           </tr>
 
           <!-- The link -->
           <tr>
-            <td style="padding: 0 40px 28px;">
-              <div style="background-color: #f0fdf4; border: 1px solid #dcfce7; border-radius: 12px; padding: 20px; text-align: center;">
-                <p style="margin: 0 0 10px; color: #166534; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;">Your referral link</p>
+            <td style="padding: 0 40px 8px;">
+              <p style="margin: 0 0 12px; color: #202536; font-size: 16px; font-weight: 700;">Here's your personal referral link:</p>
+              <div style="background-color: #fdf8e8; border: 1px solid #f0e6c8; border-radius: 12px; padding: 20px; text-align: center;">
                 <p style="margin: 0; font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; font-size: 15px; word-break: break-all;">
-                  <a href="${referral_url}" style="color: #047857; text-decoration: none;">${referral_url}</a>
+                  <a href="${referral_url}" style="color: #00553b; text-decoration: none; font-weight: 600;">${referral_url}</a>
                 </p>
               </div>
-            </td>
-          </tr>
-
-          <!-- How it works -->
-          <tr>
-            <td style="padding: 0 40px 8px;">
-              <p style="margin: 0 0 20px; color: #1e293b; font-size: 16px; font-weight: 600;">How it works</p>
-              <table role="presentation" style="width: 100%; border-collapse: collapse;">
-                ${steps_html}
-              </table>
+              <p style="margin: 12px 0 24px; color: #6b7280; font-size: 15px; line-height: 1.6;">
+                Copy it. Save it. Send it to someone useful.
+              </p>
+              <p style="margin: 0 0 24px; color: #4b5563; font-size: 16px; line-height: 1.65;">
+                You can also visit your affiliate dashboard anytime to grab your link, share directly to social media, and track each referral as it moves through the process.
+              </p>
             </td>
           </tr>
 
           <!-- CTA -->
           <tr>
-            <td style="padding: 16px 40px 36px; text-align: center;">
-              <a href="${dashboard_url}" style="display: inline-block; padding: 14px 32px; background-color: #10b981; color: #ffffff; font-size: 16px; font-weight: 600; text-decoration: none; border-radius: 8px;">Open my dashboard</a>
-              <p style="margin: 16px 0 0; color: #64748b; font-size: 14px; line-height: 1.6;">
-                Track your referrals, clicks and rewards any time.
+            <td style="padding: 0 40px 32px; text-align: center;">
+              <a href="${dashboard_url}" style="display: inline-block; padding: 16px 34px; background-color: #202536; color: #a6f0ce; font-size: 16px; font-weight: 700; text-decoration: none; border-radius: 10px; letter-spacing: 0.02em;">OPEN MY AFFILIATE DASHBOARD</a>
+            </td>
+          </tr>
+
+          <!-- Where to start -->
+          <tr>
+            <td style="padding: 0 40px;">
+              <div style="border-top: 1px solid #e8e6e0;"></div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 28px 40px 0;">
+              <h2 style="margin: 0 0 12px; color: #202536; font-size: 18px; font-weight: 700;">Not sure where to start?</h2>
+              <p style="margin: 0 0 24px; color: #4b5563; font-size: 16px; line-height: 1.65;">
+                Text your link to a friend who owns a business. Email it to your cousin with three locations and no free time. Post it on Facebook or LinkedIn. Drop it in the group chat. Slide into a few DMs without making it weird.
               </p>
+              <p style="margin: 0 0 24px; color: #4b5563; font-size: 16px; line-height: 1.65;">
+                When someone uses your link, we take it from there. Our team will learn what their business needs, walk them through the options, and see whether Credit Banc can help.
+              </p>
+            </td>
+          </tr>
+
+          <!-- The reward -->
+          <tr>
+            <td style="padding: 0 40px 28px;">
+              <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #f2fbf7; border: 1px solid #cdeee0; border-radius: 12px;">
+                <tr>
+                  <td style="padding: 22px 24px; text-align: center;">
+                    <p style="margin: 0; color: #00553b; font-size: 16px; line-height: 1.6;">
+                      If their deal funds, you'll receive a <strong style="font-size: 18px;">${reward_amount} gift card</strong> of your choice through Giftronaut.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- No limit -->
+          <tr>
+            <td style="padding: 0 40px 8px;">
+              <p style="margin: 0 0 10px; color: #202536; font-size: 16px; font-weight: 700;">And there's no referral limit.</p>
+              <p style="margin: 0 0 24px; color: #4b5563; font-size: 16px; line-height: 1.8;">
+                Know one business owner? Excellent.<br>
+                Know ten? Even better.<br>
+                Know half the town? Slightly concerning, but financially promising.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Sign-off -->
+          <tr>
+            <td style="padding: 0 40px 40px;">
+              <p style="margin: 0 0 20px; color: #4b5563; font-size: 16px; line-height: 1.65;">
+                You make the intro. We make the calls.
+              </p>
+              <p style="margin: 0 0 4px; color: #202536; font-size: 20px; font-weight: 700;">Now go know someone.</p>
+              <p style="margin: 0; color: #6b7280; font-size: 15px;">The Credit Banc Team</p>
             </td>
           </tr>
 
           <!-- Footer -->
           <tr>
-            <td style="padding: 24px 40px 32px; background-color: #f8fafc; border-top: 1px solid #e2e8f0; text-align: center;">
-              <p style="margin: 0 0 8px; color: #64748b; font-size: 13px; line-height: 1.6;">
+            <td style="padding: 24px 40px 32px; background-color: #202536; text-align: center;">
+              <p style="margin: 0 0 8px; color: #b9bdc9; font-size: 13px; line-height: 1.6;">
                 Rewards are issued after a referred deal funds and closing conditions are complete.
-                <a href="${terms_url}" style="color: #047857; text-decoration: underline;">Full program terms</a>.
+                <a href="${terms_url}" style="color: #a6f0ce; text-decoration: underline;">Full program terms</a>.
               </p>
-              <p style="margin: 0; color: #94a3b8; font-size: 12px;">© ${new Date().getFullYear()} Credit Banc Vault</p>
+              <p style="margin: 0; color: #8b90a0; font-size: 12px;">© ${new Date().getFullYear()} Credit Banc</p>
             </td>
           </tr>
 
@@ -2670,24 +2796,49 @@ export function generate_affiliate_welcome_email_html(data: AffiliateWelcomeEmai
 export function generate_affiliate_welcome_email_text(data: AffiliateWelcomeEmailData): string {
   const { affiliate_name, referral_url, dashboard_url, reward_amount, terms_url } = data;
   return [
-    `Hi ${affiliate_name},`,
+    `Hi ${affiliate_name}, you're officially in!`,
     ``,
-    `You're in — welcome to the "I Know Someone" Club.`,
+    `Thanks for joining Credit Banc's "I Know Someone" Club. Your affiliate`,
+    `dashboard is live, your personal referral link is ready, and somewhere in`,
+    `your contacts is a business owner who should probably hear from you.`,
     ``,
-    `Your personal referral link:`,
+    `Here's your personal referral link:`,
     `${referral_url}`,
     ``,
-    `How it works:`,
-    `1. Share your link with any business owner who might want capital.`,
-    `2. They apply through it — we take it from there.`,
-    `3. When their deal funds, your ${reward_amount} gift card goes out. No cap on referrals.`,
+    `Copy it. Save it. Send it to someone useful.`,
     ``,
-    `Track referrals and rewards: ${dashboard_url}`,
+    `You can also visit your affiliate dashboard anytime to grab your link, share`,
+    `directly to social media, and track each referral as it moves through the`,
+    `process.`,
+    ``,
+    `OPEN MY AFFILIATE DASHBOARD: ${dashboard_url}`,
+    ``,
+    `Not sure where to start?`,
+    `Text your link to a friend who owns a business. Email it to your cousin with`,
+    `three locations and no free time. Post it on Facebook or LinkedIn. Drop it in`,
+    `the group chat. Slide into a few DMs without making it weird.`,
+    ``,
+    `When someone uses your link, we take it from there. Our team will learn what`,
+    `their business needs, walk them through the options, and see whether Credit`,
+    `Banc can help.`,
+    ``,
+    `If their deal funds, you'll receive a ${reward_amount} gift card of your choice through`,
+    `Giftronaut.`,
+    ``,
+    `And there's no referral limit.`,
+    `Know one business owner? Excellent.`,
+    `Know ten? Even better.`,
+    `Know half the town? Slightly concerning, but financially promising.`,
+    ``,
+    `You make the intro. We make the calls.`,
+    ``,
+    `Now go know someone.`,
+    `The Credit Banc Team`,
     ``,
     `Rewards are issued after a referred deal funds and closing conditions are`,
     `complete. Full program terms: ${terms_url}`,
     ``,
-    `© ${new Date().getFullYear()} Credit Banc Vault`,
+    `© ${new Date().getFullYear()} Credit Banc`,
   ].join("\n");
 }
 
@@ -2697,9 +2848,16 @@ export async function send_affiliate_welcome_email(data: AffiliateWelcomeEmailDa
   const mail_options: any = {
     from: affiliate_from_header(),
     to: data.affiliate_email,
-    subject: `You're in — here's your referral link`,
+    subject: `You're In. Go Know Someone.`,
     html: generate_affiliate_welcome_email_html(data),
     text: generate_affiliate_welcome_email_text(data),
+    attachments: [
+      {
+        filename: "welcome-to-the-club.png",
+        path: path.join(process.cwd(), "public", AFFILIATE_WELCOME_HERO_FILE),
+        cid: AFFILIATE_WELCOME_HERO_CID,
+      },
+    ],
   };
 
   return await transporter.sendMail(mail_options);

@@ -64,23 +64,23 @@ async function postAffiliateAlert(text: string): Promise<void> {
 }
 
 /**
- * Link a newly-created client vault back to the referral lead that produced it,
+ * Link a newly-created client vault back to the affiliate lead that produced it,
  * so affiliate attribution survives from the public pre-qualification flow all
  * the way to a funded deal.
  *
  * Called at the end of every vault-creation path. Matches an unconverted
- * `referral_leads` row by GHL contact id first (most reliable — the referral
+ * `affiliate_leads` row by GHL contact id first (most reliable — the referral
  * already created the GHL contact), then by email. On a match it:
  *   - marks the lead `converted` and stamps `converted_vault_id`,
- *   - stamps `client_data_vault.referral_lead_id` (the funded-payout hook walks
+ *   - stamps `client_data_vault.affiliate_lead_id` (the funded-payout hook walks
  *     this), and mirrors the affiliate name onto `referral_partner` for the
  *     existing client-profile UI.
  *
  * Best-effort and non-throwing: attribution must never break signup. Pass a
- * SERVICE-ROLE client (referral_leads is RLS-locked to service role).
+ * SERVICE-ROLE client (affiliate_leads is RLS-locked to service role).
  * See [[ghl_integration_contract]], [[role_model]].
  */
-export async function linkReferralLeadToVault(
+export async function linkAffiliateLeadToVault(
   db: SupabaseClient,
   args: { vaultId: string; email?: string | null; ghlContactId?: string | null }
 ): Promise<void> {
@@ -92,7 +92,7 @@ export async function linkReferralLeadToVault(
 
     if (ghlContactId) {
       const { data } = await db
-        .from("referral_leads")
+        .from("affiliate_leads")
         .select("id, affiliate_id")
         .eq("ghl_contact_id", ghlContactId)
         .neq("status", "converted")
@@ -104,7 +104,7 @@ export async function linkReferralLeadToVault(
 
     if (!lead && email) {
       const { data } = await db
-        .from("referral_leads")
+        .from("affiliate_leads")
         .select("id, affiliate_id")
         .eq("email", email.toLowerCase())
         .neq("status", "converted")
@@ -119,20 +119,20 @@ export async function linkReferralLeadToVault(
     const nowIso = new Date().toISOString();
 
     await db
-      .from("referral_leads")
+      .from("affiliate_leads")
       .update({ status: "converted", converted_vault_id: vaultId, updated_at: nowIso })
       .eq("id", lead.id);
 
-    // Attribution lives ONLY on referral_lead_id — this is the public affiliate
+    // Attribution lives ONLY on affiliate_lead_id — this is the public affiliate
     // program. We deliberately do NOT touch client_data_vault.referral_partner /
     // GHL AFFILIATE_ASSIGNED: those belong to the separate internal
     // referral-partner program and must not be overwritten.
     await db
       .from("client_data_vault")
-      .update({ referral_lead_id: lead.id })
+      .update({ affiliate_lead_id: lead.id })
       .eq("id", vaultId);
   } catch (err) {
-    console.error("[affiliates] linkReferralLeadToVault failed (non-fatal):", err);
+    console.error("[affiliates] linkAffiliateLeadToVault failed (non-fatal):", err);
   }
 }
 
@@ -148,7 +148,7 @@ export async function linkReferralLeadToVault(
  * mark reverted inside the window never becomes a gift card.
  *
  * Idempotent and non-throwing:
- *   - no-op unless the vault carries a referral_lead_id (i.e. it's a referral),
+ *   - no-op unless the vault carries an affiliate_lead_id (i.e. it's a referral),
  *   - a UNIQUE(client_vault_id) on affiliate_payouts + the payout-id
  *     idempotency key guarantee at most one Giftronaut send per funded deal.
  *
@@ -163,10 +163,10 @@ export async function createAffiliatePayoutForFundedVault(
     // 1. Is this vault a referral?
     const { data: vault } = await db
       .from("client_data_vault")
-      .select("id, referral_lead_id, user_id, client_email")
+      .select("id, affiliate_lead_id, user_id, client_email")
       .eq("id", clientVaultId)
       .maybeSingle();
-    if (!vault?.referral_lead_id) return;
+    if (!vault?.affiliate_lead_id) return;
 
     // 1b. Defense in depth: pay only on a funded transition that a STAFF member
     //     recorded. updateLoanStatus already gates this, but real money leaves
@@ -191,9 +191,9 @@ export async function createAffiliatePayoutForFundedVault(
 
     // 2. lead -> affiliate
     const { data: lead } = await db
-      .from("referral_leads")
+      .from("affiliate_leads")
       .select("id, affiliate_id")
-      .eq("id", vault.referral_lead_id)
+      .eq("id", vault.affiliate_lead_id)
       .maybeSingle();
     if (!lead?.affiliate_id) return;
 
@@ -220,7 +220,7 @@ export async function createAffiliatePayoutForFundedVault(
       );
       await db.from("affiliate_payouts").insert({
         affiliate_id: affiliate.id,
-        referral_lead_id: lead.id,
+        affiliate_lead_id: lead.id,
         client_vault_id: clientVaultId,
         commission_amount: 0,
         status: "canceled",
@@ -303,7 +303,7 @@ export async function createAffiliatePayoutForFundedVault(
       .from("affiliate_payouts")
       .insert({
         affiliate_id: affiliate.id,
-        referral_lead_id: lead.id,
+        affiliate_lead_id: lead.id,
         client_vault_id: clientVaultId,
         funding_deal_id: fundingDealId,
         commission_amount: commission,
@@ -382,7 +382,7 @@ export type PayoutOutcome =
 type PayoutRow = {
   id: string;
   affiliate_id: string | null;
-  referral_lead_id: string | null;
+  affiliate_lead_id: string | null;
   client_vault_id: string | null;
   commission_amount: number | string | null;
   status: string;
@@ -422,7 +422,7 @@ export async function processAffiliatePayout(
     const { data: payout } = await db
       .from("affiliate_payouts")
       .select(
-        "id, affiliate_id, referral_lead_id, client_vault_id, commission_amount, status, hold_reason, release_at, attempts"
+        "id, affiliate_id, affiliate_lead_id, client_vault_id, commission_amount, status, hold_reason, release_at, attempts"
       )
       .eq("id", payoutId)
       .maybeSingle<PayoutRow>();
@@ -456,16 +456,18 @@ export async function processAffiliatePayout(
     }
 
     // --- Re-verify the deal, 24h on. ---------------------------------------
+    // company_name/client_name ride along for the payout email, which names the
+    // business that funded ("Acme Coffee officially funded through Credit Banc").
     const { data: vault } = await db
       .from("client_data_vault")
-      .select("id, referral_lead_id, user_id, client_email")
+      .select("id, affiliate_lead_id, user_id, client_email, company_name, client_name")
       .eq("id", payout.client_vault_id)
       .maybeSingle();
 
     if (!vault) {
       return await cancelPayout(db, payout, "Client vault no longer exists");
     }
-    if (vault.referral_lead_id !== payout.referral_lead_id) {
+    if (vault.affiliate_lead_id !== payout.affiliate_lead_id) {
       return await cancelPayout(db, payout, "Referral attribution was removed from this vault");
     }
 
@@ -636,6 +638,7 @@ export async function processAffiliatePayout(
         recipientEmail,
         clientVaultId: payout.client_vault_id,
         commission,
+        referralName: vault.company_name || vault.client_name || null,
       });
 
       return { outcome: "sent", orderId: result.orderId };
@@ -732,9 +735,11 @@ async function notifyAffiliateOfReward(
     recipientEmail: string;
     clientVaultId: string | null;
     commission: number;
+    /** Referred business (or contact) name, for the "X officially funded" line. */
+    referralName?: string | null;
   }
 ): Promise<void> {
-  const { affiliate, recipientEmail, clientVaultId, commission } = args;
+  const { affiliate, recipientEmail, clientVaultId, commission, referralName } = args;
   const rewardStr = commission.toLocaleString("en-US", {
     style: "currency",
     currency: "USD",
@@ -762,6 +767,7 @@ async function notifyAffiliateOfReward(
       affiliate_email: recipientEmail,
       reward_amount: rewardStr,
       login_url: `${appUrl}/affiliate/dashboard`,
+      referral_name: referralName ?? null,
     });
   } catch (emailErr) {
     console.error("[affiliates] payout email failed (non-fatal):", emailErr);

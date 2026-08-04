@@ -58,7 +58,7 @@ const BUSINESS_STEP = 2;
 const FIRST_CHOICE_STEP = 3;
 const CONTACT_STEP = FIRST_CHOICE_STEP + CHOICE_STEPS.length; // 7
 
-export function ReferralLeadForm({
+export function AffiliateLeadForm({
   code,
   affiliateFirstName,
 }: {

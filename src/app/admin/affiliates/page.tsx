@@ -69,7 +69,7 @@ export default async function AdminAffiliatesPage() {
 
   const [{ data: affiliates }, { data: leads }, { data: payouts }] = await Promise.all([
     db.from("affiliates").select("id, referral_code, first_name, last_name, email, link_clicks, status, created_at").order("created_at", { ascending: false }),
-    db.from("referral_leads").select("affiliate_id, status"),
+    db.from("affiliate_leads").select("affiliate_id, status"),
     db.from("affiliate_payouts").select("id, affiliate_id, commission_amount, status, giftronaut_order_id, error, hold_reason, release_at, attempts, created_at, affiliates(first_name, last_name, email)").order("created_at", { ascending: false }),
   ]);
 

@@ -5,8 +5,8 @@
 //   1. validate the affiliate code is active,
 //   2. evaluate the pre-qual answers SERVER-SIDE (can't be bypassed),
 //   3. for QUALIFIED leads: upsert the contact into GHL WITHOUT assignedTo (the
-//      GHL round-robin calendar assigns the owner when they book) + store a
-//      `referral_leads` row recording the affiliate + the answers,
+//      GHL round-robin calendar assigns the owner when they book) + store an
+//      `affiliate_leads` row recording the affiliate + the answers,
 //   4. for DISQUALIFIED leads: store the row (status=disqualified) with no GHL
 //      push; the client redirects them to the thanks-for-applying page.
 // See [[ghl_integration_contract]], [[role_model]], [[affiliate_program]].
@@ -93,7 +93,7 @@ export async function POST(
 
     // 3. Duplicate guard: same email already a lead or an existing client.
     const [{ data: existingLead }, { data: existingClient }] = await Promise.all([
-      db.from("referral_leads").select("id").eq("email", email).maybeSingle(),
+      db.from("affiliate_leads").select("id").eq("email", email).maybeSingle(),
       db.from("client_data_vault").select("id").eq("client_email", email).maybeSingle(),
     ]);
     const isDuplicate = Boolean(existingLead || existingClient);
@@ -108,7 +108,7 @@ export async function POST(
     // Disqualified → store (unless dup) and tell the client to redirect out.
     if (!qualified) {
       if (!isDuplicate) {
-        await db.from("referral_leads").insert({
+        await db.from("affiliate_leads").insert({
           affiliate_id: affiliate.id,
           first_name: firstName,
           last_name: lastName || null,
@@ -169,7 +169,7 @@ export async function POST(
     }
 
     // 5. Store the qualified pending lead with attribution + answers.
-    const { error: insertErr } = await db.from("referral_leads").insert({
+    const { error: insertErr } = await db.from("affiliate_leads").insert({
       affiliate_id: affiliate.id,
       first_name: firstName,
       last_name: lastName || null,

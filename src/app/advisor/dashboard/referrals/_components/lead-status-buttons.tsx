@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
-import { updateReferralLeadStatus } from "../actions";
+import { updateAffiliateLeadStatus } from "../actions";
 
 const OPTIONS: { value: "contacted" | "qualified" | "disqualified"; label: string }[] = [
   { value: "contacted", label: "Contacted" },
@@ -16,7 +16,7 @@ export function LeadStatusButtons({ leadId, current }: { leadId: string; current
 
   const set = (value: "contacted" | "qualified" | "disqualified") => {
     startTransition(async () => {
-      const res = await updateReferralLeadStatus(leadId, value);
+      const res = await updateAffiliateLeadStatus(leadId, value);
       if (res.success) setStatus(value);
     });
   };
