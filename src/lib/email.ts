@@ -2501,8 +2501,7 @@ export function generate_affiliate_payout_notification_html(data: AffiliatePayou
               <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #f2fbf7; border: 1px solid #cdeee0; border-radius: 12px;">
                 <tr>
                   <td style="padding: 24px; text-align: center;">
-                    <p style="margin: 0 0 6px; color: #00553b; font-size: 34px; font-weight: 800; line-height: 1.1;">${reward_amount}</p>
-                    <p style="margin: 0; color: #00553b; font-size: 15px; line-height: 1.6;">
+                    <p style="margin: 0; color: #00553b; font-size: 18px; line-height: 1.6;">
                       It also means you've earned a ${reward_amount} gift card. Keep an eye out for an email from <strong>Giftronaut</strong> within the next three business days so you can choose your reward.
                     </p>
                   </td>
