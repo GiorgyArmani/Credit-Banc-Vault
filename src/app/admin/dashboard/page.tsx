@@ -191,7 +191,7 @@ async function load_metrics(
   ] = await Promise.all([
     supabase_admin
       .from('loan_status_history')
-      .select('client_vault_id, status, created_at')
+      .select('client_vault_id, status, created_at, funding_deal_id')
       .order('created_at', { ascending: true }),
 
     vault_query,
@@ -218,16 +218,23 @@ async function load_metrics(
     // compute_funded_amount prefers this over the requested amount.
     supabase_admin
       .from('funding_deals')
-      .select('funded_amount, business_profiles!inner(client_vault_id)'),
+      .select('id, funded_amount, business_profiles!inner(client_vault_id)'),
   ])
 
-  // Aggregate funded_amount per vault (a vault may have several business deals).
+  // Aggregate funded_amount per vault (a vault may have several business deals,
+  // and a repeat client several rounds per business). Used for legacy funded
+  // events that carry no round id.
   const funded_amount_by_vault = new Map<string, number>()
+  // Per-round amounts, so a repeat client's rounds are counted as the separate
+  // fundings they are instead of collapsing into one vault-sized event.
+  const funded_amount_by_deal = new Map<string, number>()
   for (const d of funded_deal_rows ?? []) {
     const vault_id = (d as any).business_profiles?.client_vault_id as string | null
     const amount = Number((d as any).funded_amount)
     if (!vault_id || !Number.isFinite(amount)) continue
     funded_amount_by_vault.set(vault_id, (funded_amount_by_vault.get(vault_id) ?? 0) + amount)
+    const deal_id = (d as any).id as string | null
+    if (deal_id) funded_amount_by_deal.set(deal_id, amount)
   }
 
   // ─── Index helpers ─────────────────────────────────────────────────────
@@ -341,38 +348,49 @@ async function load_metrics(
   const prev_from_ms = range.prev_from.getTime()
   const prev_to_ms = range.prev_to.getTime()
 
-  // Dedupe per vault: until funding_deals lands, a client has at most one
-  // "funded" event from the dashboard's POV. Without this, duplicate funded
-  // rows in loan_status_history (e.g. from kanban re-drags into the Funded
-  // column) double-count the same vault.capital_requested. history_rows is
-  // ordered ascending, so Map.set keeps the latest transition per vault.
-  const latest_funded_in_range = new Map<string, { ts: number; amount: number }>()
-  const latest_funded_in_prior = new Map<string, { ts: number; amount: number }>()
+  // Dedupe per funding ROUND, not per client. A repeat client who funds twice
+  // in the period is two funded events for two amounts — collapsing them to one
+  // vault-sized event was what made repeat business invisible on this tile.
+  // Legacy rows carry no round id and fall back to per-vault dedupe, exactly as
+  // before. Duplicate funded rows for the same round (e.g. kanban re-drags into
+  // the Funded column) still collapse; history_rows is ordered ascending, so
+  // Map.set keeps the latest transition per key.
+  const latest_funded_in_range = new Map<string, { ts: number; amount: number; client_id: string }>()
+  const latest_funded_in_prior = new Map<string, { ts: number; amount: number; client_id: string }>()
 
   for (const r of history_rows ?? []) {
     if (r.status !== 'funded') continue
     if (advisor_id && !in_scope(r.client_vault_id)) continue
     const ts = new Date(r.created_at).getTime()
     const v = vault_by_id.get(r.client_vault_id)
+    const deal_id = (r as any).funding_deal_id as string | null
     // Source of truth for "how much was funded" lives in compute_funded_amount
     // — prefers the funded_amount stamped on funding_deals, falling back to
     // vault.capital_requested for deals funded before that column was written.
+    // A round-stamped event uses THAT round's amount; an unstamped legacy event
+    // still uses the vault total.
     const amount = compute_funded_amount({
       vault: v,
-      funding_deal_amount: funded_amount_by_vault.get(r.client_vault_id) ?? null,
+      funding_deal_amount:
+        (deal_id ? funded_amount_by_deal.get(deal_id) : undefined) ??
+        funded_amount_by_vault.get(r.client_vault_id) ??
+        null,
     })
 
+    const key = deal_id ?? r.client_vault_id
     if (ts >= range_from_ms && ts <= range_to_ms) {
-      latest_funded_in_range.set(r.client_vault_id, { ts, amount })
+      latest_funded_in_range.set(key, { ts, amount, client_id: r.client_vault_id })
     } else if (ts >= prev_from_ms && ts < prev_to_ms) {
-      latest_funded_in_prior.set(r.client_vault_id, { ts, amount })
+      latest_funded_in_prior.set(key, { ts, amount, client_id: r.client_vault_id })
     }
   }
 
   let funded_amount = 0
   const funded_count = latest_funded_in_range.size
   const funded_in_range: Array<{ client_id: string; ts: number; amount: number }> = []
-  for (const [client_id, { ts, amount }] of latest_funded_in_range) {
+  // Keyed by round, so the entry carries the vault id explicitly rather than
+  // relying on the map key being one.
+  for (const { ts, amount, client_id } of latest_funded_in_range.values()) {
     funded_amount += amount
     funded_in_range.push({ client_id, ts, amount })
   }

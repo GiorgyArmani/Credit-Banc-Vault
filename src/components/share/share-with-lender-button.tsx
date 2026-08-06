@@ -30,6 +30,8 @@ interface ShareableFile {
   file_name: string;
   doc_code: string;
   label: string;
+  /** Advisor-approved category. Badged, not gated — share whenever you want. */
+  approved: boolean;
 }
 
 interface Props {
@@ -38,13 +40,11 @@ interface Props {
   /** Classes for the trigger button so it blends into its host (grid vs toolbar). */
   className?: string;
   triggerLabel?: string;
-  /** Lenders already on the deal — offered as a dropdown for the link label so
-   *  staff pick who they're sending to instead of retyping. Omitted (advisor
-   *  view) → falls back to a free-text field. */
+  /** Lenders already on the deal — offered as type-ahead suggestions for the
+   *  link label. Purely a convenience: the field is always free text so a link
+   *  can be minted for a lender that isn't on the deal yet. */
   lenderOptions?: string[];
 }
-
-const OTHER_LENDER = "__other__";
 
 const EXPIRY_OPTIONS = [7, 14, 30] as const;
 
@@ -67,8 +67,6 @@ export function ShareWithLenderButton({
   lenderOptions,
 }: Props) {
   const lender_choices = Array.from(new Set((lenderOptions ?? []).filter(Boolean)));
-  // When lenders exist we show a dropdown; "Other…" flips to a free-text field.
-  const [custom_mode, set_custom_mode] = useState(false);
   const [open, set_open] = useState(false);
   const [links, set_links] = useState<ShareLink[]>([]);
   const [loading_links, set_loading_links] = useState(false);
@@ -79,7 +77,7 @@ export function ShareWithLenderButton({
   const [revoking_id, set_revoking_id] = useState<string | null>(null);
   const [files, set_files] = useState<ShareableFile[]>([]);
   const [loading_docs, set_loading_docs] = useState(false);
-  // File ids the lender will receive. Defaults to every approved file once loaded.
+  // File ids the lender will receive. Defaults to every file once loaded.
   const [selected_ids, set_selected_ids] = useState<Set<string>>(new Set());
 
   // Files grouped under their category label for the picker.
@@ -163,7 +161,7 @@ export function ShareWithLenderButton({
   }
 
   async function generate() {
-    if (files.length > 0 && selected_ids.size === 0) {
+    if (selected_ids.size === 0) {
       toast.error("Select at least one file to share");
       return;
     }
@@ -177,9 +175,8 @@ export function ShareWithLenderButton({
           business_profile_id: businessProfileId,
           expires_in_days: expiry_days,
           label: lender_label.trim() || undefined,
-          // Send the exact files chosen. Always sent as an explicit list so the
-          // link is a snapshot of what was selected now.
-          document_ids: files.length > 0 ? Array.from(selected_ids) : undefined,
+          // Always an explicit list — the link is a snapshot of what was picked.
+          document_ids: Array.from(selected_ids),
         }),
       });
       const data = await res.json();
@@ -235,10 +232,10 @@ export function ShareWithLenderButton({
       <Dialog open={open} onOpenChange={handle_open}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Share documents with a lender</DialogTitle>
+            <DialogTitle>Share documents</DialogTitle>
             <DialogDescription>
-              Generates a secure link to this client&apos;s <strong>approved</strong> documents for
-              the selected business. Anyone with the link can view and download until it expires.
+              Pick the files, get a link. Anyone with it can view and download those
+              files until it expires — no login, no approval needed first.
             </DialogDescription>
           </DialogHeader>
 
@@ -246,50 +243,23 @@ export function ShareWithLenderButton({
           <div className="rounded-2xl border border-slate-200 p-4 space-y-3">
             <div className="space-y-1.5">
               <label className="text-[11px] font-bold uppercase tracking-widest text-slate-400">
-                Lender name (optional)
+                Send to (optional)
               </label>
-              {lender_choices.length > 0 && !custom_mode ? (
-                <select
-                  value={lender_choices.includes(lender_label) ? lender_label : ""}
-                  onChange={(e) => {
-                    if (e.target.value === OTHER_LENDER) {
-                      set_custom_mode(true);
-                      set_lender_label("");
-                    } else {
-                      set_lender_label(e.target.value);
-                    }
-                  }}
-                  className="w-full h-10 text-sm border border-slate-200 rounded-lg px-3 bg-white text-slate-700"
-                >
-                  <option value="">Select a lender…</option>
+              {/* Free text with the deal's lenders as suggestions — a link can be
+                  minted for anyone, whether or not they're on the deal yet. */}
+              <Input
+                value={lender_label}
+                onChange={(e) => set_lender_label(e.target.value)}
+                placeholder="e.g. LG Funding"
+                list="share-lender-options"
+                maxLength={120}
+              />
+              {lender_choices.length > 0 && (
+                <datalist id="share-lender-options">
                   {lender_choices.map((name) => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
+                    <option key={name} value={name} />
                   ))}
-                  <option value={OTHER_LENDER}>Other (type a name)…</option>
-                </select>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <Input
-                    value={lender_label}
-                    onChange={(e) => set_lender_label(e.target.value)}
-                    placeholder="e.g. LG Funding"
-                    maxLength={120}
-                  />
-                  {lender_choices.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        set_custom_mode(false);
-                        set_lender_label("");
-                      }}
-                      className="text-[11px] font-semibold text-emerald-600 hover:text-emerald-700 whitespace-nowrap"
-                    >
-                      Pick lender
-                    </button>
-                  )}
-                </div>
+                </datalist>
               )}
             </div>
 
@@ -297,7 +267,7 @@ export function ShareWithLenderButton({
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <label className="text-[11px] font-bold uppercase tracking-widest text-slate-400">
-                  Files to share
+                  Files ({selected_ids.size}/{files.length})
                 </label>
                 {files.length > 0 && (
                   <div className="flex items-center gap-2 text-[11px] font-semibold">
@@ -325,7 +295,7 @@ export function ShareWithLenderButton({
                 </div>
               ) : files.length === 0 ? (
                 <p className="text-xs text-slate-400 py-2">
-                  No approved documents yet — approve documents before sharing.
+                  No documents uploaded for this business yet.
                 </p>
               ) : (
                 <div className="max-h-[220px] overflow-y-auto rounded-xl border border-slate-200 divide-y divide-slate-100">
@@ -348,6 +318,14 @@ export function ShareWithLenderButton({
                           <span className="text-sm text-slate-700 flex-1 truncate" title={f.file_name}>
                             {f.file_name}
                           </span>
+                          {!f.approved && (
+                            <span
+                              title="Not advisor-approved yet — you can still share it"
+                              className="shrink-0 text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full bg-amber-100 text-amber-700"
+                            >
+                              Unreviewed
+                            </span>
+                          )}
                         </label>
                       ))}
                     </div>
@@ -375,7 +353,7 @@ export function ShareWithLenderButton({
               </div>
               <Button
                 onClick={generate}
-                disabled={generating}
+                disabled={generating || selected_ids.size === 0}
                 className="ml-auto bg-emerald-600 hover:bg-emerald-700 text-white min-w-[150px]"
               >
                 {generating ? (
@@ -386,7 +364,7 @@ export function ShareWithLenderButton({
                 ) : (
                   <>
                     <LinkIcon className="h-4 w-4 mr-2" />
-                    Generate link
+                    Create &amp; copy link
                   </>
                 )}
               </Button>

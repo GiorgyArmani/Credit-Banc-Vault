@@ -42,10 +42,9 @@ export async function POST(request: Request) {
     const label =
       typeof body?.label === "string" && body.label.trim() ? body.label.trim().slice(0, 120) : null;
 
-    // Optional per-file selection. Omitted/non-array → null → share every
-    // approved file (legacy behavior). An explicit array means "only these
-    // files", letting staff withhold the agreement or pick one of several files
-    // in a category.
+    // The exact files this link exposes. The share modal always sends the list,
+    // so the link is a snapshot of what was picked — approval state is not a
+    // gate. Omitted/non-array → null → legacy "every approved file" behavior.
     const selected_document_ids: string[] | null = Array.isArray(body?.document_ids)
       ? Array.from(
           new Set(
@@ -56,16 +55,12 @@ export async function POST(request: Request) {
         )
       : null;
 
-    // Legacy category-level selection (still honored when no document_ids given).
-    const selected_doc_codes: string[] | null = Array.isArray(body?.doc_codes)
-      ? Array.from(
-          new Set(
-            (body.doc_codes as unknown[]).filter(
-              (c): c is string => typeof c === "string" && !!c.trim()
-            )
-          )
-        )
-      : null;
+    if (selected_document_ids && selected_document_ids.length === 0) {
+      return NextResponse.json(
+        { error: "Select at least one file to share." },
+        { status: 400 }
+      );
+    }
 
     const link = await createShareLink({
       client_id,
@@ -74,7 +69,6 @@ export async function POST(request: Request) {
       created_by_email: gate.user.email ?? null,
       label,
       expires_in_days,
-      selected_doc_codes,
       selected_document_ids,
     });
 

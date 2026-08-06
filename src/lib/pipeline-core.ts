@@ -28,24 +28,47 @@ export async function recordPipelineTransition(args: {
   note?: string | null;
   actorUserId: string;
   actorRole: string;
+  /** The round this transition belongs to; stamped on the history row. */
+  fundingDealId?: string | null;
 }): Promise<{ success: boolean; error?: string }> {
   const { clientVaultId, newStatus, note, actorUserId, actorRole } = args;
+  const fundingDealId = args.fundingDealId ?? null;
   const db = createAdminClient();
 
   // Invariant, independent of who is asking: a deal is funded when UNDERWRITING
   // records it funded. fundLoanAction writes the funded figures onto
   // funding_deals before transitioning, so requiring the row makes the Loan
   // Funded dialog the single route without relying on a spoofable flag.
+  //
+  // Scoped to the round being funded, NOT the vault. A vault-wide check passes
+  // forever once a client has funded even once, which would leave every repeat
+  // client's `funded` status unguarded — exactly the case this file cares about.
   if (newStatus === "funded") {
-    const { data: fundedDeal } = await db
-      .from("funding_deals")
-      .select("id, business_profiles!inner(client_vault_id)")
-      .eq("business_profiles.client_vault_id", clientVaultId)
-      .not("funded_at", "is", null)
-      .limit(1)
-      .maybeSingle();
+    let fundedDealOk = false;
 
-    if (!fundedDeal?.id) {
+    if (fundingDealId) {
+      const { data } = await db
+        .from("funding_deals")
+        .select("id")
+        .eq("id", fundingDealId)
+        .not("funded_at", "is", null)
+        .maybeSingle();
+      fundedDealOk = !!data?.id;
+    } else {
+      // No round named (a Kanban drag). Check the round the client is actually
+      // working — the most recently opened one — instead of "has this vault ever
+      // funded anything", which would wave through every repeat client.
+      const { data } = await db
+        .from("funding_deals")
+        .select("id, funded_at, business_profiles!inner(client_vault_id)")
+        .eq("business_profiles.client_vault_id", clientVaultId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      fundedDealOk = !!data?.funded_at;
+    }
+
+    if (!fundedDealOk) {
       console.warn(
         `[pipeline] BLOCKED funded on ${clientVaultId} by ${actorRole} ${actorUserId}: no funded funding_deals row`
       );
@@ -57,18 +80,37 @@ export async function recordPipelineTransition(args: {
     }
   }
 
+  // The round's business, so history rows can be read back per business tab.
+  // Only costs a query when the caller named a round.
+  let businessProfileId: string | null = null;
+  if (fundingDealId) {
+    const { data: dealRow } = await db
+      .from("funding_deals")
+      .select("business_profile_id")
+      .eq("id", fundingDealId)
+      .maybeSingle();
+    businessProfileId = dealRow?.business_profile_id ?? null;
+  }
+
   // Skip redundant consecutive entries. Kanban drops always pass a "Moved in
   // Pipeline" note, so without this a re-drop on the current column would insert
   // a duplicate row — breaking funded-event dedupe on the admin dashboard.
+  //
+  // A new funding round is NOT redundant even at the same status: opening round 2
+  // at documents_requested right after round 1 sat there has to be recorded, or
+  // the round has no entry point in the history.
   const { data: latestEntry } = await db
     .from("loan_status_history")
-    .select("status")
+    .select("status, funding_deal_id")
     .eq("client_vault_id", clientVaultId)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
 
-  if (latestEntry?.status === newStatus) {
+  if (
+    latestEntry?.status === newStatus &&
+    (latestEntry as any)?.funding_deal_id === fundingDealId
+  ) {
     return { success: true };
   }
 
@@ -78,6 +120,8 @@ export async function recordPipelineTransition(args: {
     changed_by: actorUserId,
     changed_by_role: actorRole,
     note: note || null,
+    funding_deal_id: fundingDealId,
+    business_profile_id: businessProfileId,
   });
 
   if (error) {

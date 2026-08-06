@@ -15,7 +15,7 @@ import { Progress } from "@/components/ui/progress";
 import { PremiumLoader } from "./ui/premium-loader";
 import { Send } from "lucide-react";
 import DocumentPreviewModal from "@/components/pdf/pdf-viewer";
-import { isClientScopedDoc, matchesActiveBusiness } from "@/lib/document-scope";
+import { isClientScopedDoc, isCarryOverDoc, matchesActiveBusiness, matchesActiveDeal } from "@/lib/document-scope";
 
 /**
  * DocumentType: Interface for documents requested for the user
@@ -74,6 +74,9 @@ interface DocumentCardProps {
    *  doc is client-scoped (DL/PFS/MyScoreIQ), which always land NULL so they
    *  serve every tab and survive business deletion. */
   activeBusinessId?: string | null;
+  /** The funding round this upload belongs to. Carry-over docs (identity /
+   *  entity paperwork) are stamped NULL so they serve every future round. */
+  activeDealId?: string | null;
   /** Optional DOM id for the website tour to anchor on (set on the first card). */
   anchorId?: string;
 }
@@ -93,6 +96,7 @@ function DocumentCard({
   isRejected = false,
   rejectionReason,
   activeBusinessId,
+  activeDealId,
   anchorId,
 }: DocumentCardProps) {
   const supabase = createClient();
@@ -188,6 +192,10 @@ function DocumentCard({
             business_profile_id: isClientScopedDoc(docType.code)
               ? null
               : (activeBusinessId ?? null),
+            // Carry-over paperwork (identity + entity docs) stays unstamped so
+            // it serves every future funding round; everything else belongs to
+            // the round it was collected for.
+            funding_deal_id: isCarryOverDoc(docType.code) ? null : (activeDealId ?? null),
             metadata: { tags: [docType.code] },
           })
           .select("*")
@@ -397,12 +405,17 @@ export default function Vault({
   clientName,
   onLoad,
   activeBusinessId,
+  activeDealId,
 }: {
   onChecklist?: (info: ChecklistInfo & { isSubmitted: boolean }) => void;
   clientName: string | null;
   onLoad?: () => void;
   /** When provided, all doc requests / uploads / approvals are scoped to this business. */
   activeBusinessId?: string | null;
+  /** The funding round being worked. Files and approvals belonging to a
+   *  previous round drop out of the checklist, so a repeat client is asked for
+   *  fresh statements instead of seeing last year's already ticked off. */
+  activeDealId?: string | null;
 }) {
   const supabase = createClient();
   const { toast } = useToast();
@@ -458,13 +471,16 @@ export default function Vault({
     try {
       const { data, error } = await supabase
         .from("document_category_approvals")
-        .select("doc_code, business_profile_id")
+        .select("doc_code, business_profile_id, funding_deal_id")
         .eq("client_vault_id", vid);
       if (error) throw error;
       // Scope to active business via the shared matcher — client-scoped doc
-      // approvals (DL/PFS/MyScoreIQ) automatically surface on every tab.
+      // approvals (DL/PFS/MyScoreIQ) automatically surface on every tab — then
+      // to the active round, so a closed financing's approvals don't make the
+      // new round look already-satisfied.
       const filtered = (data || []).filter((d: any) =>
-        matchesActiveBusiness(d.business_profile_id, activeBusinessId, d.doc_code)
+        matchesActiveBusiness(d.business_profile_id, activeBusinessId, d.doc_code) &&
+        matchesActiveDeal(d.funding_deal_id, activeDealId)
       );
       setApprovals(new Set(filtered.map((d: any) => d.doc_code)));
     } catch (e) {
@@ -502,15 +518,16 @@ export default function Vault({
     try {
       const { data, error } = await supabase
         .from("user_documents")
-        .select("*, business_profile_id, doc_code")
+        .select("*, business_profile_id, doc_code, funding_deal_id")
         .eq("user_id", uid)
         .order("upload_date", { ascending: false });
       if (error) throw error;
       // Scope to active business via the shared matcher — client-scoped docs
       // (DL/PFS/MyScoreIQ) automatically surface on every tab regardless of
-      // which business they were uploaded under.
+      // which business they were uploaded under — then to the active round.
       const filtered = (data || []).filter((d: any) =>
-        matchesActiveBusiness(d.business_profile_id, activeBusinessId, d.doc_code || d.category)
+        matchesActiveBusiness(d.business_profile_id, activeBusinessId, d.doc_code || d.category) &&
+        matchesActiveDeal(d.funding_deal_id, activeDealId)
       );
       setDocuments(filtered);
       const { data: v } = await supabase.from("client_data_vault").select("data_vault_submitted_at").eq("user_id", uid).maybeSingle();
@@ -712,6 +729,7 @@ export default function Vault({
                   userId={userId || ""}
                   clientName={clientName}
                   activeBusinessId={activeBusinessId}
+                  activeDealId={activeDealId}
                   onUploadComplete={() => fetchDocuments(userId || "", true)}
                   onDelete={handleDelete}
                   onEdit={d => set_renaming_file({ id: d.id, label: d.custom_label || d.name })}
@@ -744,6 +762,7 @@ export default function Vault({
                   userId={userId || ""}
                   clientName={clientName}
                   activeBusinessId={activeBusinessId}
+                  activeDealId={activeDealId}
                   onUploadComplete={() => fetchDocuments(userId || "", true)}
                   onDelete={handleDelete}
                   onEdit={d => set_renaming_file({ id: d.id, label: d.custom_label || d.name })}

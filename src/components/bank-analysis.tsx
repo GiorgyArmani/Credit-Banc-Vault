@@ -824,6 +824,8 @@ interface ClientOption {
   avg_monthly_deposits: number;
   avg_annual_revenue: number;
   proposed_loan_type: string;
+  /** "Reason for Funding" in the Slack deal summary (e.g. "Working Capital"). */
+  loan_purpose?: string;
 }
 
 // Per-business projection. Multi-business clients (~1% of the book) own >1 row
@@ -999,6 +1001,16 @@ export default function BankAnalysis() {
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [exportPeriods, setExportPeriods] = useState<number[]>([]);
 
+  // ── Send-to-Slack composer ────────────────────────────────────────────────
+  // `slackRange` drives the numbers in the summary text (the team quotes the
+  // 3-month window by convention); `slackPdfPeriods` drives the attached PDF,
+  // which can cover more windows than the summary quotes.
+  const [showSlackDialog, setShowSlackDialog] = useState(false);
+  const [slackRange, setSlackRange] = useState<number>(3);
+  const [slackPdfPeriods, setSlackPdfPeriods] = useState<number[]>([3]);
+  const [slackNote, setSlackNote] = useState("");
+  const [isSendingSlack, setIsSendingSlack] = useState(false);
+
   // Always count backwards from previous month
   // e.g. current=March(2), previous=February(1), 3 months: [Dec(11), Jan(0), Feb(1)]
   const prevMonthIdx = (new Date().getMonth() - 1 + 12) % 12;
@@ -1008,7 +1020,7 @@ export default function BankAnalysis() {
   useEffect(() => {
     supabase
       .from("client_data_vault")
-      .select("id, client_name, company_name, client_phone, owner_1_name, owner_2_name, capital_requested, credit_score, business_start_date, legal_entity_type, num_owners:number_of_owners, company_state, industry, avg_monthly_deposits, avg_annual_revenue, proposed_loan_type")
+      .select("id, client_name, company_name, client_phone, owner_1_name, owner_2_name, capital_requested, credit_score, business_start_date, legal_entity_type, num_owners:number_of_owners, company_state, industry, avg_monthly_deposits, avg_annual_revenue, proposed_loan_type, loan_purpose")
       .order("client_name", { ascending: true })
       .then(({ data }) => {
         if (!data) return;
@@ -1517,15 +1529,21 @@ export default function BankAnalysis() {
     }
   };
 
-  // ─── Export to PDF ─────────────────────────────────────────────────────────
-  const exportToPDF = async (selectedPeriods: number[]) => {
-    setShowExportDialog(false);
+  // ─── PDF construction ──────────────────────────────────────────────────────
+  // Shared by "Export PDF" (browser download) and "Send to Slack" (uploaded as
+  // an attachment) so both always ship byte-identical documents. Returns the
+  // blob plus the canonical filename.
+  const buildPdfBlob = async (
+    selectedPeriods: number[],
+  ): Promise<{ blob: Blob; filename: string }> => {
     // Render the chosen windows ascending so the comparison + breakdown pages
     // read 3 → 4 → 6 → 12. Guard against an empty selection.
     const ranges = [...new Set(selectedPeriods)].sort((a, b) => a - b);
     const periodViews = (ranges.length > 0 ? ranges : [monthRange]).map(buildPeriodView);
-    setIsExporting(true);
-    try {
+    {
+      // (Block scope kept so the extraction from exportToPDF stayed a pure move —
+      // the body below is unchanged from when it lived inside that try/catch.)
+      //
       // Dynamic import keeps @react-pdf/renderer's heavy client bundle out of
       // the initial page load — we only pay for it when someone clicks Export.
       const { pdf } = await import("@react-pdf/renderer");
@@ -1621,20 +1639,31 @@ export default function BankAnalysis() {
 
       const blob = await pdf(<BankAnalysisPDF data={pdfData} />).toBlob();
 
-      // Trigger browser download
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
       const safeName = (businessName || "bank-analysis")
         .replace(/[^a-z0-9\-_]+/gi, "_")
         .slice(0, 60);
       const stamp = new Date().toISOString().slice(0, 10);
+      return { blob, filename: `${safeName}_bank-analysis_${stamp}.pdf` };
+    }
+  };
+
+  // ─── Export to PDF ─────────────────────────────────────────────────────────
+  const exportToPDF = async (selectedPeriods: number[]) => {
+    setShowExportDialog(false);
+    setIsExporting(true);
+    try {
+      const { blob, filename } = await buildPdfBlob(selectedPeriods);
+
+      // Trigger browser download
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
       a.href = url;
-      a.download = `${safeName}_bank-analysis_${stamp}.pdf`;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      toast.success("PDF exported", { description: a.download });
+      toast.success("PDF exported", { description: filename });
     } catch (err: any) {
       console.error("PDF export error:", err);
       toast.error("Failed to export PDF", {
@@ -1642,6 +1671,155 @@ export default function BankAnalysis() {
       });
     } finally {
       setIsExporting(false);
+    }
+  };
+
+  // ─── Slack deal summary ────────────────────────────────────────────────────
+  // Reproduces the block UW has been pasting into the deal channel by hand.
+  // Layout is deliberately plain text (Slack mrkdwn): the team reads these on
+  // mobile, where tables and attachments collapse.
+  //
+  //   Amount Requested: $120,000
+  //
+  //   3 MONTHS SUMMARY
+  //
+  //   Average monthly revenue: $112,085     ← avg of Total Deposits over the window
+  //   Average Daily Balance: $17,476
+  //   Number of negative days: 0            ← summed across the window, not averaged
+  //   _<free-text caveat>_
+  //
+  //   Reason for Funding: Working Capital
+  //   Estimated Credit Score: 680
+  //   Existing Positions No
+  //
+  // …plus one Lender/Balance/Payment stanza per open position when there are any.
+  const buildSlackSummary = (range: number, note: string): string => {
+    const view = buildPeriodView(range);
+    const selectedClient = clientList.find((c) => c.id === selectedClientId);
+
+    const amountRequested =
+      capitalRequested || parseMoney(questions.capitalRequested) || 0;
+
+    // A position counts as real once it has a funder name — balance is routinely
+    // unknown ("N/A" in the manual messages) and amount can lag behind.
+    const livePositions = positions.filter((p) => (p.funderLender || "").trim());
+
+    const lines: string[] = [
+      `Amount Requested: ${amountRequested > 0 ? formatMoney(amountRequested) : "—"}`,
+      "",
+      `${range} MONTHS SUMMARY`,
+      "",
+      `Average monthly revenue: ${formatMoney(view.avgRevenue)}`,
+      `Average Daily Balance: ${formatMoney(view.avgDailyBalance)}`,
+      `Number of negative days: ${view.totalNegDays}`,
+    ];
+
+    // Italicised caveat line (e.g. "July's based on MTD") — omitted when blank.
+    const trimmedNote = note.trim();
+    if (trimmedNote) {
+      lines.push(`_${trimmedNote.replace(/\s+/g, " ")}_`);
+    }
+
+    lines.push(
+      "",
+      `Reason for Funding: ${selectedClient?.loan_purpose?.trim() || "—"}`,
+      `Estimated Credit Score: ${questions.ficoScore.trim() || "—"}`,
+      `Existing Positions ${livePositions.length > 0 ? "Yes" : "No"}`,
+    );
+
+    // Position figures keep their cents — a daily remit of $499.66 is not the
+    // same number as $500 to the people reading this, so formatMoney's
+    // whole-dollar rounding is wrong here.
+    const money2 = (raw: string): string => {
+      if (!(raw || "").trim()) return "N/A";
+      const n = parseMoney(raw);
+      if (!Number.isFinite(n)) return "N/A";
+      return `$${n.toLocaleString("en-US", {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 2,
+      })}`;
+    };
+
+    for (const p of livePositions) {
+      lines.push(
+        "",
+        `Lender Name: ${p.funderLender.trim()}`,
+        `Balance: ${money2(p.balance)}`,
+        `Payment: ${money2(p.amount)}`,
+      );
+    }
+
+    return lines.join("\n");
+  };
+
+  /** Open the Slack dialog, prefilling the caveat box with whatever the analyst
+   *  already typed in the per-account NOTE fields (that's where the "July is
+   *  MTD"-style warnings get written today). */
+  const openSlackDialog = () => {
+    const usable = PERIOD_PRESETS.filter((n) => n <= availableMonths);
+    const range = usable.includes(3) ? 3 : usable[usable.length - 1] ?? PERIOD_PRESETS[0];
+    const seededNote = accounts
+      .flatMap((a) => a.notes)
+      .map((n) => (n || "").trim())
+      .filter(Boolean)
+      .join(" · ");
+    setSlackRange(range);
+    setSlackPdfPeriods([range]);
+    setSlackNote(seededNote);
+    setShowSlackDialog(true);
+  };
+
+  // ─── Send summary + PDF to the deal's Slack channel ────────────────────────
+  const sendToSlack = async () => {
+    if (!selectedClientId) {
+      toast.error("Please select a client first.");
+      return;
+    }
+    setShowSlackDialog(false);
+    setIsSendingSlack(true);
+    const sendingToastId = toast.loading("Posting to Slack…");
+    try {
+      const message = buildSlackSummary(slackRange, slackNote);
+      const { blob, filename } = await buildPdfBlob(
+        slackPdfPeriods.length > 0 ? slackPdfPeriods : [slackRange],
+      );
+
+      // Serverless request bodies cap out around 4.5 MB. A normal report is
+      // well under that, but catch it here so an oversized attachment reads as
+      // a clear message instead of an opaque platform 413.
+      if (blob.size > 4 * 1024 * 1024) {
+        throw new Error(
+          "PDF is too large to post to Slack. Select fewer periods and try again.",
+        );
+      }
+
+      const form = new FormData();
+      form.append("client_id", selectedClientId);
+      form.append("message", message);
+      form.append("filename", filename);
+      form.append("file", blob, filename);
+
+      const res = await fetch("/api/slack/send-bank-analysis", {
+        method: "POST",
+        body: form,
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(payload?.error || `Request failed (${res.status})`);
+      }
+
+      toast.success("Posted to Slack", {
+        id: sendingToastId,
+        description: payload?.channel_name ? `#${payload.channel_name}` : filename,
+      });
+    } catch (err: any) {
+      console.error("Slack send error:", err);
+      toast.error("Failed to post to Slack", {
+        id: sendingToastId,
+        description: err?.message ?? "Unknown error — check console for details.",
+      });
+    } finally {
+      setIsSendingSlack(false);
     }
   };
 
@@ -2044,6 +2222,29 @@ export default function BankAnalysis() {
         {/* Final Actions */}
         <div className="mt-12 flex justify-end gap-3">
           <button
+            onClick={openSlackDialog}
+            disabled={isSendingSlack || !selectedClientId}
+            title={
+              selectedClientId
+                ? "Post the summary + PDF into this deal's Slack channel"
+                : "Load a client first"
+            }
+            className="flex items-center justify-center gap-3 px-8 py-4 font-bold text-slate-900 bg-slate-200 hover:bg-slate-300 border border-slate-300/40 rounded-2xl text-xs uppercase tracking-[0.2em] shadow-2xl shadow-black/20 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-40 disabled:hover:scale-100 group"
+          >
+            {isSendingSlack ? (
+              <>
+                <div className="w-4 h-4 border-2 border-slate-400/40 border-t-slate-700 rounded-full animate-spin" />
+                <span>Sending...</span>
+              </>
+            ) : (
+              <>
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 2 11 13" /><path d="M22 2l-7 20-4-9-9-4Z" /></svg>
+                <span>Send to Slack</span>
+              </>
+            )}
+          </button>
+
+          <button
             onClick={openExportDialog}
             disabled={isExporting}
             className="flex items-center justify-center gap-3 px-8 py-4 font-bold text-slate-900 bg-slate-200 hover:bg-slate-300 border border-slate-300/40 rounded-2xl text-xs uppercase tracking-[0.2em] shadow-2xl shadow-black/20 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-40 disabled:hover:scale-100 group"
@@ -2152,6 +2353,143 @@ export default function BankAnalysis() {
                   className="px-6 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 transition-all"
                 >
                   Export {exportPeriods.length > 0 ? `(${exportPeriods.length})` : ""}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Send to Slack composer ───────────────────────────────────────
+            Posts the summary text and the PDF as ONE message into the deal's
+            Slack channel (client_data_vault.slack_channel_id). The preview is
+            the literal message body, so what's reviewed here is what lands.
+            The summary window and the PDF windows are chosen separately: the
+            team quotes 3-month numbers by convention but often attaches a
+            wider PDF. */}
+        {showSlackDialog && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+            onClick={() => setShowSlackDialog(false)}
+          >
+            <div
+              className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white shadow-2xl border border-slate-200"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="px-6 pt-5 pb-4 border-b border-slate-100">
+                <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Send to Slack</h3>
+                <p className="mt-1 text-xs text-slate-500">
+                  Posts this summary and the bank analysis PDF to the deal&apos;s Slack channel.
+                  The channel must already exist — create it from the underwriting client page.
+                </p>
+              </div>
+
+              <div className="px-6 py-5 space-y-5">
+                {/* Summary window — single select; drives the numbers quoted. */}
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">
+                    Summary window
+                  </label>
+                  <div className="grid grid-cols-4 gap-2">
+                    {PERIOD_PRESETS.map((n) => {
+                      const enabled = n <= availableMonths || n === PERIOD_PRESETS[0];
+                      const checked = slackRange === n;
+                      return (
+                        <button
+                          key={n}
+                          type="button"
+                          disabled={!enabled}
+                          onClick={() => setSlackRange(n)}
+                          className={`rounded-xl border px-3 py-2.5 text-xs font-mono font-bold tracking-wider transition-all ${
+                            !enabled
+                              ? "border-slate-100 bg-slate-50 text-slate-300 cursor-not-allowed"
+                              : checked
+                                ? "border-emerald-500 bg-emerald-500 text-white shadow-[0_0_8px_rgba(16,185,129,0.4)]"
+                                : "border-slate-200 bg-white text-slate-600 hover:border-emerald-500/50"
+                          }`}
+                          title={enabled ? "" : `Needs ${n} months of data`}
+                        >
+                          {n} Mo
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Attached PDF windows — multi select, independent of the above. */}
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">
+                    Attached PDF — periods
+                  </label>
+                  <div className="grid grid-cols-4 gap-2">
+                    {PERIOD_PRESETS.map((n) => {
+                      const enabled = n <= availableMonths || n === PERIOD_PRESETS[0];
+                      const checked = slackPdfPeriods.includes(n);
+                      return (
+                        <button
+                          key={n}
+                          type="button"
+                          disabled={!enabled}
+                          onClick={() =>
+                            setSlackPdfPeriods((prev) =>
+                              prev.includes(n) ? prev.filter((p) => p !== n) : [...prev, n],
+                            )
+                          }
+                          className={`rounded-xl border px-3 py-2.5 text-xs font-mono font-bold tracking-wider transition-all ${
+                            !enabled
+                              ? "border-slate-100 bg-slate-50 text-slate-300 cursor-not-allowed"
+                              : checked
+                                ? "border-slate-800 bg-slate-800 text-white"
+                                : "border-slate-200 bg-white text-slate-600 hover:border-slate-400"
+                          }`}
+                          title={enabled ? "" : `Needs ${n} months of data`}
+                        >
+                          {n} Mo
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Caveat line — seeded from the account NOTE fields, editable. */}
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">
+                    Caveat note <span className="normal-case tracking-normal font-normal text-slate-400">(italic line under the figures — leave blank to omit)</span>
+                  </label>
+                  <textarea
+                    value={slackNote}
+                    onChange={(e) => setSlackNote(e.target.value)}
+                    rows={2}
+                    placeholder="e.g. July bank statement required for accurate input, July's based on MTD"
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-700 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/30 resize-none"
+                  />
+                </div>
+
+                {/* Live preview of the exact message body. */}
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">
+                    Message preview
+                  </label>
+                  <pre className="whitespace-pre-wrap break-words rounded-xl bg-slate-50 border border-slate-200 px-4 py-3 text-xs text-slate-700 font-mono leading-relaxed max-h-60 overflow-y-auto">
+                    {buildSlackSummary(slackRange, slackNote)}
+                  </pre>
+                </div>
+              </div>
+
+              <div className="px-6 pb-5 pt-1 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowSlackDialog(false)}
+                  className="px-5 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={slackPdfPeriods.length === 0}
+                  onClick={sendToSlack}
+                  className="px-6 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 transition-all"
+                >
+                  Send to Slack
                 </button>
               </div>
             </div>

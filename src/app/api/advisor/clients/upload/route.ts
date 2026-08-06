@@ -31,7 +31,8 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createClient as createAdminClient } from '@supabase/supabase-js';
 import { ghlAddTags } from '@/lib/ghl-api';
-import { isClientScopedDoc } from '@/lib/document-scope';
+import { isCarryOverDoc, isClientScopedDoc } from '@/lib/document-scope';
+import { getActiveDeal } from '@/lib/funding-deals';
 
 export const maxDuration = 60;
 
@@ -160,6 +161,16 @@ export async function POST(request: Request) {
             ? null
             : business_profile_id;
 
+        // Stamp the funding round this upload belongs to, so a later renewal
+        // starts with a clean packet instead of inheriting these files. Carry-
+        // over paperwork (identity + entity docs) is left NULL on purpose —
+        // NULL means "serves every round".
+        let resolved_funding_deal_id: string | null = null;
+        if (resolved_business_profile_id && !isCarryOverDoc(doc_code)) {
+            const active_deal = await getActiveDeal(supabase_admin, resolved_business_profile_id);
+            resolved_funding_deal_id = active_deal?.id ?? null;
+        }
+
         // ========================================================================
         // STEP 4: LOOK UP DOC METADATA (label + is_core)
         // ========================================================================
@@ -202,6 +213,7 @@ export async function POST(request: Request) {
                     custom_label: standardized_name,
                     uploaded_by_role: 'advisor',
                     business_profile_id: resolved_business_profile_id,
+                    funding_deal_id: resolved_funding_deal_id,
                     metadata: { tags: [doc_code], uploaded_by: 'advisor', advisor_id: advisor_data?.id ?? null },
                 })
                 .select('*')

@@ -2,8 +2,9 @@
 //
 // Service-role helpers for lender document share links. A staff member
 // generates an expiring, unguessable link to a public page (/share/[token])
-// that lists a client's APPROVED documents for one business, so the file can be
-// handed to an external lender.
+// that lists the documents they picked for one business, so the file can be
+// handed to an external lender. Sharing is NOT gated on advisor approval —
+// staff shop a deal well before the packet is signed off.
 //
 // Everything here runs server-side with the service role — the table is
 // RLS-locked with no policies, so it is unreachable any other way. Validation
@@ -41,19 +42,15 @@ export interface ShareLinkRow {
   selected_document_ids: string[] | null;
 }
 
-/** One selectable document category for the share modal. */
-export interface ShareableDocCode {
-  code: string;
-  label: string;
-  file_count: number;
-}
-
 /** One selectable file for the share modal (grouped under its category label). */
 export interface ShareableFile {
   id: string;
   file_name: string;
   doc_code: string;
   label: string;
+  /** Whether the category has an advisor approval. Shown as a badge so staff
+   *  know what they're sending — it is NOT a gate on sharing. */
+  approved: boolean;
 }
 
 export interface SharedDocument {
@@ -86,9 +83,8 @@ export async function createShareLink(params: {
   created_by_email: string | null;
   label: string | null;
   expires_in_days: number;
-  /** Subset of doc codes to expose; null shares every approved doc. */
-  selected_doc_codes: string[] | null;
-  /** Specific file ids to expose; takes precedence over codes when set. */
+  /** Exact file ids to expose. Always set by the share modal; null only on
+   *  legacy rows, which fall back to "every approved doc". */
   selected_document_ids: string[] | null;
 }): Promise<ShareLinkRow | null> {
   const supabase = createAdminClient();
@@ -107,7 +103,6 @@ export async function createShareLink(params: {
       created_by_email: params.created_by_email,
       label: params.label,
       expires_at,
-      selected_doc_codes: params.selected_doc_codes,
       selected_document_ids: params.selected_document_ids,
     })
     .select("*")
@@ -162,69 +157,11 @@ export async function revokeShareLink(id: string): Promise<boolean> {
 }
 
 /**
- * The approved document categories a staff member can choose from when minting a
- * share link — one entry per approved code that has at least one uploaded file
- * for the active business. Drives the checkbox list in the share modal.
- */
-export async function listShareableDocCodes(
-  client_id: string,
-  business_profile_id: string | null
-): Promise<ShareableDocCode[]> {
-  const supabase = createAdminClient();
-
-  const { data: client } = await supabase
-    .from("client_data_vault")
-    .select("user_id")
-    .eq("id", client_id)
-    .maybeSingle();
-  if (!client?.user_id) return [];
-
-  const { data: approvals } = await supabase
-    .from("document_category_approvals")
-    .select("doc_code, business_profile_id")
-    .eq("client_vault_id", client_id);
-
-  const approved_codes = new Set<string>(
-    (approvals ?? [])
-      .filter((a: any) => matchesActiveBusiness(a.business_profile_id, business_profile_id, a.doc_code))
-      .map((a: any) => a.doc_code as string)
-  );
-  if (approved_codes.size === 0) return [];
-
-  const { data: required } = await supabase
-    .from("required_documents")
-    .select("code, label");
-  const label_by_code = new Map<string, string>(
-    (required ?? []).map((r: any) => [r.code as string, r.label as string])
-  );
-
-  const { data: docs } = await supabase
-    .from("user_documents")
-    .select("doc_code, category, business_profile_id")
-    .eq("user_id", client.user_id);
-
-  // Count eligible files per approved code (same gate as resolveShareLink).
-  const counts = new Map<string, number>();
-  for (const d of (docs ?? []) as any[]) {
-    const code = (d.doc_code ?? d.category ?? null) as string | null;
-    if (!code || !approved_codes.has(code)) continue;
-    if (!matchesActiveBusiness(d.business_profile_id, business_profile_id, code)) continue;
-    counts.set(code, (counts.get(code) ?? 0) + 1);
-  }
-
-  return Array.from(counts.entries())
-    .map(([code, file_count]) => ({
-      code,
-      label: label_by_code.get(code) || code,
-      file_count,
-    }))
-    .sort((a, b) => a.label.localeCompare(b.label));
-}
-
-/**
- * The individual approved files a staff member can pick from when minting a
- * share link — one entry per uploaded file whose category is approved for the
- * active business. Drives the per-file checkbox list in the share modal.
+ * Every file a staff member can pick from when minting a share link — one entry
+ * per uploaded file on the active business. Approval is reported per file
+ * (`approved`) so the modal can badge un-reviewed docs, but it is deliberately
+ * NOT a filter: UW/admin share files with lenders long before the packet is
+ * fully approved, so waiting on approvals would block the whole workflow.
  */
 export async function listShareableFiles(
   client_id: string,
@@ -249,7 +186,6 @@ export async function listShareableFiles(
       .filter((a: any) => matchesActiveBusiness(a.business_profile_id, business_profile_id, a.doc_code))
       .map((a: any) => a.doc_code as string)
   );
-  if (approved_codes.size === 0) return [];
 
   const { data: required } = await supabase
     .from("required_documents")
@@ -260,19 +196,22 @@ export async function listShareableFiles(
 
   const { data: docs } = await supabase
     .from("user_documents")
-    .select("id, name, custom_label, doc_code, category, business_profile_id")
+    .select("id, name, custom_label, doc_code, category, business_profile_id, status")
     .eq("user_id", client.user_id);
 
   const files: ShareableFile[] = [];
   for (const d of (docs ?? []) as any[]) {
     const code = (d.doc_code ?? d.category ?? null) as string | null;
-    if (!code || !approved_codes.has(code)) continue;
+    if (!code) continue;
+    // Rejected uploads are known-bad — never offer them to a lender.
+    if (d.status === "rejected") continue;
     if (!matchesActiveBusiness(d.business_profile_id, business_profile_id, code)) continue;
     files.push({
       id: d.id as string,
       file_name: (d.custom_label || d.name || "Document") as string,
       doc_code: code,
       label: label_by_code.get(code) || code,
+      approved: approved_codes.has(code),
     });
   }
 
@@ -283,8 +222,14 @@ export async function listShareableFiles(
 }
 
 /**
- * Resolve a token into the client's approved, signed documents — or null when
- * the token is unknown, revoked, or expired. Also bumps view tracking.
+ * Resolve a token into the shared, signed documents — or null when the token is
+ * unknown, revoked, or expired. Also bumps view tracking.
+ *
+ * A link stores the exact files staff picked, so that list is authoritative:
+ * the approval state at mint time doesn't re-filter it later (a doc approved
+ * after the link was made still isn't shared; a doc shared before approval
+ * stays shared). Legacy links with no stored selection fall back to the old
+ * "every approved doc for this business" behavior.
  */
 export async function resolveShareLink(token: string): Promise<ResolvedShare | null> {
   if (!token) return null;
@@ -315,18 +260,29 @@ export async function resolveShareLink(token: string): Promise<ResolvedShare | n
 
   const business_profile_id = link.business_profile_id as string | null;
 
-  // Approved doc codes for this business (client-scoped approvals surface on
-  // every business via matchesActiveBusiness).
-  const { data: approvals } = await supabase
-    .from("document_category_approvals")
-    .select("doc_code, business_profile_id")
-    .eq("client_vault_id", link.client_id);
+  // A link may expose only a chosen subset of files. Precedence:
+  //   1. selected_document_ids — the exact files staff picked (current behavior).
+  //   2. selected_doc_codes — legacy category-level selection, approved-only.
+  //   3. neither — legacy "every approved file".
+  const selected_ids = (link.selected_document_ids as string[] | null) ?? null;
+  const id_set = selected_ids ? new Set(selected_ids) : null;
+  const selected_codes = (link.selected_doc_codes as string[] | null) ?? null;
+  const code_set = selected_codes ? new Set(selected_codes) : null;
 
-  const approved_codes = new Set<string>(
-    (approvals ?? [])
-      .filter((a: any) => matchesActiveBusiness(a.business_profile_id, business_profile_id, a.doc_code))
-      .map((a: any) => a.doc_code as string)
-  );
+  // Approved doc codes for this business (client-scoped approvals surface on
+  // every business via matchesActiveBusiness). Only the legacy paths need them.
+  const approved_codes = new Set<string>();
+  if (!id_set) {
+    const { data: approvals } = await supabase
+      .from("document_category_approvals")
+      .select("doc_code, business_profile_id")
+      .eq("client_vault_id", link.client_id);
+    for (const a of (approvals ?? []) as any[]) {
+      if (matchesActiveBusiness(a.business_profile_id, business_profile_id, a.doc_code)) {
+        approved_codes.add(a.doc_code as string);
+      }
+    }
+  }
 
   // Human labels per doc code.
   const { data: required } = await supabase
@@ -336,27 +292,20 @@ export async function resolveShareLink(token: string): Promise<ResolvedShare | n
     (required ?? []).map((r: any) => [r.code as string, r.label as string])
   );
 
-  // The client's uploaded files, kept only if their category is approved AND
-  // belongs to this business tab.
+  // The client's uploaded files, narrowed to this business tab and then to the
+  // link's stored selection (or, on legacy links, to approved categories).
   const { data: docs } = await supabase
     .from("user_documents")
     .select("id, name, custom_label, size, type, category, doc_code, business_profile_id, storage_path")
     .eq("user_id", client.user_id);
 
-  // A link may expose only a chosen subset of files. Precedence:
-  //   1. selected_document_ids — exact files the staff member picked.
-  //   2. selected_doc_codes — legacy category-level selection.
-  //   3. neither — every approved file.
-  const selected_ids = (link.selected_document_ids as string[] | null) ?? null;
-  const id_set = selected_ids ? new Set(selected_ids) : null;
-  const selected_codes = (link.selected_doc_codes as string[] | null) ?? null;
-  const code_set = selected_codes ? new Set(selected_codes) : null;
-
   const eligible = (docs ?? []).filter((d: any) => {
     const code = (d.doc_code ?? d.category ?? null) as string | null;
-    if (!code || !approved_codes.has(code)) return false;
+    if (!code) return false;
     if (!matchesActiveBusiness(d.business_profile_id, business_profile_id, code)) return false;
+    // The stored file list is the whole gate — it was chosen deliberately.
     if (id_set) return id_set.has(d.id);
+    if (!approved_codes.has(code)) return false;
     if (code_set) return code_set.has(code);
     return true;
   });

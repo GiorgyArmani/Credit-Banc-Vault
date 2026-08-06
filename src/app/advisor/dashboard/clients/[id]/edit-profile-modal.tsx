@@ -161,7 +161,15 @@ export function EditProfileModal({ isOpen, onClose, onSuccess, clientData, busin
                 ? await updateBusinessProfile(clientData.id, businessProfileId!, submissionValues)
                 : await updateClientProfile(clientData.id, submissionValues);
             if (result.success) {
-                toast.success(editingBusiness ? "Business updated successfully" : "Client profile updated successfully");
+                // A partial save (e.g. the funding ask skipped because the
+                // business's latest round is already funded) reports itself
+                // rather than passing as a clean success.
+                const warning = (result as any).warning as string | undefined;
+                if (warning) {
+                    toast.warning(warning, { duration: 8000 });
+                } else {
+                    toast.success(editingBusiness ? "Business updated successfully" : "Client profile updated successfully");
+                }
                 if (onSuccess) onSuccess();
                 router.refresh();
                 onClose();

@@ -1,7 +1,7 @@
 // src/app/advisor/dashboard/clients/[id]/page.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter, useParams, usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -74,6 +74,7 @@ import { DocumentUploadStatus } from "./_components/document-upload-status";
 import { InternalCommunication } from "./_components/internal-communication";
 import { SubmitUnderwritingCTA } from "./_components/submit-underwriting-cta";
 import { ClientFollowersCard } from "./_components/client-followers-card";
+import { FundingRoundsCard } from "@/components/funding/funding-rounds-card";
 import { listClientFollowers, type FollowerRow } from "./follower-actions";
 import { ClientNotesCard, type FileNote } from "./_components/client-notes-card";
 // M2 / Communications Hub — hidden until the outbound-email identity question is
@@ -85,7 +86,7 @@ import { ClientNotesCard, type FileNote } from "./_components/client-notes-card"
 // import { CommunicationsTimeline } from "./_components/communications-timeline";
 import { AdminLenderReviewCard } from "@/components/admin/admin-lender-review-card";
 import { CollapsibleSection, broadcast_toggle_all } from "./_components/collapsible-section";
-import { isClientScopedDoc, matchesActiveBusiness, normalizeSupabaseJoin } from "@/lib/document-scope";
+import { isClientScopedDoc, matchesActiveBusiness, matchesActiveDeal, normalizeSupabaseJoin } from "@/lib/document-scope";
 
 /**
  * ============================================================================
@@ -371,7 +372,7 @@ export default function AdvisorClientDetailsPage() {
     const [required_docs, set_required_docs] = useState<{ code: string; label: string; business_profile_id?: string | null }[]>([]);
     // approvals-raw: each approval carries its business_profile_id so the
     // approvals Set can be derived per active tab.
-    const [approvals_raw, set_approvals_raw] = useState<{ doc_code: string; business_profile_id: string | null }[]>([]);
+    const [approvals_raw, set_approvals_raw] = useState<{ doc_code: string; business_profile_id: string | null; funding_deal_id: string | null }[]>([]);
 
     // all-available-docs-state: Stores all possible document types for request
     const [all_doc_types, set_all_doc_types] = useState<{ id: string; code: string; label: string }[]>([]);
@@ -478,13 +479,22 @@ export default function AdvisorClientDetailsPage() {
     // `approvals` is derived from approvals_raw filtered by the active tab,
     // so switching businesses automatically recomputes which categories are
     // shown as approved + drives the completion percentage.
+    // The funding round on screen — the business's newest funding_deals row.
+    // Rows stamped with an older round belong to a financing that already
+    // closed and drop out of the active view. See [[funding_deals_refactor]].
+    const active_deal_id = useMemo<string | null>(
+        () => businesses.find((b) => b.id === active_business_id)?.active_deal_id ?? null,
+        [businesses, active_business_id]
+    );
+
     const approvals = useMemo<Set<string>>(() => {
         return new Set(
             approvals_raw
                 .filter((a) => matchesActiveBusiness(a.business_profile_id, active_business_id, a.doc_code))
+                .filter((a) => matchesActiveDeal((a as any).funding_deal_id ?? null, active_deal_id))
                 .map((a) => a.doc_code)
         );
-    }, [approvals_raw, active_business_id]);
+    }, [approvals_raw, active_business_id, active_deal_id]);
 
     // Scoped versions of the dynamic doc requests + uploaded files for the
     // active business tab. The matchesActiveBusiness predicate also lets
@@ -496,6 +506,9 @@ export default function AdvisorClientDetailsPage() {
         return documents.filter((d) => {
             const code = (d as any).doc_code ?? (d as any).category ?? null;
             const bpid = (d as any).business_profile_id ?? null;
+            // Files stamped with a previous round stay in the vault as that
+            // round's record but leave the current packet.
+            if (!matchesActiveDeal((d as any).funding_deal_id ?? null, active_deal_id)) return false;
             if (matchesActiveBusiness(bpid, active_business_id, code)) return true;
             // Resilience: a legacy/unscoped upload (business_profile_id = null,
             // e.g. a funding application e-signed before per-business scoping)
@@ -505,7 +518,7 @@ export default function AdvisorClientDetailsPage() {
             if (bpid === null && active_is_primary) return true;
             return false;
         });
-    }, [documents, active_business_id, businesses]);
+    }, [documents, active_business_id, businesses, active_deal_id]);
 
     // Categories to render in the doc-status accordion = (active dynamic
     // requests for the business, deduped by code) ∪ (categories of uploaded
@@ -577,7 +590,13 @@ export default function AdvisorClientDetailsPage() {
     // ============================================
     // FETCH CLIENT DATA ON MOUNT
     // ============================================
+    // First load blanks the page; refetches after an action (status change, doc
+    // request, new round) run in place. Reset per client so navigating to a
+    // different file still gets its own loading state.
+    const has_loaded_once = useRef(false);
+
     useEffect(() => {
+        has_loaded_once.current = false;
         if (client_id) {
             fetch_client_details();
         }
@@ -676,15 +695,30 @@ export default function AdvisorClientDetailsPage() {
      */
     async function fetch_client_details() {
         try {
-            set_component_state(ComponentState.LOADING);
+            // Only the first load blanks the page — a refetch triggered by an
+            // action must not unmount everything and lose the user's place.
+            if (!has_loaded_once.current) {
+                set_component_state(ComponentState.LOADING);
+            }
+
+            // Failure handling differs by phase: on first load there's nothing
+            // to show but the error; on a background refresh the page already
+            // holds good data, so a transient failure is a toast, not a wipe.
+            const fail = (message: string) => {
+                if (!has_loaded_once.current) {
+                    set_error_message(message);
+                    set_component_state(ComponentState.ERROR);
+                } else {
+                    toast.error(message);
+                }
+            };
 
             // ============================================
             // STEP 1+2: RESOLVE IDENTITY (cached across navigations)
             // ============================================
             const identity = await resolve_identity_cached(supabase);
             if (!identity) {
-                set_error_message("Authentication failed. Please log in again.");
-                set_component_state(ComponentState.ERROR);
+                fail("Authentication failed. Please log in again.");
                 return;
             }
             // Admins can view any client; advisors must have an advisor profile.
@@ -695,10 +729,7 @@ export default function AdvisorClientDetailsPage() {
                 return;
             }
             if (!is_admin_user && !identity.advisor) {
-                set_error_message(
-                    "No advisor profile found. Please contact support to set up your advisor account."
-                );
-                set_component_state(ComponentState.ERROR);
+                fail("No advisor profile found. Please contact support to set up your advisor account.");
                 return;
             }
             const advisor_data = identity.advisor;
@@ -746,15 +777,13 @@ export default function AdvisorClientDetailsPage() {
 
             if (client_error) {
                 console.error("❌ Error fetching client:", client_error);
-                set_error_message("Error loading client information.");
-                set_component_state(ComponentState.ERROR);
+                fail("Error loading client information.");
                 return;
             }
 
             if (!client_data) {
                 console.error("❌ Client not found");
-                set_error_message("Client not found.");
-                set_component_state(ComponentState.ERROR);
+                fail("Client not found.");
                 return;
             }
 
@@ -846,12 +875,12 @@ export default function AdvisorClientDetailsPage() {
                 getClientPipelineHistory(client_id),
                 supabase
                     .from("document_category_approvals")
-                    .select("doc_code, business_profile_id")
+                    .select("doc_code, business_profile_id, funding_deal_id")
                     .eq("client_vault_id", client_id),
                 getBulkClientActivity([client_id]),
                 supabase
                     .from("business_profiles")
-                    .select("id, company_name, is_primary, display_order, legal_entity_type, business_start_date, company_city, company_state, company_zip_code, avg_monthly_deposits, avg_annual_revenue, employees_count, is_home_based, industry, funding_deals (capital_requested, proposed_loan_type, loan_purpose, funding_eta, display_order)")
+                    .select("id, company_name, is_primary, display_order, legal_entity_type, business_start_date, company_city, company_state, company_zip_code, avg_monthly_deposits, avg_annual_revenue, employees_count, is_home_based, industry, funding_deals (id, capital_requested, proposed_loan_type, loan_purpose, funding_eta, display_order, funded_at)")
                     .eq("client_vault_id", client_id)
                     .order("is_primary", { ascending: false })
                     .order("display_order", { ascending: true })
@@ -928,6 +957,7 @@ export default function AdvisorClientDetailsPage() {
                 set_approvals_raw((approvals_result.data || []).map((a: any) => ({
                     doc_code: a.doc_code,
                     business_profile_id: a.business_profile_id ?? null,
+                    funding_deal_id: a.funding_deal_id ?? null,
                 })));
             }
 
@@ -940,13 +970,14 @@ export default function AdvisorClientDetailsPage() {
             } else {
                 // Flatten each business's funding ask (lives on funding_deals,
                 // not business_profiles) onto the tab row so switching tabs can
-                // rescope the funding figures. Pick the lowest-display_order deal
-                // as the business's primary ask.
+                // rescope the funding figures. The ask shown is the CURRENT
+                // round's — the highest-display_order deal — so a repeat client
+                // doesn't have last year's closed ask in their header.
                 const rows = (businesses_result.data || []).map((b: any): BusinessTab => {
                     const deals = Array.isArray(b.funding_deals) ? b.funding_deals : [];
                     const deal = deals
                         .slice()
-                        .sort((x: any, y: any) => (x.display_order ?? 0) - (y.display_order ?? 0))[0] ?? null;
+                        .sort((x: any, y: any) => (y.display_order ?? 0) - (x.display_order ?? 0))[0] ?? null;
                     const { funding_deals: _drop, ...rest } = b;
                     return {
                         ...rest,
@@ -954,6 +985,9 @@ export default function AdvisorClientDetailsPage() {
                         proposed_loan_type: deal?.proposed_loan_type ?? null,
                         loan_purpose: deal?.loan_purpose ?? null,
                         funding_eta: deal?.funding_eta ?? null,
+                        active_deal_id: deal?.id ?? null,
+                        active_deal_funded_at: deal?.funded_at ?? null,
+                        deal_count: deals.length,
                     };
                 });
                 set_businesses(rows);
@@ -964,11 +998,18 @@ export default function AdvisorClientDetailsPage() {
                 }
             }
 
+            has_loaded_once.current = true;
             set_component_state(ComponentState.SUCCESS);
         } catch (error: any) {
             console.error("❌ Unexpected error:", error);
-            set_error_message(error.message || "An unexpected error occurred.");
-            set_component_state(ComponentState.ERROR);
+            // A failed background refresh leaves the working page alone — what's
+            // on screen is still the last good copy.
+            if (!has_loaded_once.current) {
+                set_error_message(error.message || "An unexpected error occurred.");
+                set_component_state(ComponentState.ERROR);
+            } else {
+                toast.error(error.message || "Couldn't refresh this client's data.");
+            }
         }
     }
 
@@ -1009,7 +1050,9 @@ export default function AdvisorClientDetailsPage() {
                     if (prev.some((a) => a.doc_code === code && a.business_profile_id === business_profile_id)) {
                         return prev;
                     }
-                    return [...prev, { doc_code: code, business_profile_id }];
+                    // Optimistic row for the round being worked, so the freshly
+                    // approved category doesn't blink back to unapproved.
+                    return [...prev, { doc_code: code, business_profile_id, funding_deal_id: active_deal_id }];
                 });
                 setIs_approving_modal_open(false);
                 set_category_to_approve(null);
@@ -2211,6 +2254,19 @@ export default function AdvisorClientDetailsPage() {
                         onFollowersChange={set_followers_list}
                     />
                 </CollapsibleSection>
+
+                {/* ── Funding rounds ───────────────────────────────────
+                    Every financing this business has taken, so a repeat
+                    client's history is readable instead of overwritten.
+                    Advisors see it; only admins open the next round. */}
+                <div className="mb-6">
+                    <FundingRoundsCard
+                        clientId={client_profile.id}
+                        businessProfileId={active_business_id}
+                        canStartRound={is_admin_path}
+                        onRoundStarted={fetch_client_details}
+                    />
+                </div>
 
                 {/* ── Admin Lender Review (admin-only) ──────────────────
                     UW selects matched lenders; admins approve which ones

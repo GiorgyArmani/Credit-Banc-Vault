@@ -61,9 +61,23 @@ const CONTACT_STEP = FIRST_CHOICE_STEP + CHOICE_STEPS.length; // 7
 export function AffiliateLeadForm({
   code,
   affiliateFirstName,
+  onQualified,
+  showHero = true,
 }: {
   code: string;
   affiliateFirstName?: string | null;
+  /**
+   * Fired once the lead qualifies and the booking calendar takes over. The
+   * landing page uses it to retire its "see if you pre-qualify" CTAs — they'd
+   * be pointing at a calendar the visitor has already earned.
+   */
+  onQualified?: () => void;
+  /**
+   * The form ships with its own hero for surfaces that drop it in bare. The
+   * /r/<code> landing page renders its own hero at the top of the page and the
+   * form at the bottom, so it turns this off.
+   */
+  showHero?: boolean;
 }) {
   const stepperRef = useRef<StepperHandle>(null);
   const [currentStep, setCurrentStep] = useState(1);
@@ -127,6 +141,7 @@ export function AffiliateLeadForm({
       const data = await res.json();
       if (data.qualified) {
         setQualified(true);
+        onQualified?.();
       } else {
         // Disqualified — send them to the thanks-for-applying page.
         window.location.href = DISQUALIFY_URL;
@@ -245,7 +260,7 @@ export function AffiliateLeadForm({
 
   // Hero shown above the flow for every non-qualified state; hidden once the
   // booking calendar takes over so it isn't redundant with "You're pre-qualified".
-  const hero = (
+  const hero = !showHero ? null : (
     <div className="text-center mb-12">
       <div className="mx-auto w-16 h-16 bg-cb-mint text-cb-navy rounded-2xl flex items-center justify-center mb-6 shadow-xl shadow-cb-mint/25">
         <Gift className="h-8 w-8" />
@@ -326,12 +341,15 @@ export function AffiliateLeadForm({
         <p className="text-cb-mint font-semibold mt-1 mb-6">Takes about 30 seconds. 👋</p>
         <div className="grid gap-2">
           <Label htmlFor="ref-full-name" className={labelClass}>Full Name</Label>
+          {/* No autoFocus. Browsers scroll a focused element into view on
+              load, and this form now sits at the foot of a long landing page —
+              autofocusing it dumped every visitor past the entire pitch and
+              straight onto step 1. */}
           <Input
             id="ref-full-name"
             type="text"
             placeholder="Your full name"
             required
-            autoFocus
             value={name}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={onEnter(!!name.trim())}

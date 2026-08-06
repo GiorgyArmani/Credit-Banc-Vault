@@ -635,11 +635,17 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
     // Only rows from the matching tool are cleared — admin-added manual lenders
     // (source = 'admin_manual') are preserved so the admin doesn't lose their
     // additions when UW re-runs the engine.
+    //
+    // A row already flipped to 'funded' is NOT a match any more, it's the record
+    // of who funded the deal. Re-matching a repeat client for their next round
+    // used to delete it, erasing the only structured trace of the previous
+    // round's funder. Those rows survive every re-run.
     await supabase
       .from("client_lender_assignments")
       .delete()
       .eq("client_id", selectedClientId)
-      .eq("source", "match_tool");
+      .eq("source", "match_tool")
+      .neq("status", "funded");
 
     // Only insert lenders UW recommended (decision === "approved").
     // Skipped/unselected matches are simply not stored — admin sees a clean

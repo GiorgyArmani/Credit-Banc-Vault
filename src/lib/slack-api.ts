@@ -45,6 +45,23 @@ async function slackPost(method: string, token: string, body: Record<string, any
 }
 
 /**
+ * Same as slackPost but form-encoded. A handful of Web API methods — notably
+ * files.getUploadURLExternal — reject application/json and only read
+ * x-www-form-urlencoded params.
+ */
+async function slackPostForm(method: string, token: string, params: Record<string, string>): Promise<any> {
+  const res = await fetch(`${BASE}/${method}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
+    },
+    body: new URLSearchParams(params).toString(),
+  });
+  return handle(res);
+}
+
+/**
  * Slack channel names must be lowercase, <= 80 chars, and contain only letters,
  * numbers, hyphens, and underscores. Turn a company name into a valid slug.
  */
@@ -168,6 +185,64 @@ export async function slackPostMessage(channelId: string, text: string): Promise
     console.error("⚠️ slackPostMessage failed (non-fatal):", err);
     return false;
   }
+}
+
+/**
+ * Uploads a file to a channel and posts it with `comment` as the message body,
+ * so the summary text and the PDF land as ONE Slack post (not two).
+ *
+ * Uses the current 3-step external upload flow. `files.upload` is deprecated and
+ * stopped accepting new apps in 2025 — do not switch back to it:
+ *   1. files.getUploadURLExternal → a one-shot presigned URL + file id
+ *   2. POST the raw bytes to that URL (this is NOT a Slack API host, so it takes
+ *      no auth header and returns plain text, not the { ok } envelope)
+ *   3. files.completeUploadExternal → attaches the file to the channel
+ *
+ * Requires the `files:write` bot scope on top of the existing chat:write.
+ * Throws on failure — the caller decides whether that's fatal.
+ */
+export async function slackUploadFile(opts: {
+  channelId: string;
+  filename: string;
+  bytes: Buffer;
+  title?: string;
+  comment?: string;
+}): Promise<{ fileId: string }> {
+  const token = botToken();
+
+  // Step 1 — reserve an upload slot. `length` must be the exact byte count or
+  // Slack rejects the completion call.
+  const reserved = await slackPostForm("files.getUploadURLExternal", token, {
+    filename: opts.filename,
+    length: String(opts.bytes.byteLength),
+  });
+  const uploadUrl: string = reserved.upload_url;
+  const fileId: string = reserved.file_id;
+  if (!uploadUrl || !fileId) {
+    throw new Error("files.getUploadURLExternal returned no upload_url/file_id");
+  }
+
+  // Step 2 — push the bytes. Plain POST body; a non-2xx here is fatal because
+  // step 3 would then complete an empty file.
+  const putRes = await fetch(uploadUrl, {
+    method: "POST",
+    body: new Uint8Array(opts.bytes),
+    headers: { "Content-Type": "application/octet-stream" },
+  });
+  if (!putRes.ok) {
+    const detail = await putRes.text().catch(() => "");
+    throw new Error(`Slack file upload failed: ${putRes.status} ${putRes.statusText} :: ${detail.slice(0, 200)}`);
+  }
+
+  // Step 3 — attach to the channel. initial_comment is what makes the text and
+  // the PDF a single post.
+  await slackPost("files.completeUploadExternal", token, {
+    files: [{ id: fileId, title: opts.title || opts.filename }],
+    channel_id: opts.channelId,
+    ...(opts.comment ? { initial_comment: opts.comment } : {}),
+  });
+
+  return { fileId };
 }
 
 // ---------------------------------------------------------------------------

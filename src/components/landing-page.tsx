@@ -86,9 +86,6 @@ export function LandingPage() {
               <Link href="#how-it-works" className="text-sm font-semibold uppercase tracking-wide text-cb-ink hover:text-cb-mint transition-colors">
                 How It Works
               </Link>
-              <Link href="/affiliate" className="text-sm font-semibold uppercase tracking-wide text-cb-ink hover:text-cb-mint transition-colors">
-                Affiliate Program
-              </Link>
               <Link href="/support" className="text-sm font-semibold uppercase tracking-wide text-cb-ink hover:text-cb-mint transition-colors">
                 Support
               </Link>
@@ -135,13 +132,6 @@ export function LandingPage() {
                   onClick={() => setMobileMenuOpen(false)}
                 >
                   How It Works
-                </Link>
-                <Link
-                  href="/affiliate"
-                  className="text-base font-bold uppercase tracking-wide text-cb-ink hover:text-cb-mint transition-colors px-2 py-2"
-                  onClick={() => setMobileMenuOpen(false)}
-                >
-                  Affiliate Program
                 </Link>
                 <Link
                   href="/support"

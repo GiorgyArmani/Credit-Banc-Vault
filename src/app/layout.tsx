@@ -1,7 +1,6 @@
 import './globals.css';
 import type { Metadata } from 'next'
 import { Manrope, Inter } from 'next/font/google'
-import { ThemeProvider } from 'next-themes'
 import { FloatingSupport } from '@/components/floating-support'
 import { ErrorDialogProvider } from '@/components/error-dialog'
 
@@ -37,13 +36,25 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
       </head>
+      {/* No next-themes ThemeProvider. It renders a literal <script> element
+          inside a client component, which React 19.2 warns about on every
+          route ("Encountered a script tag while rendering React component").
+          The library has no opt-out — its ThemeScript is unconditional — and
+          0.4.6 is already latest, so there is nothing to upgrade to.
+
+          Dropping it is behavior-neutral here: defaultTheme was "light", the
+          only useTheme() consumer is theme-switcher.tsx, and that component is
+          imported by src/app/page.tsx but never rendered. No visitor could
+          reach dark mode, so the app was light-only in practice already.
+
+          To bring theming back, restore <ThemeProvider> around the children
+          and mount ThemeSwitcher somewhere — the ~100 `dark:` variants still
+          in the tree will start resolving again, and the warning with them. */}
       <body className="bg-background text-foreground">
-        <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
-          <ErrorDialogProvider>
-            {children}
-            <FloatingSupport />
-          </ErrorDialogProvider>
-        </ThemeProvider>
+        <ErrorDialogProvider>
+          {children}
+          <FloatingSupport />
+        </ErrorDialogProvider>
       </body>
     </html>
   )

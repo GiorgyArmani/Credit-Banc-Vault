@@ -1,8 +1,8 @@
 // src/app/share/[token]/page.tsx
 //
 // Public, unauthenticated lender-facing page. Validates the token server-side
-// (not revoked, not expired) and lists the client's APPROVED documents for the
-// shared business, each behind a short-lived signed URL. No login, no nav —
+// (not revoked, not expired) and lists the documents the link was minted with,
+// each behind a short-lived signed URL. No login, no nav —
 // this is meant to be handed to an external lender.
 
 import { resolveShareLink } from "@/lib/share-links";
@@ -106,7 +106,7 @@ export default async function SharePage({
           <div className="rounded-2xl border border-black/5 bg-white p-10 text-center shadow-[0_1px_2px_rgba(0,3,33,0.04)]">
             <FileText className="mx-auto mb-3 h-10 w-10 text-cb-gray/40" />
             <p className="text-sm font-semibold text-cb-ink/50">
-              No approved documents are available yet.
+              No documents are available on this link.
             </p>
           </div>
         ) : (

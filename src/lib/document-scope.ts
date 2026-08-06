@@ -21,6 +21,42 @@ export const CLIENT_SCOPED_DOC_CODES = [
 export type ClientScopedDocCode = (typeof CLIENT_SCOPED_DOC_CODES)[number];
 
 /**
+ * Documents that survive a new funding round.
+ *
+ * When a client comes back for a second or third financing, the paperwork
+ * splits in two: things that describe who they are and what the entity is
+ * (unchanged since last time), and things that describe how the business is
+ * doing right now (stale the moment the last deal closed — a lender will not
+ * accept 14-month-old bank statements).
+ *
+ * Codes listed here carry forward: their files and approvals stay unscoped
+ * (funding_deal_id NULL = "belongs to every round"). Everything else is stamped
+ * with the closing round's id when the next round opens, which retires it from
+ * the active view and puts the category back on the request list.
+ *
+ * The client-scoped codes (DL / PFS / MyScoreIQ) are already global to the
+ * person; they're repeated here so the intent reads in one place.
+ */
+export const DEAL_CARRY_OVER_DOC_CODES = [
+  "drivers_license",
+  "drivers_license_front",
+  "drivers_license_back",
+  "pfs",
+  "myscoreiq",
+  "voided_check",
+  "articles_of_incorporation",
+  "operating_agreement_bylaws",
+] as const;
+
+const _carry_over: Set<string> = new Set(DEAL_CARRY_OVER_DOC_CODES);
+
+/** True when this document type carries forward into a new funding round. */
+export function isCarryOverDoc(code: string | null | undefined): boolean {
+  if (!code) return false;
+  return _carry_over.has(code);
+}
+
+/**
  * Bank-statement period configuration.
  *
  * Bank statements are the one document whose required quantity changes per deal
@@ -90,6 +126,31 @@ export function matchesActiveBusiness(
   if (isClientScopedDoc(docCode)) return true;
   if (!activeBusinessId) return false;
   return rowBusinessProfileId === activeBusinessId;
+}
+
+/**
+ * matchesActiveDeal — the funding-round half of row scoping, and the companion
+ * to matchesActiveBusiness above. A row belongs to the round on screen when:
+ *   • it carries no funding_deal_id — either legacy data (every row predates
+ *     rounds) or a document deliberately left unscoped because it carries
+ *     across rounds, OR
+ *   • its funding_deal_id is the active round.
+ *
+ * A row stamped with an OLDER round's id is retired: it stays in the database
+ * as that round's record but drops out of the working view, which is what makes
+ * "re-request the stale documents" mean something on a repeat deal.
+ *
+ * Pass `null` for activeDealId when the caller has no round context — nothing
+ * is hidden in that case, so a surface that hasn't been taught about rounds
+ * behaves exactly as it did before.
+ */
+export function matchesActiveDeal(
+  rowFundingDealId: string | null | undefined,
+  activeDealId: string | null | undefined,
+): boolean {
+  if (!rowFundingDealId) return true;
+  if (!activeDealId) return true;
+  return rowFundingDealId === activeDealId;
 }
 
 /**

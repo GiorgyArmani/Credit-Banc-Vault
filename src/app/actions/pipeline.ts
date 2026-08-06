@@ -119,7 +119,11 @@ async function resolveActor(): Promise<{ userId: string; role: string } | null> 
 export async function updateLoanStatus(
   clientVaultId: string,
   newStatus: LoanStatus,
-  note?: string
+  note?: string,
+  /** The funding round this transition belongs to. Stamped on the history row so
+   *  a repeat client's rounds stay tellable apart. Optional — legacy callers and
+   *  client-level drags leave it null, which reads as "the client's round". */
+  fundingDealId?: string | null
 ): Promise<{ success: boolean; error?: string }> {
   const actor = await resolveActor();
   if (!actor) return { success: false, error: "Unauthenticated" };
@@ -144,6 +148,7 @@ export async function updateLoanStatus(
     note,
     actorUserId: actor.userId,
     actorRole: actor.role,
+    fundingDealId: fundingDealId ?? null,
   });
 
   if (result.success) {

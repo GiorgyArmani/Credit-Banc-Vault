@@ -1,8 +1,8 @@
 // src/app/api/share-links/documents/route.ts
 //
-// GET — list the approved document categories a staff member can pick from when
-// minting a lender share link, for the active business. One entry per approved
-// code that has at least one uploaded file.
+// GET — list the files a staff member can pick from when minting a lender share
+// link, for the active business. Every uploaded file is listed (each flagged
+// with its approval state) so staff can share before the packet is approved.
 //
 // AuthZ: admin OR underwriting (see require-staff) — same gate as the link mint.
 

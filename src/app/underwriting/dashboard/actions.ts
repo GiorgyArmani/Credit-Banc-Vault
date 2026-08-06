@@ -6,6 +6,9 @@ import { send_advisor_document_notification, send_loan_funded_notification } fro
 import { createClient } from "@/lib/supabase/server";
 import { ghlUpdateContact, ghlAddTags } from "@/lib/ghl-api";
 import { updateLoanStatus } from "@/app/actions/pipeline";
+// No startNewFundingRound import on purpose: funding never opens a round.
+// Opening one is a deliberate act through the Funding Rounds card.
+import { getActiveDeal, isDealFunded } from "@/lib/funding-deals";
 import { revalidatePath } from "next/cache";
 
 /**
@@ -185,6 +188,52 @@ export async function fundLoanAction(clientId: string, data: {
 
         console.log("fundLoanAction: Client found. GHL Contact ID:", client.ghl_contact_id);
 
+        // 1.5 GUARD — refuse to fund a round that is already funded.
+        //
+        // This runs BEFORE any side effect. Everything below (the GHL "Loan
+        // Funded" tag, the custom fields, the internal note, the advisor email)
+        // is irreversible from here, so the check cannot live down at the
+        // funding_deals write where the problem is actually detected — a late
+        // bail would leave the client tagged and the advisor emailed about a
+        // funding that was never recorded.
+        //
+        // Opening the next round is deliberately a MANUAL act: a second funding
+        // on an already-funded round means the workflow was skipped, and the
+        // person doing it should decide that consciously rather than have the
+        // system quietly invent a round behind them.
+        let fundedBusinessProfileId = data.businessProfileId ?? null;
+        if (!fundedBusinessProfileId) {
+            const { data: primaryBusiness } = await supabaseAdmin
+                .from("business_profiles")
+                .select("id")
+                .eq("client_vault_id", clientId)
+                .order("created_at", { ascending: true })
+                .limit(1)
+                .maybeSingle();
+            fundedBusinessProfileId = primaryBusiness?.id ?? null;
+            if (fundedBusinessProfileId) {
+                console.log(`fundLoanAction: resolved primary business ${fundedBusinessProfileId} for ${clientId}`);
+            }
+        }
+
+        let activeDeal = null as Awaited<ReturnType<typeof getActiveDeal>>;
+        if (fundedBusinessProfileId) {
+            activeDeal = await getActiveDeal(supabaseAdmin, fundedBusinessProfileId);
+            if (isDealFunded(activeDeal)) {
+                console.warn(
+                    `fundLoanAction BLOCKED on ${clientId}: round ${(activeDeal!.display_order ?? 0) + 1} is already funded`
+                );
+                return {
+                    success: false,
+                    error:
+                        `This business's latest funding round is already recorded as funded` +
+                        `${activeDeal!.lender_funded ? ` (${activeDeal!.lender_funded})` : ""}. ` +
+                        `Start a new funding round from the Funding Rounds card first, then record this funding against it — ` +
+                        `that keeps the previous round's amount, lender and date intact.`,
+                };
+            }
+        }
+
         // 2. Prepare GHL payload
         const customFields = [
             { id: process.env.FILE_SINOPSIS, value: data.fileSinopsis },
@@ -276,36 +325,13 @@ export async function fundLoanAction(clientId: string, data: {
         //    and renewal tracking). GHL above is the signaling layer; this is the
         //    record. Non-fatal — a missing deal row must not block the tag/email.
         //
-        //    This dialog is now the ONLY route to a `funded` pipeline status, and
-        //    updateLoanStatus refuses `funded` without a funded funding_deals row.
-        //    So when the caller didn't supply a business (a client whose vault has
-        //    no active business selected), resolve the primary one here rather
-        //    than skipping the write and stranding the transition.
-        let fundedBusinessProfileId = data.businessProfileId ?? null;
-        if (!fundedBusinessProfileId) {
-            const { data: primaryBusiness } = await supabaseAdmin
-                .from("business_profiles")
-                .select("id")
-                .eq("client_vault_id", clientId)
-                .order("created_at", { ascending: true })
-                .limit(1)
-                .maybeSingle();
-            fundedBusinessProfileId = primaryBusiness?.id ?? null;
-            if (fundedBusinessProfileId) {
-                console.log(`fundLoanAction: resolved primary business ${fundedBusinessProfileId} for ${clientId}`);
-            }
-        }
-
+        //    The round was resolved and validated in step 1.5, before anything
+        //    irreversible ran. This dialog is the ONLY route to a `funded`
+        //    pipeline status, and updateLoanStatus refuses `funded` without a
+        //    funded funding_deals row.
+        let fundedDealId: string | null = null;
         if (fundedBusinessProfileId) {
             try {
-                const { data: deal } = await supabaseAdmin
-                    .from("funding_deals")
-                    .select("id")
-                    .eq("business_profile_id", fundedBusinessProfileId)
-                    .order("display_order", { ascending: true })
-                    .limit(1)
-                    .maybeSingle();
-
                 const fundedAmountNum = Number(String(data.totalAmountFunded).replace(/[^0-9.]/g, ""));
                 const fundedFields = {
                     funded_amount: Number.isFinite(fundedAmountNum) ? fundedAmountNum : null,
@@ -319,18 +345,26 @@ export async function fundLoanAction(clientId: string, data: {
                     slack_channel: data.slackChannel || null,
                 };
 
-                if (deal?.id) {
-                    await supabaseAdmin.from("funding_deals").update(fundedFields).eq("id", deal.id);
+                // An already-funded round was rejected up front (step 1.5), so
+                // the only two cases left are "fund the open round" and "no deal
+                // row exists yet". Nothing here ever creates a round implicitly.
+                if (activeDeal) {
+                    await supabaseAdmin.from("funding_deals").update(fundedFields).eq("id", activeDeal.id);
+                    fundedDealId = activeDeal.id;
                 } else {
                     // No deal row yet — common for primary businesses whose
                     // requested amount still lives on client_data_vault. Create
                     // one so the funded figures persist and the admin funded-$
                     // KPI reads the real funded amount instead of the requested.
-                    const { error: insertErr } = await supabaseAdmin
+                    const { data: created, error: insertErr } = await supabaseAdmin
                         .from("funding_deals")
-                        .insert({ business_profile_id: fundedBusinessProfileId, ...fundedFields });
+                        .insert({ business_profile_id: fundedBusinessProfileId, display_order: 0, ...fundedFields })
+                        .select("id")
+                        .single();
                     if (insertErr) {
                         console.error("fundLoanAction Error: Failed to create funding_deal:", insertErr);
+                    } else {
+                        fundedDealId = created?.id ?? null;
                     }
                 }
             } catch (dealError) {
@@ -368,7 +402,8 @@ export async function fundLoanAction(clientId: string, data: {
             const statusRes = await updateLoanStatus(
                 clientId,
                 "funded",
-                `Funded by ${data.lenderFunded || "lender"} — ${data.totalAmountFunded}`
+                `Funded by ${data.lenderFunded || "lender"} — ${data.totalAmountFunded}`,
+                fundedDealId
             );
             if (!statusRes.success) {
                 statusWarning = statusRes.error || "Pipeline status was not updated.";
@@ -410,26 +445,39 @@ export async function markDocumentAsViewed(documentId: string) {
 }
 
 /**
+ * requireUnderwritingOrAdmin
+ *
+ * File actions on this page are reached from both /underwriting/... and the
+ * admin routes that render the same component, so both roles must pass. Throws
+ * on anyone else — every caller here runs on the service role afterwards, so
+ * this check is the only thing standing between a client and another client's
+ * documents.
+ */
+async function requireUnderwritingOrAdmin() {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error("Unauthorized");
+
+    const { data: userData } = await supabase
+        .from("users")
+        .select("role")
+        .eq("id", user.id)
+        .single();
+
+    if (userData?.role !== "underwriting" && userData?.role !== "admin") {
+        throw new Error("Access denied: Underwriting or admin only");
+    }
+    return { user, role: userData.role as "underwriting" | "admin" };
+}
+
+/**
  * renameClientFile
- * 
+ *
  * Allows an underwriter to update the display name (custom_label) of a file.
  */
 export async function renameClientFile(documentId: string, newLabel: string) {
     try {
-        const supabase = await createClient();
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) throw new Error("Unauthorized");
-
-        // Verify user is an underwriter
-        const { data: userData } = await supabase
-            .from("users")
-            .select("role")
-            .eq("id", user.id)
-            .single();
-
-        if (userData?.role !== "underwriting") {
-            throw new Error("Access denied: Underwriters only");
-        }
+        await requireUnderwritingOrAdmin();
 
         const supabaseAdmin = createAdminClient();
         const { error } = await supabaseAdmin
@@ -458,6 +506,75 @@ export async function renameClientFile(documentId: string, newLabel: string) {
         return { success: true };
     } catch (error: any) {
         console.error("Exception in renameClientFile (UW):", error);
+        return { success: false, error: error.message || "An unexpected error occurred" };
+    }
+}
+
+/**
+ * deleteClientFile
+ *
+ * Removes a client document (storage object + row) from the UW/admin client
+ * detail page. Underwriting handles the file end-to-end in practice — bad scans,
+ * wrong-business uploads and superseded statements have to be cleared without
+ * routing through the advisor — so this mirrors the advisor's deleteClientFile
+ * rather than being a lesser version of it.
+ *
+ * The document is verified to belong to the client whose page issued the call,
+ * so a document id from another vault can't be passed in.
+ */
+export async function deleteClientFile(clientId: string, documentId: string) {
+    try {
+        await requireUnderwritingOrAdmin();
+
+        const supabaseAdmin = createAdminClient();
+
+        const { data: client, error: clientError } = await supabaseAdmin
+            .from("client_data_vault")
+            .select("id, user_id, ghl_contact_id")
+            .eq("id", clientId)
+            .single();
+
+        if (clientError || !client) throw new Error("Client not found");
+
+        const { data: doc, error: docError } = await supabaseAdmin
+            .from("user_documents")
+            .select("id, user_id, storage_path")
+            .eq("id", documentId)
+            .single();
+
+        if (docError || !doc) throw new Error("Document not found");
+        if (doc.user_id !== client.user_id) {
+            throw new Error("Document does not belong to this client");
+        }
+
+        // Storage first; a failure here is logged but not fatal — an orphaned
+        // object is better than a row the UI still shows and can't remove.
+        const { error: storageError } = await supabaseAdmin.storage
+            .from("user-documents")
+            .remove([doc.storage_path]);
+        if (storageError) {
+            console.error("Storage deletion error (UW):", storageError);
+        }
+
+        const { error: dbError } = await supabaseAdmin
+            .from("user_documents")
+            .delete()
+            .eq("id", documentId);
+
+        if (dbError) throw new Error(`Failed to delete document record: ${dbError.message}`);
+
+        // The doc is outstanding again — keep the GHL chase list honest.
+        if (client.ghl_contact_id && process.env.GHL_TOKEN) {
+            const { syncOutstandingDocuments } = await import("@/lib/outstanding-documents");
+            await syncOutstandingDocuments(client.user_id, client.ghl_contact_id, process.env.GHL_TOKEN);
+        }
+
+        revalidateClientSurfaces(clientId);
+        revalidatePath(`/advisor/dashboard/clients/${clientId}`);
+
+        return { success: true };
+    } catch (error: any) {
+        console.error("Exception in deleteClientFile (UW):", error);
         return { success: false, error: error.message || "An unexpected error occurred" };
     }
 }

@@ -26,6 +26,15 @@ export interface BusinessTab {
   proposed_loan_type?: string | null;
   loan_purpose?: string | null;
   funding_eta?: string | null;
+  // The funding ROUND currently being worked on this business — the newest
+  // funding_deals row. Repeat clients have several; documents and approvals are
+  // scoped to this one so a renewal doesn't inherit last year's paperwork.
+  active_deal_id?: string | null;
+  /** Set once UW records the round funded. A funded active round is what makes
+   *  "Start New Funding Round" available. */
+  active_deal_funded_at?: string | null;
+  /** How many rounds this business has had, for the "Round N" label. */
+  deal_count?: number;
 }
 
 interface BusinessTabStripProps {

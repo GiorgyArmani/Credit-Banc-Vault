@@ -9,6 +9,7 @@ import { syncUnifiedClientData } from "@/lib/user-management";
 import { updateLoanStatus } from "@/app/actions/pipeline";
 import { ghlSyncDocument } from "@/lib/ghl-document-sync";
 import { isClientScopedDoc } from "@/lib/document-scope";
+import { getOrCreateActiveDeal, isDealFunded } from "@/lib/funding-deals";
 import { resolveCatchAllAdvisor } from "@/lib/catch-all-advisor";
 import { send_file_reassignment_notification } from "@/lib/email";
 
@@ -700,6 +701,10 @@ export async function updateBusinessProfile(clientId: string, businessProfileId:
             return Number.isFinite(n) ? n : null;
         };
 
+        // Set when part of the save is deliberately skipped, so the modal can
+        // say so instead of reporting a clean success.
+        let deal_warning: string | null = null;
+
         // 1. Business-scoped fields → business_profiles.
         const { error: bpErr } = await supabaseAdmin
             .from("business_profiles")
@@ -724,29 +729,28 @@ export async function updateBusinessProfile(clientId: string, businessProfileId:
             .eq("id", businessProfileId);
         if (bpErr) throw new Error(`Failed to update business: ${bpErr.message}`);
 
-        // 2. Funding-ask fields → the business's funding_deals row (lowest
-        //    display_order). Create one if missing so the ask always has a home.
+        // 2. Funding-ask fields → the business's CURRENT round. Editing the ask
+        //    must never reach back into a funded round and rewrite what was
+        //    actually asked for on a closed deal, so a funded active round is
+        //    left alone (the ask for the next round is set when it's opened).
         const dealPayload = {
             capital_requested: num(data.capital_requested),
             proposed_loan_type: data.proposed_loan_type || null,
             loan_purpose: data.loan_purpose || null,
             funding_eta: data.funding_eta || null,
         };
-        const { data: deals } = await supabaseAdmin
-            .from("funding_deals")
-            .select("id")
-            .eq("business_profile_id", businessProfileId)
-            .order("display_order", { ascending: true })
-            .limit(1);
-        if (deals && deals.length > 0) {
+        const activeDeal = await getOrCreateActiveDeal(supabaseAdmin, businessProfileId, dealPayload);
+        if (activeDeal && !isDealFunded(activeDeal)) {
             const { error: dealErr } = await supabaseAdmin
-                .from("funding_deals").update(dealPayload).eq("id", deals[0].id);
+                .from("funding_deals").update(dealPayload).eq("id", activeDeal.id);
             if (dealErr) throw new Error(`Failed to update funding deal: ${dealErr.message}`);
-        } else {
-            const { error: dealErr } = await supabaseAdmin
-                .from("funding_deals")
-                .insert({ business_profile_id: businessProfileId, display_order: 0, ...dealPayload });
-            if (dealErr) throw new Error(`Failed to create funding deal: ${dealErr.message}`);
+        } else if (activeDeal) {
+            // The only round is closed. Rewriting its ask would falsify what was
+            // asked for on a funded deal, and dropping the edit without saying so
+            // would look like the form failed. Save the business fields (done
+            // above) and tell the caller why the ask didn't move.
+            deal_warning =
+                "Business details saved. The funding ask wasn't changed — this business's latest round is already funded. Start a new funding round to record a new ask.";
         }
 
         // 3. Shared client identity → client_data_vault. Email change is
@@ -806,7 +810,7 @@ export async function updateBusinessProfile(clientId: string, businessProfileId:
         }
 
         revalidatePath(`/advisor/dashboard/clients/${clientId}`);
-        return { success: true };
+        return { success: true as const, warning: deal_warning };
     } catch (error: any) {
         console.error("Exception in updateBusinessProfile:", error);
         return { success: false, error: error.message || "An unexpected error occurred" };

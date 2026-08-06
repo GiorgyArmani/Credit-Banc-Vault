@@ -86,7 +86,7 @@ function DashboardContent() {
     (async () => {
       const { data, error } = await supabase
         .from('business_profiles')
-        .select('id, company_name, is_primary, display_order')
+        .select('id, company_name, is_primary, display_order, funding_deals (id, display_order, funded_at)')
         .eq('client_vault_id', vaultId)
         .order('is_primary', { ascending: false })
         .order('display_order', { ascending: true })
@@ -96,7 +96,17 @@ function DashboardContent() {
         console.error('Error fetching businesses for client dashboard:', error);
         return;
       }
-      const rows = (data || []) as BusinessTab[];
+      // Flatten the current funding round onto each tab so the vault only shows
+      // the paperwork for the financing being worked — a renewal shouldn't open
+      // with the previous round's documents already ticked off.
+      const rows = (data || []).map((b: any): BusinessTab => {
+        const deals = Array.isArray(b.funding_deals) ? b.funding_deals : [];
+        const deal = deals
+          .slice()
+          .sort((x: any, y: any) => (y.display_order ?? 0) - (x.display_order ?? 0))[0] ?? null;
+        const { funding_deals: _drop, ...rest } = b;
+        return { ...rest, active_deal_id: deal?.id ?? null, active_deal_funded_at: deal?.funded_at ?? null };
+      });
       setBusinesses(rows);
       const primary = rows.find((b) => b.is_primary) || rows[0];
       if (primary) setActiveBusinessId(primary.id);
@@ -336,6 +346,7 @@ function DashboardContent() {
                     onLoad={onVaultLoad}
                     onChecklist={handleChecklist}
                     activeBusinessId={activeBusinessId}
+                    activeDealId={businesses.find((b) => b.id === activeBusinessId)?.active_deal_id ?? null}
                   />
                 </CardContent>
               </Card>

@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { DollarSign, User, Hash, FileText, Send, Loader2 } from "lucide-react";
+import { DollarSign, User, Hash, FileText, Send, Loader2, RefreshCw } from "lucide-react";
 import { fundLoanAction } from "@/app/underwriting/dashboard/actions";
 import { toast } from "@/lib/toast";
 
@@ -41,6 +41,12 @@ interface LoanFundedDialogProps {
     defaultSalesRep?: string;
     /** Pre-fills the Slack Channel field with the deal's channel name. */
     defaultSlackChannel?: string;
+    /** True when this business's current round is already recorded as funded.
+     *  The form is replaced with a prompt to open a new round — recording a
+     *  second funding against a closed round is the mistake this prevents. */
+    activeRoundFunded?: boolean;
+    /** Lender on the already-funded round, named in the prompt for context. */
+    activeRoundLender?: string | null;
 }
 
 const OTHER_LENDER = "__other__";
@@ -57,6 +63,8 @@ export function LoanFundedDialog({
     lenderOptions = [],
     defaultSalesRep = "",
     defaultSlackChannel = "",
+    activeRoundFunded = false,
+    activeRoundLender = null,
 }: LoanFundedDialogProps) {
     const [isOpen, setIsOpen] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
@@ -148,6 +156,43 @@ export function LoanFundedDialog({
                 </Button>
             </DialogTrigger>
             <DialogContent className="sm:max-w-[600px] rounded-[3rem] p-8 max-h-[90vh] overflow-y-auto custom-scrollbar">
+                {activeRoundFunded ? (
+                    // Caught before a single field is typed. The server refuses
+                    // this too (fundLoanAction guards before any side effect) —
+                    // this is the version of the refusal that says what to do.
+                    <>
+                        <DialogHeader>
+                            <DialogTitle className="text-2xl font-black text-slate-900 uppercase tracking-tighter flex items-center gap-2">
+                                <RefreshCw className="w-6 h-6 text-amber-500" />
+                                Start a new round first
+                            </DialogTitle>
+                            <DialogDescription className="text-slate-500 font-bold">
+                                This business&apos;s current funding round is already recorded as funded
+                                {activeRoundLender ? ` by ${activeRoundLender}` : ""}.
+                            </DialogDescription>
+                        </DialogHeader>
+                        <div className="py-4 space-y-4">
+                            <p className="text-sm text-slate-600 leading-relaxed">
+                                Recording another funding against a closed round would overwrite its amount,
+                                lender, term and date — the record of what actually happened on that deal.
+                            </p>
+                            <p className="text-sm text-slate-600 leading-relaxed">
+                                Open a new round from the <strong>Funding Rounds</strong> card on this page,
+                                then come back and record the funding against it. The previous round keeps
+                                its figures and the client is re-asked for fresh statements.
+                            </p>
+                        </div>
+                        <DialogFooter>
+                            <Button
+                                onClick={() => setIsOpen(false)}
+                                className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-black uppercase tracking-widest text-xs h-11 px-6"
+                            >
+                                Got it
+                            </Button>
+                        </DialogFooter>
+                    </>
+                ) : (
+                <>
                 <DialogHeader>
                     <DialogTitle className="text-2xl font-black text-slate-900 uppercase tracking-tighter flex items-center gap-2">
                         <Send className="w-6 h-6 text-emerald-500" />
@@ -347,6 +392,8 @@ export function LoanFundedDialog({
                         </Button>
                     </DialogFooter>
                 </form>
+                </>
+                )}
             </DialogContent>
         </Dialog>
     );

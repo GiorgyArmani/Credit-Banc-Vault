@@ -4,35 +4,21 @@
 // domain) links here (vault.creditbanc.io/affiliate). Anyone can view it — the
 // role gate lives one level down in /affiliate/dashboard. See [[role_model]].
 //
+// Layout mirrors the marketing site's apply-now funnel: centered hero (headline
+// + metrics), a labelled divider, then the signup form with the "how this
+// works" steps card beside it (sticky on desktop, foldable on mobile).
+//
 // Aesthetic matches the creditbanc.io marketing site: warm cream background
 // (cb-cream #faf9f6), mint primary (cb-mint #55cf9e), navy surfaces
 // (cb-navy #202536), Manrope headlines / Inter body, restrained radii.
 
 import Link from "next/link";
 import { AffiliateSignUpForm } from "@/components/affiliate-sign-up-form";
-import { Badge } from "@/components/ui/badge";
 import { BrandHeader, BrandFooter, BrandBackdrop, Eyebrow } from "@/components/marketing/brand-chrome";
-import { Gift, DollarSign, Link2 } from "lucide-react";
+import { AffiliateHero } from "./_components/affiliate-hero";
+import { AffiliateSteps } from "./_components/affiliate-steps";
 
 export const dynamic = "force-dynamic";
-
-const STEPS = [
-  {
-    icon: Link2,
-    title: "Get the Link",
-    desc: "Sign up and get your personal referral link. Congratulations. You now have something worth passing around.",
-  },
-  {
-    icon: Gift,
-    title: "Spread It Everywhere",
-    desc: "Text it. Email it. Post it. Drop it in a group chat. Slide into the DMs of every business owner you know without making it weird.",
-  },
-  {
-    icon: DollarSign,
-    title: "Get Your $500",
-    desc: "If we can help them and their deal funds, Giftronaut sends you a $500 gift card of your choice.",
-  },
-];
 
 // Program rules. Shown in full on the page (not hidden behind a link) — these
 // are the terms the $500 reward actually hangs on.
@@ -60,52 +46,32 @@ export default function AffiliateSignupPage() {
         }
       />
 
-      {/* hero */}
-      <section className="relative w-full overflow-hidden">
+      <section className="relative w-full overflow-hidden px-4 sm:px-6 pt-8 sm:pt-12 pb-12 sm:pb-16">
         <BrandBackdrop />
 
-        <div className="max-w-6xl mx-auto px-4 py-20 md:py-28 relative z-10">
-          <div className="grid lg:grid-cols-2 gap-16 items-center">
-            {/* pitch */}
-            <div>
-              <div className="inline-flex items-center space-x-2 bg-white border border-black/5 rounded-full px-4 py-2 mb-10 shadow-sm">
-                
-                <span className="text-sm text-cb-gray font-bold uppercase tracking-[0.2em]">Affiliate Program</span>
-              </div>
+        <div className="max-w-7xl mx-auto relative z-10">
+          <AffiliateHero />
 
-              <h1 className="font-manrope text-5xl md:text-7xl font-extrabold mb-8 tracking-tight leading-[1.05] text-cb-ink">
-                Refer. <span className="text-cb-mint">Get Paid.</span> Repeat.
-              </h1>
-
-              <p className="text-xl md:text-2xl text-cb-mint font-semibold mb-12 leading-relaxed max-w-lg">
-                Join our Affiliate Program and turn the business owners you know into{" "}
-                <span className="text-cb-ink font-bold">$500</span> rewards, one useful introduction at a time. Cha-ching!
-              </p>
-
-              <div className="space-y-6">
-                {STEPS.map((item, i) => (
-                  <div key={i} className="flex items-start gap-5 group">
-                    <div className="h-12 w-12 rounded-xl bg-cb-mint/10 flex items-center justify-center shrink-0 group-hover:bg-cb-mint transition-colors duration-300">
-                      <item.icon className="h-6 w-6 text-cb-mint group-hover:text-white transition-colors duration-300" />
-                    </div>
-                    <div>
-                      <h4 className="font-manrope text-lg font-bold text-cb-ink tracking-tight">{item.title}</h4>
-                      <p className="text-cb-ink/50">{item.desc}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <p className="mt-10 font-manrope text-2xl md:text-3xl font-extrabold tracking-tight text-cb-ink leading-tight">
-                One good introduction. <span className="text-cb-mint">A very happy ending.</span>
-              </p>
-            </div>
-
-            {/* signup form */}
-            <div>
-              <AffiliateSignUpForm />
-            </div>
+          {/* Divider between hero and form */}
+          <div className="max-w-6xl mx-auto mt-2 mb-10 sm:mb-14 flex items-center gap-4">
+            <div className="flex-1 h-px bg-black/10" />
+            <span className="font-label text-[11px] font-bold uppercase tracking-[0.22em] text-cb-mint whitespace-nowrap">
+              Start your sign-up
+            </span>
+            <div className="flex-1 h-px bg-black/10" />
           </div>
+
+          {/* Form (left) + "how this works" steps (right) on desktop. On mobile
+              they stack — form first so it's reachable immediately, steps below
+              it as a foldable card. */}
+          <div className="max-w-6xl mx-auto grid lg:grid-cols-[1fr_340px] gap-8 lg:gap-12 items-start">
+            <AffiliateSignUpForm />
+            <AffiliateSteps />
+          </div>
+
+          <p className="max-w-6xl mx-auto mt-12 sm:mt-16 text-center font-headline text-2xl md:text-3xl font-extrabold tracking-tight text-cb-ink leading-tight">
+            One good introduction. <span className="text-cb-mint">A very happy ending.</span>
+          </p>
         </div>
       </section>
 

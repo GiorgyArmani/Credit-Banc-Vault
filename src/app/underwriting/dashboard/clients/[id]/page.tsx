@@ -68,6 +68,7 @@ import clsx from "clsx";
 import { format } from "date-fns";
 import { LoanFundedDialog } from "@/components/loan-funded-dialog";
 import { ShareWithLenderButton } from "@/components/share/share-with-lender-button";
+import { FundingRoundsCard } from "@/components/funding/funding-rounds-card";
 import { LenderResponsePanel } from "@/components/lender/lender-response-panel";
 import { UwAddLenderButton } from "@/components/lender/uw-add-lender-button";
 import { requestDocuments } from "@/app/advisor/dashboard/clients/[id]/actions";
@@ -78,7 +79,7 @@ import { ActivityAgeBadge } from "@/components/advisor/activity-age-badge";
 import { differenceInDays } from "date-fns";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { renameClientFile } from "../../actions";
+import { renameClientFile, deleteClientFile } from "../../actions";
 import { EditProfileModal } from "@/app/advisor/dashboard/clients/[id]/edit-profile-modal";
 import { ClientFollowersCard } from "@/app/advisor/dashboard/clients/[id]/_components/client-followers-card";
 import {
@@ -88,7 +89,7 @@ import {
 import { BankAnalysisViewer } from "@/components/admin/bank-analysis-viewer";
 import { BusinessTabStrip, type BusinessTab } from "@/app/advisor/dashboard/clients/[id]/_components/business-tab-strip";
 import { CollapsibleSection, broadcast_toggle_all } from "@/app/advisor/dashboard/clients/[id]/_components/collapsible-section";
-import { isClientScopedDoc, matchesActiveBusiness, normalizeSupabaseJoin, formatRequirementLabel } from "@/lib/document-scope";
+import { isClientScopedDoc, matchesActiveBusiness, matchesActiveDeal, normalizeSupabaseJoin, formatRequirementLabel } from "@/lib/document-scope";
 
 // Slack deal-channel integration is built but not yet tested end-to-end.
 // Flip to `true` to re-enable the "Create / Open Slack Channel" button.
@@ -276,7 +277,7 @@ export default function UnderwritingClientDetailsPage() {
     const [active_business_id, set_active_business_id] = useState<string | null>(null);
     // approvals_raw is the ungrouped fetch from document_category_approvals;
     // the `approvals` Set used by render code is derived per active tab.
-    const [approvals_raw, set_approvals_raw] = useState<{ doc_code: string; business_profile_id: string | null }[]>([]);
+    const [approvals_raw, set_approvals_raw] = useState<{ doc_code: string; business_profile_id: string | null; funding_deal_id: string | null }[]>([]);
     const [error_message, set_error_message] = useState<string>("");
     const [lender_assignments, set_lender_assignments] = useState<LenderAssignment[]>([]);
     const [is_loading_assignments, set_is_loading_assignments] = useState(false);
@@ -457,13 +458,22 @@ export default function UnderwritingClientDetailsPage() {
     // Documents state enhancement. `approvals` is derived from approvals_raw
     // filtered by the active business tab, so switching tabs auto-recomputes
     // which categories show as approved + drives the completion percentage.
+    // The funding round on screen. Documents and approvals stamped with an
+    // OLDER round drop out of the working view — that is what makes a renewal
+    // re-collect bank statements instead of inheriting last year's.
+    const active_deal_id = useMemo<string | null>(
+        () => businesses.find((b) => b.id === active_business_id)?.active_deal_id ?? null,
+        [businesses, active_business_id]
+    );
+
     const approvals = useMemo<Set<string>>(() => {
         return new Set(
             approvals_raw
                 .filter((a) => matchesActiveBusiness(a.business_profile_id, active_business_id, a.doc_code))
+                .filter((a) => matchesActiveDeal((a as any).funding_deal_id ?? null, active_deal_id))
                 .map((a) => a.doc_code)
         );
-    }, [approvals_raw, active_business_id]);
+    }, [approvals_raw, active_business_id, active_deal_id]);
 
     // Scoped docs + required docs for the active business tab. Client-scoped
     // codes (driver's license / MyScoreIQ / PFS) surface on every tab. De-dupe
@@ -474,6 +484,9 @@ export default function UnderwritingClientDetailsPage() {
         return documents.filter((d) => {
             const code = (d as any).doc_code ?? (d as any).category ?? null;
             const bpid = (d as any).business_profile_id ?? null;
+            // A file belonging to a previous round is that round's record, not
+            // this one's — it stays in the vault but off the active packet.
+            if (!matchesActiveDeal((d as any).funding_deal_id ?? null, active_deal_id)) return false;
             if (matchesActiveBusiness(bpid, active_business_id, code)) return true;
             // Resilience: a legacy/unscoped upload (business_profile_id = null,
             // e.g. a funding application e-signed before per-business scoping)
@@ -481,7 +494,7 @@ export default function UnderwritingClientDetailsPage() {
             if (bpid === null && active_is_primary) return true;
             return false;
         });
-    }, [documents, active_business_id, businesses]);
+    }, [documents, active_business_id, businesses, active_deal_id]);
 
     const scoped_required_docs = useMemo(() => {
         const filtered = required_docs.filter((d) =>
@@ -528,13 +541,23 @@ export default function UnderwritingClientDetailsPage() {
     const [renaming_file, set_renaming_file] = useState<{ id: string; label: string } | null>(null);
     const [is_renaming_loading, setIs_renaming_loading] = useState(false);
 
+    // Deleting state — UW/admin own the file end-to-end, so they clear bad
+    // uploads here instead of asking the advisor to do it.
+    const [file_to_delete, set_file_to_delete] = useState<UserDocument | null>(null);
+    const [is_deleting_file, set_is_deleting_file] = useState(false);
+
     // navigable-clients-state: Ordered list of client IDs for prev/next navigation in the UW header.
     const [navigable_client_ids, set_navigable_client_ids] = useState<string[]>([]);
 
     // Most recent meaningful interaction (status change, doc upload, internal note).
     const [last_activity_at, set_last_activity_at] = useState<string | null>(null);
 
+    // First load blanks the page; refetches after an action don't. Navigating to
+    // a different client resets it so the new file gets its own loading state.
+    const has_loaded_once = useRef(false);
+
     useEffect(() => {
+        has_loaded_once.current = false;
         if (client_id) fetch_client_details();
     }, [client_id]);
 
@@ -567,7 +590,13 @@ export default function UnderwritingClientDetailsPage() {
 
     async function fetch_client_details() {
         try {
-            set_component_state(ComponentState.LOADING);
+            // Only blank the page on the FIRST load. Every later refetch — after
+            // an upload, a note, an approval — runs in place: flipping back to
+            // LOADING unmounts the whole page, so the user loses their scroll
+            // position and every expanded section on each upload.
+            if (!has_loaded_once.current) {
+                set_component_state(ComponentState.LOADING);
+            }
 
             // 1. Fetch Client Profile with Advisor details
             const { data: client, error: client_error } = await supabase
@@ -669,12 +698,13 @@ export default function UnderwritingClientDetailsPage() {
             //    the approvals memo can rescope per active tab.
             const { data: categoryApprovals } = await supabase
                 .from("document_category_approvals")
-                .select("doc_code, business_profile_id")
+                .select("doc_code, business_profile_id, funding_deal_id")
                 .eq("client_vault_id", client_id);
             set_approvals_raw(
                 (categoryApprovals || []).map((a: any) => ({
                     doc_code: a.doc_code,
                     business_profile_id: a.business_profile_id ?? null,
+                    funding_deal_id: a.funding_deal_id ?? null,
                 }))
             );
 
@@ -683,18 +713,21 @@ export default function UnderwritingClientDetailsPage() {
             //    primary so single-business clients see identical UI.
             const { data: businessRows } = await supabase
                 .from("business_profiles")
-                .select("id, company_name, is_primary, display_order, legal_entity_type, business_start_date, company_city, company_state, company_zip_code, avg_monthly_deposits, avg_annual_revenue, employees_count, is_home_based, industry, funding_deals (capital_requested, proposed_loan_type, loan_purpose, funding_eta, display_order)")
+                .select("id, company_name, is_primary, display_order, legal_entity_type, business_start_date, company_city, company_state, company_zip_code, avg_monthly_deposits, avg_annual_revenue, employees_count, is_home_based, industry, funding_deals (id, capital_requested, proposed_loan_type, loan_purpose, funding_eta, display_order, funded_at)")
                 .eq("client_vault_id", client_id)
                 .order("is_primary", { ascending: false })
                 .order("display_order", { ascending: true })
                 .order("created_at", { ascending: true });
             // Flatten each business's funding ask (lives on funding_deals) onto
             // the tab row so the header amount rescopes per active business.
+            // The ask shown is the CURRENT round's — the newest deal, not the
+            // oldest, or a repeat client's header would report the ask from the
+            // financing they already closed.
             const rows = (businessRows || []).map((b: any): BusinessTab => {
                 const deals = Array.isArray(b.funding_deals) ? b.funding_deals : [];
                 const deal = deals
                     .slice()
-                    .sort((x: any, y: any) => (x.display_order ?? 0) - (y.display_order ?? 0))[0] ?? null;
+                    .sort((x: any, y: any) => (y.display_order ?? 0) - (x.display_order ?? 0))[0] ?? null;
                 const { funding_deals: _drop, ...rest } = b;
                 return {
                     ...rest,
@@ -702,6 +735,9 @@ export default function UnderwritingClientDetailsPage() {
                     proposed_loan_type: deal?.proposed_loan_type ?? null,
                     loan_purpose: deal?.loan_purpose ?? null,
                     funding_eta: deal?.funding_eta ?? null,
+                    active_deal_id: deal?.id ?? null,
+                    active_deal_funded_at: deal?.funded_at ?? null,
+                    deal_count: deals.length,
                 };
             });
             set_businesses(rows);
@@ -713,12 +749,19 @@ export default function UnderwritingClientDetailsPage() {
             // 8. Fetch Lender Assignments
             await fetch_lender_assignments();
 
+            has_loaded_once.current = true;
             set_component_state(ComponentState.SUCCESS);
 
         } catch (err: any) {
             console.error("fetch_client_details error:", err);
-            set_error_message(err.message || "An unexpected error occurred.");
-            set_component_state(ComponentState.ERROR);
+            // A failed background refresh must not replace a page the user is
+            // working in — the data on screen is still the last good copy.
+            if (!has_loaded_once.current) {
+                set_error_message(err.message || "An unexpected error occurred.");
+                set_component_state(ComponentState.ERROR);
+            } else {
+                toast.error(err.message || "Couldn't refresh this client's data.");
+            }
         }
     }
 
@@ -1262,6 +1305,32 @@ export default function UnderwritingClientDetailsPage() {
     }
 
     /**
+     * handle_delete_file: Permanently removes a document (storage + row).
+     */
+    async function handle_delete_file() {
+        if (!file_to_delete) return;
+
+        set_is_deleting_file(true);
+        try {
+            const res = await deleteClientFile(client_id, file_to_delete.id);
+            if (res.success) {
+                toast.success("Document deleted");
+                set_documents(prev => prev.filter(d => d.id !== file_to_delete.id));
+                // Close the preview if it was showing the file we just removed.
+                set_preview_modal(prev => (prev.doc?.id === file_to_delete.id ? { isOpen: false, doc: null } : prev));
+                set_file_to_delete(null);
+            } else {
+                toast.error(res.error || "Failed to delete document");
+            }
+        } catch (err: any) {
+            console.error("uw delete file error:", err);
+            toast.error("An unexpected error occurred");
+        } finally {
+            set_is_deleting_file(false);
+        }
+    }
+
+    /**
      * render_document_card: Renders individual document card with download/preview for underwriting
      */
     function render_document_card(doc: UserDocument) {
@@ -1331,6 +1400,17 @@ export default function UnderwritingClientDetailsPage() {
                             >
                                 <Pencil className="h-3.5 w-3.5" />
                             </Button>
+                            {can_upload && (
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => set_file_to_delete(doc)}
+                                    className="h-8 w-8 p-0 text-slate-400 hover:text-red-600 hover:bg-red-50"
+                                    title="Delete Document"
+                                >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                            )}
                         </div>
                     </div>
                 </CardContent>
@@ -2353,6 +2433,11 @@ export default function UnderwritingClientDetailsPage() {
                                         lenderName: a.lender_name,
                                         stateLabel: FUNDED_LABEL[a.status] ?? a.status,
                                     }));
+                                // Already-funded round → the dialog prompts for a
+                                // new round instead of collecting figures that
+                                // would overwrite a closed deal.
+                                const active_business = businesses.find((b) => b.id === active_business_id);
+                                const active_round_funded = !!active_business?.active_deal_funded_at;
                                 return (
                             <LoanFundedDialog
                                 clientId={client_id}
@@ -2362,6 +2447,8 @@ export default function UnderwritingClientDetailsPage() {
                                 lenderOptions={lenderOptions}
                                 defaultSalesRep={`${client_profile.advisor?.first_name ?? ''} ${client_profile.advisor?.last_name ?? ''}`.trim()}
                                 defaultSlackChannel={slack_channel.name ?? ''}
+                                activeRoundFunded={active_round_funded}
+                                activeRoundLender={lender_assignments.find((a) => a.status === 'funded')?.lender_name ?? null}
                                 onSuccess={() => { fetch_client_details(); fetch_lender_assignments(); }}
                                 triggerClassName="h-11 px-5 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-black uppercase tracking-widest text-[10px] shadow-lg shadow-emerald-500/20"
                             />
@@ -2562,6 +2649,16 @@ export default function UnderwritingClientDetailsPage() {
                     </div>
                     </CollapsibleSection>
 
+                    {/* Funding rounds — every financing this business has taken,
+                        and the entry point for the next one. Renders only for
+                        repeat/funded files; a first-time deal shows nothing. */}
+                    <FundingRoundsCard
+                        clientId={client_id}
+                        businessProfileId={active_business_id}
+                        canStartRound={can_upload}
+                        onRoundStarted={fetch_client_details}
+                    />
+
                     {/* Internal Notes Feed */}
                     <CollapsibleSection
                         clientId={client_id}
@@ -2746,6 +2843,16 @@ export default function UnderwritingClientDetailsPage() {
                                         <Send className="w-3.5 h-3.5 mr-1.5" />
                                         Request Doc
                                     </Button>
+                                    {/* Share sits with the documents, not with the
+                                        lender card — staff hand files to lenders
+                                        long before the match is finalized. */}
+                                    <ShareWithLenderButton
+                                        clientId={client_id}
+                                        businessProfileId={active_business_id}
+                                        triggerLabel="Share Docs"
+                                        lenderOptions={lender_assignments.map((a) => a.lender_name)}
+                                        className="h-8 rounded-lg text-[9px] font-black uppercase tracking-widest border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 px-3"
+                                    />
                                 </div>
                             ) : undefined
                         }
@@ -2787,6 +2894,49 @@ export default function UnderwritingClientDetailsPage() {
                     label: preview_modal.doc!.custom_label || preview_modal.doc!.name,
                 }) : undefined}
             />
+
+            {/* Delete Document Confirmation */}
+            <Dialog
+                open={!!file_to_delete}
+                onOpenChange={(open) => { if (!open && !is_deleting_file) set_file_to_delete(null); }}
+            >
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Delete Document?</DialogTitle>
+                        <DialogDescription>
+                            <strong>{file_to_delete?.custom_label || file_to_delete?.name}</strong> will be
+                            permanently removed from the client&apos;s vault — for the client and the advisor
+                            too. This cannot be undone.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <Button
+                            variant="ghost"
+                            onClick={() => set_file_to_delete(null)}
+                            disabled={is_deleting_file}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            onClick={handle_delete_file}
+                            disabled={is_deleting_file}
+                            className="bg-red-600 hover:bg-red-700 text-white"
+                        >
+                            {is_deleting_file ? (
+                                <>
+                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                    Deleting...
+                                </>
+                            ) : (
+                                <>
+                                    <Trash2 className="h-4 w-4 mr-2" />
+                                    Yes, Delete
+                                </>
+                            )}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
             {/* Rename Document Dialog */}
             <Dialog open={!!renaming_file} onOpenChange={(open) => !open && set_renaming_file(null)}>

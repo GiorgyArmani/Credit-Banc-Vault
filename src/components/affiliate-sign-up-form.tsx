@@ -94,7 +94,7 @@ export function AffiliateSignUpForm({
   if (success) {
     return (
       <div className={cn("flex flex-col gap-6", className)} {...props}>
-        <div className="rounded-3xl overflow-hidden bg-white shadow-xl border border-black/5 p-12 text-center">
+        <div className="rounded-2xl overflow-hidden border border-black/5 bg-white p-8 sm:p-12 text-center shadow-[0_24px_60px_-25px_rgba(0,3,33,0.18)]">
           <div className="mx-auto w-16 h-16 bg-cb-mint/10 rounded-xl flex items-center justify-center mb-6">
             <CheckCircle className="h-8 w-8 text-cb-mint" />
           </div>
@@ -118,7 +118,7 @@ export function AffiliateSignUpForm({
 
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
-      <div className="rounded-3xl bg-white shadow-xl border border-black/5 p-8 md:p-10">
+      <div className="rounded-2xl border border-black/5 bg-white p-6 sm:p-8 md:p-10 shadow-[0_24px_60px_-25px_rgba(0,3,33,0.18)]">
         <div className="mb-8">
           <div className="w-11 h-11 rounded-xl bg-cb-mint/10 flex items-center justify-center mb-5">
             <Gift className="h-6 w-6 text-cb-mint" />
@@ -132,7 +132,7 @@ export function AffiliateSignUpForm({
             <div className="flex flex-col gap-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="grid gap-3">
-                  <Label htmlFor="aff-first-name" className="text-[11px] font-bold uppercase tracking-[0.15em] text-cb-mint/70 ml-1">First Name</Label>
+                  <Label htmlFor="aff-first-name" className="text-sm font-semibold text-cb-ink">First Name</Label>
                   <Input
                     id="aff-first-name"
                     type="text"
@@ -140,12 +140,12 @@ export function AffiliateSignUpForm({
                     required
                     value={firstName}
                     onChange={(e) => setFirstName(e.target.value)}
-                    className="h-14 rounded-xl border-cb-mint/20 bg-white focus:border-cb-mint focus:ring-cb-mint/30 transition-all font-medium px-5"
+                    className="h-12 rounded-xl border-black/10 bg-white px-4 font-medium placeholder:text-cb-gray/60 focus-visible:ring-cb-mint/40 transition-all"
                   />
                 </div>
 
                 <div className="grid gap-3">
-                  <Label htmlFor="aff-last-name" className="text-[11px] font-bold uppercase tracking-[0.15em] text-cb-mint/70 ml-1">Last Name</Label>
+                  <Label htmlFor="aff-last-name" className="text-sm font-semibold text-cb-ink">Last Name</Label>
                   <Input
                     id="aff-last-name"
                     type="text"
@@ -153,13 +153,13 @@ export function AffiliateSignUpForm({
                     required
                     value={lastName}
                     onChange={(e) => setLastName(e.target.value)}
-                    className="h-14 rounded-xl border-cb-mint/20 bg-white focus:border-cb-mint focus:ring-cb-mint/30 transition-all font-medium px-5"
+                    className="h-12 rounded-xl border-black/10 bg-white px-4 font-medium placeholder:text-cb-gray/60 focus-visible:ring-cb-mint/40 transition-all"
                   />
                 </div>
               </div>
 
               <div className="grid gap-3">
-                <Label htmlFor="aff-email" className="text-[11px] font-bold uppercase tracking-[0.15em] text-cb-mint/70 ml-1">Email</Label>
+                <Label htmlFor="aff-email" className="text-sm font-semibold text-cb-ink">Email</Label>
                 <Input
                   id="aff-email"
                   type="email"
@@ -167,12 +167,12 @@ export function AffiliateSignUpForm({
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="h-14 rounded-xl border-cb-mint/20 bg-white focus:border-cb-mint focus:ring-cb-mint/30 transition-all font-medium px-5"
+                  className="h-12 rounded-xl border-black/10 bg-white px-4 font-medium placeholder:text-cb-gray/60 focus-visible:ring-cb-mint/40 transition-all"
                 />
               </div>
 
               <div className="grid gap-3">
-                <Label htmlFor="aff-phone" className="text-[11px] font-bold uppercase tracking-[0.15em] text-cb-mint/70 ml-1">Mobile Phone</Label>
+                <Label htmlFor="aff-phone" className="text-sm font-semibold text-cb-ink">Mobile Phone</Label>
                 <Input
                   id="aff-phone"
                   type="tel"
@@ -182,13 +182,13 @@ export function AffiliateSignUpForm({
                   required
                   value={phone}
                   onChange={(e) => setPhone(formatPhoneInput(e.target.value))}
-                  className="h-14 rounded-xl border-cb-mint/20 bg-white focus:border-cb-mint focus:ring-cb-mint/30 transition-all font-medium px-5"
+                  className="h-12 rounded-xl border-black/10 bg-white px-4 font-medium placeholder:text-cb-gray/60 focus-visible:ring-cb-mint/40 transition-all"
                 />
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="grid gap-3">
-                  <Label htmlFor="aff-password" className="text-[11px] font-bold uppercase tracking-[0.15em] text-cb-mint/70 ml-1">Password</Label>
+                  <Label htmlFor="aff-password" className="text-sm font-semibold text-cb-ink">Password</Label>
                   <Input
                     id="aff-password"
                     type="password"
@@ -196,12 +196,12 @@ export function AffiliateSignUpForm({
                     required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="h-14 rounded-xl border-cb-mint/20 bg-white focus:border-cb-mint focus:ring-cb-mint/30 transition-all font-medium px-5"
+                    className="h-12 rounded-xl border-black/10 bg-white px-4 font-medium placeholder:text-cb-gray/60 focus-visible:ring-cb-mint/40 transition-all"
                   />
                 </div>
 
                 <div className="grid gap-3">
-                  <Label htmlFor="aff-repeat-password" className="text-[11px] font-bold uppercase tracking-[0.15em] text-cb-mint/70 ml-1">Confirm Password</Label>
+                  <Label htmlFor="aff-repeat-password" className="text-sm font-semibold text-cb-ink">Confirm Password</Label>
                   <Input
                     id="aff-repeat-password"
                     type="password"
@@ -209,7 +209,7 @@ export function AffiliateSignUpForm({
                     required
                     value={repeatPassword}
                     onChange={(e) => setRepeatPassword(e.target.value)}
-                    className="h-14 rounded-xl border-cb-mint/20 bg-white focus:border-cb-mint focus:ring-cb-mint/30 transition-all font-medium px-5"
+                    className="h-12 rounded-xl border-black/10 bg-white px-4 font-medium placeholder:text-cb-gray/60 focus-visible:ring-cb-mint/40 transition-all"
                   />
                 </div>
               </div>
