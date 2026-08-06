@@ -85,7 +85,12 @@ export function Sidebar({
         className={clsx(
           'fixed left-0 top-0 z-50 flex h-dvh md:h-screen flex-col',
           'bg-white border-r border-slate-200 shadow-xl',
-          'transition-all duration-300 ease-in-out overflow-y-auto overflow-x-hidden',
+          // transition-transform, NOT transition-all: the mobile drawer still
+          // slides in, but the collapse/expand width snaps. Animating the width
+          // meant the expanded labels spent 300ms laid out inside an 80px box —
+          // they wrapped onto several lines, pushed the content past the
+          // viewport, and flashed a scrollbar before the width caught up.
+          'transition-transform duration-300 ease-in-out overflow-y-auto overflow-x-hidden',
           mobileOpen ? 'translate-x-0' : '-translate-x-full',
           'md:translate-x-0',
           collapsed ? 'md:w-20 w-72' : 'md:w-72 w-72',
@@ -96,7 +101,7 @@ export function Sidebar({
           <div className={clsx('flex items-center gap-3', collapsed && 'md:justify-center')}>
             {collapsed ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src="/cb-mark.png" alt="Credit Banc" className="w-10 h-10 max-w-none shrink-0 rounded-full shadow-lg shadow-emerald-500/20" />
+              <img src="/cb-logo.png" alt="Credit Banc" className="w-10 h-10 max-w-none shrink-0" />
             ) : (
               <div className="transition-all duration-300">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -258,7 +263,7 @@ export function Sidebar({
           localStorage.setItem('sidebar_collapsed_admin', !collapsed ? '1' : '0')
         }}
         aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        className="hidden md:flex fixed z-50 h-10 w-10 items-center justify-center rounded-2xl bg-emerald-500 text-white shadow-xl shadow-emerald-500/20 hover:bg-emerald-600 transition-all duration-300 ease-in-out active:scale-90"
+        className="hidden md:flex fixed z-50 h-10 w-10 items-center justify-center rounded-2xl bg-emerald-500 text-white shadow-xl shadow-emerald-500/20 hover:bg-emerald-600 transition-[transform,background-color] duration-150 ease-out active:scale-90"
         style={{ bottom: 100, left: collapsed ? 60 : 268 }}
         title={collapsed ? 'Expand' : 'Collapse'}
       >

@@ -24,12 +24,18 @@ const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 const GOLD_BAND =
   "linear-gradient(135deg, #F3B518 0%, #F8CE5B 48%, #FCE7A8 100%)";
 
-// The only hero-scale artwork in the repo is the four step collages. This is
-// the one that reads as "owner looking for money", which is where this
-// visitor is standing. Swap the path if marketing supplies a dedicated asset.
+// Marketing's dedicated hero asset (replaced the step-1.png collage that stood
+// in before one existed). Cut out on a transparent background on purpose, so it
+// sits directly on the gold band with no card or panel behind it.
+//
+// Renamed on the way in: it arrived as "Cue the confetti. Your referral
+// funded.png", which is the name of an affiliate *email* hero — and
+// email.ts:2429 really does wire "Your referral funded.png" into that send. Two
+// unrelated assets a space apart in the same folder was a wrong-image bug
+// waiting to happen.
 const HERO_IMAGE = {
-  src: "/step-1.png",
-  alt: "Business owner searching for a small business loan on his phone",
+  src: "/referral-hero-owner.png",
+  alt: "A smiling business owner on the phone",
 };
 
 const container = {
@@ -123,7 +129,7 @@ export function ReferralHero({
                 <ArrowRight className="h-5 w-5" />
               </a>
               <p className="text-sm font-semibold text-on-secondary-fixed/60">
-                Takes about 30 seconds. No impact to your credit.
+                Takes just a few minutes. No impact on your credit score.
               </p>
             </motion.div>
           </motion.div>
@@ -137,13 +143,22 @@ export function ReferralHero({
             // art was the tallest thing in the band and set the row height on
             // its own, which is what pushed the figures off the fold.
             //
-            // 60vh is sized off the copy column, not picked by eye: the grid is
-            // items-center, so anything up to the copy's own height is free —
-            // the row doesn't grow and the metrics stay above the fold. Height
-            // is what binds here, not width; the column is wider than the art
-            // needs at this ratio, so raising vh is the lever, not the columns.
+            // Bottom-aligned and bled into the metrics gap, rather than centred
+            // in its cell. A cut-out figure on a transparent background with
+            // empty band above AND below it reads as floating — it needs a
+            // ground line, and the metrics hairline is the one already there.
+            // `self-end` overrides the grid's items-center for this cell,
+            // -mb-10 cancels MetricsRow's mt-10 so the art's bottom edge lands
+            // exactly on the rule, and object-bottom keeps the figure sitting
+            // on it as the box grows.
+            //
+            // 66vh, up from 60: height is what binds here, not width (the
+            // column is wider than the art needs at this ratio), so vh is the
+            // lever. Kept modest on purpose — the band is min-h-screen and the
+            // figures below have to clear the fold, and the 2.5rem reclaimed by
+            // the negative margin is most of what paid for the increase.
             // Below lg it keeps its natural ratio, the column being full width.
-            className="relative mx-auto aspect-[8/7] w-full max-w-xl lg:aspect-auto lg:h-[60vh] lg:max-h-[640px] lg:max-w-none"
+            className="relative mx-auto aspect-[8/7] w-full max-w-xl lg:aspect-auto lg:-mb-10 lg:h-[66vh] lg:max-h-[720px] lg:max-w-none lg:self-end"
           >
             <Image
               src={HERO_IMAGE.src}
@@ -151,7 +166,7 @@ export function ReferralHero({
               fill
               priority
               sizes="(max-width: 1024px) 92vw, 52vw"
-              className="object-contain drop-shadow-[0_30px_50px_rgba(0,3,33,0.22)]"
+              className="object-contain object-bottom drop-shadow-[0_30px_50px_rgba(0,3,33,0.22)]"
             />
           </motion.div>
         </div>

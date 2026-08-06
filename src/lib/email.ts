@@ -3937,3 +3937,190 @@ export async function send_file_reassignment_notification(data: FileReassignment
 
   return await transporter.sendMail(mail_options);
 }
+
+export interface ClientCheckInNotificationData {
+  /** File owner (recipient). */
+  advisor_name: string;
+  advisor_email: string;
+  /** Funded rounds that are due a check-in call. */
+  clients: Array<{
+    client_name: string;
+    company_name: string;
+    /** What the round that just came due actually funded at. */
+    funded_amount?: number | null;
+    lender_funded?: string | null;
+    funded_term?: string | null;
+    /** ISO timestamp the round funded. */
+    funded_at: string;
+    /** Which round it was — "Round 2" reads better than a uuid. */
+    round_number: number;
+    detail_url: string;
+  }>;
+  login_url: string;
+}
+
+/**
+ * Generates HTML for the funded-client check-in nudge.
+ *
+ * Deliberately NOT written as "your client is ready to borrow again" — the
+ * timing is a fixed interval, not a signal about the client's actual appetite.
+ * Some come back in three months, some in over a year. The email asks the
+ * advisor to make contact and find out; more capital is one possible outcome,
+ * not the premise.
+ *
+ * Nested `clients` rows are escaped per-field here because escape_email_strings
+ * only walks top-level string values, not arrays of objects.
+ */
+export function generate_client_check_in_email_html(
+  data: ClientCheckInNotificationData
+): string {
+  const advisor_name = escape_html(data.advisor_name || "there");
+  const count = data.clients.length;
+
+  const rows = data.clients.map((c) => {
+    const client_name = escape_html(c.client_name || "Unnamed client");
+    const company_name = escape_html(c.company_name || "");
+    const lender = c.lender_funded ? escape_html(c.lender_funded) : "—";
+    const term = c.funded_term ? escape_html(c.funded_term) : "";
+    const amount =
+      typeof c.funded_amount === "number" && c.funded_amount > 0
+        ? new Intl.NumberFormat("en-US", {
+            style: "currency",
+            currency: "USD",
+            maximumFractionDigits: 0,
+          }).format(c.funded_amount)
+        : "—";
+    const d = new Date(c.funded_at);
+    const funded_on = Number.isNaN(d.getTime())
+      ? "—"
+      : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    return `
+      <tr>
+        <td style="padding: 14px 16px; border-bottom: 1px solid #f1f5f9; font-size: 14px; color: #1e293b;">
+          <strong>${client_name}</strong><br>
+          <span style="color: #64748b; font-size: 13px;">${company_name}</span>
+        </td>
+        <td style="padding: 14px 16px; border-bottom: 1px solid #f1f5f9; font-size: 14px; color: #475569; white-space: nowrap;">
+          ${amount}${term ? `<br><span style="color: #94a3b8; font-size: 12px;">${term}</span>` : ""}
+        </td>
+        <td style="padding: 14px 16px; border-bottom: 1px solid #f1f5f9; font-size: 13px; color: #64748b;">${lender}</td>
+        <td style="padding: 14px 16px; border-bottom: 1px solid #f1f5f9; font-size: 13px; color: #64748b; white-space: nowrap;">${funded_on}<br><span style="color: #94a3b8; font-size: 12px;">Round ${c.round_number}</span></td>
+      </tr>`;
+  }).join("");
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Check In With ${count === 1 ? "a Funded Client" : "Your Funded Clients"}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f6f9fc;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse;">
+    <tr>
+      <td align="center" style="padding: 40px 0;">
+        <table role="presentation" style="width: 640px; max-width: 100%; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+
+          <!-- Header -->
+          <tr>
+            <td style="background-color: #10b981; padding: 40px 20px; text-align: center;">
+              <img src="cid:cb_logo_white" alt="Credit Banc" style="height: 44px; width: auto; display: block; margin: 0 auto; margin-bottom: 24px;">
+              <h1 style="margin: 0; color: #ffffff; font-size: 18px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.15em; line-height: 1;">Time to Check In</h1>
+            </td>
+          </tr>
+
+          <!-- Message -->
+          <tr>
+            <td style="padding: 40px 40px 8px;">
+              <h2 style="margin: 0 0 16px; color: #1e293b; font-size: 20px; font-weight: 600;">Hi ${advisor_name},</h2>
+              <p style="margin: 0 0 16px; color: #475569; font-size: 16px; line-height: 1.6;">
+                ${count === 1
+                  ? "It's been a while since you funded the client below. Worth a call to see how the business is doing and whether there's anything they need."
+                  : `It's been a while since you funded the ${count} clients below. Worth a call to each — see how the business is doing and whether there's anything they need.`}
+              </p>
+              <p style="margin: 0 0 16px; color: #475569; font-size: 16px; line-height: 1.6;">
+                This isn't a signal that ${count === 1 ? "they're" : "they're"} looking for money — some clients come back within months, others after more than a year. It's a prompt to stay in touch. What ${count === 1 ? "they" : "they"} funded is below so you can open the conversation with the details in hand.
+              </p>
+              <div style="background-color: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 10px; padding: 12px 16px; margin-bottom: 8px;">
+                <p style="margin: 0; color: #065f46; font-size: 14px; font-weight: 600;">💬 If more capital does come up, use <strong>Start New Funding Round</strong> on the client's page to open the next round.</p>
+              </div>
+            </td>
+          </tr>
+
+          <!-- Clients table -->
+          <tr>
+            <td style="padding: 8px 40px 8px;">
+              <table role="presentation" style="width: 100%; border-collapse: collapse; border: 1px solid #f1f5f9; border-radius: 8px; overflow: hidden;">
+                <thead>
+                  <tr style="background-color: #f8fafc;">
+                    <th align="left" style="padding: 10px 16px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #94a3b8;">Client</th>
+                    <th align="left" style="padding: 10px 16px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #94a3b8;">Funded</th>
+                    <th align="left" style="padding: 10px 16px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #94a3b8;">Lender</th>
+                    <th align="left" style="padding: 10px 16px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #94a3b8;">Closed</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${rows}
+                </tbody>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Action Button -->
+          <tr>
+            <td style="padding: 24px 40px 40px;" align="center">
+              <a href="${data.login_url}" style="display: inline-block; background-color: #10b981; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-size: 16px; font-weight: 600;">
+                ${count === 1 ? "View Client" : "View Clients"}
+              </a>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding: 40px; text-align: center; color: #94a3b8; font-size: 13px; line-height: 1.6; border-top: 1px solid #f1f5f9;">
+              <p style="margin: 0;">© ${new Date().getFullYear()} Credit Banc Vault. This is an automated notification.</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `;
+}
+
+/**
+ * Sends the funded-client check-in summary to the file's current owner.
+ */
+export async function send_client_check_in_notification(
+  data: ClientCheckInNotificationData
+) {
+  if (!data.clients.length) return null;
+
+  const transporter = create_smtp_transporter();
+  const from_email = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  const from_name = process.env.SMTP_FROM_NAME || "Credit Banc Vault";
+
+  const count = data.clients.length;
+  const mail_options = {
+    from: `${from_name} <${from_email}>`,
+    to: data.advisor_email,
+    subject:
+      count === 1
+        ? "Check in with a client you funded"
+        : `Check in with ${count} clients you funded`,
+    html: generate_client_check_in_email_html(data),
+    attachments: [
+      {
+        filename: "CBLOGOWHITE.png",
+        path: path.join(process.cwd(), "public", "CBLOGOWHITE.png"),
+        cid: "cb_logo_white",
+      },
+    ],
+  };
+
+  return await transporter.sendMail(mail_options);
+}

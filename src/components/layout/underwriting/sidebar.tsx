@@ -73,7 +73,13 @@ export function Sidebar({
                 aria-label="Sidebar navigation"
                 className={[
                     'fixed left-0 top-0 z-50 flex h-dvh md:h-screen w-72 flex-col bg-slate-900 border-r border-white/5 shadow-2xl overflow-y-auto overflow-x-hidden',
-                    'transition-all duration-300 ease-in-out',
+                    // transition-transform, NOT transition-all: the mobile
+                    // drawer still slides in, but the collapse/expand width
+                    // snaps. Animating the width meant the expanded labels spent
+                    // 300ms laid out inside an 80px box — they wrapped onto
+                    // several lines, pushed the content past the viewport, and
+                    // flashed a scrollbar before the width caught up.
+                    'transition-transform duration-300 ease-in-out',
                     mobileOpen ? 'translate-x-0' : '-translate-x-full',
                     'md:translate-x-0',
                     desktopWidth,
@@ -91,7 +97,7 @@ export function Sidebar({
                         {/* CB mark for collapsed state */}
                         {collapsed && (
                             // eslint-disable-next-line @next/next/no-img-element
-                            <img src="/cb-mark.png" alt="Credit Banc" className="w-10 h-10 max-w-none shrink-0 hidden md:block rounded-full shadow-lg shadow-emerald-500/20" />
+                            <img src="/cb-logo.png" alt="Credit Banc" className="w-10 h-10 max-w-none shrink-0 hidden md:block" />
                         )}
 
                         <button
@@ -192,7 +198,7 @@ export function Sidebar({
                     localStorage.setItem('sidebar_collapsed_uw', next ? '1' : '0')
                 }}
                 aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-                className="hidden md:flex fixed z-50 h-10 w-10 items-center justify-center rounded-2xl bg-emerald-500 text-white shadow-xl shadow-emerald-500/20 hover:bg-emerald-600 transition-all duration-300 ease-in-out active:scale-90"
+                className="hidden md:flex fixed z-50 h-10 w-10 items-center justify-center rounded-2xl bg-emerald-500 text-white shadow-xl shadow-emerald-500/20 hover:bg-emerald-600 transition-[transform,background-color] duration-150 ease-out active:scale-90"
                 style={{ bottom: 100, left: collapsed ? 60 : 268 }}
                 title={collapsed ? 'Expand' : 'Collapse'}
             >

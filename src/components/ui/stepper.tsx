@@ -319,15 +319,20 @@ function StepIndicator({
 }
 
 function StepConnector({ isComplete }: { isComplete: boolean }) {
+  // Width only. The fill used to animate backgroundColor "transparent" → mint
+  // as well, which Motion warns about and refuses: `transparent` is a keyword,
+  // not a colour it can interpolate from. It was never needed — the bar is
+  // zero-width when incomplete, so there is nothing to see the colour of. Same
+  // shape as Stepper2's connector, which sets the colour as a static class.
   const lineVariants = {
-    incomplete: { width: 0, backgroundColor: "transparent" },
-    complete: { width: "100%", backgroundColor: MINT },
+    incomplete: { width: 0 },
+    complete: { width: "100%" },
   };
 
   return (
     <div className="relative mx-2 h-0.5 flex-1 overflow-hidden rounded bg-cb-mint/15">
       <motion.div
-        className="absolute left-0 top-0 h-full"
+        className="absolute left-0 top-0 h-full bg-cb-mint"
         variants={lineVariants}
         initial={false}
         animate={isComplete ? "complete" : "incomplete"}

@@ -21,6 +21,7 @@ import { AffiliateLeadForm } from "@/components/affiliate-lead-form";
 import { Eyebrow } from "@/components/marketing/brand-chrome";
 import { ReferralHero } from "./referral-hero";
 import { WhatWeDo } from "./what-we-do";
+import { HowThisWorks } from "./how-this-works";
 import { BAND_MIN_H_LG } from "./band";
 
 export function ReferralLanding({
@@ -55,9 +56,14 @@ export function ReferralLanding({
       {/* min-h matches the bands above so the page scrolls in whole screens.
           It is a floor, not a cap — this section outgrows it as the visitor
           steps through the form, and again when the booking calendar lands. */}
+      {/* No scroll-mt here. globals.css already sets `html { scroll-padding-top:
+          6rem }`, and anchor scrolling adds the target's scroll-margin ON TOP of
+          the container's scroll-padding — so scroll-mt-24 made it 192px against
+          an 80px sticky header, parking a slab of the green band above the fold
+          on every CTA click. 6rem alone clears the header with 16px to spare. */}
       <section
         id="prequal"
-        className={`relative flex w-full items-center overflow-hidden scroll-mt-24 bg-white ${BAND_MIN_H_LG}`}
+        className={`relative flex w-full items-center overflow-hidden bg-white ${BAND_MIN_H_LG}`}
       >
         <div
           aria-hidden
@@ -79,13 +85,28 @@ export function ReferralLanding({
             </div>
           )}
 
-          <div className="mx-auto max-w-2xl">
-            <AffiliateLeadForm
-              code={code}
-              affiliateFirstName={affiliateFirstName}
-              onQualified={handleQualified}
-              showHero={false}
-            />
+          {/* Two columns while the form is live, one once it isn't.
+              "Here's how this works" answers "what happens after I finish
+              this?", which is a question the visitor only has while filling it
+              in. Once they qualify the booking calendar takes over and needs
+              the full width — the same reason the heading above retires. */}
+          <div
+            className={
+              qualified
+                ? "mx-auto max-w-2xl"
+                : "mx-auto grid max-w-6xl gap-8 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start lg:gap-12"
+            }
+          >
+            <div className={qualified ? undefined : "min-w-0"}>
+              <AffiliateLeadForm
+                code={code}
+                affiliateFirstName={affiliateFirstName}
+                onQualified={handleQualified}
+                showHero={false}
+              />
+            </div>
+
+            {!qualified && <HowThisWorks />}
           </div>
         </div>
       </section>

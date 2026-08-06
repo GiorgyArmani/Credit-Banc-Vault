@@ -9,6 +9,7 @@ import { updateLoanStatus } from "@/app/actions/pipeline";
 // No startNewFundingRound import on purpose: funding never opens a round.
 // Opening one is a deliberate act through the Funding Rounds card.
 import { getActiveDeal, isDealFunded } from "@/lib/funding-deals";
+import { computeRenewalDates } from "@/lib/renewals";
 import { revalidatePath } from "next/cache";
 
 /**
@@ -333,11 +334,21 @@ export async function fundLoanAction(clientId: string, data: {
         if (fundedBusinessProfileId) {
             try {
                 const fundedAmountNum = Number(String(data.totalAmountFunded).replace(/[^0-9.]/g, ""));
+                // One instant for both the funded stamp and the renewal schedule
+                // derived from it, so they can never disagree by a few ms.
+                const fundedAtIso = new Date().toISOString();
+                const renewal = computeRenewalDates(fundedAtIso);
                 const fundedFields = {
                     funded_amount: Number.isFinite(fundedAmountNum) ? fundedAmountNum : null,
                     lender_funded: data.lenderFunded || null,
                     funded_term: data.termOfFundedLoan || null,
-                    funded_at: new Date().toISOString(),
+                    funded_at: fundedAtIso,
+                    // Drives /api/cron/client-check-ins. Populated here so the
+                    // schedule is a fact of the funding, not something a sweep
+                    // has to infer — though the cron can derive it for rounds
+                    // funded before this existed.
+                    renewal_eligibility_date: renewal?.eligibilityDate ?? null,
+                    renewal_reminder_at: renewal?.reminderAt ?? null,
                     sales_rep_funded: data.salesRepFunded || null,
                     date_of_submission: data.dateOfSubmission || null,
                     file_synopsis: data.fileSinopsis || null,

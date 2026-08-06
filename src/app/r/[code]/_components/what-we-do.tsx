@@ -28,14 +28,17 @@ export function WhatWeDo() {
         style={{ background: GREEN_PANEL }}
       >
         <Reveal direction="right" className="w-full">
-          {/* Bigger than it was: the band is a full screen tall now, and at
-              max-w-xl the art floated in a lot of empty green. */}
-          <div className="relative mx-auto aspect-[8/7] w-full max-w-xl lg:max-w-2xl">
+          {/* Bigger again on marketing's note — the collage carries real detail
+              (the four product cards are legible copy, not decoration), and at
+              max-w-2xl that detail was too small to reward looking at. It now
+              runs to the panel's padding on wide screens; the panel's px is the
+              only thing keeping it off the seam. */}
+          <div className="relative mx-auto aspect-[8/7] w-full max-w-xl lg:max-w-3xl xl:max-w-4xl">
             <Image
               src="/step-3.png"
               alt="A Credit Banc advisor and a business owner comparing SBA, term loan, line of credit and equipment financing options"
               fill
-              sizes="(max-width: 1024px) 88vw, 44vw"
+              sizes="(max-width: 1024px) 88vw, 48vw"
               className="object-contain drop-shadow-[0_30px_50px_rgba(0,3,33,0.28)]"
             />
           </div>
@@ -51,11 +54,21 @@ export function WhatWeDo() {
             <span className="text-cb-mint">Credit Banc</span> Do?
           </h2>
 
+          {/* The two bolded phrases are the differentiator marketing wants the
+              eye to catch in a paragraph that is otherwise a list of products.
+              Bolded inside the muted paragraph rather than lifted out, so the
+              sentence still reads as one thought. */}
           <p className="mt-6 text-lg leading-relaxed text-cb-ink/60">
             Here&rsquo;s the short version: Credit Banc helps business owners
             explore working capital, lines of credit, SBA loans, equipment
             financing, real estate funding, debt consolidation, and longer-term
-            options with monthly payments and terms up to 10 years.
+            options with{" "}
+            <strong className="font-bold text-cb-ink">monthly payments</strong>{" "}
+            and{" "}
+            <strong className="font-bold text-cb-ink">
+              terms up to 10 years
+            </strong>
+            .
           </p>
 
           <p className="font-headline mt-8 text-xl font-extrabold leading-snug tracking-tight text-cb-ink md:text-2xl">
@@ -75,7 +88,7 @@ export function WhatWeDo() {
               <ArrowRight className="h-5 w-5" />
             </a>
             <p className="text-sm font-semibold text-cb-ink/50">
-              Takes about 30 seconds. No impact to your credit.
+              Takes just a few minutes. No impact on your credit score.
             </p>
           </div>
         </Reveal>

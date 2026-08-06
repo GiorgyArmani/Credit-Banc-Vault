@@ -335,10 +335,12 @@ export function AffiliateLeadForm({
     >
       {/* 1 — name */}
       <Step>
-        <h3 className="font-manrope text-2xl md:text-3xl font-extrabold text-cb-ink tracking-tight">
+        {/* No "takes about 30 seconds" line here. It was a promise the form
+            can't keep — this is seven steps — and the timing claim now lives
+            once, next to the CTAs that lead here. */}
+        <h3 className="font-manrope text-2xl md:text-3xl font-extrabold text-cb-ink tracking-tight mb-6">
           First things first — what should we call you?
         </h3>
-        <p className="text-cb-mint font-semibold mt-1 mb-6">Takes about 30 seconds. 👋</p>
         <div className="grid gap-2">
           <Label htmlFor="ref-full-name" className={labelClass}>Full Name</Label>
           {/* No autoFocus. Browsers scroll a focused element into view on
