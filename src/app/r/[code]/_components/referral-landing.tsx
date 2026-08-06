@@ -70,34 +70,42 @@ export function ReferralLanding({
           className="pointer-events-none absolute inset-x-0 top-0 h-72 bg-gradient-to-b from-cb-mint/10 to-transparent"
         />
         <div className="relative z-10 mx-auto w-full max-w-6xl px-4 py-20 md:py-28">
-          {!qualified && (
-            <div className="mx-auto mb-12 max-w-2xl text-center">
-              <Eyebrow className="mb-4">Let&rsquo;s See Where You Stand</Eyebrow>
-              <h2 className="font-headline text-3xl font-extrabold leading-tight tracking-tight text-cb-ink md:text-5xl">
-                Not sure what kind of funding you need?{" "}
-                <span className="text-cb-mint">That&rsquo;s the point.</span>
-              </h2>
-              <p className="mt-5 text-lg leading-relaxed text-cb-ink/60">
-                Answer a few questions and we&rsquo;ll tell you where you stand — no
-                impact to your credit, and no obligation to do anything with the
-                answer.
-              </p>
-            </div>
-          )}
-
           {/* Two columns while the form is live, one once it isn't.
               "Here's how this works" answers "what happens after I finish
               this?", which is a question the visitor only has while filling it
               in. Once they qualify the booking calendar takes over and needs
-              the full width — the same reason the heading above retires. */}
+              the full width — the same reason the heading below retires.
+
+              The heading rides INSIDE the left column rather than spanning the
+              grid: the four-step card is tall enough that starting it below a
+              full-width heading pushed its last step off the bottom of the
+              screen. Sharing the row with the heading lifts it ~200px, so the
+              whole card lands above the fold. */}
           <div
             className={
               qualified
                 ? "mx-auto max-w-2xl"
-                : "mx-auto grid max-w-6xl gap-8 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start lg:gap-12"
+                : "grid gap-8 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start lg:gap-12"
             }
           >
             <div className={qualified ? undefined : "min-w-0"}>
+              {!qualified && (
+                <div className="mb-10 max-w-2xl text-center lg:text-left">
+                  <Eyebrow className="mb-4">
+                    Let&rsquo;s See Where You Stand
+                  </Eyebrow>
+                  <h2 className="font-headline text-3xl font-extrabold leading-tight tracking-tight text-cb-ink md:text-4xl">
+                    Not sure what kind of funding you need?{" "}
+                    <span className="text-cb-mint">That&rsquo;s the point.</span>
+                  </h2>
+                  <p className="mt-5 text-lg leading-relaxed text-cb-ink/60">
+                    Answer a few questions and we&rsquo;ll tell you where you
+                    stand — no impact to your credit, and no obligation to do
+                    anything with the answer.
+                  </p>
+                </div>
+              )}
+
               <AffiliateLeadForm
                 code={code}
                 affiliateFirstName={affiliateFirstName}

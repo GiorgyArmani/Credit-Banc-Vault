@@ -48,7 +48,7 @@ type Choice = { key: ChoiceKey; title: string; sub?: string; options: readonly s
 const CHOICE_STEPS: Choice[] = [
   { key: "loan_amount", title: "How much funding are you looking for?", options: LOAN_AMOUNT_OPTIONS },
   { key: "monthly_revenue", title: "Roughly how much does your business bring in each month?", options: REVENUE_OPTIONS },
-  { key: "fico_band", title: "And where's your personal credit these days?", sub: "A ballpark is fine — no impact to your score.", options: FICO_OPTIONS },
+  { key: "fico_band", title: "And where's your personal credit these days?", sub: "A ballpark is fine.", options: FICO_OPTIONS },
   { key: "time_in_business", title: "How long have you been in business?", options: TIME_IN_BUSINESS_OPTIONS },
 ];
 
@@ -413,9 +413,9 @@ export function AffiliateLeadForm({
       {/* 7 — contact */}
       <Step>
         <h3 className="font-manrope text-2xl md:text-3xl font-extrabold text-cb-ink tracking-tight">
-          Last thing{firstName ? `, ${firstName}` : ""} — where should we reach you?
+          One last thing{firstName ? `, ${firstName}` : ""}...how do we get ahold of you?
         </h3>
-        <p className="text-cb-mint font-semibold mt-1 mb-6">So your advisor can share your funding options.</p>
+        <p className="text-cb-mint font-semibold mt-1 mb-6">Just your phone and email. We promise not to make this weird.</p>
         <div className="grid gap-5">
           <div className="grid gap-2">
             <Label htmlFor="ref-phone" className={labelClass}>Phone</Label>

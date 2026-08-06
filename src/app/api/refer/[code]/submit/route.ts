@@ -158,7 +158,10 @@ export async function POST(
           companyName: businessName || null,
           country: "US",
           locationId,
-          tags: ["vault-affiliate-referral", "vault_pre_approval", `vault-affiliate:${affiliate.referral_code}`],
+          // Attribution tags only. No `vault_pre_approval` here — that tag fires
+          // a GHL automation meant for real vault signups, and a referral lead
+          // has only pre-qualified, not signed up.
+          tags: ["vault-affiliate-referral", `vault-affiliate:${affiliate.referral_code}`],
           customFields,
         });
       } else {
