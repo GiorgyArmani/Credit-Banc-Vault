@@ -1,7 +1,6 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { createClient } from "@/lib/supabase/client";
 import { formatPhoneInput } from "@/lib/phone";
 import { BrandCard, Eyebrow, CTA, FIELD } from "@/components/marketing/brand-chrome";
 import { Input } from "@/components/ui/input";
@@ -9,25 +8,40 @@ import { Label } from "@/components/ui/label";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useRef } from "react";
-import { Camera, User, Pencil, ArrowRight } from "lucide-react";
+import { Camera, User, ArrowRight, Lock } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
+/** The invitation this form is being filled out under. Resolved server-side by
+ *  the page; the form never sees an un-invited state. */
+export type InviteContext = {
+  token: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+};
+
 export function AdvisorSignUpForm({
+  invite,
   className,
   ...props
-}: React.ComponentPropsWithoutRef<"div">) {
-  // Form state management
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
-  const [email, setEmail] = useState("");
+}: React.ComponentPropsWithoutRef<"div"> & { invite: InviteContext }) {
+  // Form state management. Names are seeded from the invitation but stay
+  // editable — an admin typing a colleague's name into an invite box is not
+  // authoritative about how they spell it.
+  const [firstName, setFirstName] = useState(invite.firstName);
+  const [lastName, setLastName] = useState(invite.lastName);
   const [phone, setPhone] = useState("");
   const [profilePic, setProfilePic] = useState<File | null>(null);
   const [password, setPassword] = useState("");
   const [repeatPassword, setRepeatPassword] = useState("");
-  const [inviteCode, setInviteCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  // Fixed by the invitation, not by the person filling in the form. The signup
+  // route re-checks it against the invitation, so an editable box here could
+  // only ever produce a confusing rejection.
+  const email = invite.email;
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -60,7 +74,6 @@ export function AdvisorSignUpForm({
    */
   const handleAdvisorSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
-    const supabase = createClient();
 
     setIsLoading(true);
     setError(null);
@@ -118,7 +131,7 @@ export function AdvisorSignUpForm({
           profilePicName,
           password,
           tags: ["creditbanc-advisor", "advisor-signup"],
-          inviteCode: inviteCode.trim(),
+          inviteToken: invite.token,
         }),
       });
 
@@ -193,16 +206,14 @@ export function AdvisorSignUpForm({
               </div>
 
               <div className="grid gap-3">
-                <Label htmlFor="invite-code" className={FIELD.label}>Invite Code</Label>
-                <Input
-                  id="invite-code"
-                  type="text"
-                  placeholder="Enter your invite code"
-                  required
-                  value={inviteCode}
-                  onChange={(e) => setInviteCode(e.target.value)}
-                  className={FIELD.input}
-                />
+                <Label htmlFor="email" className={FIELD.label}>Work Email</Label>
+                <div className="flex h-12 items-center gap-2 rounded-xl border border-black/10 bg-cb-mint/5 px-4">
+                  <Lock className="h-4 w-4 shrink-0 text-cb-mint" aria-hidden />
+                  <span id="email" className="truncate font-medium text-cb-ink">{email}</span>
+                </div>
+                <p className="text-xs text-cb-ink/50">
+                  Your account is created for this address, from your invitation.
+                </p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -233,33 +244,18 @@ export function AdvisorSignUpForm({
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="grid gap-3">
-                  <Label htmlFor="email" className={FIELD.label}>Work Email</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    placeholder="advisor@creditbanc.com"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className={FIELD.input}
-                  />
-                </div>
-
-                <div className="grid gap-3">
-                  <Label htmlFor="phone" className={FIELD.label}>Phone (Optional)</Label>
-                  <Input
-                    id="phone"
-                    type="tel"
-                    inputMode="tel"
-                    maxLength={14}
-                    placeholder="(555) 000-0000"
-                    value={phone}
-                    onChange={(e) => setPhone(formatPhoneInput(e.target.value))}
-                    className={FIELD.input}
-                  />
-                </div>
+              <div className="grid gap-3">
+                <Label htmlFor="phone" className={FIELD.label}>Phone (Optional)</Label>
+                <Input
+                  id="phone"
+                  type="tel"
+                  inputMode="tel"
+                  maxLength={14}
+                  placeholder="(555) 000-0000"
+                  value={phone}
+                  onChange={(e) => setPhone(formatPhoneInput(e.target.value))}
+                  className={FIELD.input}
+                />
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4">

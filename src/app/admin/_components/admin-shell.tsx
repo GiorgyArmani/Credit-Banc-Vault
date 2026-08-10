@@ -15,12 +15,54 @@ import { usePathname } from 'next/navigation'
 import { Menu } from 'lucide-react'
 import { NotificationBell } from '@/components/notifications/NotificationBell'
 import { GlobalSearch } from '@/components/layout/admin/global-search'
+import { ProfilePhotoButton } from '@/components/staff/profile-photo-button'
+import { createClient } from '@/lib/supabase/client'
 
 export function AdminShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
 
   const [mobileOpen, setMobileOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
+  const [profile, setProfile] = useState<{ name: string; avatarUrl: string | null } | null>(null)
+
+  // Admins carry clients too, so they appear on the client-facing "Your
+  // Advisor" card exactly like advisors do — same advisors row, same photo.
+  // Mirrors the lookup in advisor-shell.tsx.
+  useEffect(() => {
+    async function getProfile() {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      const { data: advisorData } = await supabase
+        .from('advisors')
+        .select('first_name, last_name, profile_pic_url')
+        .eq('user_id', user.id)
+        .maybeSingle()
+
+      if (advisorData) {
+        setProfile({
+          name: `${advisorData.first_name ?? ''} ${advisorData.last_name ?? ''}`.trim(),
+          avatarUrl: advisorData.profile_pic_url,
+        })
+        return
+      }
+
+      const { data: userData } = await supabase
+        .from('users')
+        .select('first_name, last_name')
+        .eq('id', user.id)
+        .maybeSingle()
+
+      if (userData) {
+        setProfile({
+          name: `${userData.first_name ?? ''} ${userData.last_name ?? ''}`.trim(),
+          avatarUrl: null,
+        })
+      }
+    }
+    getProfile()
+  }, [])
 
   useEffect(() => {
     setMobileOpen(false)
@@ -42,6 +84,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
       '/admin/prospects': 'Prospects',
       '/admin/clients': 'Clients',
       '/admin/affiliates': 'Affiliates',
+      '/admin/referral-partners': 'Referral Partners',
     }
     const key = Object.keys(map).find(k => pathname?.startsWith(k))
     return key ? map[key] : 'Admin'
@@ -88,6 +131,12 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           </div>
           <div className="flex items-center gap-4 shrink-0">
             <NotificationBell clientBasePath="/admin/clients" />
+            <div className="h-8 w-px bg-slate-200"></div>
+            <ProfilePhotoButton
+              name={profile?.name ?? ''}
+              photoUrl={profile?.avatarUrl ?? null}
+              roleLabel="Admin"
+            />
           </div>
         </header>
 

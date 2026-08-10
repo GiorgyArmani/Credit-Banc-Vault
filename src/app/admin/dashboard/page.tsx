@@ -24,6 +24,7 @@ import {
   Minus,
   Timer,
   Zap,
+  Handshake,
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { resolve_range, compute_delta, type ResolvedRange } from './_lib/range'
@@ -549,7 +550,7 @@ const advisorTools = [
   { label: 'Clients', desc: 'Funded customer book.', href: '/admin/clients', icon: Users, color: 'from-blue-50 to-blue-100/50', iconColor: 'text-blue-500', border: 'border-blue-100' },
   { label: 'New Funding', desc: 'Submit a new client vault for the funding pipeline.', href: '/admin/clients/new', icon: UserCog, color: 'from-blue-50 to-blue-100/50', iconColor: 'text-blue-500', border: 'border-blue-100' },
   { label: 'Fast Funding', desc: 'One-page speed form — create a client on the call and send the signing link instantly.', href: '/admin/clients/new/speed', icon: Zap, color: 'from-emerald-50 to-emerald-100/50', iconColor: 'text-emerald-500', border: 'border-emerald-100' },
-  { label: 'Referral Partners', desc: 'Manage the "who referred this deal" list shown on client creation and each client card.', href: '/admin/referral-partners', icon: Users, color: 'from-blue-50 to-blue-100/50', iconColor: 'text-blue-500', border: 'border-blue-100' },
+  { label: 'Referral Partners', desc: 'CPAs, bankers and professionals who refer clients — their links, portal access and commission terms.', href: '/admin/referral-partners', icon: Handshake, color: 'from-blue-50 to-blue-100/50', iconColor: 'text-blue-500', border: 'border-blue-100' },
 ]
 
 function ToolCard({ label, desc, href, icon: Icon, color, iconColor, border }: (typeof uwTools)[0]) {

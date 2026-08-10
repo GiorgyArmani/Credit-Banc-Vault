@@ -75,10 +75,22 @@ export async function ghlUpdateContact(contactId: string, body: Partial<GhlConta
  * The search endpoint doesn't reliably return `assignedTo`, so when we need
  * the contact owner (e.g. to mirror GHL round-robin ownership into the vault)
  * we read the full contact here.
+ *
+ * `customFields` comes back as GHL sends it — `[{ id, value }]`, keyed by field
+ * ID, not merge key. Resolve the id you want with ghlResolveFieldId() (or read
+ * it from env) before looking a value up. Used by the referral-partner
+ * attribution read, which is how a partner link filled on the marketing site
+ * reaches the vault. See [[ghl_integration_contract]].
  */
 export async function ghlGetContact(
   contactId: string
-): Promise<{ id: string; assignedTo?: string | null; email?: string | null; phone?: string | null } | null> {
+): Promise<{
+  id: string;
+  assignedTo?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  customFields?: Array<{ id: string; value?: any; fieldValue?: any }>;
+} | null> {
   const res = await fetch(`${BASE}/contacts/${contactId}`, {
     method: "GET",
     headers: authHeaders(),
@@ -92,6 +104,7 @@ export async function ghlGetContact(
     assignedTo: contact.assignedTo ?? null,
     email: contact.email ?? null,
     phone: contact.phone ?? null,
+    customFields: Array.isArray(contact.customFields) ? contact.customFields : [],
   };
 }
 

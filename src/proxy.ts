@@ -56,6 +56,10 @@ export async function proxy(request: NextRequest) {
   // Define public paths that don't require authentication
   const publicPaths = [
     "/auth/login",
+    // Staff invitation landing. Resolves the token and forwards to the right
+    // role's onboarding form — all three of those are public paths below, but
+    // each now refuses to render without a live invitation in ?token=.
+    "/auth/join",
     "/auth/advisor-signup",
     "/auth/callback",
     "/auth/sign-up-success",
@@ -106,6 +110,9 @@ export async function proxy(request: NextRequest) {
       setter: ["/setter"], // Appointment setters: create-only fast-funding dashboard
       // Only the dashboard is role-gated — /affiliate (index) is the PUBLIC signup page.
       affiliate: ["/affiliate/dashboard"],
+      // Level-2 referral partners (CPAs, bankers, professionals). Invite-only —
+      // there is no public signup page, so the whole /partner tree is gated.
+      referral_partner: ["/partner"],
       free: [], // Free users have access to basic /dashboard only
     };
 
@@ -163,6 +170,7 @@ export async function proxy(request: NextRequest) {
           underwriting: "/underwriting/dashboard",
           setter: "/setter/dashboard",
           affiliate: "/affiliate/dashboard",
+        referral_partner: "/partner/dashboard",
           free: isOnboardingComplete ? "/dashboard" : "/onboarding",
         };
         return redirectWithCookies(adminRedirectMap[userRole] || "/dashboard");
@@ -185,6 +193,7 @@ export async function proxy(request: NextRequest) {
                 underwriting: "/underwriting/dashboard",
                 setter: "/setter/dashboard",
                 affiliate: "/affiliate/dashboard",
+                referral_partner: "/partner/dashboard",
                 admin: "/admin/dashboard",
                 free: isOnboardingComplete ? "/dashboard" : "/onboarding",
               };
@@ -203,11 +212,12 @@ export async function proxy(request: NextRequest) {
         underwriting: "/underwriting/dashboard",
         setter: "/setter/dashboard",
         affiliate: "/affiliate/dashboard",
+        referral_partner: "/partner/dashboard",
         admin: "/admin/dashboard",
         free: isOnboardingComplete ? "/dashboard" : "/onboarding",
       };
 
-      if (userRole === "advisor" || userRole === "underwriting" || userRole === "setter" || userRole === "affiliate" || userRole === "admin" || !isOnboardingComplete) {
+      if (userRole === "advisor" || userRole === "underwriting" || userRole === "setter" || userRole === "affiliate" || userRole === "referral_partner" || userRole === "admin" || !isOnboardingComplete) {
         return redirectWithCookies(redirectMap[userRole]);
       }
     }
@@ -219,6 +229,7 @@ export async function proxy(request: NextRequest) {
         underwriting: "/underwriting/dashboard",
         setter: "/setter/dashboard",
         affiliate: "/affiliate/dashboard",
+        referral_partner: "/partner/dashboard",
         admin: "/admin/dashboard",
         free: isOnboardingComplete ? "/dashboard" : "/onboarding",
       };

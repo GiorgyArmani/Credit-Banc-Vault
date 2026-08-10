@@ -11,8 +11,22 @@
  *   2. serve as a last-resort fallback in getActiveReferralPartners() when the
  *      table can't be read (see src/lib/referral-partners.ts).
  *
- * The selected name is still persisted to client_data_vault.referral_partner and
- * synced to the GHL custom field AFFILIATE_ASSIGNED. Keep alphabetized.
+ * The selected name is persisted to client_data_vault.referral_partner (plus the
+ * referral_partner_id FK) and synced to the GHL field "Referral Assigned"
+ * ({{contact.data_vault_referral_assigned}}). Keep alphabetized.
+ *
+ * NOTE: as of migration 20260807 a partner is more than a name — they carry a
+ * link slug, portal access and commission terms. None of that can live here, so
+ * this list is now strictly the emergency fallback for the dropdown.
+ *
+ * This file HAS DRIFTED from production before, and the drift is expensive: it
+ * seeded "Chris Scheneider" into the migration while prod already held the
+ * correct "Chris Schneider", which inserted a duplicate person rather than
+ * failing. Two names below are still misspelled relative to the links in
+ * circulation ("Nathasha Atto", "Tersea Wagonseller") — those match prod, and
+ * the migration maps the right slug onto them rather than renaming, because the
+ * name is what already-attributed clients carry. Fix them at
+ * /admin/referral-partners (which updates both the registry and every client).
  */
 export const REFERRAL_PARTNERS: readonly string[] = [
     "Aaron Sedlacek",
@@ -110,7 +124,7 @@ export const REFERRAL_PARTNERS: readonly string[] = [
     "Vivian Gant",
     "Weston Holley",
     "Zahra Yarahamdi",
-    "Chris Scheneider",
+    "Chris Schneider",
     "Santo Chiarelli",
 
 ];

@@ -9,7 +9,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { CopyLink } from "./_components/copy-link";
+import { CopyLink } from "@/components/copy-link";
 import { MousePointerClick, Users, DollarSign, Clock } from "lucide-react";
 import clsx from "clsx";
 

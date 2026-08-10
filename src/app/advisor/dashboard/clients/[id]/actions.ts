@@ -12,6 +12,8 @@ import { isClientScopedDoc } from "@/lib/document-scope";
 import { getOrCreateActiveDeal, isDealFunded } from "@/lib/funding-deals";
 import { resolveCatchAllAdvisor } from "@/lib/catch-all-advisor";
 import { send_file_reassignment_notification } from "@/lib/email";
+import { resolvePartnerByName } from "@/lib/referral-partners";
+import { partnerAssignedCustomFields } from "@/lib/referral-partner-attribution";
 
 /**
  * Owner OR follower check. Admin flow isn't covered here (advisor-persona actions).
@@ -421,9 +423,12 @@ export async function updateClientSignupNotes(
 /**
  * setReferralPartner
  *
- * Persists the selected referral partner (a.k.a. affiliate) on the client
- * vault and syncs the same string to the GHL contact custom field
- * AFFILIATE_ASSIGNED so GHL automations keyed on that field fire.
+ * Persists the selected Level-2 referral partner on the client vault (both the
+ * mirrored name and the referral_partner_id FK) and syncs the name to the GHL
+ * contact field "Referral Assigned"
+ * ({{contact.data_vault_referral_assigned}}) so CRM automations keyed on it fire.
+ *
+ * NOT the affiliate's AFFILIATE_ASSIGNED field — that is a separate program.
  *
  * Pass `null` to clear the assignment.
  */
@@ -452,10 +457,21 @@ export async function setReferralPartner(clientId: string, partnerName: string |
         }
 
         const supabaseAdmin = createAdminClient();
+
+        // Resolve the picked name to a registry row so the FK is written too.
+        // The name column is what this UI and the GHL sync read; the FK is what
+        // the partner portal resolves their book of business with — writing only
+        // one of the two leaves the other surface wrong. A name with no registry
+        // row (legacy free text) still saves, just without the FK.
+        const partner = partnerName
+            ? await resolvePartnerByName(supabaseAdmin, partnerName)
+            : null;
+
         const { error: updateError } = await supabaseAdmin
             .from("client_data_vault")
             .update({
                 referral_partner: partnerName,
+                referral_partner_id: partner?.id ?? null,
                 updated_at: new Date().toISOString(),
             })
             .eq("id", clientId);
@@ -463,12 +479,17 @@ export async function setReferralPartner(clientId: string, partnerName: string |
         if (updateError) throw new Error(`Failed to update referral partner: ${updateError.message}`);
 
         // Sync to GHL — non-fatal if this fails; vault is source of truth.
-        const affiliateFieldId = process.env.AFFILIATE_ASSIGNED;
-        if (client.ghl_contact_id && affiliateFieldId) {
+        //
+        // Writes the referral-partner field ("Referral Assigned",
+        // {{contact.data_vault_referral_assigned}}), NOT AFFILIATE_ASSIGNED —
+        // that one belongs to the public affiliate program, and sharing it made
+        // "who referred this" ambiguous on every contact.
+        if (client.ghl_contact_id) {
             try {
-                await ghlUpdateContact(client.ghl_contact_id, {
-                    customFields: [{ id: affiliateFieldId, value: partnerName ?? "" }],
-                });
+                const customFields = await partnerAssignedCustomFields(partnerName);
+                if (customFields.length) {
+                    await ghlUpdateContact(client.ghl_contact_id, { customFields });
+                }
             } catch (ghlError) {
                 console.error("[setReferralPartner] GHL sync failed (non-fatal):", ghlError);
             }

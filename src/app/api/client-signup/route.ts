@@ -9,6 +9,7 @@ import { ghlSearchContacts, ghlUpdateContact, ghlAddContactFollowers, ghlAddTags
 import { formatPhoneUS, isValidUsPhone, phoneKey, toE164 } from '@/lib/phone';
 import { generateOnboardingMagicLink, pushMagicLinkToGhl } from '@/lib/magic-link';
 import { linkAffiliateLeadToVault } from '@/lib/affiliates';
+import { attributeReferralPartnerToVault, resolvePartnerAssignedFieldId } from '@/lib/referral-partner-attribution';
 
 /**
  * Supabase admin client with elevated privileges
@@ -547,6 +548,12 @@ export async function POST(request: Request) {
     console.log(`✅ User sync completed for ${user_id}`);
 
     // ========== STEP 3: PREPARE GHL CUSTOM FIELDS ==========
+    // Resolve the referral-partner field id once. Falls back to the merge key
+    // {{contact.data_vault_referral_assigned}} when GHL_CF_REFERRAL_ASSIGNED
+    // isn't set, so partner attribution still reaches the CRM before anyone
+    // configures the env. Cached in-process by ghlResolveFieldId.
+    const referral_assigned_field_id = await resolvePartnerAssignedFieldId();
+
     const custom_fields = [
       // Basic Information
       create_custom_field('GHL_CF_CLIENTS_NAME', body.client_name, 'htTNeG6SjgBb816NXzrM'),
@@ -603,9 +610,14 @@ export async function POST(request: Request) {
       create_custom_field('GHL_CF_FUNDING_ETA', map_ghl_value('funding_eta', body.funding_eta), '3NLSSMdhnCRbV8zggguo'),
       create_custom_field('GHL_CF_ADDITIONAL_NOTES', body.additional_notes, 'FML6V2dctE8ffwvqOTrp'),
 
-      // Internal referral partner (who referred this deal) → AFFILIATE_ASSIGNED.
-      // Mirrors the setReferralPartner action so the value is set at creation time.
-      create_custom_field('AFFILIATE_ASSIGNED', body.referral_partner),
+      // Level-2 referral partner (who referred this deal) → the program's OWN
+      // field, "Referral Assigned" ({{contact.data_vault_referral_assigned}}).
+      // Deliberately NOT AFFILIATE_ASSIGNED: that belongs to the public affiliate
+      // program, and sharing one field made "who referred this" ambiguous on
+      // every contact. Mirrors setReferralPartner so creation and later edits
+      // land in the same place. The id is resolved by merge key when the env
+      // isn't set, so this keeps working before anyone configures it.
+      create_custom_field('GHL_CF_REFERRAL_ASSIGNED', body.referral_partner, referral_assigned_field_id ?? undefined),
 
     ].filter(Boolean); // Remove null fields
 
@@ -829,6 +841,18 @@ export async function POST(request: Request) {
     await linkAffiliateLeadToVault(supabase_admin, {
       vaultId: vault_id,
       email: body.client_email,
+      ghlContactId: ghl_contact_id || null,
+    });
+
+    // Level-2 referral partner attribution. The name the advisor picked is
+    // already on the vault from the insert above; this resolves it to a real FK
+    // so the partner's portal can find the deal, and — when no name was picked —
+    // reads the partner token off the GHL contact, which is where a
+    // creditbanc.io/referral-partner?referral_partner=… link lands it.
+    // Best-effort; never blocks signup.
+    await attributeReferralPartnerToVault(supabase_admin, {
+      vaultId: vault_id,
+      explicitName: body.referral_partner || null,
       ghlContactId: ghl_contact_id || null,
     });
 

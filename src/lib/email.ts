@@ -131,17 +131,50 @@ export interface ClientVaultSubmittedData {
 /**
  * Creates Nodemailer transporter with SMTP credentials
  * Uses Mailgun SMTP through LeadConnector
+ *
+ * CLICK TRACKING IS OFF, deliberately, for every message we send.
+ *
+ * With tracking on, Mailgun rewrites every href in the HTML to
+ * http://email.creditbanc.net/c/<opaque> and 302s from there. That domain is
+ * Mailgun's tracking CNAME for creditbanc.net, and it is not answering — so
+ * every link in every email times out. That's how this was found: a staff
+ * invitation link that went to "email.creditbanc.net took too long to respond"
+ * instead of the vault.
+ *
+ * Turning it off rather than fixing the DNS, because the links we send are
+ * CREDENTIALS — magic links, password resets, staff invitations, lender share
+ * links. Routing a single-use token through a third-party redirector puts it in
+ * that service's click logs and makes delivery of a login depend on an
+ * analytics subdomain being healthy. Neither is a trade worth making for
+ * click-through stats on transactional mail.
+ *
+ * (If per-campaign click tracking is ever wanted, set up the CNAME first and
+ * override X-Mailgun-Track-Clicks on that specific send — not here.)
  */
 function create_smtp_transporter() {
-  return nodemailer.createTransport({
-    host: process.env.SMTP_HOST || 'smtp.mailgun.org',
-    port: parseInt(process.env.SMTP_PORT || '587'),
-    secure: false, // true for 465, false for other ports
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
+  return nodemailer.createTransport(
+    {
+      host: process.env.SMTP_HOST || 'smtp.mailgun.org',
+      port: parseInt(process.env.SMTP_PORT || '587'),
+      secure: false, // true for 465, false for other ports
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+      },
     },
-  });
+    {
+      // Transport-level defaults, merged into every sendMail() call. No call
+      // site passes `headers`, so nothing overrides this today — if one ever
+      // does, it must re-include these or its links get rewritten again.
+      headers: {
+        'X-Mailgun-Track-Clicks': 'no',
+        // The open pixel loads from the same dead subdomain. A broken pixel is
+        // invisible rather than blocking, but it's the same wager: a tracker
+        // that can't load in exchange for nothing.
+        'X-Mailgun-Track-Opens': 'no',
+      },
+    }
+  );
 }
 
 /**
@@ -4123,4 +4156,285 @@ export async function send_client_check_in_notification(
   };
 
   return await transporter.sendMail(mail_options);
+}
+
+/**
+ * ============================================================================
+ * REFERRAL PARTNER PORTAL INVITE
+ * ============================================================================
+ * Sent when an admin grants a Level-2 referral partner (CPA, banker,
+ * professional) access to /partner/dashboard.
+ *
+ * No hero image on purpose: emails that inline a PNG throw at send time if the
+ * file isn't committed, and every call site swallows the error
+ * ([[email_hero_images_must_be_committed]]). This one has to arrive.
+ *
+ * Uses the general sending identity rather than the affiliate one — referral
+ * partners are a different program with a different audience, and folding them
+ * into affiliate@ would mix two very different sending reputations.
+ */
+export interface ReferralPartnerInviteData {
+  partner_name: string;
+  partner_email: string;
+  /**
+   * Passwordless entry link, landing on /partner/welcome (falls back to the
+   * login page). The partner sets a password there and is forwarded to the
+   * dashboard; on later clicks it forwards straight through, so the same link
+   * doubles as a re-send.
+   */
+  portal_url: string;
+  /** Their creditbanc.io referral link, if a slug has been issued. */
+  referral_url?: string | null;
+}
+
+export function generate_referral_partner_invite_html(
+  data: ReferralPartnerInviteData
+): string {
+  data = escape_email_strings(data);
+  const { partner_name, portal_url } = data;
+  const referral_url = data.referral_url || "";
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Your Credit Banc partner portal is ready</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #faf9f6;">
+  <div style="display: none; max-height: 0; overflow: hidden; opacity: 0; mso-hide: all;">
+    Track every client you refer to Credit Banc — where each file sits, in one place.
+  </div>
+
+  <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #faf9f6;">
+    <tr>
+      <td align="center" style="padding: 32px 12px;">
+        <table role="presentation" style="width: 600px; max-width: 100%; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 6px 24px rgba(32, 37, 54, 0.08);">
+
+          <tr>
+            <td style="padding: 40px 40px 8px;">
+              <p style="margin: 0 0 6px; font-size: 12px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: #10b981;">Referral Partner Program</p>
+              <h1 style="margin: 0; font-size: 26px; line-height: 1.25; font-weight: 800; color: #202536;">Your partner portal is ready</h1>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding: 16px 40px 0; font-size: 15px; line-height: 1.7; color: #475569;">
+              <p style="margin: 0 0 16px;">Hi ${partner_name},</p>
+              <p style="margin: 0 0 16px;">
+                You now have a dashboard for every client you send to Credit Banc.
+                Click below to set a password &mdash; then you'll see who you've
+                referred and exactly where each file sits, from first contact
+                through funding.
+              </p>
+              <p style="margin: 0 0 8px;">
+                You keep doing what you already do. We handle the paperwork, the
+                lenders and the follow-up.
+              </p>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding: 28px 40px 8px;" align="center">
+              <a href="${portal_url}" style="display: inline-block; background-color: #10b981; color: #ffffff; text-decoration: none; padding: 14px 34px; border-radius: 10px; font-size: 16px; font-weight: 700;">
+                Set my password
+              </a>
+              <p style="margin: 12px 0 0; font-size: 12px; color: #94a3b8;">
+                This link signs you in automatically &mdash; you'll just choose a password, and after that you can log in any time.
+              </p>
+            </td>
+          </tr>
+
+          ${referral_url ? `
+          <tr>
+            <td style="padding: 24px 40px 0;">
+              <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #f8fafc; border-radius: 12px;">
+                <tr>
+                  <td style="padding: 18px 20px;">
+                    <p style="margin: 0 0 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.15em; text-transform: uppercase; color: #64748b;">Your referral link</p>
+                    <p style="margin: 0 0 4px; font-size: 14px; word-break: break-all;">
+                      <a href="${referral_url}" style="color: #10b981; font-weight: 600; text-decoration: none;">${referral_url}</a>
+                    </p>
+                    <p style="margin: 8px 0 0; font-size: 12px; line-height: 1.6; color: #94a3b8;">
+                      Anyone who applies through this link is tracked to you automatically and shows up on your dashboard.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>` : ``}
+
+          <tr>
+            <td style="padding: 28px 40px 40px; font-size: 14px; line-height: 1.7; color: #475569;">
+              <p style="margin: 0;">
+                Questions about a file? Reply here or reach us at
+                <a href="mailto:support@creditbanc.io" style="color: #10b981;">support@creditbanc.io</a>.
+              </p>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding: 24px 40px 32px; text-align: center; color: #94a3b8; font-size: 12px; line-height: 1.6; border-top: 1px solid #f1f5f9;">
+              <p style="margin: 0;">&copy; ${new Date().getFullYear()} Credit Banc. You're receiving this because you're a Credit Banc referral partner.</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `;
+}
+
+/** Sends the partner-portal invite. Throws on SMTP failure so the caller can report it. */
+export async function send_referral_partner_invite(data: ReferralPartnerInviteData) {
+  const transporter = create_smtp_transporter();
+  const from_email = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  const from_name = process.env.SMTP_FROM_NAME || 'Credit Banc';
+
+  return await transporter.sendMail({
+    from: `${from_name} <${from_email}>`,
+    to: data.partner_email,
+    subject: 'Set up your Credit Banc partner dashboard',
+    html: generate_referral_partner_invite_html(data),
+  });
+}
+
+/**
+ * ============================================================================
+ * STAFF INVITATION
+ * ============================================================================
+ * Sent when an admin invites a teammate from /admin/team. The link inside is a
+ * CREDENTIAL — single-use, expiring, bound to this address and this role — so
+ * the copy has to say so plainly enough that nobody forwards it.
+ *
+ * No hero image on purpose: an email that inlines a PNG throws at send time if
+ * the file isn't committed, and this one has to arrive or the person can't
+ * onboard at all ([[email_hero_images_must_be_committed]]).
+ */
+export interface StaffInviteData {
+  /** Best available name for the greeting; falls back to the address. */
+  invitee_name: string;
+  invitee_email: string;
+  /** Human-readable role, e.g. "Advisor" — not the raw role string. */
+  role_label: string;
+  /** /auth/join?token=… — forwards to the right onboarding form. */
+  invite_url: string;
+  /** Rendered expiry, e.g. "August 17, 2026". */
+  expires_label: string;
+  /** Who sent it, so the invitee knows this is expected. */
+  invited_by?: string | null;
+}
+
+export function generate_staff_invite_html(data: StaffInviteData): string {
+  data = escape_email_strings(data);
+  const { invitee_name, role_label, invite_url, expires_label } = data;
+  const invited_by = data.invited_by || '';
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Your Credit Banc team invitation</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #faf9f6;">
+  <div style="display: none; max-height: 0; overflow: hidden; opacity: 0; mso-hide: all;">
+    Set up your ${role_label} account on the Credit Banc vault.
+  </div>
+
+  <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #faf9f6;">
+    <tr>
+      <td align="center" style="padding: 32px 12px;">
+        <table role="presentation" style="width: 600px; max-width: 100%; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 6px 24px rgba(32, 37, 54, 0.08);">
+
+          <tr>
+            <td style="padding: 40px 40px 8px;">
+              <p style="margin: 0 0 6px; font-size: 12px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: #10b981;">Credit Banc Team</p>
+              <h1 style="margin: 0; font-size: 26px; line-height: 1.25; font-weight: 800; color: #202536;">You've been invited as ${role_label}</h1>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding: 16px 40px 0; font-size: 15px; line-height: 1.7; color: #475569;">
+              <p style="margin: 0 0 16px;">Hi ${invitee_name},</p>
+              <p style="margin: 0 0 16px;">
+                ${invited_by
+                  ? `${invited_by} has invited you`
+                  : `You've been invited`} to join the Credit Banc vault as
+                <strong style="color: #202536;">${role_label}</strong>.
+                Click below to create your account &mdash; it takes about a minute.
+              </p>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding: 24px 40px 8px;" align="center">
+              <a href="${invite_url}" style="display: inline-block; background-color: #10b981; color: #ffffff; text-decoration: none; padding: 14px 34px; border-radius: 10px; font-size: 16px; font-weight: 700;">
+                Set up my account
+              </a>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding: 20px 40px 0;">
+              <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #f8fafc; border-radius: 12px;">
+                <tr>
+                  <td style="padding: 18px 20px; font-size: 13px; line-height: 1.7; color: #64748b;">
+                    <p style="margin: 0 0 8px; font-size: 11px; font-weight: 700; letter-spacing: 0.15em; text-transform: uppercase; color: #64748b;">Please don't forward this</p>
+                    <p style="margin: 0;">
+                      This link works <strong>once</strong>, only for
+                      <strong style="color: #202536;">${data.invitee_email}</strong>, and
+                      expires on <strong style="color: #202536;">${expires_label}</strong>.
+                      If it's expired by the time you get to it, ask whoever invited you to resend it.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding: 24px 40px 40px; font-size: 14px; line-height: 1.7; color: #475569;">
+              <p style="margin: 0 0 12px;">
+                Weren't expecting this? You can ignore this email &mdash; nothing happens until the link is used.
+              </p>
+              <p style="margin: 0; font-size: 12px; color: #94a3b8; word-break: break-all;">
+                Button not working? Paste this into your browser:<br>${invite_url}
+              </p>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding: 24px 40px 32px; text-align: center; color: #94a3b8; font-size: 12px; line-height: 1.6; border-top: 1px solid #f1f5f9;">
+              <p style="margin: 0;">&copy; ${new Date().getFullYear()} Credit Banc.</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `;
+}
+
+/** Sends a staff invitation. Throws on SMTP failure so the caller can report it
+ *  — an invitation that silently didn't send looks identical to one that did. */
+export async function send_staff_invite(data: StaffInviteData) {
+  const transporter = create_smtp_transporter();
+  const from_email = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  const from_name = process.env.SMTP_FROM_NAME || 'Credit Banc';
+
+  return await transporter.sendMail({
+    from: `${from_name} <${from_email}>`,
+    to: data.invitee_email,
+    subject: `You're invited to Credit Banc as ${data.role_label}`,
+    html: generate_staff_invite_html(data),
+  });
 }

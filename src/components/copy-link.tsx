@@ -3,13 +3,27 @@
 import { useState } from "react";
 import { Copy, Check, Mail, MessageCircle, Share2, Send } from "lucide-react";
 
-// Client island: the affiliate's referral link with a copy button + one-tap
-// share to the channels partners actually use. All share targets open the
-// platform's native compose window prefilled with the referral link.
-const SHARE_MESSAGE =
+// Client island: a partner's referral link with a copy button + one-tap share to
+// the channels partners actually use. All share targets open the platform's
+// native compose window prefilled with the link.
+//
+// Shared by both referral programs — the public affiliate dashboard and the
+// Level-2 referral-partner portal. They point at different URLs (an affiliate's
+// /r/<code> on the vault vs a partner's creditbanc.io/referral-partner?…) and
+// speak to different audiences, so the pitch is a prop. Styling assumes a dark
+// panel; both dashboards render it inside the navy card.
+const DEFAULT_MESSAGE =
   "Need business funding? Apply through my link and get funded fast with Credit Banc:";
 
-export function CopyLink({ url }: { url: string }) {
+export function CopyLink({
+  url,
+  message = DEFAULT_MESSAGE,
+  subject = "Get funded with Credit Banc",
+}: {
+  url: string;
+  message?: string;
+  subject?: string;
+}) {
   const [copied, setCopied] = useState(false);
 
   const copy = async () => {
@@ -25,7 +39,7 @@ export function CopyLink({ url }: { url: string }) {
   const nativeShare = async () => {
     try {
       if (navigator.share) {
-        await navigator.share({ title: "Credit Banc", text: SHARE_MESSAGE, url });
+        await navigator.share({ title: "Credit Banc", text: message, url });
       } else {
         copy();
       }
@@ -34,9 +48,9 @@ export function CopyLink({ url }: { url: string }) {
     }
   };
 
-  const msg = encodeURIComponent(`${SHARE_MESSAGE} ${url}`);
+  const msg = encodeURIComponent(`${message} ${url}`);
   const channels = [
-    { label: "Email", icon: Mail, href: `mailto:?subject=${encodeURIComponent("Get funded with Credit Banc")}&body=${msg}` },
+    { label: "Email", icon: Mail, href: `mailto:?subject=${encodeURIComponent(subject)}&body=${msg}` },
     { label: "WhatsApp", icon: MessageCircle, href: `https://wa.me/?text=${msg}` },
     { label: "SMS", icon: Send, href: `sms:?&body=${msg}` },
     { label: "X", icon: Share2, href: `https://twitter.com/intent/tweet?text=${msg}` },

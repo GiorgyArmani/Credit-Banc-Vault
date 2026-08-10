@@ -19,6 +19,8 @@ import {
   UserCog,
   ChevronDown,
   Gift,
+  Handshake,
+  UserPlus,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { Badge } from '@/components/ui/badge'
@@ -143,6 +145,35 @@ export function Sidebar({
             )}>
               <Gift className={clsx('h-5 w-5 shrink-0', pathname?.startsWith('/admin/affiliates') ? 'text-emerald-500' : '')} />
               {!collapsed && <span className="text-sm font-semibold">Affiliates</span>}
+            </div>
+          </Link>
+
+          {/* Level-2 referral partners (CPAs, bankers, professionals). A separate
+              program from Affiliates above — different table, different payout,
+              its own portal — so it gets its own entry rather than a sub-item. */}
+          <Link href="/admin/referral-partners" onClick={onMobileClose} title={collapsed ? 'Referral Partners' : undefined}>
+            <div className={clsx(
+              'flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200 cursor-pointer',
+              pathname?.startsWith('/admin/referral-partners')
+                ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50'
+            )}>
+              <Handshake className={clsx('h-5 w-5 shrink-0', pathname?.startsWith('/admin/referral-partners') ? 'text-emerald-500' : '')} />
+              {!collapsed && <span className="text-sm font-semibold">Referral Partners</span>}
+            </div>
+          </Link>
+
+          {/* Staff access. Onboarding a teammate is invitation-only — this is the
+              only way to hand out an advisor / underwriting / setter account. */}
+          <Link href="/admin/team" onClick={onMobileClose} title={collapsed ? 'Team Access' : undefined}>
+            <div className={clsx(
+              'flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200 cursor-pointer',
+              pathname?.startsWith('/admin/team')
+                ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50'
+            )}>
+              <UserPlus className={clsx('h-5 w-5 shrink-0', pathname?.startsWith('/admin/team') ? 'text-emerald-500' : '')} />
+              {!collapsed && <span className="text-sm font-semibold">Team Access</span>}
             </div>
           </Link>
         </nav>

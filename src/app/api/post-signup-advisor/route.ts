@@ -2,7 +2,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { send_advisor_welcome_email } from "@/lib/email";
-import { checkStaffInviteCode } from "@/lib/auth/staff-invite";
+import {
+  consumeStaffInvite,
+  markStaffInviteAccepted,
+  releaseStaffInvite,
+} from "@/lib/auth/staff-invite";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -74,10 +78,13 @@ async function upsertGHLContact({
  * 6. Sends branded welcome email (without password for security)
  */
 export async function POST(req: NextRequest) {
+  // Declared outside the try so the catch can hand a claimed invitation back.
+  let claimedInviteId: string | null = null;
+
   try {
     // Parse request body
     const body = await req.json();
-    const { firstName, lastName, email, phone, profilePicUrl, password, tags, profilePicBase64, profilePicName, inviteCode } = body;
+    const { firstName, lastName, email, phone, profilePicUrl, password, tags, profilePicBase64, profilePicName, inviteToken } = body;
 
     // Validate required fields
     if (!firstName || !lastName || !email || !password) {
@@ -87,11 +94,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Gate: shared staff invite code (server-side — a form field alone isn't a gate).
-    const inviteError = checkStaffInviteCode(inviteCode);
-    if (inviteError) {
-      return NextResponse.json({ message: inviteError.message }, { status: inviteError.status });
+    // THE gate. Server-side because this endpoint can be POSTed directly — the
+    // form that normally calls it is a convenience, not a control. Claiming the
+    // invitation here (rather than after the account exists) is what makes it
+    // single-use under concurrent submissions. See [[staff_signup_invite_gate]].
+    const invite = await consumeStaffInvite(inviteToken, "advisor", email);
+    if (!invite.ok) {
+      return NextResponse.json({ message: invite.message }, { status: invite.status });
     }
+    // From here on, any failure must hand the invitation back — otherwise a
+    // hiccup burns the link and the invitee is stuck with a dead URL.
+    claimedInviteId = invite.invite.id;
 
     // Step 1: Create the auth user in Supabase (Server-side)
     // We use admin.createUser to auto-confirm and suppress the default email
@@ -112,6 +125,9 @@ export async function POST(req: NextRequest) {
 
     const userId = userData.user.id;
     console.log(`✅ User created and auto-confirmed: ${email} (${userId})`);
+
+    // Audit link: which account this invitation produced. Best-effort.
+    await markStaffInviteAccepted(claimedInviteId, userId);
 
     // Step 2: Handle Profile Picture Upload (Server-side to bypass RLS)
     let finalProfilePicUrl = profilePicUrl || null;
@@ -220,6 +236,9 @@ export async function POST(req: NextRequest) {
   } catch (err: any) {
     // Log and return error
     console.error("post-signup-advisor error:", err);
+    // Signup failed after the invitation was claimed — give the link back so
+    // the invitee can retry instead of needing an admin to resend.
+    if (claimedInviteId) await releaseStaffInvite(claimedInviteId);
     return NextResponse.json(
       { message: err?.message || "Server error during advisor signup" },
       { status: 500 }

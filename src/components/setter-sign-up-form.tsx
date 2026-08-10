@@ -12,20 +12,24 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { Zap, ArrowRight } from "lucide-react";
+import { Zap, ArrowRight, Lock } from "lucide-react";
+import type { InviteContext } from "@/components/advisor-sign-up-form";
 
 export function SetterSignUpForm({
+    invite,
     className,
     ...props
-}: React.ComponentPropsWithoutRef<"div">) {
-    const [firstName, setFirstName] = useState("");
-    const [lastName, setLastName] = useState("");
-    const [email, setEmail] = useState("");
+}: React.ComponentPropsWithoutRef<"div"> & { invite: InviteContext }) {
+    const [firstName, setFirstName] = useState(invite.firstName);
+    const [lastName, setLastName] = useState(invite.lastName);
     const [password, setPassword] = useState("");
     const [repeatPassword, setRepeatPassword] = useState("");
-    const [inviteCode, setInviteCode] = useState("");
     const [error, setError] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
+
+    // Fixed by the invitation. The signup route re-checks it, so an editable
+    // box here could only ever produce a confusing rejection.
+    const email = invite.email;
 
     const router = useRouter();
 
@@ -55,7 +59,7 @@ export function SetterSignUpForm({
                     lastName: lastName.trim(),
                     email: email.trim().toLowerCase(),
                     password,
-                    inviteCode: inviteCode.trim(),
+                    inviteToken: invite.token,
                 }),
             });
 
@@ -92,16 +96,14 @@ export function SetterSignUpForm({
                         <div className="flex flex-col gap-8">
 
                             <div className="grid gap-3">
-                                <Label htmlFor="invite-code" className={FIELD.label}>Invite Code</Label>
-                                <Input
-                                    id="invite-code"
-                                    type="text"
-                                    placeholder="Enter your invite code"
-                                    required
-                                    value={inviteCode}
-                                    onChange={(e) => setInviteCode(e.target.value)}
-                                    className={FIELD.input}
-                                />
+                                <Label htmlFor="email" className={FIELD.label}>Team Email</Label>
+                                <div className="flex h-12 items-center gap-2 rounded-xl border border-black/10 bg-cb-mint/5 px-4">
+                                    <Lock className="h-4 w-4 shrink-0 text-cb-mint" aria-hidden />
+                                    <span id="email" className="truncate font-medium text-cb-ink">{email}</span>
+                                </div>
+                                <p className="text-xs text-cb-ink/50">
+                                    Your account is created for this address, from your invitation.
+                                </p>
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -130,19 +132,6 @@ export function SetterSignUpForm({
                                         className={FIELD.input}
                                     />
                                 </div>
-                            </div>
-
-                            <div className="grid gap-3">
-                                <Label htmlFor="email" className={FIELD.label}>Team Email</Label>
-                                <Input
-                                    id="email"
-                                    type="email"
-                                    placeholder="name@creditbanc.com"
-                                    required
-                                    value={email}
-                                    onChange={(e) => setEmail(e.target.value)}
-                                    className={FIELD.input}
-                                />
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4">

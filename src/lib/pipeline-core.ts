@@ -15,6 +15,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createAffiliatePayoutForFundedVault } from "@/lib/affiliates";
+import { createPartnerCommissionForFundedVault } from "@/lib/referral-partner-commissions";
 import type { LoanStatus } from "@/app/actions/pipeline";
 
 /**
@@ -164,6 +165,11 @@ export async function recordPipelineTransition(args: {
   // Idempotent and non-throwing, so it never blocks the transition.
   if (newStatus === "funded") {
     await createAffiliatePayoutForFundedVault(db, clientVaultId);
+    // Level-2 referral partner (CPA/banker/professional): record what's owed.
+    // A different program from the affiliate above — a vault can carry at most
+    // one of the two, and the ledger no-ops when there's no partner. Nothing is
+    // paid out here; the commission rate is still being decided.
+    await createPartnerCommissionForFundedVault(db, clientVaultId, fundingDealId);
   }
 
   return { success: true };

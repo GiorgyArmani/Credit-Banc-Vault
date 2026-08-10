@@ -116,6 +116,31 @@ export async function generateDocUploadMagicLink(email: string): Promise<string 
 }
 
 /**
+ * Same passwordless login, for the Level-2 referral-partner portal.
+ *
+ * Lands on /partner/welcome, which asks them to choose a password and then
+ * forwards to the dashboard. It forwards straight through on later clicks, so
+ * the same link works as both the invite and a re-send.
+ *
+ * Partners are invited professionals (CPAs, bankers) — mailing them a temporary
+ * password to type in is both worse security and a worse first impression than
+ * a link that just works. The auth user is created with a random password nobody
+ * ever sees, so this link is the ONLY way in until they set one.
+ * See [[magic_link_onboarding]].
+ */
+export async function generatePartnerPortalMagicLink(email: string): Promise<string | null> {
+  try {
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://vault.creditbanc.io";
+    const token = signMagicToken(email);
+    const next = encodeURIComponent("/partner/welcome");
+    return `${appUrl}/auth/magic?token=${token}&next=${next}`;
+  } catch (err) {
+    console.error("❌ Partner portal magic link generation threw:", err);
+    return null;
+  }
+}
+
+/**
  * Pushes the magic link to GHL: writes it to the MAGIC_LINK custom field and
  * adds the `send-magic-link` tag so a GHL workflow can dispatch the SMS.
  * Non-fatal — logs and swallows errors so it never breaks the calling flow.

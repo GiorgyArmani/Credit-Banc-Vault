@@ -16,6 +16,7 @@ import { Menu } from 'lucide-react'
 import { NotificationBell } from '@/components/notifications/NotificationBell'
 import { createClient } from '@/lib/supabase/client'
 import { GlobalSearch } from '@/components/layout/advisor/global-search'
+import { ProfilePhotoButton } from '@/components/staff/profile-photo-button'
 
 export function AdvisorShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
@@ -128,23 +129,14 @@ export function AdvisorShell({ children }: { children: React.ReactNode }) {
             </div>
 
             <div className="h-8 w-px bg-slate-200 mx-2"></div>
-            <div className="flex items-center gap-3">
-              {profile?.avatarUrl ? (
-                <img
-                  className="h-9 w-9 rounded-full object-cover border-2 border-primary-container"
-                  alt="Advisor"
-                  src={profile.avatarUrl}
-                />
-              ) : (
-                <div className="h-9 w-9 rounded-full bg-emerald-500 flex items-center justify-center text-white text-xs font-bold border-2 border-primary-container">
-                  {profile?.name ? profile.name.split(' ').map(n => n[0]).join('') : 'A'}
-                </div>
-              )}
-              <div className="hidden lg:block">
-                <p className="text-xs font-bold leading-none text-slate-900 dark:text-slate-100">{profile?.name || 'Loading...'}</p>
-                <p className="text-[10px] text-slate-500 uppercase tracking-tighter">Advisor</p>
-              </div>
-            </div>
+            {/* Clicking this opens the photo picker. It's the only place an
+                advisor can set the picture their clients see on the "Your
+                Advisor" card. */}
+            <ProfilePhotoButton
+              name={profile?.name ?? ''}
+              photoUrl={profile?.avatarUrl ?? null}
+              roleLabel="Advisor"
+            />
           </div>
         </header>
 
