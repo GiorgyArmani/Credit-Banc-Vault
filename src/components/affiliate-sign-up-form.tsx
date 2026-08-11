@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import Link from "next/link";
 import { useState } from "react";
@@ -189,9 +190,9 @@ export function AffiliateSignUpForm({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="grid gap-3">
                   <Label htmlFor="aff-password" className="text-sm font-semibold text-cb-ink">Password</Label>
-                  <Input
+                  <PasswordInput
                     id="aff-password"
-                    type="password"
+                    autoComplete="new-password"
                     placeholder="••••••••"
                     required
                     value={password}
@@ -202,9 +203,9 @@ export function AffiliateSignUpForm({
 
                 <div className="grid gap-3">
                   <Label htmlFor="aff-repeat-password" className="text-sm font-semibold text-cb-ink">Confirm Password</Label>
-                  <Input
+                  <PasswordInput
                     id="aff-repeat-password"
-                    type="password"
+                    autoComplete="new-password"
                     placeholder="••••••••"
                     required
                     value={repeatPassword}

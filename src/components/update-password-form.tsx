@@ -3,7 +3,7 @@
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { BrandCard, Eyebrow, CTA, FIELD } from "@/components/marketing/brand-chrome";
-import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
@@ -142,9 +142,9 @@ export function UpdatePasswordForm({
               </Label>
               <div className="relative">
                 <Lock className={FIELD.icon} />
-                <Input
+                <PasswordInput
                   id="password"
-                  type="password"
+                  autoComplete="new-password"
                   placeholder="Enter new password"
                   required
                   minLength={6}
@@ -161,9 +161,9 @@ export function UpdatePasswordForm({
               </Label>
               <div className="relative">
                 <Lock className={FIELD.icon} />
-                <Input
+                <PasswordInput
                   id="confirmPassword"
-                  type="password"
+                  autoComplete="new-password"
                   placeholder="Confirm new password"
                   required
                   minLength={6}

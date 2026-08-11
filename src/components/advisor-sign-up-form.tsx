@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import { formatPhoneInput } from "@/lib/phone";
 import { BrandCard, Eyebrow, CTA, FIELD } from "@/components/marketing/brand-chrome";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -261,9 +262,9 @@ export function AdvisorSignUpForm({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4">
                 <div className="grid gap-3">
                   <Label htmlFor="password" className={FIELD.label}>Password</Label>
-                  <Input
+                  <PasswordInput
                     id="password"
-                    type="password"
+                    autoComplete="new-password"
                     placeholder="••••••••"
                     required
                     value={password}
@@ -274,9 +275,9 @@ export function AdvisorSignUpForm({
 
                 <div className="grid gap-3">
                   <Label htmlFor="repeat-password" className={FIELD.label}>Confirm Password</Label>
-                  <Input
+                  <PasswordInput
                     id="repeat-password"
-                    type="password"
+                    autoComplete="new-password"
                     placeholder="••••••••"
                     required
                     value={repeatPassword}

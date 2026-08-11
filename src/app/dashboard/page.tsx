@@ -216,9 +216,7 @@ function DashboardContent() {
 
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2">
-              <Badge className="bg-emerald-50 text-emerald-700 border border-emerald-200">
-                BETA
-              </Badge>
+              
               <div className="hidden xl:flex items-center text-slate-600 text-sm gap-3">
                 <span className="inline-flex items-center gap-1">
                   <Shield className="h-4 w-4" /> Secure

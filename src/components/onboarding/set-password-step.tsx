@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { Lock } from "lucide-react";
 
@@ -69,9 +69,8 @@ export function SetPasswordStep({ onComplete }: SetPasswordStepProps) {
             <form onSubmit={onSubmit} className="space-y-6">
                 <div className="grid gap-3">
                     <Label htmlFor="pwd1" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 ml-1">New password</Label>
-                    <Input
+                    <PasswordInput
                         id="pwd1"
-                        type="password"
                         autoComplete="new-password"
                         value={pwd1}
                         onChange={(e) => setPwd1(e.target.value)}
@@ -81,9 +80,8 @@ export function SetPasswordStep({ onComplete }: SetPasswordStepProps) {
                 </div>
                 <div className="grid gap-3">
                     <Label htmlFor="pwd2" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 ml-1">Repeat password</Label>
-                    <Input
+                    <PasswordInput
                         id="pwd2"
-                        type="password"
                         autoComplete="new-password"
                         value={pwd2}
                         onChange={(e) => setPwd2(e.target.value)}

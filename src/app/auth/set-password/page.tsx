@@ -4,7 +4,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { BrandAuthShell, BrandCard, Eyebrow, CTA } from "@/components/marketing/brand-chrome";
 
@@ -132,9 +132,8 @@ export default function SetPasswordPage() {
                 >
                   New password
                 </Label>
-                <Input
+                <PasswordInput
                   id="pwd1"
-                  type="password"
                   autoComplete="new-password"
                   value={pwd1}
                   onChange={(e) => setPwd1(e.target.value)}
@@ -149,9 +148,8 @@ export default function SetPasswordPage() {
                 >
                   Repeat password
                 </Label>
-                <Input
+                <PasswordInput
                   id="pwd2"
-                  type="password"
                   autoComplete="new-password"
                   value={pwd2}
                   onChange={(e) => setPwd2(e.target.value)}

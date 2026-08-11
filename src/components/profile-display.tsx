@@ -28,6 +28,7 @@ type ProfileField = {
 // vault-data: Structure for client_data_vault data
 // Only includes the 6 fields we want to display
 type VaultData = {
+  company_name: string;           // Client's business name (heading)
   capital_requested: number;      // Funding goal (amount requested)
   legal_entity_type: string;      // Type of entity
   business_start_date: string;    // Business start date
@@ -131,6 +132,7 @@ export default function ProfileDisplay({ onLoad }: { onLoad?: () => void }) {
         const { data: vault, error: vault_error } = await supabase
           .from("client_data_vault")
           .select(`
+            company_name,
             capital_requested,
             legal_entity_type,
             business_start_date,
@@ -333,7 +335,17 @@ export default function ProfileDisplay({ onLoad }: { onLoad?: () => void }) {
     return (
       <Card id="tour-profile" className="bg-white/80 border-emerald-50 rounded-[2.5rem] shadow-sm overflow-hidden backdrop-blur-sm transition-all duration-500 hover:shadow-xl">
         <CardHeader className="p-10 pb-4">
-          <CardTitle className="text-3xl font-black text-emerald-950 uppercase tracking-tighter">Your Profile</CardTitle>
+          {/* The company name is the heading — a client landing here wants to see
+              their own business named back to them, not a generic label. The
+              "Your Profile" eyebrow keeps the section identifiable, and the
+              vault always has company_name (NOT NULL), so the fallback is
+              defensive only. */}
+          <div className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2">
+            Your Profile
+          </div>
+          <CardTitle className="text-3xl font-black text-emerald-950 uppercase tracking-tighter">
+            {vault_data.company_name || "Your Profile"}
+          </CardTitle>
           <CardDescription className="text-emerald-900/60 text-lg font-bold mt-2">
             Used by underwriting to review your business and funding goals. This information helps move your application forward.
           </CardDescription>
