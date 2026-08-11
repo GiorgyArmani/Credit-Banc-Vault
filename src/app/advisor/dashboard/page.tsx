@@ -277,6 +277,7 @@ export default function AdvisorDashboard() {
               status,
               submitted_at,
               client_data_vault (
+                id,
                 client_name,
                 company_name
               )
@@ -507,7 +508,10 @@ export default function AdvisorDashboard() {
                   recentApps.map(app => (
                     <div
                       key={app.id}
-                      onClick={() => router.push((pathname.startsWith("/admin") ? "/admin/clients/" : "/advisor/dashboard/clients/") + (app.vault_id || app.id))}
+                      onClick={() => {
+                        if (!app.vault_id) return;
+                        router.push((pathname.startsWith("/admin") ? "/admin/clients/" : "/advisor/dashboard/clients/") + app.vault_id);
+                      }}
                       className="flex items-center justify-between p-4 bg-emerald-50/30 rounded-2xl border border-emerald-50 hover:bg-emerald-50/80 hover:border-emerald-200 hover:shadow-md cursor-pointer transition-all duration-200 active:scale-[0.99] group/row"
                     >
                       <div className="flex items-center gap-4">
