@@ -29,6 +29,11 @@ export async function resolveCatchAllAdvisor(admin: SupabaseClient): Promise<Cat
         .from("advisors")
         .select("id, user_id, first_name, last_name, email")
         .eq("email", CATCH_ALL_ADVISOR_EMAIL)
+        // The catch-all must be internal staff. Belt-and-braces against an
+        // external partner advisor ever being provisioned on this address —
+        // resolving to one would hand every stale file in the company to an
+        // outside CPA, silently.
+        .is("referral_partner_id", null)
         .maybeSingle();
 
     if (!data) return null;

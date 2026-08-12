@@ -10,6 +10,7 @@ import { formatPhoneUS, isValidUsPhone, phoneKey, toE164 } from '@/lib/phone';
 import { generateOnboardingMagicLink, pushMagicLinkToGhl } from '@/lib/magic-link';
 import { linkAffiliateLeadToVault } from '@/lib/affiliates';
 import { attributeReferralPartnerToVault, resolvePartnerAssignedFieldId } from '@/lib/referral-partner-attribution';
+import { attachAdminOversightToPartnerDeal } from '@/lib/partner-deal-oversight';
 
 /**
  * Supabase admin client with elevated privileges
@@ -385,14 +386,14 @@ export async function POST(request: Request) {
     // Prefer user_id match; fall back to email if the advisor row isn't linked yet.
     let { data: advisor_row } = await supabase_admin
       .from('advisors')
-      .select('id, first_name, last_name, email, user_id')
+      .select('id, first_name, last_name, email, user_id, referral_partner_id')
       .eq('user_id', session_user.id)
       .maybeSingle();
 
     if (!advisor_row && session_user.email) {
       const { data: by_email } = await supabase_admin
         .from('advisors')
-        .select('id, first_name, last_name, email, user_id')
+        .select('id, first_name, last_name, email, user_id, referral_partner_id')
         .ilike('email', session_user.email)
         .maybeSingle();
       advisor_row = by_email ?? null;
@@ -850,10 +851,25 @@ export async function POST(request: Request) {
     // reads the partner token off the GHL contact, which is where a
     // creditbanc.io/referral-partner?referral_partner=… link lands it.
     // Best-effort; never blocks signup.
-    await attributeReferralPartnerToVault(supabase_admin, {
+    const attributed_partner = await attributeReferralPartnerToVault(supabase_admin, {
       vaultId: vault_id,
+      // A partner advisor creating their own deal is attributed to themselves,
+      // by id, with no dropdown involved — the picker is hidden from them for
+      // exactly this reason. Without it the commission would depend on them
+      // typing their own name to match the registry.
+      creatorPartnerId: advisor_row.referral_partner_id || null,
       explicitName: body.referral_partner || null,
       ghlContactId: ghl_contact_id || null,
+    });
+
+    // Internal oversight on partner-created deals: admins follow the file and
+    // are notified. No-op for staff-created deals.
+    await attachAdminOversightToPartnerDeal(supabase_admin, {
+      vaultId: vault_id,
+      creatorPartnerId: advisor_row.referral_partner_id || null,
+      clientName: body.client_name,
+      companyName: body.company_name,
+      partnerName: attributed_partner?.name ?? body.advisor_name,
     });
 
     // ========== STEP 5.1: SEED INITIAL PIPELINE STATUS ==========

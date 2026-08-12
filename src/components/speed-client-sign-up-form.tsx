@@ -86,6 +86,11 @@ export default function SpeedClientSignUpForm({ isSetter = false }: { isSetter?:
   const router = useRouter();
   const pathname = usePathname();
   const supabase = createClient();
+
+  // Portal base, derived from the route — see the same note in
+  // client-sign-up-form.tsx. This form lives at "<base>/clients/new/speed", so
+  // splitting on "/clients/new" yields the base for every portal that mounts it.
+  const portal_base = pathname?.split("/clients/new")[0] || "/advisor/dashboard";
   // Setters get a trimmed 2-step form: no document picker and no loan-type
   // picker. Documents auto-set to business bank statements and the proposed
   // loan type to "other" — the assigned advisor refines the client afterward.
@@ -348,7 +353,7 @@ export default function SpeedClientSignUpForm({ isSetter = false }: { isSetter?:
               {/* Setters have a create-only dashboard — no prospect list to link to. */}
               {!isSetter && (
                 <Button
-                  onClick={() => router.push(pathname.startsWith('/admin') ? '/admin/prospects' : '/advisor/dashboard/prospects')}
+                  onClick={() => router.push(`${portal_base}/prospects`)}
                   variant="outline"
                   className="flex-1 h-14 border-2 border-emerald-100 text-emerald-950 font-black rounded-2xl hover:bg-emerald-50 transition-all active:scale-95"
                 >

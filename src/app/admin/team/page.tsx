@@ -21,7 +21,12 @@ import {
 
 export const dynamic = "force-dynamic";
 
-const STAFF_ROLES = ["admin", "advisor", "underwriting", "setter"] as const;
+// Who shows up under "who has access". Includes partner_advisor: they are
+// external referral partners working their own deals, and an admin asking who
+// can reach the advisor tooling needs to see them. They are NOT invitable from
+// this page — the deal desk is provisioned at /admin/referral-partners — so
+// they appear in the member list only. See [[role_model]].
+const STAFF_ROLES = ["admin", "advisor", "underwriting", "setter", "partner_advisor"] as const;
 
 export default async function AdminTeamPage() {
   const supabase = await createClient();

@@ -8,7 +8,8 @@
 // round is now an explicit object: this endpoint creates the new row, retires
 // the closing round's stale paperwork, and re-requests it.
 //
-// Guards: admin / underwriting, or the client's advisor (owner or follower).
+// Guards: admin / underwriting, or the client's advisor (owner or follower) —
+// including an external partner advisor working their own deal.
 // The business must belong to the client, and its current round must be funded
 // — a business with an open round doesn't need a new one.
 
@@ -33,6 +34,7 @@ import {
 } from "@/lib/slack-api";
 import type { FundingDeal } from "@/lib/funding-deals";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { CLIENT_API_ROLES, isScopedAdvisorRole } from "@/lib/auth/roles";
 
 function money(n: number | null | undefined): string {
   if (n === null || n === undefined || !Number.isFinite(Number(n))) return "not set";
@@ -137,7 +139,7 @@ async function authorize(clientVaultId: string, businessProfileId: string) {
     .maybeSingle();
 
   const role = userRow?.role;
-  if (!role || !["admin", "advisor", "underwriting"].includes(role)) {
+  if (!role || !(CLIENT_API_ROLES as readonly string[]).includes(role)) {
     return { ok: false as const, response: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   }
 
@@ -153,7 +155,8 @@ async function authorize(clientVaultId: string, businessProfileId: string) {
   }
 
   // Advisor access gate (admin + underwriting skip it — they work every file).
-  if (role === "advisor") {
+  // External partner advisors are scoped here exactly like staff advisors.
+  if (isScopedAdvisorRole(role)) {
     const { data: me } = await admin
       .from("advisors")
       .select("id")

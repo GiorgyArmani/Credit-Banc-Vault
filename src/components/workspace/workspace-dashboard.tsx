@@ -1,8 +1,8 @@
 "use client";
-import AdvisorNewClientPage from "./clients/new/page";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter } from "next/navigation";
+import { canUseAdvisorWorkspace } from "@/lib/auth/roles";
 import {
   Card,
   CardContent,
@@ -91,10 +91,28 @@ function StatCard({
 }
 
 /**
- * Advisor Dashboard Page
- * Main dashboard for advisors to manage clients and applications
+ * Workspace Dashboard
+ *
+ * The landing dashboard for anyone who works deals. Rendered by three portals,
+ * differing only in `basePath`:
+ *   /advisor/dashboard   staff advisors
+ *   /admin               admins
+ *   /partner             external partner advisors working their own deals
+ *
+ * Every stat, list and feed below is scoped to files the caller owns or follows.
+ * That scoping is convenience — RLS enforces the same bound independently via
+ * is_assigned_advisor_for().
  */
-export default function AdvisorDashboard() {
+export function WorkspaceDashboard({
+  basePath,
+  /** What this portal calls the person looking at it. External partners are
+   *  "Referral Partner" throughout the UI — `partner_advisor` is the internal
+   *  role name and is never shown to them. */
+  roleLabel = "Advisor",
+}: {
+  basePath: string;
+  roleLabel?: string;
+}) {
   // State management
   interface AdvisorUserProfile {
     id: string;
@@ -132,7 +150,6 @@ export default function AdvisorDashboard() {
   const [recentActivity, setRecentActivity] = useState<ActivityItem[]>([]);
 
   const router = useRouter();
-  const pathname = usePathname();
   const supabase = createClient();
 
   /**
@@ -158,8 +175,8 @@ export default function AdvisorDashboard() {
 
         if (profileError) throw profileError;
 
-        // Check if user has advisor or admin role
-        if (profile.role !== "advisor" && profile.role !== "admin") {
+        // Must be able to work deals: advisor, partner_advisor or admin.
+        if (!canUseAdvisorWorkspace(profile.role)) {
           router.push("/dashboard"); // Redirect to regular dashboard
           return;
         }
@@ -374,7 +391,7 @@ export default function AdvisorDashboard() {
       <div className="absolute top-0 right-0 w-[50%] h-[50%] bg-emerald-50/50 blur-[120px] rounded-full pointer-events-none" />
       <div className="absolute bottom-0 left-0 w-[40%] h-[40%] bg-blue-50/30 blur-[120px] rounded-full pointer-events-none" />
 
-      <AdvisorWebsiteTour />
+      <AdvisorWebsiteTour roleLabel={roleLabel} />
 
       {/* Main Content Area */}
       <div className="container mx-auto px-4 py-8 space-y-8 animate-in fade-in-50 duration-500 relative z-10">
@@ -391,11 +408,7 @@ export default function AdvisorDashboard() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2 mr-2">
-              <Badge className="bg-emerald-50 text-emerald-700 border border-emerald-200 font-black px-3 py-1">
-                ADVISOR PORTAL
-              </Badge>
-            </div>
+      
 
             <Button
               variant="outline"
@@ -407,15 +420,7 @@ export default function AdvisorDashboard() {
               Website Tour
             </Button>
 
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleLogout}
-              className="bg-white text-emerald-950 border-emerald-100 hover:bg-emerald-50 flex items-center gap-2 font-black rounded-full px-6 h-11"
-            >
-              <LogOut className="h-4 w-4" />
-              Sign Out
-            </Button>
+            
           </div>
         </div>
 
@@ -463,10 +468,10 @@ export default function AdvisorDashboard() {
           <CardContent className="px-10 pb-10 pt-0">
             <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
               {[
-                { icon: FileText, title: "New Client Application", desc: "Start a new funding request", tone: "emerald", onClick: () => router.push(pathname.startsWith("/admin") ? "/admin/clients/new" : "/advisor/dashboard/clients/new") },
-                { icon: Zap, title: "Fast Funding", desc: "One-page speed form for the call", tone: "amber", onClick: () => router.push(pathname.startsWith("/admin") ? "/admin/clients/new/speed" : "/advisor/dashboard/clients/new/speed") },
-                { icon: Users, title: "View Prospects", desc: "Manage your active pipeline", tone: "blue", onClick: () => router.push(pathname.startsWith("/admin") ? "/admin/prospects" : "/advisor/dashboard/prospects") },
-                { icon: AlertCircle, title: "Pending Reviews", desc: "Applications awaiting your review", tone: "violet", onClick: () => router.push(pathname.startsWith("/admin") ? "/admin/prospects" : "/advisor/dashboard/prospects") },
+                { icon: FileText, title: "New Client Application", desc: "Start a new funding request", tone: "emerald", onClick: () => router.push(`${basePath}/clients/new`) },
+                { icon: Zap, title: "Fast Funding", desc: "One-page speed form for the call", tone: "amber", onClick: () => router.push(`${basePath}/clients/new/speed`) },
+                { icon: Users, title: "View Prospects", desc: "Manage your active pipeline", tone: "blue", onClick: () => router.push(`${basePath}/prospects`) },
+                { icon: AlertCircle, title: "Pending Reviews", desc: "Applications awaiting your review", tone: "violet", onClick: () => router.push(`${basePath}/prospects`) },
               ].map(({ icon: ActionIcon, title, desc, tone, onClick }) => {
                 const qt = QUICK_TONES[tone] ?? QUICK_TONES.emerald;
                 return (
@@ -510,7 +515,7 @@ export default function AdvisorDashboard() {
                       key={app.id}
                       onClick={() => {
                         if (!app.vault_id) return;
-                        router.push((pathname.startsWith("/admin") ? "/admin/clients/" : "/advisor/dashboard/clients/") + app.vault_id);
+                        router.push(`${basePath}/clients/${app.vault_id}`);
                       }}
                       className="flex items-center justify-between p-4 bg-emerald-50/30 rounded-2xl border border-emerald-50 hover:bg-emerald-50/80 hover:border-emerald-200 hover:shadow-md cursor-pointer transition-all duration-200 active:scale-[0.99] group/row"
                     >

@@ -1,13 +1,14 @@
-// src/app/advisor/dashboard/clients/page.tsx
+// src/components/workspace/workspace-clients.tsx
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import clsx from "clsx";
 import { getBulkLatestStatus, type LoanStatus } from "@/app/actions/pipeline";
 import { getBulkClientActivity } from "@/app/actions/advisor";
+import { canUseAdvisorWorkspace } from "@/lib/auth/roles";
 
 function format_currency(amount: number): string {
     return new Intl.NumberFormat("en-US", {
@@ -23,7 +24,15 @@ function format_currency(amount: number): string {
  * CLIENTS LIST PAGE — FUNDED CUSTOMER BOOK
  * ----------------------------------------------------------------------------
  * Only files whose pipeline_status === "funded" land here. Anything earlier in
- * the pipeline lives on /advisor/dashboard/prospects.
+ * the pipeline lives on `${basePath}/prospects`.
+ *
+ * Rendered by three portals, differing only in `basePath`:
+ *   /advisor/dashboard   staff advisors
+ *   /admin               admins (adds the all/mine scope toggle)
+ *   /partner             external partner advisors working their own deals
+ *
+ * The owner ∪ follower scoping below is convenience, not the security boundary —
+ * RLS enforces the same bound independently through is_assigned_advisor_for().
  * ============================================================================
  */
 
@@ -48,11 +57,10 @@ interface ClientInfo {
     funded_at?: string;
 }
 
-export default function FundedClientsListPage() {
+export function WorkspaceClients({ basePath }: { basePath: string }) {
     const supabase = createClient();
     const router = useRouter();
-    const pathname = usePathname();
-    const isAdminContext = pathname.startsWith("/admin");
+    const isAdminContext = basePath.startsWith("/admin");
 
     const [component_state, set_component_state] = useState<ComponentState>(
         ComponentState.LOADING
@@ -118,7 +126,7 @@ export default function FundedClientsListPage() {
                 supabase.from('advisors').select('id').eq('user_id', user.id).maybeSingle(),
             ]);
 
-            if (user_error || !user_data || (user_data.role !== "advisor" && user_data.role !== "admin")) {
+            if (user_error || !user_data || !canUseAdvisorWorkspace(user_data.role)) {
                 set_error_message("Access denied. You must be an advisor or admin to view this page.");
                 set_component_state(ComponentState.ERROR);
                 return;
@@ -207,8 +215,8 @@ export default function FundedClientsListPage() {
         return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
     }
 
-    const detail_base = isAdminContext ? "/admin/clients/" : "/advisor/dashboard/clients/";
-    const new_href = isAdminContext ? "/admin/clients/new" : "/advisor/dashboard/clients/new";
+    const detail_base = `${basePath}/clients/`;
+    const new_href = `${basePath}/clients/new`;
 
     if (component_state === ComponentState.LOADING) {
         return (
@@ -250,7 +258,7 @@ export default function FundedClientsListPage() {
                     <span className="material-symbols-outlined text-outline/30 text-6xl mb-4">paid</span>
                     <h3 className="text-2xl font-black mb-2 uppercase tracking-tighter">No Funded Clients Yet</h3>
                     <p className="text-outline font-medium mb-6">Once a prospect funds, they'll graduate into your client book here.</p>
-                    <Button onClick={() => router.push(isAdminContext ? "/admin/prospects" : "/advisor/dashboard/prospects")}>
+                    <Button onClick={() => router.push(`${basePath}/prospects`)}>
                         View Prospects
                     </Button>
                 </div>

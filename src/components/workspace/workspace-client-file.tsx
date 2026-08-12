@@ -1,9 +1,22 @@
-// src/app/advisor/dashboard/clients/[id]/page.tsx
+// src/components/workspace/workspace-client-file.tsx
+//
+// The client file. Rendered by three portals, differing only in `basePath`:
+//   /advisor/dashboard   staff advisors
+//   /admin               admins (adds reassign-advisor and lender-match review)
+//   /partner             external partner advisors working their own deals
+//
+// Reads go through the browser client under RLS, and that is exactly what makes
+// this safe to hand to an external partner_advisor: every advisor-scoped policy
+// is `is_advisor_user() AND is_assigned_advisor_for(<vault>)`, so the database
+// bounds them to files they own or follow no matter what this component asks
+// for. The owner/follower check below produces a better error message; it is not
+// the fence.
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { useRouter, useParams, usePathname } from "next/navigation";
+import { useRouter, useParams } from "next/navigation";
+import { canUseAdvisorWorkspace, isScopedAdvisorRole } from "@/lib/auth/roles";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -49,7 +62,7 @@ import {
     updateClientSignupNotes,
     setReferralPartner,
     reassignClientAdvisor
-} from "./actions";
+} from "@/app/advisor/dashboard/clients/[id]/actions";
 import { fetchInternalNotes, addInternalNote } from "@/app/actions/internal-notes";
 import { fetchFileNotes, addFileNote } from "@/app/actions/client-file-notes";
 import { toast } from "@/lib/toast";
@@ -58,7 +71,7 @@ import { format, differenceInDays } from "date-fns";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { EditProfileModal } from "./edit-profile-modal";
+import { EditProfileModal } from "@/app/advisor/dashboard/clients/[id]/edit-profile-modal";
 import { PIPELINE_STEPS, LoanPipelineBadge } from "@/components/loan-pipeline-status";
 import { getClientPipelineHistory, updateLoanStatus, type LoanStatus, type PipelineStatusEntry } from "@/app/actions/pipeline";
 import { getBulkClientActivity } from "@/app/actions/advisor";
@@ -66,26 +79,26 @@ import { ActivityAgeBadge } from "@/components/advisor/activity-age-badge";
 import DocumentPreviewModal from "@/components/pdf/pdf-viewer";
 
 // ── New UI components ─────────────────────────────────────────────────────────
-import { ClientProfileHeader } from "./_components/client-profile-header";
-import { BusinessTabStrip, type BusinessTab } from "./_components/business-tab-strip";
-import { AddBusinessModal } from "./_components/add-business-modal";
-import { FundingPipelineCard, FundingPipelineAdvanceButton } from "./_components/funding-pipeline-card";
-import { DocumentUploadStatus } from "./_components/document-upload-status";
-import { InternalCommunication } from "./_components/internal-communication";
-import { SubmitUnderwritingCTA } from "./_components/submit-underwriting-cta";
-import { ClientFollowersCard } from "./_components/client-followers-card";
+import { ClientProfileHeader } from "@/app/advisor/dashboard/clients/[id]/_components/client-profile-header";
+import { BusinessTabStrip, type BusinessTab } from "@/app/advisor/dashboard/clients/[id]/_components/business-tab-strip";
+import { AddBusinessModal } from "@/app/advisor/dashboard/clients/[id]/_components/add-business-modal";
+import { FundingPipelineCard, FundingPipelineAdvanceButton } from "@/app/advisor/dashboard/clients/[id]/_components/funding-pipeline-card";
+import { DocumentUploadStatus } from "@/app/advisor/dashboard/clients/[id]/_components/document-upload-status";
+import { InternalCommunication } from "@/app/advisor/dashboard/clients/[id]/_components/internal-communication";
+import { SubmitUnderwritingCTA } from "@/app/advisor/dashboard/clients/[id]/_components/submit-underwriting-cta";
+import { ClientFollowersCard } from "@/app/advisor/dashboard/clients/[id]/_components/client-followers-card";
 import { FundingRoundsCard } from "@/components/funding/funding-rounds-card";
-import { listClientFollowers, type FollowerRow } from "./follower-actions";
-import { ClientNotesCard, type FileNote } from "./_components/client-notes-card";
+import { listClientFollowers, type FollowerRow } from "@/app/advisor/dashboard/clients/[id]/follower-actions";
+import { ClientNotesCard, type FileNote } from "@/app/advisor/dashboard/clients/[id]/_components/client-notes-card";
 // M2 / Communications Hub — hidden until the outbound-email identity question is
 // settled (advisors sit on creditbanc.io, Mailgun sends from creditbanc.net, and
 // creditbanc.io is at DMARC p=quarantine, so "from the advisor" would be
 // spam-foldered until creditbanc.io is added as a Mailgun sending domain).
 // Everything behind this — table, adapters, webhooks — is built and inert; only
 // the entry point is withdrawn. Restore both this import and the section below.
-// import { CommunicationsTimeline } from "./_components/communications-timeline";
+// import { CommunicationsTimeline } from "@/app/advisor/dashboard/clients/[id]/_components/communications-timeline";
 import { AdminLenderReviewCard } from "@/components/admin/admin-lender-review-card";
-import { CollapsibleSection, broadcast_toggle_all } from "./_components/collapsible-section";
+import { CollapsibleSection, broadcast_toggle_all } from "@/app/advisor/dashboard/clients/[id]/_components/collapsible-section";
 import { isClientScopedDoc, matchesActiveBusiness, matchesActiveDeal, normalizeSupabaseJoin } from "@/lib/document-scope";
 
 /**
@@ -166,8 +179,11 @@ async function resolve_identity_cached(supabase: ReturnType<typeof createClient>
             if (!user_data) return null;
 
             let advisor: CachedIdentity["advisor"] = null;
-            // Only advisors have a row in the advisors table; admins skip this step.
-            if (user_data.role === "advisor") {
+            // Advisor-shaped roles have a row in the advisors table; admins skip
+            // this step. partner_advisor MUST be included — without the advisors
+            // row `identity.advisor` stays null and the access gate below denies
+            // them their own client.
+            if (isScopedAdvisorRole(user_data.role)) {
                 const { data: by_uid } = await supabase
                     .from("advisors")
                     .select("id, first_name, last_name, email")
@@ -284,7 +300,7 @@ interface InternalNote {
 // isClientScopedDoc — same shared implementation used by the UW page,
 // vault.tsx, and any future surface. Don't re-define it here.
 
-export default function AdvisorClientDetailsPage() {
+export function WorkspaceClientFile({ basePath }: { basePath: string }) {
     // ============================================
     // STATE MANAGEMENT
     // ============================================
@@ -292,16 +308,18 @@ export default function AdvisorClientDetailsPage() {
     const supabase = createClient();
     const router = useRouter();
     const params = useParams();
-    const pathname = usePathname();
     const client_id = params.id as string;
 
-    // Keep navigation inside whichever portal layout the user entered from
-    // (admin or advisor). Re-exports of this page mount under /admin/* — we
-    // detect that and rewrite back/prev/next links so admins don't get
-    // bounced out into the advisor portal layout.
-    const is_admin_path = pathname?.startsWith("/admin") ?? false;
+    // Keep navigation inside whichever portal the user entered from. Every
+    // back/prev/next link is built off basePath, so an admin isn't bounced into
+    // the advisor layout and a partner isn't bounced into either.
+    //
+    // is_admin_path additionally gates the two ADMIN-ONLY sections below
+    // (reassign advisor, lender-match review). It is a portal test, not a
+    // permission test — the underlying actions re-check the role server-side.
+    const is_admin_path = basePath.startsWith("/admin");
     const client_detail_path = (id: string) => {
-        const base = is_admin_path ? `/admin/clients/${id}` : `/advisor/dashboard/clients/${id}`;
+        const base = `${basePath}/clients/${id}`;
         // Preserve the pipeline context across prev/next so the filtered set + counter persist.
         return came_from_pipeline ? `${base}?from=pipeline` : base;
     };
@@ -458,10 +476,10 @@ export default function AdvisorClientDetailsPage() {
     // send them back there. Otherwise route by the file's status: funded files go
     // to the Clients book, everything else to the Prospects pipeline.
     const clients_list_path = came_from_pipeline
-        ? (is_admin_path ? "/admin/pipeline" : "/advisor/dashboard/pipeline")
+        ? `${basePath}/pipeline`
         : current_pipeline_status === "funded"
-            ? (is_admin_path ? "/admin/clients" : "/advisor/dashboard/clients")
-            : (is_admin_path ? "/admin/prospects" : "/advisor/dashboard/prospects");
+            ? `${basePath}/clients`
+            : `${basePath}/prospects`;
 
     // Rejection state
     const [is_reject_modal_open, set_is_reject_modal_open] = useState(false);
@@ -723,7 +741,7 @@ export default function AdvisorClientDetailsPage() {
             }
             // Admins can view any client; advisors must have an advisor profile.
             const is_admin_user = identity.role === "admin";
-            if (identity.role !== "advisor" && !is_admin_user) {
+            if (!canUseAdvisorWorkspace(identity.role)) {
                 set_error_message("Access denied. You must be an advisor or admin to view this page.");
                 set_component_state(ComponentState.ACCESS_DENIED);
                 return;
@@ -1801,10 +1819,13 @@ export default function AdvisorClientDetailsPage() {
 
     async function open_reassign_modal() {
         // Load active advisors for the picker. Admin-only — guarded by render gate.
+        // Internal staff only: reassigning a file TO an external partner advisor
+        // would move someone else's client onto an outside CPA's book.
         const { data, error } = await supabase
             .from("advisors")
             .select("id, first_name, last_name, email")
             .eq("is_active", true)
+            .is("referral_partner_id", null)
             .order("first_name", { ascending: true });
         if (error) {
             toast.error("Failed to load advisor list");

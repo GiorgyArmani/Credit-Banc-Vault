@@ -138,6 +138,38 @@ export async function resolvePartnerBySlug(
   }
 }
 
+/**
+ * Resolve a partner by primary key.
+ *
+ * Used when the partner is already known for certain — chiefly
+ * `advisors.referral_partner_id`, i.e. a partner advisor creating their own
+ * deal. No normalizing, no fuzzy matching: this is the one path where
+ * attribution cannot be wrong.
+ */
+export async function resolvePartnerById(
+  db: SupabaseClient,
+  id: string | null | undefined
+): Promise<ReferralPartner | null> {
+  if (!id) return null;
+
+  try {
+    const { data, error } = await db
+      .from("referral_partners")
+      .select("id, name, slug, active")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (error) {
+      console.error("[referral-partners] resolvePartnerById failed:", error);
+      return null;
+    }
+    return (data as ReferralPartner) ?? null;
+  } catch (err) {
+    console.error("[referral-partners] resolvePartnerById threw:", err);
+    return null;
+  }
+}
+
 /** Resolve a partner from the exact display name stored on client_data_vault. */
 export async function resolvePartnerByName(
   db: SupabaseClient,

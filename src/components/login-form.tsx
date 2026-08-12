@@ -59,11 +59,17 @@ export default function LoginForm({
       }
 
       // Step 4: Map roles to their respective dashboard URLs
+      // Every role needs an entry. A missing one falls through to /dashboard,
+      // which the proxy then re-routes — it works, but as a second redirect the
+      // user can see. affiliate and referral_partner were relying on that.
       const roleRedirects: Record<string, string> = {
         admin: "/admin/dashboard",
         advisor: "/advisor/dashboard",
         underwriting: "/underwriting/dashboard",
         setter: "/setter/dashboard",
+        affiliate: "/affiliate/dashboard",
+        referral_partner: "/partner/dashboard",
+        partner_advisor: "/partner/deals",
         free: "/dashboard",
       };
 

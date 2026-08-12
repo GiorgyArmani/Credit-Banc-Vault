@@ -1,7 +1,17 @@
+"use client";
+
 // src/app/admin/clients/[id]/page.tsx
-// Unified admin client detail view. Re-uses the ADVISOR client page as the
-// base (admin works the file as an advisor) and adds UW-side overlays
-// (lender matching results, bank analysis links) when rendered in admin
-// context. The advisor page already detects /admin/* paths and adjusts
-// nav + access checks accordingly.
-export { default } from '@/app/advisor/dashboard/clients/[id]/page'
+// The canonical admin client detail view. Renders the shared client file with
+// admin overlays (reassign advisor, lender-match review) switched on by the
+// /admin basePath. See [[canonical_admin_client_detail]] — never fork a new
+// admin detail route; extend this one.
+//
+// Was a bare re-export of the advisor page, which worked only while the
+// component sniffed usePathname() for /admin/*. The portal is now passed in
+// explicitly.
+
+import { WorkspaceClientFile } from "@/components/workspace/workspace-client-file";
+
+export default function AdminClientDetailsPage() {
+  return <WorkspaceClientFile basePath="/admin" />;
+}

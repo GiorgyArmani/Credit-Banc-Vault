@@ -51,8 +51,11 @@ export function useOnboardingStatus() {
       setClientName(vaultData?.client_name || null)
       setVaultId(vaultData?.id || null)
 
-      // If user is an advisor, underwriter, or admin, skip onboarding entirely
-      if (userData?.role === "advisor" || userData?.role === "underwriting" || userData?.role === "admin") {
+      // Anyone who isn't a client skips onboarding entirely. Onboarding is the
+      // CLIENT flow (data vault, contract, video) — a non-client falling through
+      // here is redirected into it by OnboardingGate and can never reach their
+      // own portal. That is why every non-'free' role has to be listed.
+      if (userData?.role && userData.role !== "free") {
         setNeedsOnboarding(false)
         setDataVaultCompleted(true)
         setContractCompleted(true)

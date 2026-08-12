@@ -12,6 +12,7 @@ import { useRouter, usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { formatPhoneInput, isValidUsPhone } from "@/lib/phone";
 import { ReferralPartnerSelect } from "@/components/referral-partner-select";
+import { canUseAdvisorWorkspace, isExternalAdvisor } from "@/lib/auth/roles";
 import {
   ChevronRight,
   ChevronLeft,
@@ -134,6 +135,13 @@ export default function ClientSignupForm() {
   const router = useRouter();
   const pathname = usePathname();
   const supabase = createClient();
+
+  // Which portal is this form mounted in? Derived from the route rather than
+  // passed down, because this component is rendered by four of them and the
+  // public signup page as well. Everything before "/clients/new" IS the portal
+  // base: "/admin", "/advisor/dashboard", "/partner". The fallback only applies
+  // on the public route, where no portal link is rendered anyway.
+  const portal_base = pathname?.split("/clients/new")[0] || "/advisor/dashboard";
   const [step, set_step] = useState(1);
   const [submitting, set_submitting] = useState(false);
   const { showError } = useErrorDialog();
@@ -367,6 +375,12 @@ export default function ClientSignupForm() {
   // Detects if form is being used by an advisor (vs public client signup)
   // This determines success flow: advisor stays on page, client redirects to login
   const [is_advisor_context, set_is_advisor_context] = useState(false);
+  // An EXTERNAL partner advisor working their own deal. They get the advisor
+  // form, minus the two things that only make sense for staff: the referral
+  // partner picker (they are the referral partner — the server attributes the
+  // deal to them automatically) and the followers picker (which would expose
+  // the internal advisor roster).
+  const [is_partner_advisor, set_is_partner_advisor] = useState(false);
   const [show_success, set_show_success] = useState(false);
   const [created_client_email, set_created_client_email] = useState("");
   const [created_client_name, set_created_client_name] = useState("");
@@ -390,9 +404,12 @@ export default function ClientSignupForm() {
         // Admins also act as advisors when creating clients — they have an
         // advisors row of their own and the client must be assigned to them
         // (same auto-assignment + same form layout, including the manual
-        // funding-app upload section).
-        if (user_data?.role === "advisor" || user_data?.role === "admin") {
+        // funding-app upload section). External partner advisors create clients
+        // the same way; without them here they'd fall through to the
+        // client-facing flow and never get assigned to themselves.
+        if (canUseAdvisorWorkspace(user_data?.role)) {
           set_is_advisor_context(true);
+          set_is_partner_advisor(isExternalAdvisor(user_data?.role));
 
           // Auto-assign advisor/admin if they are logged in
           if (user.email) {
@@ -421,7 +438,7 @@ export default function ClientSignupForm() {
                 set_advisor_id(advisor_by_email.id);
                 console.log(`✅ Advisor matched by email: ${advisor_by_email.first_name} ${advisor_by_email.last_name}`);
               } else {
-                console.warn(`⚠️ User has role "${user_data.role}" but no record found in "advisors" table for email: ${user.email} — the server will try to resolve by session at submit time.`);
+                console.warn(`⚠️ User has role "${user_data?.role}" but no record found in "advisors" table for email: ${user.email} — the server will try to resolve by session at submit time.`);
               }
             }
           }
@@ -435,10 +452,14 @@ export default function ClientSignupForm() {
   useEffect(() => {
     async function fetch_advisors() {
       try {
+        // Internal staff only. This list feeds both the followers picker and the
+        // public advisor-assignment dropdown, so an external partner advisor
+        // appearing here could be assigned someone else's client.
         const { data, error } = await supabase
           .from("advisors")
           .select("id, first_name, last_name, email, phone, profile_pic_url, ghl_user_id")
           .eq("is_active", true)
+          .is("referral_partner_id", null)
           .order("first_name", { ascending: true });
         if (error) throw error;
         set_advisors(data || []);
@@ -800,7 +821,7 @@ export default function ClientSignupForm() {
                 Create Another
               </Button>
               <Button
-                onClick={() => router.push(pathname.startsWith('/admin') ? '/admin/prospects' : '/advisor/dashboard/prospects')}
+                onClick={() => router.push(`${portal_base}/prospects`)}
                 variant="outline"
                 className="flex-1 h-14 border-2 border-emerald-100 text-emerald-950 font-black rounded-2xl hover:bg-emerald-50 transition-all active:scale-95"
               >
@@ -2094,8 +2115,11 @@ export default function ClientSignupForm() {
                     </div>
                   )}
 
-                  {/* Followers — additional advisors who should receive every email this client gets */}
-                  {is_advisor_context && !loading_advisors && (
+                  {/* Followers — additional advisors who should receive every email this client gets.
+                      Hidden from external partner advisors: the picker lists the
+                      full internal advisor roster with emails. Admins are added
+                      as followers server-side on every partner-created deal. */}
+                  {is_advisor_context && !is_partner_advisor && !loading_advisors && (
                     <div className="mt-8 pt-8 border-t border-emerald-50">
                       <FollowersPicker
                         advisors={advisors}
@@ -2107,8 +2131,12 @@ export default function ClientSignupForm() {
                     </div>
                   )}
 
-                  {/* Referral partner — who referred this deal (optional) */}
-                  {is_advisor_context && (
+                  {/* Referral partner — who referred this deal (optional).
+                      Hidden from external partner advisors: they ARE the referral
+                      partner, the server stamps the attribution from their own
+                      advisors row, and the picker would otherwise show them every
+                      other partner's name. */}
+                  {is_advisor_context && !is_partner_advisor && (
                     <div className="mt-8 pt-8 border-t border-emerald-50 max-w-md">
                       <ReferralPartnerSelect
                         value={referral_partner}

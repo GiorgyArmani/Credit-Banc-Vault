@@ -379,7 +379,11 @@ async function provisionPartnerPortal(id: string): Promise<ActionResult> {
         .maybeSingle();
 
       if (existingUser) {
-        if (existingUser.role !== "referral_partner" && existingUser.role !== "free") {
+        // partner_advisor is allowed through: it IS a referral partner, one who
+        // also works their own deals. Everything else (staff, clients) is
+        // refused rather than silently role-swapped.
+        const reclaimable = ["referral_partner", "partner_advisor", "free"];
+        if (!reclaimable.includes(existingUser.role)) {
           return {
             success: false,
             error: `${email} already has a ${existingUser.role} account. Use a different address.`,
@@ -407,13 +411,24 @@ async function provisionPartnerPortal(id: string): Promise<ActionResult> {
 
     const [firstName, ...restName] = (partner.name || "").split(/\s+/);
 
+    // Don't demote a partner who already works their own deals. Re-sending the
+    // portal invite is a routine thing to do (a lost link, a changed address),
+    // and hardcoding referral_partner here would strip a partner_advisor of
+    // their deal desk with nothing in the UI to suggest that's what happened.
+    const { data: currentRole } = await db
+      .from("users")
+      .select("role")
+      .eq("id", userId)
+      .maybeSingle();
+    const role = currentRole?.role === "partner_advisor" ? "partner_advisor" : "referral_partner";
+
     const { error: roleErr } = await db.from("users").upsert(
       {
         id: userId,
         email,
         first_name: firstName || partner.name,
         last_name: restName.join(" ") || null,
-        role: "referral_partner",
+        role,
       },
       { onConflict: "id" }
     );
@@ -489,6 +504,151 @@ export async function revokeReferralPartnerPortal(id: string): Promise<ActionRes
 
   revalidatePath("/admin/referral-partners");
   return { success: true };
+}
+
+/**
+ * Turn the DEAL DESK on or off for a partner (admin only).
+ *
+ * Distinct from portal_enabled, which controls the read-only referral portal.
+ * This is the opt-in that lets a partner WORK the deals they refer: create
+ * clients, chase and approve documents, move the pipeline, submit to
+ * underwriting — the advisor job, on their own files only.
+ *
+ * Two things happen together, and both are required:
+ *
+ *   1. users.role flips to 'partner_advisor'. That is what the RLS helper
+ *      is_advisor_user() keys off, and every advisor-scoped policy in the
+ *      database is `is_advisor_user() AND is_assigned_advisor_for(<vault>)` —
+ *      so the role grants the advisor SURFACE while the per-file boundary stays
+ *      exactly where it is for staff.
+ *   2. An `advisors` row is provisioned, carrying referral_partner_id. Every
+ *      advisor FK in the schema points at advisors.id, and
+ *      is_assigned_advisor_for() resolves through advisors.user_id — without
+ *      this row the role grants nothing at all. referral_partner_id is what
+ *      marks it external: it keeps them out of the staff advisor pickers, links
+ *      their deals back for commission attribution, and exempts their files
+ *      from the stale-file reassignment cron.
+ *
+ * Disabling reverts the role and DEACTIVATES the advisors row rather than
+ * deleting it. client_data_vault.advisor_id and client_followers reference that
+ * row; deleting it would either fail on the FK or orphan every deal they ever
+ * worked.
+ *
+ * Requires the portal to have been provisioned first (partner.user_id) — the
+ * deal desk lives inside the partner portal, so a deal desk without a login is
+ * meaningless.
+ */
+export async function setPartnerDealDesk(
+  id: string,
+  enabled: boolean
+): Promise<ActionResult> {
+  const admin = await requireAdminUser();
+  if (!admin) return { success: false, error: "Forbidden" };
+
+  const db = createAdminClient();
+  const now = new Date().toISOString();
+
+  const { data: partner, error: readErr } = await db
+    .from("referral_partners")
+    .select("id, name, email, phone, user_id, portal_enabled")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (readErr || !partner) return { success: false, error: "Partner not found" };
+
+  if (!partner.user_id) {
+    return {
+      success: false,
+      error: "Invite this partner to the portal first — the deal desk lives inside it.",
+    };
+  }
+
+  try {
+    if (enabled) {
+      const email = (partner.email ?? "").trim().toLowerCase();
+      if (!email) {
+        return { success: false, error: "Add an email address before enabling the deal desk" };
+      }
+
+      const [firstName, ...restName] = (partner.name || "").split(/\s+/);
+      const lastName = restName.join(" ");
+
+      // Reuse an existing advisors row if this partner was enabled before, so
+      // toggling off and back on returns them to their own book rather than
+      // stranding it on a deactivated row. Match on user_id — email can be
+      // edited between toggles, user_id cannot.
+      const { data: existingAdvisor } = await db
+        .from("advisors")
+        .select("id")
+        .eq("user_id", partner.user_id)
+        .maybeSingle();
+
+      if (existingAdvisor) {
+        const { error: reviveErr } = await db
+          .from("advisors")
+          .update({
+            first_name: firstName || partner.name,
+            last_name: lastName || firstName || partner.name,
+            email,
+            phone: partner.phone ?? null,
+            is_active: true,
+            referral_partner_id: partner.id,
+            updated_at: now,
+          })
+          .eq("id", existingAdvisor.id);
+        if (reviveErr) return { success: false, error: reviveErr.message };
+      } else {
+        const { error: insertErr } = await db.from("advisors").insert({
+          user_id: partner.user_id,
+          first_name: firstName || partner.name,
+          // advisors.last_name is NOT NULL; a one-word partner name would
+          // otherwise fail the insert with a constraint error the admin can do
+          // nothing about.
+          last_name: lastName || firstName || partner.name,
+          email,
+          phone: partner.phone ?? null,
+          is_active: true,
+          referral_partner_id: partner.id,
+        });
+        if (insertErr) return { success: false, error: insertErr.message };
+      }
+
+      const { error: roleErr } = await db
+        .from("users")
+        .update({ role: "partner_advisor" })
+        .eq("id", partner.user_id);
+      if (roleErr) return { success: false, error: roleErr.message };
+    } else {
+      // Order matters on the way down: drop the role first, so that if the
+      // advisors update fails the partner is already out of the workspace
+      // rather than left holding advisor access with an admin who believes
+      // they revoked it.
+      const { error: roleErr } = await db
+        .from("users")
+        .update({ role: "referral_partner" })
+        .eq("id", partner.user_id);
+      if (roleErr) return { success: false, error: roleErr.message };
+
+      const { error: deactivateErr } = await db
+        .from("advisors")
+        .update({ is_active: false, updated_at: now })
+        .eq("user_id", partner.user_id)
+        .eq("referral_partner_id", partner.id);
+      if (deactivateErr) return { success: false, error: deactivateErr.message };
+    }
+
+    const { error: flagErr } = await db
+      .from("referral_partners")
+      .update({ deal_desk_enabled: enabled, updated_at: now })
+      .eq("id", id);
+    if (flagErr) return { success: false, error: flagErr.message };
+
+    revalidatePath("/admin/referral-partners");
+    return { success: true, name: partner.name };
+  } catch (err: any) {
+    console.error("[referral-partners] setPartnerDealDesk threw:", err);
+    return { success: false, error: err?.message || "Could not update the deal desk" };
+  }
 }
 
 // ============================================================================
@@ -735,11 +895,64 @@ export async function deleteReferralPartner(id: string): Promise<ActionResult> {
     };
   }
 
+  // Retire the deal desk BEFORE the row goes away.
+  //
+  // advisors.referral_partner_id is ON DELETE SET NULL, so deleting the partner
+  // silently turns their advisors row into one that looks exactly like internal
+  // staff — referral_partner_id NULL, is_active true — and it reappears in every
+  // advisor picker, the admin leaderboard, and as a reassignment target. The
+  // marker that would have excluded it is the very thing the delete erases, so
+  // this has to happen first.
+  let hasAdvisorRow = false;
+
+  if (partner.user_id) {
+    const { data: advisorRow, error: retireReadErr } = await db
+      .from("advisors")
+      .select("id")
+      .eq("user_id", partner.user_id)
+      .maybeSingle();
+
+    if (retireReadErr) {
+      console.error("[referral-partners] could not read partner advisor row:", retireReadErr);
+      return {
+        success: false,
+        error: "Could not check this partner's advisor profile — nothing was deleted.",
+      };
+    }
+
+    if (advisorRow) {
+      hasAdvisorRow = true;
+      const { error: retireErr } = await db
+        .from("advisors")
+        .update({ is_active: false, referral_partner_id: null, updated_at: new Date().toISOString() })
+        .eq("id", advisorRow.id);
+      if (retireErr) {
+        console.error("[referral-partners] could not retire partner advisor row:", retireErr);
+        return {
+          success: false,
+          error: "Could not retire this partner's advisor profile — nothing was deleted.",
+        };
+      }
+
+      await db
+        .from("users")
+        .update({ role: "referral_partner" })
+        .eq("id", partner.user_id)
+        .eq("role", "partner_advisor");
+    }
+  }
+
   // Clean up the portal login, but only when it exists SOLELY for this partner.
   // inviteReferralPartnerToPortal can attach an existing 'free' account, and a
   // client's auth user cascades to their whole vault — deleting one here would
   // be catastrophic and completely invisible from this screen.
   // See [[client_deletion_cascade_contract]].
+  //
+  // An advisors row also blocks it, and blocks it HARD: advisors_user_id_fkey
+  // has no ON DELETE clause, so it defaults to NO ACTION and the auth delete
+  // fails on the constraint. Checking up front turns a caught-and-logged
+  // exception into a deliberate skip — the login is left in place on purpose,
+  // deactivated, still carrying the history of every deal they worked.
   if (partner.user_id) {
     try {
       const [{ data: userRow }, { count: vaultCount }] = await Promise.all([
@@ -750,12 +963,13 @@ export async function deleteReferralPartner(id: string): Promise<ActionResult> {
           .eq("user_id", partner.user_id),
       ]);
 
-      if (userRow?.role === "referral_partner" && (vaultCount ?? 0) === 0) {
+      if (userRow?.role === "referral_partner" && (vaultCount ?? 0) === 0 && !hasAdvisorRow) {
         await db.auth.admin.deleteUser(partner.user_id);
       } else {
         console.warn(
           `[referral-partners] delete ${partner.name}: leaving auth user ${partner.user_id} in place ` +
-            `(role=${userRow?.role}, vaults=${vaultCount}) — it isn't exclusively a partner login`
+            `(role=${userRow?.role}, vaults=${vaultCount}, advisorRow=${hasAdvisorRow}) — ` +
+            `it isn't exclusively a partner login`
         );
       }
     } catch (authErr) {

@@ -13,9 +13,10 @@
 //   max(created_at, latest loan_status_history, latest user_documents.upload_date,
 //       latest client_internal_notes.created_at).
 //
-// Files already owned by the catch-all advisor, and files that are funded or
-// declined (closed), are skipped — so the job is naturally idempotent: once a
-// file is handed over it stays put and never re-triggers.
+// The catch-all is a PRE-UNDERWRITING net: anything at or past `under_review`
+// stays with its assigned advisor (see NO_REASSIGN_STATUSES). Files already
+// owned by the catch-all advisor are skipped too — so the job is naturally
+// idempotent: once a file is handed over it stays put and never re-triggers.
 //
 // Mirrors the auth/dry-run conventions of /api/cron/send-document-reminders.
 
@@ -30,10 +31,24 @@ export const dynamic = "force-dynamic";
 // How long a file may sit with no activity before it's reassigned.
 const REASSIGN_AFTER_DAYS = 7;
 
-// Pipeline statuses that never trigger reassignment: closed deals (funded,
-// declined) plus deals with an offer on the table (lender_matched / "Offer
-// Received") — those are actively progressing and shouldn't be pulled away.
-const NO_REASSIGN_STATUSES = new Set(["funded", "declined", "lender_matched"]);
+// Pipeline statuses that never trigger reassignment.
+//
+// The catch-all advisor is a PRE-UNDERWRITING safety net only: he picks up
+// files that go dormant while the client is still gathering docs. The moment a
+// vault is submitted to underwriting (`under_review`, stamped by
+// /api/vault/submit and /api/advisor/clients/submit-vault) the assigned advisor
+// owns communications for the rest of the deal — UW quiet periods are normal
+// and are not a signal that the file is unworked.
+//
+// Everything downstream of UW is exempt for the same reason plus its own:
+// closed deals (funded, declined) and deals with an offer on the table
+// (lender_matched / "Offer Received") are actively progressing.
+const NO_REASSIGN_STATUSES = new Set([
+    "under_review",
+    "lender_matched",
+    "funded",
+    "declined",
+]);
 
 interface ReassignResult {
     clientVaultId: string;
@@ -112,6 +127,47 @@ export async function GET(req: Request) {
     const vaultIds = clients.map(c => c.id);
     const userIds = clients.map(c => c.user_id);
 
+    // 1b. Files owned by an EXTERNAL partner advisor are exempt.
+    //
+    // Reassigning one would take an outside CPA's own deal away from them on day
+    // 7 — the deal they sourced, created and are being paid a commission on. An
+    // external partner works on a slower cadence than staff, and "inactive for a
+    // week" doesn't mean the same thing for them.
+    //
+    // The internal safety net is elsewhere: every partner-created deal already
+    // carries admin followers, attached at signup by
+    // attachAdminOversightToPartnerDeal. So a stalled partner file is still
+    // visible to staff; it just doesn't change hands automatically.
+    const partnerOwnedVaultIds = new Set<string>();
+    const ownerAdvisorIds = Array.from(
+        new Set(clients.map(c => c.advisor_id).filter((id): id is string => !!id))
+    );
+    if (ownerAdvisorIds.length) {
+        const { data: partnerAdvisors, error: partnerAdvisorsError } = await supabase
+            .from("advisors")
+            .select("id")
+            .in("id", ownerAdvisorIds)
+            .not("referral_partner_id", "is", null);
+
+        if (partnerAdvisorsError) {
+            // Fail closed: reassigning a partner's deal is not undoable from the
+            // partner's side, so if we can't tell whose file is whose, don't move
+            // anything this run.
+            console.error(
+                "[cron/reassign-stale-files] could not identify partner-owned files — aborting run:",
+                partnerAdvisorsError
+            );
+            return NextResponse.json({ error: partnerAdvisorsError.message }, { status: 500 });
+        }
+
+        const partnerAdvisorIds = new Set((partnerAdvisors || []).map(a => a.id));
+        clients.forEach(c => {
+            if (c.advisor_id && partnerAdvisorIds.has(c.advisor_id)) {
+                partnerOwnedVaultIds.add(c.id);
+            }
+        });
+    }
+
     // 2. Latest pipeline status per file (mirrors getBulkLatestStatus).
     const { data: statusRows } = await supabase
         .from("loan_status_history")
@@ -187,6 +243,14 @@ export async function GET(req: Request) {
         };
 
         try {
+            // Owned by an external partner advisor — their own deal, exempt. See
+            // the note where partnerOwnedVaultIds is built.
+            if (partnerOwnedVaultIds.has(client.id)) {
+                result.skipReason = "partner_owned";
+                results.push(result);
+                continue;
+            }
+
             // Advisor-set pause: a client asked for more time, etc. Skip until it expires.
             if (client.reassignment_paused_until && new Date(client.reassignment_paused_until) > startedAt) {
                 result.skipReason = "paused";

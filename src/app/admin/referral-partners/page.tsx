@@ -41,7 +41,7 @@ export default async function AdminReferralPartnersPage() {
   const { data } = await db
     .from("referral_partners")
     .select(
-      "id, name, slug, active, email, phone, company, notes, commission_type, commission_value, portal_enabled, user_id, invited_at, password_set_at, last_login_at"
+      "id, name, slug, active, email, phone, company, notes, commission_type, commission_value, portal_enabled, deal_desk_enabled, user_id, invited_at, password_set_at, last_login_at"
     )
     .order("name", { ascending: true });
 
@@ -93,6 +93,7 @@ export default async function AdminReferralPartnersPage() {
           ? null
           : Number(r.commission_value),
       portal_enabled: !!r.portal_enabled,
+      deal_desk_enabled: !!r.deal_desk_enabled,
       has_login: !!r.user_id,
       invited_at: r.invited_at ?? null,
       password_set_at: r.password_set_at ?? null,

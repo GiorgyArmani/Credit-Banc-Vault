@@ -26,6 +26,7 @@ import { formatPhoneUS, isValidUsPhone, phoneKey, toE164 } from '@/lib/phone';
 import { generateOnboardingMagicLink, pushMagicLinkToGhl } from '@/lib/magic-link';
 import { linkAffiliateLeadToVault } from '@/lib/affiliates';
 import { attributeReferralPartnerToVault, resolvePartnerAssignedFieldId } from '@/lib/referral-partner-attribution';
+import { attachAdminOversightToPartnerDeal } from '@/lib/partner-deal-oversight';
 
 const supabase_admin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -250,6 +251,11 @@ export async function POST(request: Request) {
           phone: string | null;
           ghl_user_id: string | null;
           user_id: string | null;
+          /** Set when this advisor row belongs to an external referral partner
+           *  working their own deals. Optional because the setter branch selects
+           *  a narrower shape — it resolves the GHL contact's owner, which is
+           *  always internal staff. */
+          referral_partner_id?: string | null;
         }
       | null = null;
 
@@ -305,6 +311,11 @@ export async function POST(request: Request) {
         .from('advisors')
         .select('id, first_name, last_name, email, phone, ghl_user_id, user_id, is_active')
         .eq('ghl_user_id', owner_ghl_user_id)
+        // Setter round-robin assigns to internal staff only. Partner advisors
+        // carry no ghl_user_id today so they cannot match anyway — this makes
+        // that a rule rather than an accident, and keeps .maybeSingle() from
+        // going ambiguous if one is ever given a GHL seat.
+        .is('referral_partner_id', null)
         .maybeSingle();
 
       if (!owner_advisor || owner_advisor.is_active === false) {
@@ -347,7 +358,7 @@ export async function POST(request: Request) {
       // ----- ADVISOR/ADMIN: resolve the advisor from the session (REQUIRED) -----
       const { data: by_user } = await supabase_admin
         .from('advisors')
-        .select('id, first_name, last_name, email, phone, ghl_user_id, user_id')
+        .select('id, first_name, last_name, email, phone, ghl_user_id, user_id, referral_partner_id')
         .eq('user_id', session_user.id)
         .maybeSingle();
       advisor_row = by_user ?? null;
@@ -355,7 +366,7 @@ export async function POST(request: Request) {
       if (!advisor_row && session_user.email) {
         const { data: by_email } = await supabase_admin
           .from('advisors')
-          .select('id, first_name, last_name, email, phone, ghl_user_id, user_id')
+          .select('id, first_name, last_name, email, phone, ghl_user_id, user_id, referral_partner_id')
           .ilike('email', session_user.email)
           .maybeSingle();
         advisor_row = by_email ?? null;
@@ -725,10 +736,23 @@ export async function POST(request: Request) {
     // Level-2 referral partner attribution — same contract as the standard
     // signup route: resolve the picked name to an FK, else read the partner
     // token off the GHL contact. Best-effort; never blocks signup.
-    await attributeReferralPartnerToVault(supabase_admin, {
+    const attributed_partner = await attributeReferralPartnerToVault(supabase_admin, {
       vaultId: vault_id,
+      // See the note on the standard signup route: a partner advisor working
+      // their own deal is attributed to themselves by id, not by name.
+      creatorPartnerId: advisor_row.referral_partner_id || null,
       explicitName: body.referral_partner || null,
       ghlContactId: ghl_contact_id || null,
+    });
+
+    // Internal oversight on partner-created deals: admins follow the file and
+    // are notified. No-op for staff-created deals.
+    await attachAdminOversightToPartnerDeal(supabase_admin, {
+      vaultId: vault_id,
+      creatorPartnerId: advisor_row.referral_partner_id || null,
+      clientName: body.client_name,
+      companyName: body.company_name,
+      partnerName: attributed_partner?.name ?? advisor_name,
     });
 
     // ========== STEP 4.5: SEED INITIAL PIPELINE STATUS ==========

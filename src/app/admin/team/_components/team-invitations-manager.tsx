@@ -63,6 +63,20 @@ const ROLE_BADGE: Record<string, string> = {
   advisor: "bg-emerald-100 text-emerald-800",
   underwriting: "bg-indigo-100 text-indigo-800",
   setter: "bg-amber-100 text-amber-800",
+  // Deliberately a different colour family from `advisor`: these are external
+  // people (CPAs, bankers) working their own deals, and an admin scanning this
+  // list should be able to tell at a glance which advisors aren't employees.
+  partner_advisor: "bg-violet-100 text-violet-800",
+};
+
+/** Display names for the member list, which shows every staff role — not just
+ *  the invitable ones ROLE_LABEL covers. */
+const MEMBER_ROLE_LABEL: Record<string, string> = {
+  admin: "Admin",
+  advisor: "Advisor",
+  underwriting: "Underwriting",
+  setter: "Setter",
+  partner_advisor: "Partner Advisor",
 };
 
 function shortDate(iso: string | null): string {
@@ -484,7 +498,7 @@ export function TeamInvitationsManager({
                           ROLE_BADGE[m.role] ?? "bg-slate-100 text-slate-700"
                         }`}
                       >
-                        {m.role}
+                        {MEMBER_ROLE_LABEL[m.role] ?? m.role}
                       </span>
                     </div>
                     <div className="mt-1 text-xs text-slate-500">

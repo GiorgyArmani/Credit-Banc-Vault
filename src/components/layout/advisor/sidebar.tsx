@@ -18,6 +18,17 @@ type SidebarProps = {
   onMobileClose?: () => void
   collapsed?: boolean
   onToggleCollapsed?: () => void
+  /** Which portal this sidebar is mounted in. Every nav href hangs off it, so
+   *  the same sidebar serves the advisor portal and the partner deal desk. */
+  basePath?: string
+  /** Where "Dashboard" points. Defaults to basePath, which is right for the
+   *  advisor portal (/advisor/dashboard is a real page) but NOT for the partner
+   *  deal desk: /partner is only a route prefix — its landing page is
+   *  /partner/deals, because /partner/dashboard is the referral book. */
+  dashboardHref?: string
+  /** Appended after the standard items. The partner deal desk uses this for
+   *  "My Referrals", which has no advisor-portal equivalent. */
+  extraNavItems?: { label: string; href: string; icon?: string }[]
 }
 
 export function Sidebar({
@@ -25,6 +36,9 @@ export function Sidebar({
   onMobileClose,
   collapsed = false,
   onToggleCollapsed,
+  basePath = '/advisor/dashboard',
+  dashboardHref,
+  extraNavItems = [],
 }: SidebarProps) {
   const pathname = usePathname()
   const supabase = createClient()
@@ -37,10 +51,11 @@ export function Sidebar({
   }
 
   const navItems = [
-    { label: 'Dashboard', href: '/advisor/dashboard', icon: BookCheck },
-    { label: 'Pipeline', href: '/advisor/dashboard/pipeline', icon: LayoutGrid },
-    { label: 'Prospects', href: '/advisor/dashboard/prospects', icon: Users },
-    { label: 'Clients', href: '/advisor/dashboard/clients', icon: Users },
+    { label: 'Dashboard', href: dashboardHref ?? basePath, icon: 'dashboard' },
+    { label: 'Pipeline', href: `${basePath}/pipeline`, icon: 'account_tree' },
+    { label: 'Prospects', href: `${basePath}/prospects`, icon: 'person_search' },
+    { label: 'Clients', href: `${basePath}/clients`, icon: 'verified_user' },
+    ...extraNavItems.map(i => ({ ...i, icon: i.icon ?? 'group' })),
   ]
 
   return (
@@ -81,14 +96,8 @@ export function Sidebar({
 
         {/* Navigation */}
         <nav className="flex-1 space-y-1 px-3">
-          {navItems.map(({ href, label }) => {
+          {navItems.map(({ href, label, icon: iconName }) => {
             const active = pathname === href
-            const iconName =
-              label === 'Dashboard' ? 'dashboard'
-              : label === 'Pipeline' ? 'account_tree'
-              : label === 'Prospects' ? 'person_search'
-              : label === 'Clients' ? 'verified_user'
-              : 'group'
 
             return (
               <Link href={href} key={href} onClick={onMobileClose} title={collapsed ? label : undefined}>
@@ -106,7 +115,7 @@ export function Sidebar({
           })}
 
           <div className="pt-4 px-3">
-            <Link href="/advisor/dashboard/clients/new">
+            <Link href={`${basePath}/clients/new`}>
               <button className={clsx(
                 "w-full editorial-gradient text-white rounded-xl py-3 px-4 font-bold shadow-lg shadow-primary/20 flex items-center justify-center gap-2 active:scale-95 transition-transform",
                 collapsed ? "px-0" : ""
@@ -115,7 +124,7 @@ export function Sidebar({
                 {!collapsed && <span>New Funding</span>}
               </button>
             </Link>
-            <Link href="/advisor/dashboard/clients/new/speed">
+            <Link href={`${basePath}/clients/new/speed`}>
               <button className={clsx(
                 "w-full mt-2 border-2 border-white/20 text-white rounded-xl py-3 px-4 font-bold flex items-center justify-center gap-2 active:scale-95 transition-transform hover:bg-white/10",
                 collapsed ? "px-0" : ""

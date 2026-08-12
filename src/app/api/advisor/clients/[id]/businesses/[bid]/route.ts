@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
+import { CLIENT_API_ROLES, isScopedAdvisorRole } from "@/lib/auth/roles";
 
 // DELETE /api/advisor/clients/[id]/businesses/[bid]
 //   Permanently removes a non-primary business for this client. Cleans up
@@ -36,7 +37,7 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
     .maybeSingle();
 
   const role = userRow?.role;
-  if (!role || !["admin", "advisor", "underwriting"].includes(role)) {
+  if (!role || !(CLIENT_API_ROLES as readonly string[]).includes(role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -53,8 +54,9 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
     .maybeSingle();
   if (!client) return NextResponse.json({ error: "Client not found" }, { status: 404 });
 
-  // Advisor access gate (admins skip).
-  if (role === "advisor") {
+  // Advisor access gate (admins skip). Covers external partner advisors too —
+  // they are bounded to the files they own or follow, same as staff advisors.
+  if (isScopedAdvisorRole(role)) {
     const { data: me } = await admin
       .from("advisors")
       .select("id")

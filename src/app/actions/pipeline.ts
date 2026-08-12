@@ -80,15 +80,32 @@ export async function getBulkLatestStatus(
  * Roles allowed to move a deal through the pipeline. Everyone else — clients
  * (role='free') and affiliates — has NO write access to the funding process at
  * all; they only ever read the step their own file is on.
+ *
+ * partner_advisor is included: they do the advisor job on their own files. The
+ * per-file boundary is RLS (`is_assigned_advisor_for`), not this list — the same
+ * as for a staff advisor, who is likewise not restricted here to their own book.
  */
-const STAFF_ROLES = new Set(["admin", "underwriting", "advisor", "setter"]);
+const STAFF_ROLES = new Set([
+  "admin",
+  "underwriting",
+  "advisor",
+  "setter",
+  "partner_advisor",
+]);
 
 /**
  * Roles allowed to record `funded`. Narrower than STAFF_ROLES because this
  * transition pays an affiliate a real gift card downstream — setters never touch
  * the pipeline, so they are excluded. See [[affiliate_program]].
+ *
+ * partner_advisor IS allowed, for parity with an advisor. Know what that means:
+ * `funded` also writes the partner's own commission row via
+ * createPartnerCommissionForFundedVault, so a partner marking their own deal
+ * funded self-initiates their payout. The row lands `status: 'pending'` and
+ * releasing it stays an admin action, so the approval gate is downstream rather
+ * than here. Drop "partner_advisor" from this set to make `funded` staff-only.
  */
-const FUNDED_ROLES = new Set(["admin", "underwriting", "advisor"]);
+const FUNDED_ROLES = new Set(["admin", "underwriting", "advisor", "partner_advisor"]);
 
 /** Resolve the caller's role with the service role, so RLS can't mask it. */
 async function resolveActor(): Promise<{ userId: string; role: string } | null> {

@@ -14,12 +14,21 @@
 // whole book of business on a single proxy regression.
 //
 // admin can reach it (admins bypass role guards everywhere). See [[role_model]].
+//
+// Two roles live here. `referral_partner` gets the read-only referral book.
+// `partner_advisor` is the same person with the DEAL DESK enabled: they also
+// work the deals they refer, through the same advisor components the staff
+// portal uses. The whole deal desk is mounted under /partner rather than
+// admitting them to /advisor, which keeps the advisor tree sealed to staff.
 
 import { redirect } from 'next/navigation'
 import Image from 'next/image'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { LogoutButton } from '@/components/logout-button'
+import { Toaster } from 'sonner'
+import { PartnerDealDeskShell } from './_components/partner-deal-desk-shell'
+import { isExternalAdvisor } from '@/lib/auth/roles'
 
 export default async function PartnerLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
@@ -36,10 +45,24 @@ export default async function PartnerLayout({ children }: { children: React.Reac
     .maybeSingle()
 
   const role = userRow?.role
-  if (role !== 'referral_partner' && role !== 'admin') {
+  if (role !== 'referral_partner' && role !== 'partner_advisor' && role !== 'admin') {
     redirect('/dashboard')
   }
 
+  // Admins get the deal desk too, so they can walk the partner experience end to
+  // end when supporting one. Their own access is unaffected either way.
+  const hasDealDesk = isExternalAdvisor(role) || role === 'admin'
+
+  // A partner who works deals gets the full workspace chrome — the SAME sidebar,
+  // global search and notifications the advisor portal has, pointed at /partner.
+  // It brings its own Toaster and layout, so it replaces the simple header
+  // rather than nesting inside it.
+  if (hasDealDesk) {
+    return <PartnerDealDeskShell>{children}</PartnerDealDeskShell>
+  }
+
+  // Referrals-only: a single read-only page. A sidebar with one destination on
+  // it would be noise, so this keeps the light brand chrome.
   return (
     <div className="min-h-screen bg-cb-cream font-body text-cb-ink">
       <header className="sticky top-0 z-40 border-b border-black/5 bg-cb-cream/80 backdrop-blur-md">
@@ -64,6 +87,7 @@ export default async function PartnerLayout({ children }: { children: React.Reac
         </div>
       </header>
       <main>{children}</main>
+      <Toaster position="top-right" richColors />
     </div>
   )
 }

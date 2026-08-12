@@ -594,6 +594,9 @@ export default async function AdminDashboardPage({ searchParams }: PageProps) {
       .from('advisors')
       .select('id, first_name, last_name')
       .eq('is_active', true)
+      // Internal staff only — external partner advisors don't belong in the
+      // company-wide advisor filter or the leaderboard it drives.
+      .is('referral_partner_id', null)
       .order('first_name', { ascending: true }),
   ])
 

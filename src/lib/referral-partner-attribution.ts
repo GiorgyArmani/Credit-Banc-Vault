@@ -10,10 +10,14 @@
 // the prospect ever touched. See [[ghl_integration_contract]].
 //
 // Precedence, highest first:
-//   1. An explicit name chosen by staff (the client-card picker / signup form).
+//   1. The partner who CREATED the deal — a partner advisor working their own
+//      file. This is a primary key off their advisors row, not a string to
+//      match, so it is the one path that cannot silently miss. See
+//      [[referral_partner_portal]].
+//   2. An explicit name chosen by staff (the client-card picker / signup form).
 //      A human who says "this was Jane" outranks whatever the CRM holds.
-//   2. The GHL contact's referral-partner custom field.
-//   3. Nothing — leave the vault unattributed rather than guess.
+//   3. The GHL contact's referral-partner custom field.
+//   4. Nothing — leave the vault unattributed rather than guess.
 //
 // Everything here is best-effort and non-throwing: a missing GHL token, an
 // unknown partner or a network hiccup must never fail a signup.
@@ -21,6 +25,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { ghlGetContact, ghlResolveFieldId } from "@/lib/ghl-api";
 import {
+  resolvePartnerById,
   resolvePartnerByName,
   resolvePartnerBySlug,
   stampPartnerOnVault,
@@ -112,18 +117,40 @@ export async function attributeReferralPartnerToVault(
   db: SupabaseClient,
   args: {
     vaultId: string;
+    /**
+     * The partner who CREATED this deal — `advisors.referral_partner_id` of the
+     * session's advisor row, set when a partner advisor works their own file.
+     * Highest precedence, and deliberately so: it is a primary key rather than a
+     * name to match, so it is the only attribution path that cannot silently
+     * miss. Everything downstream — the commission ledger above all — keys off
+     * `client_data_vault.referral_partner_id`, and a partner who had to pick
+     * their own name from a dropdown would lose the commission on every deal
+     * where the string didn't match the registry exactly.
+     */
+    creatorPartnerId?: string | null;
     /** Name picked by staff on the signup form, if any. Wins over GHL. */
     explicitName?: string | null;
     ghlContactId?: string | null;
   }
 ): Promise<ReferralPartner | null> {
-  const { vaultId, explicitName, ghlContactId } = args;
+  const { vaultId, creatorPartnerId, explicitName, ghlContactId } = args;
   if (!vaultId) return null;
 
   try {
     let partner: ReferralPartner | null = null;
 
-    if (explicitName && explicitName.trim()) {
+    if (creatorPartnerId) {
+      partner = await resolvePartnerById(db, creatorPartnerId);
+      if (!partner) {
+        console.warn(
+          `[partner-attribution] vault ${vaultId}: creator partner ${creatorPartnerId} not found — falling through`
+        );
+      }
+    }
+
+    if (partner) {
+      // Already resolved from the creator; skip the weaker signals below.
+    } else if (explicitName && explicitName.trim()) {
       partner = await resolvePartnerByName(db, explicitName);
       if (!partner) {
         // Staff typed a name we have no registry row for. The name is already

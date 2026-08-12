@@ -113,6 +113,12 @@ export async function proxy(request: NextRequest) {
       // Level-2 referral partners (CPAs, bankers, professionals). Invite-only —
       // there is no public signup page, so the whole /partner tree is gated.
       referral_partner: ["/partner"],
+      // Referral partners who also WORK their deals. Same tree, and deliberately
+      // NOT "/advisor": everything a partner needs is mounted under /partner, so
+      // the advisor tree stays sealed to staff. That is what keeps
+      // /advisor/dashboard/referrals — an unlinked route that service-role reads
+      // every unworked affiliate lead — out of an external partner's reach.
+      partner_advisor: ["/partner"],
       free: [], // Free users have access to basic /dashboard only
     };
 
@@ -170,7 +176,8 @@ export async function proxy(request: NextRequest) {
           underwriting: "/underwriting/dashboard",
           setter: "/setter/dashboard",
           affiliate: "/affiliate/dashboard",
-        referral_partner: "/partner/dashboard",
+          referral_partner: "/partner/dashboard",
+          partner_advisor: "/partner/deals",
           free: isOnboardingComplete ? "/dashboard" : "/onboarding",
         };
         return redirectWithCookies(adminRedirectMap[userRole] || "/dashboard");
@@ -180,28 +187,43 @@ export async function proxy(request: NextRequest) {
     // Check if user is trying to access a role-specific route
     // Admins bypass all role-specific guards — they can access /advisor/* and /underwriting/* freely
     if (!isAdmin) {
+      // Collect EVERY role that owns the matched prefix before deciding, rather
+      // than denying on the first one that doesn't match the caller.
+      //
+      // A prefix can be shared: /partner is home to both referral_partner (the
+      // read-only referral book) and partner_advisor (the same person with the
+      // deal desk enabled). Deciding per-entry denied a partner_advisor on the
+      // referral_partner entry, because that one is iterated first — the user
+      // was bounced before their own entry was ever reached.
+      const allowedRoles = new Set<string>();
+      let isRoleProtected = false;
+
       for (const [role, routes] of Object.entries(roleRoutes)) {
-        for (const route of routes) {
-          if (path.startsWith(route)) {
-            // If the path is role-protected and user doesn't have THAT role
-            if (userRole !== role) {
-              console.warn(`[RBAC] Access denied for user ${user.id} with role ${userRole} attempting to access ${path}`);
-
-              // Redirect to their appropriate dashboard
-              const redirectMap: Record<string, string> = {
-                advisor: "/advisor/dashboard",
-                underwriting: "/underwriting/dashboard",
-                setter: "/setter/dashboard",
-                affiliate: "/affiliate/dashboard",
-                referral_partner: "/partner/dashboard",
-                admin: "/admin/dashboard",
-                free: isOnboardingComplete ? "/dashboard" : "/onboarding",
-              };
-
-              return redirectWithCookies(redirectMap[userRole] || "/dashboard");
-            }
-          }
+        if (routes.some((route) => path.startsWith(route))) {
+          isRoleProtected = true;
+          allowedRoles.add(role);
         }
+      }
+
+      if (isRoleProtected && !allowedRoles.has(userRole)) {
+        console.warn(
+          `[RBAC] Access denied for user ${user.id} with role ${userRole} attempting to access ${path} ` +
+            `(allowed: ${Array.from(allowedRoles).join(", ")})`
+        );
+
+        // Redirect to their appropriate dashboard
+        const redirectMap: Record<string, string> = {
+          advisor: "/advisor/dashboard",
+          underwriting: "/underwriting/dashboard",
+          setter: "/setter/dashboard",
+          affiliate: "/affiliate/dashboard",
+          referral_partner: "/partner/dashboard",
+          partner_advisor: "/partner/deals",
+          admin: "/admin/dashboard",
+          free: isOnboardingComplete ? "/dashboard" : "/onboarding",
+        };
+
+        return redirectWithCookies(redirectMap[userRole] || "/dashboard");
       }
     }
 
@@ -213,12 +235,16 @@ export async function proxy(request: NextRequest) {
         setter: "/setter/dashboard",
         affiliate: "/affiliate/dashboard",
         referral_partner: "/partner/dashboard",
+        partner_advisor: "/partner/deals",
         admin: "/admin/dashboard",
         free: isOnboardingComplete ? "/dashboard" : "/onboarding",
       };
 
-      if (userRole === "advisor" || userRole === "underwriting" || userRole === "setter" || userRole === "affiliate" || userRole === "referral_partner" || userRole === "admin" || !isOnboardingComplete) {
+      if (userRole in redirectMap && userRole !== "free") {
         return redirectWithCookies(redirectMap[userRole]);
+      }
+      if (!isOnboardingComplete) {
+        return redirectWithCookies(redirectMap[userRole] || "/onboarding");
       }
     }
 
@@ -230,6 +256,7 @@ export async function proxy(request: NextRequest) {
         setter: "/setter/dashboard",
         affiliate: "/affiliate/dashboard",
         referral_partner: "/partner/dashboard",
+        partner_advisor: "/partner/deals",
         admin: "/admin/dashboard",
         free: isOnboardingComplete ? "/dashboard" : "/onboarding",
       };

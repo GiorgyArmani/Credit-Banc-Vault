@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { PipelineBoard, type PipelineDeal } from "@/app/advisor/dashboard/pipeline/_components/pipeline-board";
-import { enrichDeals } from "@/app/advisor/dashboard/pipeline/page";
+import { enrichDeals } from "@/components/workspace/workspace-pipeline";
 import { updateLoanStatus, type LoanStatus } from "@/app/actions/pipeline";
 import { getActivityState, ACTIVITY_STATES, type ActivityState } from "@/components/advisor/activity-age-badge";
 import { toast } from "@/lib/toast";
@@ -49,7 +49,10 @@ export default function AdminPipelinePage() {
         supabase
           .from("client_data_vault")
           .select("id, user_id, advisor_id, client_name, client_email, client_phone, company_name, capital_requested, created_at, reassigned_to_catch_all_at, reassignment_paused_until"),
-        supabase.from("advisors").select("id, first_name, last_name, email"),
+        // Internal staff only. No is_active filter here by design (inactive
+        // advisors still own historic deals), so referral_partner_id is the only
+        // thing excluding external partner advisors from the filter.
+        supabase.from("advisors").select("id, first_name, last_name, email").is("referral_partner_id", null),
       ]);
 
       if (error) throw error;

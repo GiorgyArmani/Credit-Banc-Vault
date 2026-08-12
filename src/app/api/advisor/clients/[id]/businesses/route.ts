@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { CLIENT_SCOPED_DOC_CODES } from "@/lib/document-scope";
 import { signWell } from "@/lib/signwell";
+import { CLIENT_API_ROLES, isScopedAdvisorRole } from "@/lib/auth/roles";
 
 // GET /api/advisor/clients/[id]/businesses
 //   List every business_profiles row for this client.
@@ -27,7 +28,7 @@ async function getAuthedAdvisorContext(clientVaultId: string) {
     .maybeSingle();
 
   const role = userRow?.role;
-  if (!role || !["admin", "advisor", "underwriting"].includes(role)) {
+  if (!role || !(CLIENT_API_ROLES as readonly string[]).includes(role)) {
     return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   }
 
@@ -47,7 +48,9 @@ async function getAuthedAdvisorContext(clientVaultId: string) {
     return { error: NextResponse.json({ error: "Client not found" }, { status: 404 }) };
   }
 
-  if (role === "advisor") {
+  // Scope gate: advisors and external partner advisors are bounded to files they
+  // own or follow. Admin and underwriting work every file and skip it.
+  if (isScopedAdvisorRole(role)) {
     const { data: me } = await admin
       .from("advisors")
       .select("id")

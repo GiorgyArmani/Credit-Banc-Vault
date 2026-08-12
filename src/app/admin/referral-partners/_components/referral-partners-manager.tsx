@@ -16,6 +16,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Trash2,
+  Briefcase,
 } from "lucide-react";
 import { BulkOnboarding } from "./bulk-onboarding";
 import {
@@ -25,6 +26,7 @@ import {
   updateReferralPartnerProfile,
   inviteReferralPartnerToPortal,
   revokeReferralPartnerPortal,
+  setPartnerDealDesk,
   deleteReferralPartner,
 } from "../actions";
 
@@ -40,6 +42,9 @@ export interface PartnerRow {
   commission_type: "percent" | "flat" | null;
   commission_value: number | null;
   portal_enabled: boolean;
+  /** This partner works their own deals through the advisor tooling in the
+   *  partner portal (role partner_advisor + an advisors row). */
+  deal_desk_enabled: boolean;
   has_login: boolean;
   invited_at: string | null;
   /** NULL while they've been invited but haven't chosen a password yet. */
@@ -228,6 +233,9 @@ export function ReferralPartnersManager({
             commission_type: null,
             commission_value: null,
             portal_enabled: invited,
+            // A brand-new partner is referrals-only. The deal desk is a separate,
+            // deliberate decision an admin makes on the expanded row.
+            deal_desk_enabled: false,
             has_login: invited,
             invited_at: invited ? now : null,
             password_set_at: null,
@@ -306,6 +314,24 @@ export function ReferralPartnersManager({
         return;
       }
       patchRow(id, { portal_enabled: false });
+    });
+  }
+
+  function handleDealDesk(r: PartnerRow, enabled: boolean) {
+    setError(null);
+    setNotice(null);
+    startTransition(async () => {
+      const res = await setPartnerDealDesk(r.id, enabled);
+      if (!res.success) {
+        setError(res.error || "Could not update the deal desk");
+        return;
+      }
+      patchRow(r.id, { deal_desk_enabled: enabled });
+      setNotice(
+        enabled
+          ? `${r.name} can now create and work their own deals.`
+          : `${r.name} is back to referrals only.`
+      );
     });
   }
 
@@ -659,6 +685,7 @@ export function ReferralPartnersManager({
                   onNotice={setNotice}
                   onInvite={() => handleInvite(r)}
                   onRevoke={() => handleRevoke(r.id)}
+                  onDealDesk={(enabled) => handleDealDesk(r, enabled)}
                   startTransition={startTransition}
                 />
               )}
@@ -693,6 +720,7 @@ function PartnerDetail({
   onNotice,
   onInvite,
   onRevoke,
+  onDealDesk,
   startTransition,
 }: {
   row: PartnerRow;
@@ -703,6 +731,7 @@ function PartnerDetail({
   onNotice: (msg: string | null) => void;
   onInvite: () => void;
   onRevoke: () => void;
+  onDealDesk: (enabled: boolean) => void;
   startTransition: (cb: () => void) => void;
 }) {
   const [slug, setSlug] = useState(row.slug ?? "");
@@ -880,6 +909,60 @@ function PartnerDetail({
           </span>
         )}
 
+      </div>
+
+      {/* Deal desk — a separate decision from portal access, and a bigger one.
+          Portal access shows a partner their own referrals, read-only. The deal
+          desk makes them an advisor on the files they create: client creation,
+          documents, approvals, pipeline, underwriting submission. Kept visually
+          apart from the Save/Invite row so it can't be flipped by muscle memory. */}
+      <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-[240px] flex-1">
+            <div className="flex items-center gap-2">
+              <Briefcase className="h-4 w-4 text-violet-600" />
+              <span className="text-sm font-bold text-slate-900">Deal desk</span>
+              {row.deal_desk_enabled && (
+                <span className="rounded-md bg-violet-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-violet-800">
+                  Enabled
+                </span>
+              )}
+            </div>
+            <p className="mt-1 text-xs text-slate-500">
+              {row.deal_desk_enabled
+                ? "This partner creates and works their own deals in the portal — documents, approvals, pipeline and underwriting submission. They still earn their referral commission on every file they open."
+                : "Let this partner create and work their own deals in the portal, the same way an advisor does. They only ever see files they own or follow."}
+            </p>
+            {!row.portal_enabled && (
+              <p className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-semibold text-amber-600">
+                <Link2Off className="h-3.5 w-3.5" />
+                Invite them to the portal first — the deal desk lives inside it
+              </p>
+            )}
+          </div>
+
+          <button
+            onClick={() => onDealDesk(!row.deal_desk_enabled)}
+            disabled={isPending || !row.portal_enabled}
+            className={
+              row.deal_desk_enabled
+                ? "inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-bold text-red-600 hover:bg-red-50 disabled:opacity-50"
+                : "inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-4 py-2 text-sm font-bold text-white hover:bg-violet-700 disabled:opacity-50"
+            }
+            title={
+              row.portal_enabled
+                ? undefined
+                : "Invite this partner to the portal before enabling the deal desk"
+            }
+          >
+            {isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Briefcase className="h-4 w-4" />
+            )}
+            {row.deal_desk_enabled ? "Turn off deal desk" : "Enable deal desk"}
+          </button>
+        </div>
       </div>
 
       {row.invited_at && (

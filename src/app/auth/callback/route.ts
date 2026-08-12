@@ -77,10 +77,15 @@ export async function GET(request: NextRequest) {
       }
 
       // Step 3: Redirect based on user role
+      // Every role needs an entry — a missing one falls through to /dashboard
+      // and relies on the proxy to re-route, which costs the user a second hop.
       const roleRedirects: Record<string, string> = {
         "advisor": "/advisor/dashboard",
         "underwriting": "/underwriting/dashboard",
         "setter": "/setter/dashboard",
+        "affiliate": "/affiliate/dashboard",
+        "referral_partner": "/partner/dashboard",
+        "partner_advisor": "/partner/deals",
         "admin": "/admin/dashboard",
         "free": "/dashboard",
       };

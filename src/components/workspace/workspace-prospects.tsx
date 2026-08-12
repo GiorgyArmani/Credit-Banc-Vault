@@ -1,9 +1,18 @@
-// src/app/advisor/dashboard/prospects/page.tsx
+// src/components/workspace/workspace-prospects.tsx
+//
+// Rendered by three portals, differing only in `basePath`:
+//   /advisor/dashboard   staff advisors
+//   /admin               admins (adds the per-advisor filter)
+//   /partner             external partner advisors working their own deals
+//
+// The owner ∪ follower scoping below is convenience, not the security boundary —
+// RLS enforces the same bound independently through is_assigned_advisor_for().
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter } from "next/navigation";
+import { canUseAdvisorWorkspace } from "@/lib/auth/roles";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import clsx from "clsx";
@@ -59,11 +68,10 @@ interface ClientInfo {
     inactivity_days?: number;
 }
 
-export default function ProspectsListPage() {
+export function WorkspaceProspects({ basePath }: { basePath: string }) {
     const supabase = createClient();
     const router = useRouter();
-    const pathname = usePathname();
-    const isAdminContext = pathname.startsWith("/admin");
+    const isAdminContext = basePath.startsWith("/admin");
 
     const [component_state, set_component_state] = useState<ComponentState>(
         ComponentState.LOADING
@@ -156,7 +164,7 @@ export default function ProspectsListPage() {
                 supabase.from('advisors').select('id').eq('user_id', user.id).maybeSingle(),
             ]);
 
-            if (user_error || !user_data || (user_data.role !== "advisor" && user_data.role !== "admin")) {
+            if (user_error || !user_data || !canUseAdvisorWorkspace(user_data.role)) {
                 set_error_message("Access denied. You must be an advisor or admin to view this page.");
                 set_component_state(ComponentState.ERROR);
                 return;
@@ -167,9 +175,15 @@ export default function ProspectsListPage() {
 
             // Admins get the full advisor roster for the per-advisor filter.
             if (user_data.role === 'admin') {
+                // Internal staff only — external partner advisors are not part
+                // of the roster this filter is for. Note there is deliberately
+                // no is_active filter here (inactive advisors still own historic
+                // files worth filtering by), so referral_partner_id is the only
+                // thing keeping partners out.
                 const { data: advisorRows } = await supabase
                     .from('advisors')
                     .select('id, first_name, last_name')
+                    .is('referral_partner_id', null)
                     .order('first_name', { ascending: true });
                 set_advisors(
                     (advisorRows || []).map((a: any) => ({
@@ -352,8 +366,8 @@ export default function ProspectsListPage() {
         return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
     }
 
-    const detail_base = isAdminContext ? "/admin/clients/" : "/advisor/dashboard/clients/";
-    const new_href = isAdminContext ? "/admin/clients/new" : "/advisor/dashboard/clients/new";
+    const detail_base = `${basePath}/clients/`;
+    const new_href = `${basePath}/clients/new`;
 
     if (component_state === ComponentState.LOADING) {
         return (
