@@ -94,16 +94,28 @@ export function CollapsibleSection({
                 {/* Header row: the trigger (chevron + title) toggles; the accessory
                     sits beside it as a sibling so its buttons stay valid (no nested
                     <button>) and don't toggle the section when clicked. */}
+                {/* flex-wrap, because the accessory is `shrink-0` while the
+                    trigger beside it is `flex-1 min-w-0`: once the buttons get
+                    wide enough, the trigger collapses but the title inside it
+                    does not, and the two render on top of each other. Wrapping
+                    drops the button row to its own line instead — which is also
+                    the right behaviour on a narrow viewport. */}
                 <div
                     className={clsx(
-                        "flex items-center gap-3 px-5 py-3.5",
+                        "flex flex-wrap items-center gap-x-3 gap-y-2 px-5 py-3.5",
                         is_open && "border-b border-slate-100",
                     )}
                 >
                     <CollapsibleTrigger asChild>
+                        {/* shrink-0, NOT flex-1. With flex-1 min-w-0 the flex
+                            algorithm collapses this button toward zero rather
+                            than wrapping the accessory — and the title inside is
+                            shrink-0, so it overflows the collapsed box and paints
+                            straight through the buttons. Refusing to shrink is
+                            what actually makes flex-wrap fire. */}
                         <button
                             type="button"
-                            className="group flex items-center gap-3 flex-1 min-w-0 text-left hover:opacity-80 transition-opacity"
+                            className="group flex shrink-0 items-center gap-3 text-left hover:opacity-80 transition-opacity"
                             aria-expanded={is_open}
                         >
                             <ChevronDown

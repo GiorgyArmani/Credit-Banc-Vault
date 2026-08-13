@@ -425,10 +425,11 @@ export async function updateClientSignupNotes(
  *
  * Persists the selected Level-2 referral partner on the client vault (both the
  * mirrored name and the referral_partner_id FK) and syncs the name to the GHL
- * contact field "Referral Assigned"
- * ({{contact.data_vault_referral_assigned}}) so CRM automations keyed on it fire.
+ * contact field "Referral Partner" ({{contact.referral_partner}},
+ * QOlQRlIm2BsT7EaHYZDh) so CRM automations keyed on it fire.
  *
- * NOT the affiliate's AFFILIATE_ASSIGNED field — that is a separate program.
+ * NOT "[Data Vault] Affiliate Assigned" — that field identifies the public-
+ * program affiliate owed a $500 gift card, a separate program.
  *
  * Pass `null` to clear the assignment.
  */
@@ -480,8 +481,8 @@ export async function setReferralPartner(clientId: string, partnerName: string |
 
         // Sync to GHL — non-fatal if this fails; vault is source of truth.
         //
-        // Writes the referral-partner field ("Referral Assigned",
-        // {{contact.data_vault_referral_assigned}}), NOT AFFILIATE_ASSIGNED —
+        // Writes the referral-partner field ("Referral Partner",
+        // {{contact.referral_partner}}), NOT "[Data Vault] Affiliate Assigned" —
         // that one belongs to the public affiliate program, and sharing it made
         // "who referred this" ambiguous on every contact.
         if (client.ghl_contact_id) {

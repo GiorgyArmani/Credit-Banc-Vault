@@ -108,7 +108,21 @@ export async function ghlGetContact(
   };
 }
 
-export type GhlCustomField = { id: string; name: string; key: string; objectType: string };
+/**
+ * A custom field as GET /locations/{id}/customFields returns it.
+ *
+ * The merge key arrives as `fieldKey` — NOT `key`. Every field in this location
+ * (239 of them, checked) has `fieldKey` and none has `key`, so indexing on `key`
+ * silently resolved nothing and every merge-key fallback in the app returned
+ * null. `key` stays optional only so an older/other payload shape still indexes.
+ */
+export type GhlCustomField = {
+  id: string;
+  name: string;
+  fieldKey?: string;
+  key?: string;
+  objectType?: string;
+};
 
 export async function ghlFetchCustomFields(locationId: string) {
   // Change: custom-fields → customFields (camelCase)
@@ -123,7 +137,10 @@ export async function ghlFetchCustomFields(locationId: string) {
 /** Crea un índice { "contact.slug_key": "cf_xxx_id" } a partir del listado */
 export function buildFieldIndex(list: GhlCustomField[]) {
   const map: Record<string, string> = {};
-  for (const f of list) map[f.key] = f.id; // p.ej. "contact.documents_requested" -> "cf_abc123"
+  for (const f of list) {
+    const key = f.fieldKey ?? f.key; // la API v2 lo manda como fieldKey
+    if (key) map[key] = f.id; // p.ej. "contact.referral_partner" -> "cf_abc123"
+  }
   return map;
 }
 

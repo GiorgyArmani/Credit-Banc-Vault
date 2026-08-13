@@ -14,6 +14,7 @@
  *   {
  *     client_id,
  *     doc_code,
+ *     bank_account_id?,   // bank statements only — see STEP 3b
  *     files: [{ storage_path, file_name, file_size, file_type }]
  *   }
  *
@@ -32,6 +33,12 @@ import { createClient } from '@/lib/supabase/server';
 import { createClient as createAdminClient } from '@supabase/supabase-js';
 import { ghlAddTags } from '@/lib/ghl-api';
 import { isCarryOverDoc, isClientScopedDoc } from '@/lib/document-scope';
+import {
+    buildStatementDisplayLabel,
+    isAccountScopedDoc,
+    parseStatementPeriod,
+    type BankAccount,
+} from '@/lib/bank-accounts';
 import { getActiveDeal } from '@/lib/funding-deals';
 
 export const maxDuration = 60;
@@ -68,6 +75,8 @@ export async function POST(request: Request) {
         const client_id: string | undefined = body?.client_id;
         const doc_code: string | undefined = body?.doc_code;
         const business_profile_id: string | null = body?.business_profile_id ?? null;
+        // Optional. Only meaningful for bank statements; validated in STEP 3b.
+        const requested_bank_account_id: string | null = body?.bank_account_id ?? null;
         const files: UploadedFileMeta[] = Array.isArray(body?.files) ? body.files : [];
 
         if (!client_id || !doc_code || files.length === 0) {
@@ -172,6 +181,38 @@ export async function POST(request: Request) {
         }
 
         // ========================================================================
+        // STEP 3b: RESOLVE THE BANK ACCOUNT (bank statements only)
+        // ========================================================================
+        // The account the uploader picked, so a 12-month × 4-account packet
+        // arrives already sorted instead of landing in one flat pile that
+        // underwriting has to untangle later. See [[bank_statement_accounts]].
+        //
+        // Two guards, both silently downgrade to "unassigned" rather than
+        // failing the upload — a mis-picked account must never cost the user a
+        // file they already pushed to storage:
+        //   * the code has to be one that carries an account at all, and
+        //   * the account has to belong to the SAME business this upload is
+        //     being scoped to. Otherwise the file would group under an account
+        //     its own business tab cannot see, and disappear from both.
+        let bank_account: BankAccount | null = null;
+        if (requested_bank_account_id && isAccountScopedDoc(doc_code)) {
+            const { data: account_row } = await supabase_admin
+                .from('bank_accounts')
+                .select('id, business_profile_id, bank_name, account_last4, account_type, nickname, is_active')
+                .eq('id', requested_bank_account_id)
+                .maybeSingle();
+
+            if (account_row && account_row.business_profile_id === resolved_business_profile_id) {
+                bank_account = account_row as BankAccount;
+            } else {
+                console.warn(
+                    `⚠️ Ignoring bank_account_id ${requested_bank_account_id}: ` +
+                    `${account_row ? 'belongs to a different business' : 'not found'}`
+                );
+            }
+        }
+
+        // ========================================================================
         // STEP 4: LOOK UP DOC METADATA (label + is_core)
         // ========================================================================
         const { data: doc_def } = await supabase_admin
@@ -188,7 +229,6 @@ export async function POST(request: Request) {
         // ========================================================================
         const uploaded_documents: any[] = [];
         const expected_prefix = `${client.user_id}/`;
-        const standardized_name = `${doc_label} - ${client.client_name}`;
 
         for (const f of files) {
             // Security: signed-URL paths are server-minted, but double-check the
@@ -199,6 +239,18 @@ export async function POST(request: Request) {
             }
 
             const ext = (f.file_name.split('.').pop() || 'bin').toLowerCase();
+
+            // Per FILE, not per batch. Without an account every statement in a
+            // category gets the identical `${doc_label} - ${client_name}`, which
+            // is why a 124-file download collides on name; with one, the label
+            // carries the account and (when the bank's own filename gives it up)
+            // the statement month.
+            const standardized_name = buildStatementDisplayLabel({
+                doc_label,
+                client_name: client.client_name,
+                account: bank_account,
+                period: bank_account ? parseStatementPeriod(f.file_name) : null,
+            });
 
             const { data: doc_record, error: db_error } = await supabase_admin
                 .from('user_documents')
@@ -214,7 +266,18 @@ export async function POST(request: Request) {
                     uploaded_by_role: 'advisor',
                     business_profile_id: resolved_business_profile_id,
                     funding_deal_id: resolved_funding_deal_id,
-                    metadata: { tags: [doc_code], uploaded_by: 'advisor', advisor_id: advisor_data?.id ?? null },
+                    bank_account_id: bank_account?.id ?? null,
+                    metadata: {
+                        tags: [doc_code],
+                        uploaded_by: 'advisor',
+                        advisor_id: advisor_data?.id ?? null,
+                        // The name the bank gave the file. `name` above is the
+                        // standardized label, so without this the original is
+                        // lost — and with it the only clue to which month a
+                        // statement covers. Retrofitting is impossible, which is
+                        // why every existing row can never be dated.
+                        original_file_name: f.file_name,
+                    },
                 })
                 .select('*')
                 .single();

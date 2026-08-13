@@ -16,6 +16,14 @@ import { PremiumLoader } from "./ui/premium-loader";
 import { Send } from "lucide-react";
 import DocumentPreviewModal from "@/components/pdf/pdf-viewer";
 import { isClientScopedDoc, isCarryOverDoc, matchesActiveBusiness, matchesActiveDeal } from "@/lib/document-scope";
+import {
+  buildStatementDisplayLabel,
+  isAccountScopedDoc,
+  parseStatementPeriod,
+  type BankAccount,
+} from "@/lib/bank-accounts";
+import { BankAccountPicker } from "@/components/bank-account-picker";
+import { useBankAccounts } from "@/hooks/use-bank-accounts";
 
 /**
  * DocumentType: Interface for documents requested for the user
@@ -79,6 +87,10 @@ interface DocumentCardProps {
   activeDealId?: string | null;
   /** Optional DOM id for the website tour to anchor on (set on the first card). */
   anchorId?: string;
+  /** Bank accounts on the active business. Only read by statement cards. */
+  bankAccounts?: BankAccount[];
+  /** Lifts a newly created account up to the shared list. */
+  onAccountCreated?: (account: BankAccount) => void;
 }
 
 function DocumentCard({
@@ -98,6 +110,8 @@ function DocumentCard({
   activeBusinessId,
   activeDealId,
   anchorId,
+  bankAccounts = [],
+  onAccountCreated,
 }: DocumentCardProps) {
   const supabase = createClient();
   const { toast } = useToast();
@@ -105,6 +119,10 @@ function DocumentCard({
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [customName, setCustomName] = useState("");
+  // Bank statements only. Null means "not specified" — the file still uploads
+  // and lands in the Unassigned group for staff to sort.
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
+  const isStatementCard = isAccountScopedDoc(docType.code);
 
   const relevantDocs = documents.filter(doc =>
     doc.category === docType.code ||
@@ -161,10 +179,26 @@ function DocumentCard({
     if (selectedFiles.length === 0 || !userId) return;
     setUploading(true);
     let successCount = 0;
+    // Only honour the picker on a card that actually shows it, and only for an
+    // account that is really on this business's list — a stale id (business tab
+    // switched mid-upload) must not be written.
+    const selectedAccount = isStatementCard
+      ? bankAccounts.find(a => a.id === selectedAccountId) ?? null
+      : null;
+
     try {
       for (const file of selectedFiles) {
         const ext = file.name.split(".").pop() || "bin";
-        const standardizedName = `${docType.label} - ${clientName || "Client"}`;
+        // With an account, the label carries the bank and — when the bank's own
+        // filename gives it up — the statement month, so twelve statements no
+        // longer download as twelve identically named files. Without one, this
+        // returns exactly the old `${label} - ${client}` string.
+        const standardizedName = buildStatementDisplayLabel({
+          doc_label: docType.label,
+          client_name: clientName || "Client",
+          account: selectedAccount,
+          period: selectedAccount ? parseStatementPeriod(file.name) : null,
+        });
         const normalized = `${docType.code}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.${ext}`;
         const filePath = `${userId}/${normalized}`;
 
@@ -196,7 +230,14 @@ function DocumentCard({
             // it serves every future funding round; everything else belongs to
             // the round it was collected for.
             funding_deal_id: isCarryOverDoc(docType.code) ? null : (activeDealId ?? null),
-            metadata: { tags: [docType.code] },
+            bank_account_id: selectedAccount?.id ?? null,
+            metadata: {
+              tags: [docType.code],
+              // `name` above is the standardized label, so the bank's own file
+              // name is otherwise discarded — and with it the only clue to which
+              // month a statement covers.
+              original_file_name: file.name,
+            },
           })
           .select("*")
           .single();
@@ -345,6 +386,24 @@ function DocumentCard({
               </div>
             </div>
           )}
+          {/* Which account these statements came from. Above the dropzone on
+              purpose: picked BEFORE the files, so a batch drop of twelve
+              months lands already sorted. Applies to every file in this
+              upload — one account per batch is how statements actually
+              arrive, and it keeps the client from tagging file-by-file. */}
+          {isStatementCard && (
+            <BankAccountPicker
+              businessProfileId={activeBusinessId}
+              accounts={bankAccounts}
+              value={selectedAccountId}
+              onChange={setSelectedAccountId}
+              onAccountCreated={(account) => onAccountCreated?.(account)}
+              disabled={uploading}
+              tone="emerald"
+              helpText="Have statements from more than one account? Upload one account at a time so your file stays organized."
+            />
+          )}
+
           {(selectedFiles.length === 0 || docType.multiple) && (
             <div className="pt-2">
               <label className={clsx(
@@ -437,6 +496,10 @@ export default function Vault({
   });
   const [renaming_file, set_renaming_file] = useState<{ id: string; label: string } | null>(null);
   const [is_renaming_loading, setIs_renaming_loading] = useState(false);
+  // Bank accounts for the business tab on screen. Reloads on tab switch —
+  // accounts are per-business and offering another business's would be rejected
+  // by the upload path anyway.
+  const { accounts: bankAccounts, addAccount: addBankAccount } = useBankAccounts(activeBusinessId);
 
   useEffect(() => {
     // Wait for the parent to resolve which business tab is active before
@@ -739,6 +802,8 @@ export default function Vault({
                   isApproved={d.isApproved}
                   isRejected={d.isRejected}
                   rejectionReason={d.rejectionReason}
+                  bankAccounts={bankAccounts}
+                  onAccountCreated={addBankAccount}
                 />
               ))}
             </div>
@@ -771,6 +836,8 @@ export default function Vault({
                   onPreview={d => set_preview_modal({ isOpen: true, doc: d })}
                   isApproved={d.isApproved}
                   isRejected={d.isRejected}
+                  bankAccounts={bankAccounts}
+                  onAccountCreated={addBankAccount}
                 />
               ))}
             </div>

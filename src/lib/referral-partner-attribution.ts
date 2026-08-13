@@ -33,29 +33,26 @@ import {
 } from "@/lib/referral-partners";
 
 /**
- * GHL merge keys to try when GHL_CF_REFERRAL_ASSIGNED isn't set, in order.
+ * GHL merge keys to try when GHL_CF_REFERRAL_ASSIGNED isn't set.
  *
- * The first is the field this program OWNS — "Referral Assigned", created for
- * exactly this purpose so the two referral programs stop sharing one field:
+ * The field this program OWNS, confirmed against the live location's 239 custom
+ * fields:
  *
- *   Name       Referral Assigned
- *   Merge key  {{contact.data_vault_referral_assigned}}
+ *   Name       Referral Partner
+ *   Id         QOlQRlIm2BsT7EaHYZDh
+ *   Merge key  {{contact.referral_partner}}
  *
  * GHL can't rename a field key after creation, so the key is the stable handle.
- * Resolve its id with `npx tsx scripts/find-ghl-referral-field.mts` and set
- * GHL_CF_REFERRAL_ASSIGNED — that skips this probe entirely.
+ * Set GHL_CF_REFERRAL_ASSIGNED to the id to skip this probe entirely.
  *
- * The rest are fallbacks for contacts stamped before the new field existed.
- * `affiliate_partner` is LAST and deliberately so: it belongs to the public
- * affiliate program, and a value there is more likely to be an affiliate than a
- * Level-2 partner. It stays only so historic contacts still resolve.
+ * Nothing else is probed on purpose. `data_vault_referral_assigned` and
+ * `affiliate_partner` were guesses that never existed in this location, and
+ * `data_vault_affiliate_assigned` — the one that does — is now the public
+ * affiliate program's field. Reading it here is exactly how the two programs got
+ * tangled, and a value there means an AFFILIATE (a $500 gift card), not a
+ * Level-2 partner.
  */
-const CANDIDATE_FIELD_KEYS = [
-  "contact.data_vault_referral_assigned",
-  "contact.referral_partner",
-  "contact.referral_partner_name",
-  "contact.affiliate_partner",
-];
+const CANDIDATE_FIELD_KEYS = ["contact.referral_partner"];
 
 /** Pull the referral-partner token off a GHL contact. Returns null on any miss. */
 export async function readPartnerTokenFromGhl(
@@ -193,7 +190,7 @@ export async function attributeReferralPartnerToVault(
 
 /** Merge key of the field this program owns. GHL can't rename keys — this is the
  *  stable handle; the id is what the API needs. */
-export const PARTNER_ASSIGNED_FIELD_KEY = "contact.data_vault_referral_assigned";
+export const PARTNER_ASSIGNED_FIELD_KEY = "contact.referral_partner";
 
 /**
  * The custom-field id to write a partner name into.
@@ -224,14 +221,10 @@ export async function resolvePartnerAssignedFieldId(): Promise<string | null> {
 /**
  * customFields payload for a partner assignment. Pass null to clear.
  *
- * Writes ONLY the referral-partner field. AFFILIATE_ASSIGNED belongs to the
- * public affiliate program, and writing partner names into it is what made "who
- * referred this" ambiguous on every contact.
- *
- * If a GHL workflow or smart list still filters on AFFILIATE_ASSIGNED for
- * partners, set GHL_CF_REFERRAL_ASSIGNED_ALSO_LEGACY=true to dual-write while
- * you repoint it, then remove the flag. Opt-in, because leaving it on
- * indefinitely just recreates the ambiguity.
+ * Writes ONLY "Referral Partner" (QOlQRlIm2BsT7EaHYZDh). There is deliberately
+ * no dual-write escape hatch into "[Data Vault] Affiliate Assigned": that field
+ * now means one thing only — which AFFILIATE referred the lead — and a partner
+ * name landing there would look like a $500 gift card is owed.
  */
 export async function partnerAssignedCustomFields(
   partnerName: string | null
@@ -241,13 +234,6 @@ export async function partnerAssignedCustomFields(
 
   const primary = await resolvePartnerAssignedFieldId();
   if (primary) fields.push({ id: primary, value });
-
-  if (
-    process.env.GHL_CF_REFERRAL_ASSIGNED_ALSO_LEGACY === "true" &&
-    process.env.AFFILIATE_ASSIGNED
-  ) {
-    fields.push({ id: process.env.AFFILIATE_ASSIGNED, value });
-  }
 
   return fields;
 }

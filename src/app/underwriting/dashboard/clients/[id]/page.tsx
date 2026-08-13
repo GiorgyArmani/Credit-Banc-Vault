@@ -60,6 +60,12 @@ import {
     DialogTrigger,
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+    Tooltip,
+    TooltipContent,
+    TooltipProvider,
+    TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { Textarea } from "@/components/ui/textarea";
 import { notifyAdvisor, markDocumentAsViewed } from "../../actions";
 import { fetchInternalNotes, addInternalNote } from "@/app/actions/internal-notes";
@@ -90,6 +96,21 @@ import { BankAnalysisViewer } from "@/components/admin/bank-analysis-viewer";
 import { BusinessTabStrip, type BusinessTab } from "@/app/advisor/dashboard/clients/[id]/_components/business-tab-strip";
 import { CollapsibleSection, broadcast_toggle_all } from "@/app/advisor/dashboard/clients/[id]/_components/collapsible-section";
 import { isClientScopedDoc, matchesActiveBusiness, matchesActiveDeal, normalizeSupabaseJoin, formatRequirementLabel } from "@/lib/document-scope";
+import {
+    BANK_ACCOUNT_TYPES,
+    BANK_ACCOUNT_TYPE_LABELS,
+    formatBankAccountLabel,
+    getDocumentStatementPeriod,
+    groupDocumentsByBankAccount,
+    isAccountScopedDoc,
+    UNASSIGNED_ACCOUNT_KEY,
+    UNASSIGNED_ACCOUNT_LABEL,
+    type BankAccount,
+    type BankAccountType,
+} from "@/lib/bank-accounts";
+import { zipDocuments } from "@/lib/document-download";
+import { BankAccountPicker } from "@/components/bank-account-picker";
+import { useBankAccounts } from "@/hooks/use-bank-accounts";
 
 // Slack deal-channel integration is built but not yet tested end-to-end.
 // Flip to `true` to re-enable the "Create / Open Slack Channel" button.
@@ -219,6 +240,10 @@ interface UserDocument {
     viewed_at: string | null;
     uploaded_by_role?: 'advisor' | 'client';
     business_profile_id?: string | null;
+    /** Set on bank statements that have been sorted onto an account. */
+    bank_account_id?: string | null;
+    /** Carries metadata.original_file_name, which dates a statement. */
+    metadata?: any;
 }
 
 interface InternalNote {
@@ -526,6 +551,253 @@ export default function UnderwritingClientDetailsPage() {
         doc: null,
     });
 
+    // ------------------------------------------------------------------
+    // Bank-statement organisation
+    // ------------------------------------------------------------------
+    // Statements group by account instead of rendering as one flat list — a
+    // four-account, twelve-month file is 48+ rows, and the O'Rourke file is
+    // 124. See @/lib/bank-accounts.
+    const {
+        accounts: bank_accounts,
+        addAccount: add_bank_account,
+        refresh: refresh_bank_accounts,
+    } = useBankAccounts(active_business_id);
+    // The account new uploads are filed under. Chosen once in the category
+    // header, then reused for the whole batch — statements arrive one account
+    // at a time, so per-file tagging would be busywork.
+    const [statement_upload_account_id, set_statement_upload_account_id] = useState<string | null>(null);
+    // The retrofit path: everything uploaded before this feature has no
+    // account, so UW multi-selects those rows and files them in one go.
+    const [selected_statement_ids, set_selected_statement_ids] = useState<Set<string>>(new Set());
+    const [assign_target_account_id, set_assign_target_account_id] = useState<string | null>(null);
+    const [is_assigning_statements, set_is_assigning_statements] = useState(false);
+    // Account pending deletion, with the number of files that will be detached.
+    const [account_pending_delete, set_account_pending_delete] = useState<
+        { id: string; label: string; document_count: number } | null
+    >(null);
+    const [is_deleting_account, set_is_deleting_account] = useState(false);
+    // Bulk-download progress. Non-null while an archive is being built; the
+    // buttons disable so two archives can't be assembled at once.
+    const [is_zipping, set_is_zipping] = useState<{ completed: number; total: number } | null>(null);
+    // Account being edited, held as a working copy so Cancel is a real cancel.
+    const [account_being_edited, set_account_being_edited] = useState<
+        { id: string; bank_name: string; account_last4: string; account_type: BankAccountType; nickname: string } | null
+    >(null);
+    const [is_saving_account, set_is_saving_account] = useState(false);
+    const [account_edit_error, set_account_edit_error] = useState<string | null>(null);
+
+    // Switching business tabs invalidates both — the account ids belong to the
+    // tab we just left, and a selection carried across tabs would assign
+    // documents the user can no longer see.
+    useEffect(() => {
+        set_statement_upload_account_id(null);
+        set_selected_statement_ids(new Set());
+        set_assign_target_account_id(null);
+    }, [active_business_id]);
+
+    // Seed the assign target from the account already chosen at the top of the
+    // section, the first time a selection is made. On a file with one account —
+    // the common case when sorting a backlog — that means selecting rows and
+    // hitting Assign, with no dropdown step in between.
+    //
+    // Only on the empty → non-empty transition, so an explicit "Move to
+    // Unassigned" (null) is never overwritten while the selection is still live.
+    const had_statement_selection = useRef(false);
+    useEffect(() => {
+        const has_selection = selected_statement_ids.size > 0;
+        if (has_selection && !had_statement_selection.current) {
+            set_assign_target_account_id(prev => prev ?? statement_upload_account_id);
+        }
+        had_statement_selection.current = has_selection;
+    }, [selected_statement_ids, statement_upload_account_id]);
+
+    function toggle_statement_selection(doc_id: string) {
+        set_selected_statement_ids(prev => {
+            const next = new Set(prev);
+            if (next.has(doc_id)) next.delete(doc_id);
+            else next.add(doc_id);
+            return next;
+        });
+    }
+
+    /** Select / clear every statement in one group (the group header checkbox). */
+    function toggle_statement_group(doc_ids: string[], select: boolean) {
+        set_selected_statement_ids(prev => {
+            const next = new Set(prev);
+            for (const id of doc_ids) {
+                if (select) next.add(id);
+                else next.delete(id);
+            }
+            return next;
+        });
+    }
+
+    /**
+     * File the selected statements onto an account (or, with a null target,
+     * pull them back out). The endpoint also rewrites each file's label so the
+     * download name carries the account — grouping the list without renaming
+     * the files would leave the lender's copy exactly as ambiguous as before.
+     */
+    async function handle_assign_statements(target_account_id: string | null) {
+        const ids = Array.from(selected_statement_ids);
+        if (ids.length === 0) return;
+
+        set_is_assigning_statements(true);
+        try {
+            const res = await fetch('/api/bank-accounts/assign', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ document_ids: ids, bank_account_id: target_account_id }),
+            });
+            const result = await res.json().catch(() => null);
+
+            if (!res.ok) {
+                toast.error(result?.error || 'Could not assign the statements');
+                return;
+            }
+
+            const updated = result?.updated ?? 0;
+            const skipped = Array.isArray(result?.skipped) ? result.skipped.length : 0;
+
+            if (updated === 0) {
+                toast.error('No statements were assigned');
+                return;
+            }
+            // Report partial success honestly — silently succeeding on 40 of 50
+            // is how a packet goes out half-organised.
+            toast.success(
+                skipped > 0
+                    ? `${updated} statement(s) assigned, ${skipped} skipped`
+                    : `${updated} statement(s) assigned`
+            );
+
+            set_selected_statement_ids(new Set());
+            set_assign_target_account_id(null);
+            fetch_client_details();
+        } catch (err: any) {
+            console.error('assign statements error:', err);
+            toast.error('An unexpected error occurred');
+        } finally {
+            set_is_assigning_statements(false);
+        }
+    }
+
+    /**
+     * Save an edited bank account.
+     *
+     * Correcting the bank name or the last four also re-labels every statement
+     * on the account — the API does that, because custom_label embeds the
+     * account and would otherwise keep the typo forever.
+     */
+    async function handle_save_bank_account() {
+        if (!account_being_edited) return;
+
+        const bank_name = account_being_edited.bank_name.trim();
+        const account_last4 = account_being_edited.account_last4.trim();
+
+        if (!bank_name) {
+            set_account_edit_error('Bank name is required');
+            return;
+        }
+        if (!/^\d{4}$/.test(account_last4)) {
+            set_account_edit_error('Enter exactly the last 4 digits');
+            return;
+        }
+
+        set_is_saving_account(true);
+        set_account_edit_error(null);
+        try {
+            const res = await fetch(`/api/bank-accounts/${account_being_edited.id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    bank_name,
+                    account_last4,
+                    account_type: account_being_edited.account_type,
+                    nickname: account_being_edited.nickname.trim() || null,
+                }),
+            });
+            const result = await res.json().catch(() => null);
+
+            if (!res.ok || !result?.account) {
+                // 409 = another account on this business already owns that
+                // bank + last4, which is the dedupe index doing its job.
+                set_account_edit_error(result?.error || 'Could not save the account');
+                return;
+            }
+
+            const relabelled = result.relabelled ?? 0;
+            toast.success(
+                relabelled > 0
+                    ? `Account updated · ${relabelled} file(s) renamed`
+                    : 'Account updated'
+            );
+
+            set_account_being_edited(null);
+            await refresh_bank_accounts();
+            // Labels changed on the documents themselves, so the list has to
+            // come back from the server rather than being patched locally.
+            if (relabelled > 0) fetch_client_details();
+        } catch (err: any) {
+            console.error('save bank account error:', err);
+            set_account_edit_error('An unexpected error occurred');
+        } finally {
+            set_is_saving_account(false);
+        }
+    }
+
+    /**
+     * Delete a bank account. Two-step on purpose: the first call is sent without
+     * ?force and comes back 409 with the real file count, which is what the
+     * confirm dialog quotes. Nothing is guessed client-side.
+     *
+     * The client's documents are never deleted — the FK is ON DELETE SET NULL,
+     * so they detach back to "Unassigned" (and get relabelled on the way).
+     */
+    async function handle_delete_bank_account(account_id: string, label: string, force = false) {
+        if (force) set_is_deleting_account(true);
+        try {
+            const res = await fetch(
+                `/api/bank-accounts/${account_id}${force ? '?force=true' : ''}`,
+                { method: 'DELETE' }
+            );
+            const result = await res.json().catch(() => null);
+
+            // Still holds files — surface the count and let the user decide.
+            if (res.status === 409 && result?.error === 'account_has_documents') {
+                set_account_pending_delete({
+                    id: account_id,
+                    label,
+                    document_count: result.document_count ?? 0,
+                });
+                return;
+            }
+
+            if (!res.ok) {
+                toast.error(result?.error || 'Could not delete the account');
+                return;
+            }
+
+            const detached = result?.detached ?? 0;
+            toast.success(
+                detached > 0
+                    ? `Account deleted · ${detached} file(s) moved to Unassigned`
+                    : 'Account deleted'
+            );
+
+            set_account_pending_delete(null);
+            if (statement_upload_account_id === account_id) set_statement_upload_account_id(null);
+            if (assign_target_account_id === account_id) set_assign_target_account_id(null);
+            await refresh_bank_accounts();
+            fetch_client_details();
+        } catch (err: any) {
+            console.error('delete bank account error:', err);
+            toast.error('An unexpected error occurred');
+        } finally {
+            set_is_deleting_account(false);
+        }
+    }
+
     // Pipeline State
     const [current_pipeline_status, set_current_pipeline_status] = useState<LoanStatus>("created");
     const [pipeline_history, set_pipeline_history] = useState<PipelineStatusEntry[]>([]);
@@ -823,22 +1095,125 @@ export default function UnderwritingClientDetailsPage() {
     /**
      * download_all_documents: Downloads all documents in a category sequentially
      */
+    /**
+     * The entire review packet as one archive, foldered by category — and,
+     * inside bank statements, by bank account.
+     *
+     * This is the action UW actually performs before shopping a deal: hand me
+     * the file. Doing it category by category is 15 clicks and 15 archives to
+     * merge by hand, which is why nobody did it and lenders got emailed
+     * attachments instead.
+     *
+     * The folder names are the same labels shown on screen, so the zip opens
+     * looking like the page it came from.
+     */
+    async function download_entire_packet() {
+        if (is_zipping) return;
+
+        const docs = scoped_documents;
+        if (docs.length === 0) return;
+
+        const client_name = client_profile?.client_name || "Client";
+        const label_by_code = new Map<string, string>(
+            required_docs.map(r => [r.code, r.label])
+        );
+        const account_labels = new Map<string, string>(
+            bank_accounts.map(a => [a.id, formatBankAccountLabel(a)])
+        );
+
+        set_is_zipping({ completed: 0, total: docs.length });
+        try {
+            const result = await zipDocuments(supabase, docs, `${client_name} - Review Packet`, {
+                folderOf: (d) => {
+                    const doc = d as UserDocument;
+                    const code = doc.doc_code ?? doc.category ?? "";
+                    const category = label_by_code.get(code) || code || "Other";
+                    // Statements nest one level deeper so a 133-file category
+                    // doesn't reproduce the flat pile this all exists to fix.
+                    if (isAccountScopedDoc(code)) {
+                        const account = doc.bank_account_id
+                            ? account_labels.get(doc.bank_account_id) ?? UNASSIGNED_ACCOUNT_LABEL
+                            : UNASSIGNED_ACCOUNT_LABEL;
+                        return `${category} - ${account}`;
+                    }
+                    return category;
+                },
+                onProgress: (p) => set_is_zipping({ completed: p.completed, total: p.total }),
+            });
+
+            if (!result.saved) return;
+            if (result.failed.length > 0) {
+                toast.error(`${result.written} file(s) zipped · ${result.failed.length} could not be read`);
+            } else {
+                toast.success(`Packet downloaded — ${result.written} file(s)`);
+            }
+        } catch (err: any) {
+            console.error('packet zip error:', err);
+            toast.error('Could not build the ZIP');
+        } finally {
+            set_is_zipping(null);
+        }
+    }
+
+    /**
+     * Bulk download as ONE ZIP.
+     *
+     * Replaces a loop that fired one browser download per file, 800ms apart —
+     * which on a 133-statement category meant nearly two minutes of downloads
+     * and, in practice, a browser that blocked the sequence partway and left
+     * the underwriter with a fraction of the files and no error.
+     *
+     * `folderOf` is passed only for multi-account statement sets: a zip of one
+     * account's statements is already about that account, so nesting it inside a
+     * folder of the same name would just add a click.
+     */
     async function download_all_documents(docs: UserDocument[]) {
         if (docs.length === 0) return;
-        
-        toast.info(`Preparing to download ${docs.length} files...`);
-        
-        for (let i = 0; i < docs.length; i++) {
-            const doc = docs[i];
-            await download_document(doc);
-            
-            // Add a small delay between downloads
-            if (i < docs.length - 1) {
-                await new Promise(resolve => setTimeout(resolve, 800));
+        if (is_zipping) return;
+
+        const client_name = client_profile?.client_name || "Documents";
+        const first_code = docs[0]?.doc_code ?? docs[0]?.category ?? null;
+        const label = required_docs.find(r => r.code === first_code)?.label ?? "Documents";
+
+        // More than one account represented → folder the archive by account so
+        // the statements don't land as one flat pile of same-named files.
+        const account_labels = new Map<string, string>(
+            bank_accounts.map(a => [a.id, formatBankAccountLabel(a)])
+        );
+        const distinct_accounts = new Set(docs.map(d => d.bank_account_id ?? UNASSIGNED_ACCOUNT_KEY));
+        const should_folder = isAccountScopedDoc(first_code) && distinct_accounts.size > 1;
+
+        set_is_zipping({ completed: 0, total: docs.length });
+        try {
+            const result = await zipDocuments(
+                supabase,
+                docs,
+                `${client_name} - ${label}`,
+                {
+                    folderOf: should_folder
+                        ? (d) => {
+                            const id = (d as UserDocument).bank_account_id;
+                            return id ? account_labels.get(id) ?? UNASSIGNED_ACCOUNT_LABEL : UNASSIGNED_ACCOUNT_LABEL;
+                        }
+                        : undefined,
+                    onProgress: (p) => set_is_zipping({ completed: p.completed, total: p.total }),
+                }
+            );
+
+            if (!result.saved) return; // user dismissed the save dialog
+            // Report shortfalls rather than claiming success — a silently short
+            // packet is the failure mode this whole change exists to remove.
+            if (result.failed.length > 0) {
+                toast.error(`${result.written} file(s) zipped · ${result.failed.length} could not be read`);
+            } else {
+                toast.success(`${result.written} file(s) downloaded as a ZIP`);
             }
+        } catch (err: any) {
+            console.error('zip download error:', err);
+            toast.error('Could not build the ZIP');
+        } finally {
+            set_is_zipping(null);
         }
-        
-        toast.success("All downloads initiated!");
     }
 
     async function handleNotifyAdvisor() {
@@ -1191,6 +1566,13 @@ export default function UnderwritingClientDetailsPage() {
                     // from every per-business tab (client-scoped codes surface
                     // correctly regardless).
                     business_profile_id: active_business_id ?? null,
+                    // Statements only. The API ignores it for any other code and
+                    // re-checks that the account belongs to this business, so a
+                    // stale selection downgrades to unassigned rather than
+                    // failing the upload.
+                    bank_account_id: isAccountScopedDoc(doc_code)
+                        ? statement_upload_account_id
+                        : null,
                     files: successful.map((s) => ({
                         storage_path: s.storage_path,
                         file_name: s.file_name,
@@ -1333,20 +1715,42 @@ export default function UnderwritingClientDetailsPage() {
     /**
      * render_document_card: Renders individual document card with download/preview for underwriting
      */
-    function render_document_card(doc: UserDocument) {
+    function render_document_card(doc: UserDocument, options?: { selectable?: boolean }) {
+        const is_selectable = options?.selectable ?? false;
+        const is_selected = selected_statement_ids.has(doc.id);
+        // Only ever a hint — it comes from parsing the bank's own filename, and
+        // every document uploaded before that name was recorded returns null.
+        const period = getDocumentStatementPeriod(doc);
+
         return (
             <Card
                 key={doc.id}
-                className="hover:shadow-md transition-shadow group border-slate-100 bg-white"
+                className={clsx(
+                    "hover:shadow-md transition-shadow group bg-white",
+                    is_selected ? "border-emerald-300 ring-1 ring-emerald-200" : "border-slate-100"
+                )}
             >
                 <CardContent className="p-4">
                     <div className="flex items-start justify-between">
                         <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-2">
+                                {is_selectable && (
+                                    <Checkbox
+                                        checked={is_selected}
+                                        onCheckedChange={() => toggle_statement_selection(doc.id)}
+                                        aria-label={`Select ${doc.custom_label || doc.name}`}
+                                        className="flex-shrink-0"
+                                    />
+                                )}
                                 <FileText className="h-5 w-5 text-slate-300 flex-shrink-0" />
                                 <h4 className="font-bold text-slate-900 truncate">
                                     {doc.custom_label || doc.name}
                                 </h4>
+                                {period && (
+                                    <Badge variant="outline" className="text-[8px] font-black uppercase px-2 h-4 border-none shrink-0 bg-indigo-50 text-indigo-500">
+                                        {period.label}
+                                    </Badge>
+                                )}
                                 {doc.uploaded_by_role && (
                                     <Badge variant="outline" className={clsx(
                                         "text-[8px] font-black uppercase px-2 h-4 border-none shrink-0",
@@ -1421,11 +1825,240 @@ export default function UnderwritingClientDetailsPage() {
     /**
      * render_document_category: Renders a category section with its documents for underwriting
      */
+    /**
+     * render_statement_groups: the bank-statement body, cut into one section
+     * per account.
+     *
+     * This is the whole point of the feature for underwriting. Flat, a funded
+     * file's statements are one undifferentiated scroll (124 rows on the
+     * O'Rourke file) with no way to tell which account any given PDF is from.
+     * Grouped, the same list reads as four runs of twelve, each downloadable on
+     * its own — which is also the shape a lender wants the packet in.
+     *
+     * Selection lives here rather than on the whole category because assigning
+     * is only meaningful for statements. The Unassigned group is where every
+     * pre-existing file starts, so it renders with its checkboxes ready.
+     */
+    function render_statement_groups(category_docs: UserDocument[]) {
+        // includeEmptyAccounts: this is the management surface. An account with
+        // nothing filed under it still has to be visible, because invisible
+        // here means undeletable — which is exactly how a mistyped or test
+        // account becomes permanent.
+        const groups = groupDocumentsByBankAccount(category_docs, bank_accounts, {
+            includeEmptyAccounts: can_upload,
+        });
+        const selected_count = selected_statement_ids.size;
+
+        return (
+            <div className="space-y-4">
+                {/* Where the next upload goes. Set before hitting Upload, so a
+                    twelve-file drop lands sorted instead of needing a second pass. */}
+                {can_upload && (
+                    <div className="rounded-2xl border border-slate-200 bg-white/70 p-4">
+                        <BankAccountPicker
+                            businessProfileId={active_business_id}
+                            accounts={bank_accounts}
+                            value={statement_upload_account_id}
+                            onChange={set_statement_upload_account_id}
+                            onAccountCreated={add_bank_account}
+                            tone="slate"
+                            helpText="New uploads in this category are filed under this account. Upload one account at a time."
+                        />
+                    </div>
+                )}
+
+                {groups.map(group => {
+                    const group_ids = group.documents.map(d => d.id);
+                    const all_selected = group_ids.every(id => selected_statement_ids.has(id));
+                    const is_unassigned = group.key === UNASSIGNED_ACCOUNT_KEY;
+
+                    return (
+                        <div
+                            key={group.key}
+                            className={clsx(
+                                "rounded-2xl border overflow-hidden",
+                                // Unassigned is the work queue, so it reads as
+                                // something to act on rather than as a peer of
+                                // the organised accounts.
+                                is_unassigned
+                                    ? "border-dashed border-slate-300 bg-slate-50/60"
+                                    : "border-slate-200 bg-white"
+                            )}
+                        >
+                            <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-slate-100">
+                                <div className="flex items-center gap-3 min-w-0">
+                                    {/* An empty group has nothing to select. */}
+                                    {can_upload && group_ids.length > 0 && (
+                                        <Checkbox
+                                            checked={all_selected}
+                                            onCheckedChange={(checked) =>
+                                                toggle_statement_group(group_ids, checked === true)
+                                            }
+                                            aria-label={`Select all in ${group.label}`}
+                                        />
+                                    )}
+                                    <div className="min-w-0">
+                                        <p className={clsx(
+                                            "font-black uppercase tracking-tighter truncate",
+                                            is_unassigned ? "text-slate-500" : "text-slate-900"
+                                        )}>
+                                            {group.label}
+                                        </p>
+                                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                            {group.documents.length === 0
+                                                ? 'Empty · no files yet'
+                                                : `${group.documents.length} file${group.documents.length === 1 ? '' : 's'}`}
+                                            {group.account && ` · ${group.account.account_type}`}
+                                            {is_unassigned && ' · needs sorting'}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div className="flex items-center gap-2 shrink-0">
+                                    {group.documents.length > 1 && (
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            disabled={!!is_zipping}
+                                            onClick={() => download_all_documents(group.documents)}
+                                            className="border-emerald-200 text-emerald-600 hover:bg-emerald-50 rounded-xl h-8 px-3 font-black text-[9px] uppercase tracking-widest disabled:opacity-50"
+                                        >
+                                            {is_zipping ? (
+                                                <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                                            ) : (
+                                                <Download className="h-3.5 w-3.5 mr-1" />
+                                            )}
+                                            Zip {group.documents.length}
+                                        </Button>
+                                    )}
+
+                                    {/* Fix a typo in the bank or the digits. The
+                                        API re-labels this account's files too,
+                                        so the correction reaches the download
+                                        name and the lender page. */}
+                                    {can_upload && group.account && (
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => {
+                                                const a = group.account as BankAccount;
+                                                set_account_edit_error(null);
+                                                set_account_being_edited({
+                                                    id: a.id,
+                                                    bank_name: a.bank_name,
+                                                    account_last4: a.account_last4,
+                                                    account_type: a.account_type,
+                                                    nickname: a.nickname ?? '',
+                                                });
+                                            }}
+                                            className="h-8 w-8 p-0 text-slate-300 hover:text-slate-900"
+                                            title="Edit this account"
+                                        >
+                                            <Pencil className="h-3.5 w-3.5" />
+                                        </Button>
+                                    )}
+
+                                    {/* Delete the ACCOUNT, never the files. On a
+                                        loaded account the API answers 409 with
+                                        the real count, which opens the confirm
+                                        below — nothing is deleted on this click. */}
+                                    {can_upload && group.account && (
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() =>
+                                                handle_delete_bank_account(group.account!.id, group.label)
+                                            }
+                                            className="h-8 w-8 p-0 text-slate-300 hover:text-red-600 hover:bg-red-50"
+                                            title="Delete this account (files move to Unassigned)"
+                                        >
+                                            <Trash2 className="h-3.5 w-3.5" />
+                                        </Button>
+                                    )}
+                                </div>
+                            </div>
+
+                            {group.documents.length > 0 && (
+                                <div className="p-4 space-y-3">
+                                    {group.documents.map(doc =>
+                                        render_document_card(doc, { selectable: can_upload })
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    );
+                })}
+
+                {/* The assign bar, pinned to the VIEWPORT.
+                    Not `sticky`: the category card wrapping this is
+                    `overflow-hidden`, which resolves sticky against a box that
+                    never scrolls — the bar then sits in normal flow at the
+                    bottom of a 133-row list, i.e. nowhere the user can see it.
+                    `fixed` is correct here anyway: the selection is made while
+                    scrolling a long list, so the action has to follow the eye.
+                    Nothing in the ancestor chain sets transform/filter, so no
+                    containing block hijacks it. */}
+                {can_upload && selected_count > 0 && (
+                    <div className="fixed bottom-6 left-1/2 z-50 flex w-[min(92vw,44rem)] -translate-x-1/2 flex-wrap items-center gap-3 rounded-2xl border border-slate-900 bg-slate-900 px-4 py-3 shadow-2xl">
+                        <span className="shrink-0 text-[10px] font-black uppercase tracking-widest text-white">
+                            {selected_count} selected
+                        </span>
+                        <span className="shrink-0 text-[10px] font-black uppercase tracking-widest text-white/40">
+                            Move to
+                        </span>
+                        <select
+                            value={assign_target_account_id ?? ""}
+                            onChange={(e) => set_assign_target_account_id(e.target.value || null)}
+                            disabled={is_assigning_statements}
+                            className="min-w-[12rem] flex-1 rounded-lg border-0 bg-white/10 px-3 py-1.5 text-xs font-semibold text-white outline-none disabled:opacity-60"
+                        >
+                            {/* Listed first so the dropdown always has a valid
+                                option, but it is the un-do, not the default —
+                                the target is seeded from the account picker
+                                above the moment a selection starts. */}
+                            <option value="" className="text-slate-900">Unassigned (remove from account)</option>
+                            {bank_accounts.filter(a => a.is_active).map(account => (
+                                <option key={account.id} value={account.id} className="text-slate-900">
+                                    {formatBankAccountLabel(account)}
+                                </option>
+                            ))}
+                        </select>
+                        <Button
+                            size="sm"
+                            disabled={is_assigning_statements}
+                            onClick={() => handle_assign_statements(assign_target_account_id)}
+                            className="shrink-0 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl h-8 px-4 font-black text-[9px] uppercase tracking-widest"
+                        >
+                            {is_assigning_statements
+                                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                : `Move ${selected_count} file${selected_count === 1 ? '' : 's'}`}
+                        </Button>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={is_assigning_statements}
+                            onClick={() => set_selected_statement_ids(new Set())}
+                            className="text-white/60 hover:text-white hover:bg-white/10 rounded-xl h-8 px-3 font-black text-[9px] uppercase tracking-widest"
+                        >
+                            Clear
+                        </Button>
+                    </div>
+                )}
+            </div>
+        );
+    }
+
+    /**
+     * render_document_category: Renders a category section with its documents for underwriting
+     */
     function render_document_category(doc_type: { code: string; label: string }) {
         const category_docs = scoped_documents.filter(d => d.category === doc_type.code);
         const has_docs = category_docs.length > 0;
         const is_approved = approvals.has(doc_type.code);
         const is_expanded = expanded_categories.has(doc_type.code);
+        // Bank statements render grouped by account; everything else stays the
+        // flat list it has always been.
+        const is_statement_category = isAccountScopedDoc(doc_type.code);
 
         // Define status theme
         const status = is_approved ? 'approved' : has_docs ? 'uploaded' : 'pending';
@@ -1520,19 +2153,29 @@ export default function UnderwritingClientDetailsPage() {
                             </Button>
                         )}
 
-                        {/* Download All if multiple docs */}
+                        {/* Download All — one ZIP, not N browser downloads. */}
                         {has_docs && category_docs.length > 1 && (
                             <Button
                                 variant="outline"
                                 size="sm"
+                                disabled={!!is_zipping}
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     download_all_documents(category_docs);
                                 }}
-                                className="border-emerald-200 text-emerald-600 hover:bg-emerald-50 rounded-xl h-8 px-3 font-black text-[9px] uppercase tracking-widest shadow-lg shadow-emerald-500/10"
+                                className="border-emerald-200 text-emerald-600 hover:bg-emerald-50 rounded-xl h-8 px-3 font-black text-[9px] uppercase tracking-widest shadow-lg shadow-emerald-500/10 disabled:opacity-50"
                             >
-                                <Download className="h-3.5 w-3.5 mr-1" />
-                                Download All
+                                {is_zipping ? (
+                                    <>
+                                        <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                                        {is_zipping.completed}/{is_zipping.total}
+                                    </>
+                                ) : (
+                                    <>
+                                        <Download className="h-3.5 w-3.5 mr-1" />
+                                        Zip All ({category_docs.length})
+                                    </>
+                                )}
                             </Button>
                         )}
 
@@ -1545,7 +2188,28 @@ export default function UnderwritingClientDetailsPage() {
                 {/* Docs List if expanded */}
                 {is_expanded && has_docs && (
                     <div className="px-5 pb-5 space-y-3">
-                        {category_docs.map(doc => render_document_card(doc))}
+                        {is_statement_category
+                            ? render_statement_groups(category_docs)
+                            : category_docs.map(doc => render_document_card(doc))}
+                    </div>
+                )}
+
+                {/* The account picker is the only thing worth showing in an
+                    empty statement category — it lets UW set up the accounts
+                    before the client uploads anything. */}
+                {is_expanded && !has_docs && is_statement_category && can_upload && (
+                    <div className="px-5 pb-5">
+                        <div className="rounded-2xl border border-slate-200 bg-white/70 p-4">
+                            <BankAccountPicker
+                                businessProfileId={active_business_id}
+                                accounts={bank_accounts}
+                                value={statement_upload_account_id}
+                                onChange={set_statement_upload_account_id}
+                                onAccountCreated={add_bank_account}
+                                tone="slate"
+                                helpText="Set up the accounts now and uploads will file themselves."
+                            />
+                        </div>
                     </div>
                 )}
             </div>
@@ -2816,44 +3480,108 @@ export default function UnderwritingClientDetailsPage() {
                         summary={`${completion_pct}% complete · ${completed_count}/${total_count} docs`}
                         accessory={
                             can_upload ? (
-                                <div className="flex items-center gap-2">
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => {
-                                            set_funding_app_for_lenders(true);
-                                            set_funding_app_file(null);
-                                            set_is_funding_app_open(true);
-                                        }}
-                                        className="h-8 rounded-lg text-[9px] font-black uppercase tracking-widest border-slate-200 hover:bg-slate-50"
-                                    >
-                                        <FileText className="w-3.5 h-3.5 mr-1.5" />
-                                        Funding App (Lenders)
-                                    </Button>
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => {
-                                            set_selected_request_ids([]);
-                                            set_request_search("");
-                                            set_is_request_modal_open(true);
-                                        }}
-                                        className="h-8 rounded-lg text-[9px] font-black uppercase tracking-widest border-slate-200 hover:bg-slate-50"
-                                    >
-                                        <Send className="w-3.5 h-3.5 mr-1.5" />
-                                        Request Doc
-                                    </Button>
-                                    {/* Share sits with the documents, not with the
-                                        lender card — staff hand files to lenders
-                                        long before the match is finalized. */}
-                                    <ShareWithLenderButton
-                                        clientId={client_id}
-                                        businessProfileId={active_business_id}
-                                        triggerLabel="Share Docs"
-                                        lenderOptions={lender_assignments.map((a) => a.lender_name)}
-                                        className="h-8 rounded-lg text-[9px] font-black uppercase tracking-widest border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 px-3"
-                                    />
-                                </div>
+                                // Icon-only. Four labelled buttons could not fit
+                                // beside the section title at any realistic width;
+                                // the names live in tooltips instead. Every button
+                                // keeps an aria-label so the meaning survives for
+                                // screen readers, where a tooltip does not.
+                                <TooltipProvider delayDuration={200}>
+                                    <div className="flex items-center gap-1">
+                                        {/* The WHOLE packet in one archive, foldered
+                                            by category (and by bank account inside
+                                            the statements). The per-category buttons
+                                            below cover one section each; this is the
+                                            "hand me the file" action. */}
+                                        {scoped_documents.length > 1 && (
+                                            <Tooltip>
+                                                <TooltipTrigger asChild>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        disabled={!!is_zipping}
+                                                        aria-label={`Download the whole packet as a ZIP (${scoped_documents.length} files)`}
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            download_entire_packet();
+                                                        }}
+                                                        className="h-8 px-2 rounded-lg text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+                                                    >
+                                                        {is_zipping ? (
+                                                            <>
+                                                                <Loader2 className="w-4 h-4 animate-spin" />
+                                                                <span className="ml-1.5 text-[9px] font-black tabular-nums">
+                                                                    {is_zipping.completed}/{is_zipping.total}
+                                                                </span>
+                                                            </>
+                                                        ) : (
+                                                            <Download className="w-4 h-4" />
+                                                        )}
+                                                    </Button>
+                                                </TooltipTrigger>
+                                                <TooltipContent>
+                                                    Zip packet ({scoped_documents.length} files)
+                                                </TooltipContent>
+                                            </Tooltip>
+                                        )}
+
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    aria-label="Upload funding application for lenders"
+                                                    onClick={() => {
+                                                        set_funding_app_for_lenders(true);
+                                                        set_funding_app_file(null);
+                                                        set_is_funding_app_open(true);
+                                                    }}
+                                                    className="h-8 px-2 rounded-lg text-slate-600 hover:bg-slate-100"
+                                                >
+                                                    <FileText className="w-4 h-4" />
+                                                </Button>
+                                            </TooltipTrigger>
+                                            <TooltipContent>Funding app (lenders)</TooltipContent>
+                                        </Tooltip>
+
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    aria-label="Request a document from the client"
+                                                    onClick={() => {
+                                                        set_selected_request_ids([]);
+                                                        set_request_search("");
+                                                        set_is_request_modal_open(true);
+                                                    }}
+                                                    className="h-8 px-2 rounded-lg text-slate-600 hover:bg-slate-100"
+                                                >
+                                                    <Send className="w-4 h-4" />
+                                                </Button>
+                                            </TooltipTrigger>
+                                            <TooltipContent>Request doc</TooltipContent>
+                                        </Tooltip>
+
+                                        {/* Share sits with the documents, not with the
+                                            lender card — staff hand files to lenders
+                                            long before the match is finalized. */}
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <span>
+                                                    <ShareWithLenderButton
+                                                        clientId={client_id}
+                                                        businessProfileId={active_business_id}
+                                                        triggerLabel=""
+                                                        ariaLabel="Share documents with a lender"
+                                                        lenderOptions={lender_assignments.map((a) => a.lender_name)}
+                                                        className="h-8 w-9 rounded-lg text-slate-600 hover:bg-slate-100"
+                                                    />
+                                                </span>
+                                            </TooltipTrigger>
+                                            <TooltipContent>Share docs with a lender</TooltipContent>
+                                        </Tooltip>
+                                    </div>
+                                </TooltipProvider>
                             ) : undefined
                         }
                         defaultOpen
@@ -2931,6 +3659,165 @@ export default function UnderwritingClientDetailsPage() {
                                 <>
                                     <Trash2 className="h-4 w-4 mr-2" />
                                     Yes, Delete
+                                </>
+                            )}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Edit Bank Account */}
+            <Dialog
+                open={!!account_being_edited}
+                onOpenChange={(open) => { if (!open && !is_saving_account) set_account_being_edited(null); }}
+            >
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Edit bank account</DialogTitle>
+                        <DialogDescription>
+                            Correcting the bank or the last 4 digits also renames every statement
+                            filed under this account, so the fix reaches the download name and the
+                            lender packet.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    {account_being_edited && (
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 py-2">
+                            <div className="space-y-1.5">
+                                <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                    Bank name
+                                </Label>
+                                <Input
+                                    value={account_being_edited.bank_name}
+                                    onChange={(e) => set_account_being_edited(prev =>
+                                        prev ? { ...prev, bank_name: e.target.value } : prev
+                                    )}
+                                    placeholder="Chase"
+                                />
+                            </div>
+                            <div className="space-y-1.5">
+                                <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                    Last 4 digits
+                                </Label>
+                                <Input
+                                    value={account_being_edited.account_last4}
+                                    inputMode="numeric"
+                                    // Digits only, capped at 4 — the field cannot
+                                    // hold a full account number even on a paste.
+                                    onChange={(e) => set_account_being_edited(prev =>
+                                        prev ? { ...prev, account_last4: e.target.value.replace(/\D/g, '').slice(0, 4) } : prev
+                                    )}
+                                    placeholder="4821"
+                                />
+                            </div>
+                            <div className="space-y-1.5">
+                                <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                    Type
+                                </Label>
+                                <select
+                                    value={account_being_edited.account_type}
+                                    onChange={(e) => set_account_being_edited(prev =>
+                                        prev ? { ...prev, account_type: e.target.value as BankAccountType } : prev
+                                    )}
+                                    className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400"
+                                >
+                                    {BANK_ACCOUNT_TYPES.map((t) => (
+                                        <option key={t} value={t}>{BANK_ACCOUNT_TYPE_LABELS[t]}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div className="space-y-1.5">
+                                <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                    Nickname
+                                </Label>
+                                <Input
+                                    value={account_being_edited.nickname}
+                                    onChange={(e) => set_account_being_edited(prev =>
+                                        prev ? { ...prev, nickname: e.target.value } : prev
+                                    )}
+                                    placeholder="Operating (optional)"
+                                />
+                            </div>
+                            {account_edit_error && (
+                                <p className="sm:col-span-2 text-xs font-semibold text-rose-600">
+                                    {account_edit_error}
+                                </p>
+                            )}
+                        </div>
+                    )}
+
+                    <DialogFooter>
+                        <Button
+                            variant="ghost"
+                            onClick={() => set_account_being_edited(null)}
+                            disabled={is_saving_account}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            onClick={handle_save_bank_account}
+                            disabled={is_saving_account}
+                            className="bg-slate-900 hover:bg-slate-800 text-white"
+                        >
+                            {is_saving_account ? (
+                                <>
+                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                    Saving...
+                                </>
+                            ) : 'Save changes'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Delete Bank Account Confirmation.
+                Opened only after the API answered 409 — document_count is the
+                server's number, not a client-side guess. The wording leads with
+                what does NOT happen, because "delete" next to a list of files
+                reads as "delete the files". */}
+            <Dialog
+                open={!!account_pending_delete}
+                onOpenChange={(open) => { if (!open && !is_deleting_account) set_account_pending_delete(null); }}
+            >
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Delete this bank account?</DialogTitle>
+                        <DialogDescription>
+                            <strong>{account_pending_delete?.label}</strong> will be removed from this
+                            business. Its <strong>{account_pending_delete?.document_count} file(s) are
+                            not deleted</strong> — they move back to <strong>Unassigned</strong>, where
+                            you can file them onto another account.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <Button
+                            variant="ghost"
+                            onClick={() => set_account_pending_delete(null)}
+                            disabled={is_deleting_account}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            onClick={() => {
+                                if (!account_pending_delete) return;
+                                handle_delete_bank_account(
+                                    account_pending_delete.id,
+                                    account_pending_delete.label,
+                                    true
+                                );
+                            }}
+                            disabled={is_deleting_account}
+                            className="bg-red-600 hover:bg-red-700 text-white"
+                        >
+                            {is_deleting_account ? (
+                                <>
+                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                    Deleting...
+                                </>
+                            ) : (
+                                <>
+                                    <Trash2 className="h-4 w-4 mr-2" />
+                                    Delete account, keep files
                                 </>
                             )}
                         </Button>

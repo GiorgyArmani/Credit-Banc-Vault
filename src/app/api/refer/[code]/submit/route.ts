@@ -137,14 +137,26 @@ export async function POST(
     try {
       const locationId = process.env.GHL_LOCATION_ID;
       if (locationId) {
-        // Stamp the affiliate onto {{contact.affiliate_partner}} (PUBLIC affiliate
-        // program — distinct from AFFILIATE_ASSIGNED / referral_partner).
-        const affiliatePartnerValue =
-          [affiliate.first_name, affiliate.last_name].filter(Boolean).join(" ").trim() ||
-          affiliate.referral_code;
+        // Stamp the affiliate onto "[Data Vault] Affiliate Assigned"
+        // (LSNodFfS5IFpzF5UzGCj, {{contact.data_vault_affiliate_assigned}}) —
+        // the PUBLIC affiliate program's field, distinct from "Referral Partner"
+        // which the Level-2 partner program owns.
+        //
+        // The value carries the referral CODE, not just a name: this field is how
+        // a human in GHL answers "which affiliate is owed the $500 when this
+        // funds", and two affiliates can share a name. The machine link is still
+        // affiliate_leads.ghl_contact_id → linkAffiliateLeadToVault; this is the
+        // human-readable mirror of it.
+        const affiliateName = [affiliate.first_name, affiliate.last_name]
+          .filter(Boolean)
+          .join(" ")
+          .trim();
+        const affiliatePartnerValue = affiliateName
+          ? `${affiliateName} (${affiliate.referral_code})`
+          : affiliate.referral_code;
         const affiliateFieldId =
           process.env.GHL_CF_AFFILIATE_PARTNER ||
-          (await ghlResolveFieldId(locationId, "contact.affiliate_partner"));
+          (await ghlResolveFieldId(locationId, "contact.data_vault_affiliate_assigned"));
         const customFields = affiliateFieldId
           ? [{ id: affiliateFieldId, value: affiliatePartnerValue }]
           : undefined;

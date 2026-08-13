@@ -21,6 +21,14 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import clsx from "clsx";
+import { BANK_STATEMENTS_DOC_CODE } from "@/lib/document-scope";
+import {
+    getDocumentStatementPeriod,
+    groupDocumentsByBankAccount,
+    isAccountScopedDoc,
+    UNASSIGNED_ACCOUNT_KEY,
+    type BankAccount,
+} from "@/lib/bank-accounts";
 
 // ── Type definitions (mirrored from page.tsx) ────────────────────────────────
 
@@ -35,6 +43,10 @@ interface UserDocument {
     is_favorite: boolean;
     upload_date: string;
     storage_path: string;
+    /** Set on bank statements filed onto an account. */
+    bank_account_id?: string | null;
+    /** Carries metadata.original_file_name, which dates a statement. */
+    metadata?: any;
 }
 
 interface DocumentUploadStatusProps {
@@ -43,6 +55,14 @@ interface DocumentUploadStatusProps {
     approvals: Set<string>;
     expanded_categories: Set<string>;
     completion_percentage: number;
+    /** Accounts on the active business. Statements group under these; every
+     *  other category ignores them. Empty is fine — everything then renders in
+     *  a single "Unassigned" group, which is what a file looks like before
+     *  anyone has sorted it. */
+    bank_accounts?: BankAccount[];
+    /** Non-null while a bulk ZIP is being built — disables every Download All
+     *  and shows progress, so a 155-file archive isn't 30 silent seconds. */
+    zipping?: { completed: number; total: number } | null;
     // Code currently being re-requested (drives the per-field spinner). null when idle.
     requesting_again_code?: string | null;
     // callbacks
@@ -58,6 +78,8 @@ interface DocumentUploadStatusProps {
     on_download_all: (docs: UserDocument[]) => void;
     on_delete_file: (doc: UserDocument) => void;
     on_rename: (doc: UserDocument) => void;
+    /** Whole packet as one archive. Omit to hide the button. */
+    on_download_packet?: () => void;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -97,6 +119,16 @@ function DocumentFileRow({
                 <div className="min-w-0">
                     <p className="text-sm font-semibold text-slate-800 truncate flex items-center gap-1.5">
                         {doc.custom_label || doc.name}
+                        {/* Statement month, when the bank's own filename gave it
+                            up. A hint only — most rows won't have one. */}
+                        {(() => {
+                            const period = getDocumentStatementPeriod(doc);
+                            return period ? (
+                                <span className="shrink-0 rounded bg-indigo-50 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-indigo-500">
+                                    {period.label}
+                                </span>
+                            ) : null;
+                        })()}
                         {doc.is_favorite && <Star className="h-3 w-3 text-amber-400 fill-amber-400 flex-shrink-0" />}
                     </p>
                     <p className="text-[11px] text-slate-400">
@@ -144,6 +176,8 @@ function DocCategoryRow({
     doc_type,
     documents,
     approvals,
+    bank_accounts,
+    zipping,
     is_expanded,
     is_requesting_again,
     on_toggle_expand,
@@ -161,6 +195,8 @@ function DocCategoryRow({
     doc_type: { code: string; label: string };
     documents: UserDocument[];
     approvals: Set<string>;
+    bank_accounts: BankAccount[];
+    zipping: { completed: number; total: number } | null;
     is_expanded: boolean;
     is_requesting_again: boolean;
     on_toggle_expand: () => void;
@@ -178,7 +214,9 @@ function DocCategoryRow({
     const category_docs = documents.filter((d) => d.category === doc_type.code);
     const has_docs = category_docs.length > 0;
     const is_approved = approvals.has(doc_type.code);
-    const is_bank_statements = doc_type.code === "business_bank_statements";
+    const is_bank_statements = doc_type.code === BANK_STATEMENTS_DOC_CODE;
+    // Statements render one section per bank account instead of a flat list.
+    const is_statement_category = isAccountScopedDoc(doc_type.code);
     // Local month picker for re-requesting bank statements (advisor may need a
     // different period than the original request).
     const [again_months, set_again_months] = useState(12);
@@ -340,23 +378,85 @@ function DocCategoryRow({
                         <div className="flex justify-end mb-1">
                             <button
                                 onClick={() => on_download_all(category_docs)}
-                                className="text-[10px] font-black uppercase tracking-widest text-blue-600 hover:text-blue-700 flex items-center gap-1 px-3 py-1 rounded-lg hover:bg-blue-50 transition-colors"
+                                disabled={!!zipping}
+                                className="text-[10px] font-black uppercase tracking-widest text-blue-600 hover:text-blue-700 flex items-center gap-1 px-3 py-1 rounded-lg hover:bg-blue-50 transition-colors disabled:opacity-50"
                             >
-                                <Download className="h-3 w-3" />
-                                Download All
+                                {zipping ? (
+                                    <>
+                                        <Loader2 className="h-3 w-3 animate-spin" />
+                                        {zipping.completed}/{zipping.total}
+                                    </>
+                                ) : (
+                                    <>
+                                        <Download className="h-3 w-3" />
+                                        Zip All ({category_docs.length})
+                                    </>
+                                )}
                             </button>
                         </div>
                     )}
-                    {category_docs.map((doc) => (
-                        <DocumentFileRow
-                            key={doc.id}
-                            doc={doc}
-                            on_preview={() => on_preview(doc)}
-                            on_rename={() => on_rename(doc)}
-                            on_download={() => on_download(doc)}
-                            on_delete={() => on_delete_file(doc)}
-                        />
-                    ))}
+
+                    {/* Statements group by account; every other category keeps
+                        the flat list. Grouping is read-only here — sorting the
+                        backlog of already-uploaded files is done from the
+                        underwriting view, which has the bulk assign. */}
+                    {is_statement_category
+                        ? groupDocumentsByBankAccount(category_docs, bank_accounts).map((group) => (
+                            <div
+                                key={group.key}
+                                className={clsx(
+                                    "rounded-xl border overflow-hidden",
+                                    group.key === UNASSIGNED_ACCOUNT_KEY
+                                        ? "border-dashed border-slate-200 bg-slate-50/60"
+                                        : "border-slate-100"
+                                )}
+                            >
+                                <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-slate-100">
+                                    <div className="min-w-0">
+                                        <p className="text-xs font-bold text-slate-700 truncate">{group.label}</p>
+                                        <p className="text-[10px] font-bold text-slate-400">
+                                            {group.documents.length} file{group.documents.length === 1 ? "" : "s"}
+                                        </p>
+                                    </div>
+                                    {group.documents.length > 1 && (
+                                        <button
+                                            onClick={() => on_download_all(group.documents)}
+                                            disabled={!!zipping}
+                                            className="shrink-0 text-[10px] font-black uppercase tracking-widest text-blue-600 hover:text-blue-700 flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-blue-50 transition-colors disabled:opacity-50"
+                                        >
+                                            {zipping ? (
+                                                <Loader2 className="h-3 w-3 animate-spin" />
+                                            ) : (
+                                                <Download className="h-3 w-3" />
+                                            )}
+                                            Zip {group.documents.length}
+                                        </button>
+                                    )}
+                                </div>
+                                <div className="p-3 space-y-2">
+                                    {group.documents.map((doc) => (
+                                        <DocumentFileRow
+                                            key={doc.id}
+                                            doc={doc}
+                                            on_preview={() => on_preview(doc)}
+                                            on_rename={() => on_rename(doc)}
+                                            on_download={() => on_download(doc)}
+                                            on_delete={() => on_delete_file(doc)}
+                                        />
+                                    ))}
+                                </div>
+                            </div>
+                        ))
+                        : category_docs.map((doc) => (
+                            <DocumentFileRow
+                                key={doc.id}
+                                doc={doc}
+                                on_preview={() => on_preview(doc)}
+                                on_rename={() => on_rename(doc)}
+                                on_download={() => on_download(doc)}
+                                on_delete={() => on_delete_file(doc)}
+                            />
+                        ))}
                 </div>
             )}
         </div>
@@ -371,6 +471,8 @@ export function DocumentUploadStatus({
     approvals,
     expanded_categories,
     completion_percentage,
+    bank_accounts = [],
+    zipping = null,
     requesting_again_code,
     on_toggle_expand,
     on_request_docs,
@@ -384,6 +486,7 @@ export function DocumentUploadStatus({
     on_download_all,
     on_delete_file,
     on_rename,
+    on_download_packet,
 }: DocumentUploadStatusProps) {
     const total = required_docs.length;
     const completed = required_docs.filter((d) => approvals.has(d.code)).length;
@@ -409,6 +512,28 @@ export function DocumentUploadStatus({
                     )}>
                         {completed}/{total} Complete
                     </span>
+                    {/* Whole packet in one archive — the per-category buttons
+                        below each cover one section, which on a full file means
+                        15 separate zips to merge by hand. */}
+                    {on_download_packet && documents.length > 1 && (
+                        <button
+                            onClick={on_download_packet}
+                            disabled={!!zipping}
+                            className="flex items-center gap-1.5 px-3 py-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-[10px] font-black uppercase tracking-widest rounded-xl transition-colors disabled:opacity-50"
+                        >
+                            {zipping ? (
+                                <>
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    {zipping.completed}/{zipping.total}
+                                </>
+                            ) : (
+                                <>
+                                    <Download className="h-3.5 w-3.5" />
+                                    Zip Packet ({documents.length})
+                                </>
+                            )}
+                        </button>
+                    )}
                     <button
                         onClick={on_request_docs}
                         className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-colors shadow-lg shadow-emerald-600/20"
@@ -439,6 +564,8 @@ export function DocumentUploadStatus({
                         doc_type={doc_type}
                         documents={documents}
                         approvals={approvals}
+                        bank_accounts={bank_accounts}
+                        zipping={zipping}
                         is_expanded={expanded_categories.has(doc_type.code)}
                         is_requesting_again={requesting_again_code === doc_type.code}
                         on_toggle_expand={() => on_toggle_expand(doc_type.code)}

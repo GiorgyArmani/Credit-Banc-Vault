@@ -100,6 +100,10 @@ import { ClientNotesCard, type FileNote } from "@/app/advisor/dashboard/clients/
 import { AdminLenderReviewCard } from "@/components/admin/admin-lender-review-card";
 import { CollapsibleSection, broadcast_toggle_all } from "@/app/advisor/dashboard/clients/[id]/_components/collapsible-section";
 import { isClientScopedDoc, matchesActiveBusiness, matchesActiveDeal, normalizeSupabaseJoin } from "@/lib/document-scope";
+import { isAccountScopedDoc } from "@/lib/bank-accounts";
+import { zipDocuments } from "@/lib/document-download";
+import { BankAccountPicker } from "@/components/bank-account-picker";
+import { useBankAccounts } from "@/hooks/use-bank-accounts";
 
 /**
  * ============================================================================
@@ -283,6 +287,10 @@ interface UserDocument {
     upload_date: string;
     storage_path: string;
     business_profile_id?: string | null;
+    /** Set on bank statements filed onto an account. */
+    bank_account_id?: string | null;
+    /** Carries metadata.original_file_name, which dates a statement. */
+    metadata?: any;
 }
 
 interface InternalNote {
@@ -418,6 +426,14 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
     const [upload_doc_label, set_upload_doc_label] = useState<string>("");
     const [upload_files, set_upload_files] = useState<File[]>([]);
     const [is_uploading, set_is_uploading] = useState(false);
+    // Bank statements only: which account this upload is filed under. Cleared
+    // whenever the modal opens on a different category.
+    const [upload_bank_account_id, set_upload_bank_account_id] = useState<string | null>(null);
+    // Bulk-download progress. Non-null while an archive is being built.
+    const [is_zipping, set_is_zipping] = useState<{ completed: number; total: number } | null>(null);
+    // Bank accounts for the business tab on screen. Feeds both the upload
+    // picker and the per-account grouping in the document list.
+    const { accounts: bank_accounts, addAccount: add_bank_account } = useBankAccounts(active_business_id);
 
     // vault-submit-state: Controls for advisor vault submission
     const [is_submit_confirm_open, set_is_submit_confirm_open] = useState(false);
@@ -1257,23 +1273,82 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
     /**
      * download_all_documents: Downloads all documents in a category sequentially
      */
-    async function download_all_documents(docs: UserDocument[]) {
+    /**
+     * The whole packet as one archive, foldered by category.
+     *
+     * Mirrors the underwriting view — the per-category buttons each cover one
+     * section, which on a full file means a dozen separate zips to merge by
+     * hand. Folder names are the labels shown on screen, so the archive opens
+     * looking like the page it came from.
+     */
+    async function download_entire_packet() {
+        if (is_zipping) return;
+
+        const docs = scoped_documents;
         if (docs.length === 0) return;
 
-        toast.info(`Preparing to download ${docs.length} files...`);
+        const client_name = client_profile?.client_name || "Client";
+        const label_by_code = new Map<string, string>(
+            required_docs.map(r => [r.code, r.label])
+        );
 
-        // Use a for...of loop for sequential downloads with delays
-        for (let i = 0; i < docs.length; i++) {
-            const doc = docs[i];
-            await download_document(doc);
+        set_is_zipping({ completed: 0, total: docs.length });
+        try {
+            const result = await zipDocuments(supabase, docs, `${client_name} - Documents`, {
+                folderOf: (d) => {
+                    const code = (d as any).doc_code ?? (d as any).category ?? "";
+                    return label_by_code.get(code) || code || "Other";
+                },
+                onProgress: (p) => set_is_zipping({ completed: p.completed, total: p.total }),
+            });
 
-            // Add a small delay between downloads to ensure browser captures all of them
-            if (i < docs.length - 1) {
-                await new Promise(resolve => setTimeout(resolve, 800));
+            if (!result.saved) return;
+            if (result.failed.length > 0) {
+                toast.error(`${result.written} file(s) zipped · ${result.failed.length} could not be read`);
+            } else {
+                toast.success(`Packet downloaded — ${result.written} file(s)`);
             }
+        } catch (err: any) {
+            console.error('packet zip error:', err);
+            toast.error('Could not build the ZIP');
+        } finally {
+            set_is_zipping(null);
         }
+    }
 
-        toast.success("All downloads initiated!");
+    /**
+     * Bulk download as ONE ZIP.
+     *
+     * Replaces a loop that fired one browser download per file, 800ms apart.
+     * On a real packet that is minutes of downloads, and browsers cut the
+     * sequence off partway — leaving the advisor with some of the files and no
+     * indication which were missing. See @/lib/document-download.
+     */
+    async function download_all_documents(docs: UserDocument[]) {
+        if (docs.length === 0 || is_zipping) return;
+
+        const client_name = client_profile?.client_name || "Documents";
+        const first_code = (docs[0] as any)?.doc_code ?? docs[0]?.category ?? null;
+        const label = required_docs.find(r => r.code === first_code)?.label ?? "Documents";
+
+        set_is_zipping({ completed: 0, total: docs.length });
+        try {
+            const result = await zipDocuments(supabase, docs, `${client_name} - ${label}`, {
+                onProgress: (p) => set_is_zipping({ completed: p.completed, total: p.total }),
+            });
+
+            if (!result.saved) return; // user dismissed the save dialog
+            if (result.failed.length > 0) {
+                toast.error(`${result.written} file(s) zipped · ${result.failed.length} could not be read`);
+            } else {
+                toast.success(`${result.written} file(s) downloaded as a ZIP`);
+            }
+        } catch (err: any) {
+            console.error('zip download error:', err);
+            toast.error('Could not build the ZIP');
+        } finally {
+            set_is_zipping(null);
+        }
     }
 
     /**
@@ -1405,6 +1480,11 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
                     // business tab. The API stamps business_profile_id on the
                     // resulting user_documents row.
                     business_profile_id: active_business_id ?? null,
+                    // Statements only. The API ignores it for other codes and
+                    // re-verifies the account belongs to this business.
+                    bank_account_id: isAccountScopedDoc(upload_doc_code)
+                        ? upload_bank_account_id
+                        : null,
                     files: successful.map((s) => ({
                         storage_path: s.storage_path,
                         file_name: s.file_name,
@@ -1427,6 +1507,7 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
                 set_is_upload_modal_open(false);
                 set_upload_files([]);
                 set_upload_doc_code("");
+                set_upload_bank_account_id(null);
                 if (Array.isArray(result.documents) && result.documents.length > 0) {
                     set_documents(prev => [...result.documents, ...prev]);
                 }
@@ -2349,6 +2430,9 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
                             approvals={approvals}
                             expanded_categories={expanded_categories}
                             completion_percentage={completion_percentage}
+                            bank_accounts={bank_accounts}
+                            zipping={is_zipping}
+                            on_download_packet={download_entire_packet}
                             requesting_again_code={requesting_again_code}
                             on_toggle_expand={toggle_category_expansion}
                             on_request_docs={() => set_is_request_modal_open(true)}
@@ -2357,6 +2441,9 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
                                 set_upload_doc_code(code);
                                 set_upload_doc_label(label);
                                 set_upload_files([]);
+                                // A leftover account from the last upload would
+                                // silently file this batch under the wrong one.
+                                set_upload_bank_account_id(null);
                                 set_is_upload_modal_open(true);
                             }}
                             on_approve={(doc) => {
@@ -2522,6 +2609,22 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
                         </DialogHeader>
 
                         <div className="py-4 space-y-4">
+                            {/* Which account these statements came from. Above
+                                the file picker so a twelve-month batch is filed
+                                before it is chosen, not after. */}
+                            {isAccountScopedDoc(upload_doc_code) && (
+                                <BankAccountPicker
+                                    businessProfileId={active_business_id}
+                                    accounts={bank_accounts}
+                                    value={upload_bank_account_id}
+                                    onChange={set_upload_bank_account_id}
+                                    onAccountCreated={add_bank_account}
+                                    disabled={is_uploading}
+                                    tone="slate"
+                                    helpText="Upload one account at a time so the file stays organized for underwriting."
+                                />
+                            )}
+
                             {/* File picker */}
                             <div
                                 className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center cursor-pointer hover:border-emerald-400 hover:bg-emerald-50 transition-colors"

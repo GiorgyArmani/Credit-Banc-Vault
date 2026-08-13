@@ -10,6 +10,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Download, FileText, Loader2, X, ExternalLink, Pencil } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import { OfficeFileViewer, detectOfficeKind } from '@/components/office-file-viewer'
 
 interface DocumentPreviewModalProps {
     isOpen: boolean
@@ -66,6 +67,11 @@ export default function DocumentPreviewModal({
                    docName.toLowerCase().endsWith('.jpg') || 
                    docName.toLowerCase().endsWith('.jpeg') ||
                    docName.toLowerCase().endsWith('.webp')
+
+    // Spreadsheets and Word files render in-app. Browsers cannot display them
+    // in an iframe — the old path silently downloaded the file instead of
+    // previewing it, which read as a broken button.
+    const officeKind = detectOfficeKind(docName, fileType)
 
     return (
         <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -164,6 +170,13 @@ export default function DocumentPreviewModal({
                                     className="max-w-full max-h-full object-contain shadow-2xl rounded-lg"
                                 />
                             </div>
+                        ) : officeKind ? (
+                            <OfficeFileViewer
+                                kind={officeKind}
+                                url={signedUrl}
+                                name={docName}
+                                downloadUrl={signedUrl}
+                            />
                         ) : (
                             <iframe
                                 src={`${signedUrl}#toolbar=0`}

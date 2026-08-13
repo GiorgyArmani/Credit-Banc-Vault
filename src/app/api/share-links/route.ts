@@ -62,6 +62,11 @@ export async function POST(request: Request) {
       );
     }
 
+    // Opt-in only, and only meaningful alongside an explicit file selection —
+    // the categories that stay live are derived from what was picked, so a
+    // legacy-shaped request with no document_ids has nothing to derive from.
+    const auto_include_new = body?.auto_include_new === true && !!selected_document_ids;
+
     const link = await createShareLink({
       client_id,
       business_profile_id,
@@ -70,6 +75,9 @@ export async function POST(request: Request) {
       label,
       expires_in_days,
       selected_document_ids,
+      auto_include_new,
+      // Only an explicit false disables the stamp; anything else stays on.
+      watermark_enabled: body?.watermark_enabled !== false,
     });
 
     if (!link) {

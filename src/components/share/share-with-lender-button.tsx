@@ -23,6 +23,8 @@ interface ShareLink {
   view_count: number;
   last_viewed_at: string | null;
   created_at: string;
+  /** Keeps itself current as new files land in the shared categories. */
+  auto_include_new?: boolean;
 }
 
 interface ShareableFile {
@@ -39,7 +41,10 @@ interface Props {
   businessProfileId: string | null;
   /** Classes for the trigger button so it blends into its host (grid vs toolbar). */
   className?: string;
+  /** Visible text beside the icon. Pass "" for an icon-only trigger — set
+   *  `ariaLabel` too in that case, since the icon carries no accessible name. */
   triggerLabel?: string;
+  ariaLabel?: string;
   /** Lenders already on the deal — offered as type-ahead suggestions for the
    *  link label. Purely a convenience: the field is always free text so a link
    *  can be minted for a lender that isn't on the deal yet. */
@@ -64,6 +69,7 @@ export function ShareWithLenderButton({
   businessProfileId,
   className,
   triggerLabel = "Share",
+  ariaLabel,
   lenderOptions,
 }: Props) {
   const lender_choices = Array.from(new Set((lenderOptions ?? []).filter(Boolean)));
@@ -79,6 +85,14 @@ export function ShareWithLenderButton({
   const [loading_docs, set_loading_docs] = useState(false);
   // File ids the lender will receive. Defaults to every file once loaded.
   const [selected_ids, set_selected_ids] = useState<Set<string>>(new Set());
+  // Keep the link current as new files arrive. Default ON: the common case is a
+  // lender working a live deal, and the alternative — them underwriting from a
+  // packet that went stale the day after it was sent — is the failure this
+  // exists to prevent. Staff untick it for a one-off, fixed disclosure.
+  const [auto_include_new, set_auto_include_new] = useState(true);
+  // Stamp every file with the CB mark before the lender sees it. Default ON —
+  // an unstamped packet is the one that gets funded around us.
+  const [watermark_enabled, set_watermark_enabled] = useState(true);
 
   // Files grouped under their category label for the picker.
   const grouped_files = useMemo(() => {
@@ -177,6 +191,8 @@ export function ShareWithLenderButton({
           label: lender_label.trim() || undefined,
           // Always an explicit list — the link is a snapshot of what was picked.
           document_ids: Array.from(selected_ids),
+          auto_include_new,
+          watermark_enabled,
         }),
       });
       const data = await res.json();
@@ -219,6 +235,7 @@ export function ShareWithLenderButton({
     <>
       <button
         onClick={() => handle_open(true)}
+        aria-label={ariaLabel ?? (triggerLabel || "Share documents")}
         className={clsx(
           "flex items-center justify-center gap-2 transition-colors",
           className ??
@@ -230,8 +247,16 @@ export function ShareWithLenderButton({
       </button>
 
       <Dialog open={open} onOpenChange={handle_open}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
+        {/* The shared DialogContent sets no max-height and no overflow, so a
+            dialog taller than the viewport is silently clipped at both ends
+            rather than scrolling. This one grew past that line, so it takes
+            ownership: cap the height, and scroll the BODY while the header
+            stays put. `flex` overrides the base `grid` — grid items default to
+            min-width:auto, which is also what let the inner card render wider
+            than the dialog. min-h-0 is what makes the scroll region actually
+            shrink inside a flex column. */}
+        <DialogContent className="sm:max-w-lg max-h-[90dvh] flex flex-col overflow-hidden">
+          <DialogHeader className="shrink-0">
             <DialogTitle>Share documents</DialogTitle>
             <DialogDescription>
               Pick the files, get a link. Anyone with it can view and download those
@@ -239,6 +264,7 @@ export function ShareWithLenderButton({
             </DialogDescription>
           </DialogHeader>
 
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pr-1">
           {/* Generate */}
           <div className="rounded-2xl border border-slate-200 p-4 space-y-3">
             <div className="space-y-1.5">
@@ -334,6 +360,49 @@ export function ShareWithLenderButton({
               )}
             </div>
 
+            {/* Keep-current toggle. Sits directly under the file picker because
+                it changes what that selection MEANS: with it on, the ticked
+                files are a floor rather than the final list. */}
+            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+              <input
+                type="checkbox"
+                checked={auto_include_new}
+                onChange={(e) => set_auto_include_new(e.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+              />
+              <span className="min-w-0">
+                <span className="block text-sm font-semibold text-slate-800">
+                  Keep this link up to date
+                </span>
+                <span className="mt-0.5 block text-[11px] leading-relaxed text-slate-500">
+                  New files in these same categories are added as they&apos;re
+                  uploaded. Anything you untick above stays out.
+                </span>
+              </span>
+            </label>
+
+            {/* Stamping. Off is the exceptional case, and the reason to turn it
+                off is specific enough to name — otherwise staff untick it
+                "just in case" and the control stops existing. */}
+            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+              <input
+                type="checkbox"
+                checked={watermark_enabled}
+                onChange={(e) => set_watermark_enabled(e.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+              />
+              <span className="min-w-0">
+                <span className="block text-sm font-semibold text-slate-800">
+                  Watermark with the Credit Banc mark
+                </span>
+                <span className="mt-0.5 block text-[11px] leading-relaxed text-slate-500">
+                  Every page is stamped, so the packet can&apos;t be re-submitted as
+                  someone else&apos;s deal. Untick only if this lender&apos;s automated
+                  underwriting rejects marked-up files.
+                </span>
+              </span>
+            </label>
+
             <div className="flex items-end gap-3">
               <div className="space-y-1.5">
                 <label className="text-[11px] font-bold uppercase tracking-widest text-slate-400">
@@ -371,8 +440,11 @@ export function ShareWithLenderButton({
             </div>
           </div>
 
-          {/* Existing links */}
-          <div className="space-y-2 max-h-[280px] overflow-y-auto">
+          {/* Existing links. No max-height of its own any more — the dialog
+              body above is the single scroll region, and stacking a third one
+              here made the modal feel like it had trapdoors. The file picker
+              keeps its own because 176 rows genuinely need it. */}
+          <div className="space-y-2">
             <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400 px-1">
               Links
             </p>
@@ -404,6 +476,18 @@ export function ShareWithLenderButton({
                         >
                           {status.label}
                         </span>
+                        {/* Whether this link is still picking up new files is
+                            not otherwise visible anywhere, and it is the thing
+                            staff need to know before uploading something they
+                            didn't mean to send. */}
+                        {l.auto_include_new && (
+                          <span
+                            title="New files in the shared categories are added to this link automatically"
+                            className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full bg-sky-100 text-sky-700"
+                          >
+                            Live
+                          </span>
+                        )}
                       </div>
                       <p className="text-[11px] text-slate-400 mt-0.5">
                         Expires {format_date(l.expires_at)} · {l.view_count} view
@@ -443,6 +527,7 @@ export function ShareWithLenderButton({
                 );
               })
             )}
+          </div>
           </div>
         </DialogContent>
       </Dialog>

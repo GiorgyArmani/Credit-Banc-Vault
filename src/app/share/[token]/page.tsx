@@ -98,7 +98,27 @@ export default async function SharePage({
               •
             </span>
             <span>Available until {format_date(share.expires_at)}</span>
+            {share.is_live && (
+              <>
+                <span aria-hidden className="opacity-40">
+                  •
+                </span>
+                <span className="font-semibold text-cb-mint">Kept up to date</span>
+              </>
+            )}
           </div>
+
+          {/* A lender who reviewed this packet on day one has no way to notice
+              day-three additions — the URL is unchanged and the page looks the
+              same. This line, plus the per-file New badges, is that signal. */}
+          {share.added_since_created > 0 && (
+            <p className="mt-4 rounded-xl bg-cb-mint/10 px-4 py-3 text-xs font-semibold leading-relaxed text-cb-ink">
+              {share.added_since_created} document
+              {share.added_since_created === 1 ? " has" : "s have"} been added since this
+              link was sent on {format_date(share.created_at)} — marked{" "}
+              <span className="font-bold text-cb-mint">New</span> below.
+            </p>
+          )}
         </div>
 
         {/* Documents */}
@@ -110,7 +130,7 @@ export default async function SharePage({
             </p>
           </div>
         ) : (
-          <SharedDocuments documents={share.documents} />
+          <SharedDocuments documents={share.documents} packageName={share.company_name} />
         )}
 
         <p className="mt-10 text-center text-[11px] leading-relaxed text-cb-ink/40">

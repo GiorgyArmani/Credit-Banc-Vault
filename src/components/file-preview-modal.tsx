@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Download, FileText, X, ExternalLink } from "lucide-react";
+import { OfficeFileViewer, detectOfficeKind } from "@/components/office-file-viewer";
 
 interface Props {
   isOpen: boolean;
@@ -28,6 +29,9 @@ interface Props {
 export function FilePreviewModal({ isOpen, onClose, name, url, fileType, downloadUrl }: Props) {
   const is_image =
     (fileType ?? "").startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp)$/i.test(name);
+  // Spreadsheets and Word files render in-app instead of going to an iframe,
+  // which browsers cannot display and which silently downloads them instead.
+  const office_kind = detectOfficeKind(name, fileType);
   const download_href = downloadUrl || url;
 
   return (
@@ -96,6 +100,13 @@ export function FilePreviewModal({ isOpen, onClose, name, url, fileType, downloa
                   className="max-w-full max-h-full object-contain shadow-2xl rounded-lg"
                 />
               </div>
+            ) : office_kind ? (
+              <OfficeFileViewer
+                kind={office_kind}
+                url={url}
+                name={name}
+                downloadUrl={download_href}
+              />
             ) : (
               <iframe src={`${url}#toolbar=0`} className="w-full h-full border-none" title={name} />
             )

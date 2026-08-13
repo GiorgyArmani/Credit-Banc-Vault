@@ -13,6 +13,12 @@
 import { randomBytes } from "crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { matchesActiveBusiness } from "@/lib/document-scope";
+import {
+  formatBankAccountShort,
+  isAccountScopedDoc,
+  type BankAccount,
+} from "@/lib/bank-accounts";
+import { isStampable } from "@/lib/watermark";
 
 export const SHARE_BUCKET = "user-documents";
 // How long the per-file signed URLs handed to the lender stay valid. The share
@@ -40,6 +46,16 @@ export interface ShareLinkRow {
   /** Specific file ids this link exposes. Takes precedence over codes when set;
    *  null = fall back to selected_doc_codes (or all approved). */
   selected_document_ids: string[] | null;
+  /** Opt-in: files uploaded AFTER this link was minted join it automatically,
+   *  bounded by the two arrays below. See migration 20260813. */
+  auto_include_new: boolean;
+  /** Categories eligible for auto-inclusion. NULL/empty disables it. */
+  auto_include_doc_codes: string[] | null;
+  /** Bank accounts eligible for auto-inclusion of new statements.
+   *  NULL = no account restriction. */
+  auto_include_bank_account_ids: string[] | null;
+  /** Stamp every file on this link with the Credit Banc mark. Default true. */
+  watermark_enabled: boolean;
 }
 
 /** One selectable file for the share modal (grouped under its category label). */
@@ -61,6 +77,9 @@ export interface SharedDocument {
   type: string | null;
   view_url: string;
   download_url: string;
+  /** Uploaded after this link was sent. Badged so a lender who already worked
+   *  the packet can see what changed instead of re-reading all of it. */
+  is_new: boolean;
 }
 
 export interface ResolvedShare {
@@ -69,11 +88,167 @@ export interface ResolvedShare {
   label: string | null;
   expires_at: string;
   documents: SharedDocument[];
+  /** True when this link keeps itself current (auto_include_new). */
+  is_live: boolean;
+  /** How many of `documents` were uploaded after the link was sent. Drives the
+   *  "new since you received this" notice — a lender who already reviewed the
+   *  packet has no other way to spot what changed. */
+  added_since_created: number;
+  created_at: string;
+}
+
+/**
+ * Bank accounts for a business, keyed by id.
+ *
+ * Both the share modal and the lender page fold the account into the CATEGORY
+ * LABEL rather than adding a grouping axis of their own: each already groups by
+ * that label, so "Business Bank Statements — Chase ••4821" splits a 124-file
+ * category into per-account sections on both surfaces for free. That is the
+ * whole reason a lender can navigate the packet.
+ *
+ * Returns an empty map on failure — the labels then read exactly as they did
+ * before accounts existed, which is a degraded packet, not a broken page.
+ */
+async function loadAccountsByBusiness(
+  supabase: ReturnType<typeof createAdminClient>,
+  business_profile_id: string | null
+): Promise<Map<string, BankAccount>> {
+  if (!business_profile_id) return new Map();
+  const { data, error } = await supabase
+    .from("bank_accounts")
+    .select("id, business_profile_id, bank_name, account_last4, account_type, nickname, is_active")
+    .eq("business_profile_id", business_profile_id);
+  if (error) {
+    console.error("loadAccountsByBusiness error:", error);
+    return new Map();
+  }
+  return new Map((data ?? []).map((a: any) => [a.id as string, a as BankAccount]));
+}
+
+/** `Business Bank Statements — Chase ••4821`, or the plain label. */
+function accountScopedCategoryLabel(
+  base_label: string,
+  doc_code: string,
+  bank_account_id: string | null | undefined,
+  accounts: Map<string, BankAccount>
+): string {
+  if (!isAccountScopedDoc(doc_code) || !bank_account_id) return base_label;
+  const account = accounts.get(bank_account_id);
+  if (!account) return base_label;
+  return `${base_label} — ${formatBankAccountShort(account)}`;
+}
+
+/**
+ * Drop documents whose file is not actually in the bucket.
+ *
+ * user_documents rows and storage objects can drift apart — a failed upload
+ * that still inserted its row, a restored database, a manual cleanup of the
+ * bucket. One real client currently has five rows and an EMPTY storage folder.
+ *
+ * This used to happen by accident: resolveShareLink signed a URL per document
+ * and skipped any that failed, so a missing file quietly never appeared. Moving
+ * to route URLs for watermarking removed that check, which would have left the
+ * lender staring at rows that 404 on click. This restores the behaviour
+ * deliberately — and does it in ONE storage call for the whole packet rather
+ * than the 155 the old per-document signing cost.
+ *
+ * Fails OPEN: if the listing errors, or is long enough that it may have been
+ * truncated, every document is kept. Hiding a real document from a lender is a
+ * worse failure than showing one that turns out to be broken.
+ */
+const STORAGE_LIST_LIMIT = 1000;
+
+async function filterToExistingObjects<T extends { storage_path: string }>(
+  supabase: ReturnType<typeof createAdminClient>,
+  user_id: string,
+  docs: T[]
+): Promise<T[]> {
+  if (docs.length === 0) return docs;
+
+  const { data, error } = await supabase.storage
+    .from(SHARE_BUCKET)
+    .list(user_id, { limit: STORAGE_LIST_LIMIT });
+
+  if (error) {
+    console.error("share: storage listing failed, keeping every document:", error.message);
+    return docs;
+  }
+  if ((data?.length ?? 0) >= STORAGE_LIST_LIMIT) {
+    console.warn(`share: ${user_id} has >= ${STORAGE_LIST_LIMIT} objects; skipping existence filter`);
+    return docs;
+  }
+
+  const present = new Set((data ?? []).map((f) => f.name));
+  const kept = docs.filter((d) => present.has(d.storage_path.split("/").pop() ?? ""));
+
+  if (kept.length !== docs.length) {
+    console.warn(
+      `share: hiding ${docs.length - kept.length} document(s) with no file in storage (user ${user_id})`
+    );
+  }
+  return kept;
 }
 
 /** Unguessable URL-safe token. 32 bytes ≈ 43 chars of base64url entropy. */
 export function generateShareToken(): string {
   return randomBytes(32).toString("base64url");
+}
+
+/**
+ * Work out what "new files like these" means for a link, from the files staff
+ * actually ticked.
+ *
+ * Runs at mint time rather than at resolve time on purpose: the answer has to
+ * reflect the intent expressed WHEN THE LINK WAS MADE. Deriving it live would
+ * let today's document set redefine what a link sent last week is allowed to
+ * expose.
+ *
+ * Returns doc codes plus, for bank statements, the accounts involved. The
+ * account list is null — meaning "no restriction" — whenever any shared
+ * statement was UNASSIGNED, because staff sharing unsorted statements have not
+ * expressed an account intent and narrowing to whichever ones happened to be
+ * sorted would quietly drop the rest.
+ */
+async function deriveAutoIncludeScope(
+  supabase: ReturnType<typeof createAdminClient>,
+  document_ids: string[]
+): Promise<{ doc_codes: string[]; bank_account_ids: string[] | null }> {
+  if (document_ids.length === 0) return { doc_codes: [], bank_account_ids: null };
+
+  const { data, error } = await supabase
+    .from("user_documents")
+    .select("doc_code, category, bank_account_id")
+    .in("id", document_ids);
+
+  if (error) {
+    console.error("deriveAutoIncludeScope error:", error);
+    // Empty codes disable auto-inclusion. Failing CLOSED is the only safe
+    // direction here — a broken lookup must never widen a link.
+    return { doc_codes: [], bank_account_ids: null };
+  }
+
+  const doc_codes = new Set<string>();
+  const account_ids = new Set<string>();
+  let shares_unassigned_statement = false;
+
+  for (const d of (data ?? []) as any[]) {
+    const code = (d.doc_code ?? d.category ?? null) as string | null;
+    if (!code) continue;
+    doc_codes.add(code);
+
+    if (isAccountScopedDoc(code)) {
+      if (d.bank_account_id) account_ids.add(d.bank_account_id as string);
+      else shares_unassigned_statement = true;
+    }
+  }
+
+  return {
+    doc_codes: Array.from(doc_codes),
+    bank_account_ids:
+      shares_unassigned_statement || account_ids.size === 0
+        ? null
+        : Array.from(account_ids),
+  };
 }
 
 export async function createShareLink(params: {
@@ -86,12 +261,23 @@ export async function createShareLink(params: {
   /** Exact file ids to expose. Always set by the share modal; null only on
    *  legacy rows, which fall back to "every approved doc". */
   selected_document_ids: string[] | null;
+  /** Opt-in: keep the link current as new files land in the shared categories. */
+  auto_include_new?: boolean;
+  /** Stamp every file with the CB mark. Defaults to true when omitted. */
+  watermark_enabled?: boolean;
 }): Promise<ShareLinkRow | null> {
   const supabase = createAdminClient();
   const token = generateShareToken();
   const expires_at = new Date(
     Date.now() + params.expires_in_days * 24 * 60 * 60 * 1000
   ).toISOString();
+
+  // Only compute the scope when the flag is on — otherwise the columns stay
+  // NULL and the link is a pure snapshot, byte-identical to pre-feature rows.
+  const auto_include_new = params.auto_include_new === true;
+  const scope = auto_include_new
+    ? await deriveAutoIncludeScope(supabase, params.selected_document_ids ?? [])
+    : null;
 
   const { data, error } = await supabase
     .from("document_share_links")
@@ -104,6 +290,12 @@ export async function createShareLink(params: {
       label: params.label,
       expires_at,
       selected_document_ids: params.selected_document_ids,
+      auto_include_new,
+      auto_include_doc_codes: scope?.doc_codes ?? null,
+      auto_include_bank_account_ids: scope?.bank_account_ids ?? null,
+      // Only an explicit false turns stamping off — an omitted or malformed
+      // field leaves the link protected.
+      watermark_enabled: params.watermark_enabled !== false,
     })
     .select("*")
     .single();
@@ -196,8 +388,10 @@ export async function listShareableFiles(
 
   const { data: docs } = await supabase
     .from("user_documents")
-    .select("id, name, custom_label, doc_code, category, business_profile_id, status")
+    .select("id, name, custom_label, doc_code, category, business_profile_id, status, bank_account_id")
     .eq("user_id", client.user_id);
+
+  const accounts = await loadAccountsByBusiness(supabase, business_profile_id);
 
   const files: ShareableFile[] = [];
   for (const d of (docs ?? []) as any[]) {
@@ -210,7 +404,14 @@ export async function listShareableFiles(
       id: d.id as string,
       file_name: (d.custom_label || d.name || "Document") as string,
       doc_code: code,
-      label: label_by_code.get(code) || code,
+      // Per-account grouping in the picker, so staff can tick "everything from
+      // the Chase account" instead of hunting through 124 identical rows.
+      label: accountScopedCategoryLabel(
+        label_by_code.get(code) || code,
+        code,
+        d.bank_account_id,
+        accounts
+      ),
       approved: approved_codes.has(code),
     });
   }
@@ -222,16 +423,46 @@ export async function listShareableFiles(
 }
 
 /**
- * Resolve a token into the shared, signed documents — or null when the token is
- * unknown, revoked, or expired. Also bumps view tracking.
+ * Everything a token authorises, resolved once.
+ *
+ * Split out of resolveShareLink because the per-file route
+ * (/api/share/[token]/file/[docId]) has to answer exactly the same question —
+ * "is this token allowed to see this document?" — and answering it twice, in
+ * two places, is how a share link ends up serving a file the page never listed.
+ * The eligibility rules live here and nowhere else.
  *
  * A link stores the exact files staff picked, so that list is authoritative:
  * the approval state at mint time doesn't re-filter it later (a doc approved
  * after the link was made still isn't shared; a doc shared before approval
  * stays shared). Legacy links with no stored selection fall back to the old
- * "every approved doc for this business" behavior.
+ * "every approved doc for this business" behavior. Files uploaded AFTER the
+ * link was minted join it only when auto-include is on.
+ *
+ * Returns null when the token is unknown, revoked, or expired.
  */
-export async function resolveShareLink(token: string): Promise<ResolvedShare | null> {
+interface ShareContext {
+  supabase: ReturnType<typeof createAdminClient>;
+  link: any;
+  client: { user_id: string; company_name: string | null; client_name: string | null };
+  business_profile_id: string | null;
+  /** Rows this token may see, already filtered. */
+  eligible: any[];
+  label_by_code: Map<string, string>;
+  link_created_ms: number;
+}
+
+async function loadShareContext(
+  token: string,
+  /**
+   * Narrow the document scan to a single row.
+   *
+   * The per-file route runs this once PER FILE, and a ZIP of a full packet is
+   * 155 of those. Scanning every document the client owns each time turns one
+   * download into 155 full-table reads for no benefit — the answer only ever
+   * concerns one row. Eligibility is evaluated identically either way.
+   */
+  only_document_id?: string
+): Promise<ShareContext | null> {
   if (!token) return null;
   const supabase = createAdminClient();
 
@@ -242,7 +473,7 @@ export async function resolveShareLink(token: string): Promise<ResolvedShare | n
     .maybeSingle();
 
   if (link_error) {
-    console.error("resolveShareLink lookup error:", link_error);
+    console.error("loadShareContext lookup error:", link_error);
     return null;
   }
   if (!link) return null;
@@ -292,42 +523,188 @@ export async function resolveShareLink(token: string): Promise<ResolvedShare | n
     (required ?? []).map((r: any) => [r.code as string, r.label as string])
   );
 
+  // Auto-inclusion scope. Empty codes means the link is a snapshot even if the
+  // flag somehow got set — deriveAutoIncludeScope fails closed to exactly that.
+  const auto_include_new = link.auto_include_new === true;
+  const auto_codes = (link.auto_include_doc_codes as string[] | null) ?? null;
+  const auto_code_set =
+    auto_include_new && auto_codes && auto_codes.length > 0 ? new Set(auto_codes) : null;
+  const auto_accounts = (link.auto_include_bank_account_ids as string[] | null) ?? null;
+  const auto_account_set = auto_accounts ? new Set(auto_accounts) : null;
+  const link_created_ms = new Date(link.created_at as string).getTime();
+
   // The client's uploaded files, narrowed to this business tab and then to the
   // link's stored selection (or, on legacy links, to approved categories).
-  const { data: docs } = await supabase
+  let docs_query = supabase
     .from("user_documents")
-    .select("id, name, custom_label, size, type, category, doc_code, business_profile_id, storage_path")
+    .select("id, name, custom_label, size, type, category, doc_code, business_profile_id, storage_path, bank_account_id, status, upload_date")
     .eq("user_id", client.user_id);
+  if (only_document_id) docs_query = docs_query.eq("id", only_document_id);
+  const { data: docs } = await docs_query;
+
+  /**
+   * Does this file join the link through auto-inclusion?
+   *
+   * Four conditions, all required:
+   *   1. the link opted in and named at least one category;
+   *   2. the file is in one of those categories;
+   *   3. it was uploaded AFTER the link was minted — a file that existed at mint
+   *      time and was NOT ticked was deliberately withheld, and must stay
+   *      withheld forever. This is the condition that keeps auto-include from
+   *      quietly undoing staff's unticking;
+   *   4. for bank statements, it sits on one of the shared accounts (when the
+   *      link recorded an account restriction at all).
+   */
+  function joins_by_auto_include(d: any, code: string): boolean {
+    if (!auto_code_set || !auto_code_set.has(code)) return false;
+    const uploaded_ms = d.upload_date ? new Date(d.upload_date).getTime() : NaN;
+    if (!Number.isFinite(uploaded_ms) || uploaded_ms <= link_created_ms) return false;
+    if (isAccountScopedDoc(code) && auto_account_set) {
+      // An unassigned statement has no account to match, so a link that named
+      // accounts does not pick it up. It reaches the lender once someone files it.
+      if (!d.bank_account_id || !auto_account_set.has(d.bank_account_id)) return false;
+    }
+    return true;
+  }
 
   const eligible = (docs ?? []).filter((d: any) => {
     const code = (d.doc_code ?? d.category ?? null) as string | null;
     if (!code) return false;
     if (!matchesActiveBusiness(d.business_profile_id, business_profile_id, code)) return false;
-    // The stored file list is the whole gate — it was chosen deliberately.
-    if (id_set) return id_set.has(d.id);
+    // Rejected uploads are known-bad. listShareableFiles has always excluded
+    // them from the PICKER, but this resolver did not, so a document rejected
+    // AFTER being shared stayed visible to the lender for the life of the link
+    // — and an auto-included link would have started pulling in fresh rejects.
+    // Applies to every path, snapshot links included: this is a bug fix.
+    if (d.status === "rejected") return false;
+
+    // The stored file list is the whole gate for what existed at mint time...
+    if (id_set) return id_set.has(d.id) || joins_by_auto_include(d, code);
+
+    // ...legacy links keep their category-level behaviour, plus auto-include if
+    // it was ever switched on for one.
+    if (joins_by_auto_include(d, code)) return true;
     if (!approved_codes.has(code)) return false;
     if (code_set) return code_set.has(code);
     return true;
   });
 
+  return {
+    supabase,
+    link,
+    client: client as ShareContext["client"],
+    business_profile_id,
+    eligible,
+    label_by_code,
+    link_created_ms,
+  };
+}
+
+/**
+ * One document this token is allowed to see, as a storage path — or null.
+ *
+ * Used by the per-file route to answer "may this token fetch this document?"
+ * before it stamps or signs anything. Goes through the same eligibility filter
+ * as the page listing, so a document that isn't on the page can't be pulled by
+ * guessing its id.
+ */
+export async function resolveShareFile(
+  token: string,
+  document_id: string
+): Promise<{
+  supabase: ReturnType<typeof createAdminClient>;
+  doc: { id: string; storage_path: string; type: string | null; name: string | null; custom_label: string | null };
+  watermark_enabled: boolean;
+} | null> {
+  const ctx = await loadShareContext(token, document_id);
+  if (!ctx) return null;
+
+  const doc = ctx.eligible.find((d: any) => d.id === document_id);
+  if (!doc) return null;
+
+  return {
+    supabase: ctx.supabase,
+    doc: {
+      id: doc.id,
+      storage_path: doc.storage_path,
+      type: doc.type ?? null,
+      name: doc.name ?? null,
+      custom_label: doc.custom_label ?? null,
+    },
+    // Column added by 20260813_share_links_watermark.sql. Default TRUE in code
+    // as well as in the schema, so a deploy that lands ahead of the migration
+    // fails safe (stamped) rather than open.
+    watermark_enabled: ctx.link.watermark_enabled !== false,
+  };
+}
+
+/**
+ * Resolve a token into the shared documents for the lender page. Also bumps
+ * view tracking.
+ */
+export async function resolveShareLink(token: string): Promise<ResolvedShare | null> {
+  const ctx = await loadShareContext(token);
+  if (!ctx) return null;
+
+  const { supabase, link, client, business_profile_id, label_by_code, link_created_ms } = ctx;
+
+  // Only the page listing needs this. The per-file route resolves one document
+  // and 404s on its own if the object is gone — paying for a listing there
+  // would be one extra storage call per file in a 155-file ZIP.
+  const eligible = await filterToExistingObjects(supabase, client.user_id, ctx.eligible);
+
+  const accounts = await loadAccountsByBusiness(supabase, business_profile_id);
+
+  // Whether files on this link are stamped decides what the lender actually
+  // RECEIVES, and stamping converts images to PDF. Describing the original type
+  // here would name a scan `.jpg` inside the ZIP while its bytes are a PDF —
+  // a file the recipient can't open.
+  const stamping = link.watermark_enabled !== false;
+
   const documents: SharedDocument[] = [];
   for (const d of eligible as any[]) {
     const code = (d.doc_code ?? d.category ?? "") as string;
-    const { data: signed } = await supabase.storage
-      .from(SHARE_BUCKET)
-      .createSignedUrl(d.storage_path, SIGNED_URL_TTL_SECONDS);
-    if (!signed?.signedUrl) continue;
-    const view_url = signed.signedUrl;
-    const sep = view_url.includes("?") ? "&" : "?";
-    const filename = d.custom_label || d.name || "document";
+    const raw_name = d.custom_label || d.name || "document";
+    const will_be_pdf = stamping && isStampable(d.type, d.name ?? raw_name);
+    const filename = will_be_pdf
+      ? `${raw_name.replace(/\.[A-Za-z0-9]+$/, "")}.pdf`
+      : raw_name;
+
+    // Point at OUR route, never at the stored original.
+    //
+    // Two things follow from this. The lender never holds a URL to an unstamped
+    // file — which is the whole control, since the recipient is the adversary.
+    // And the route answers with a 302 to a signed URL for the cached stamped
+    // copy, so the bytes still travel Supabase → browser directly and the
+    // client-side ZIP is unaffected.
+    //
+    // A side benefit worth keeping: revocation now bites immediately. Before,
+    // a signed URL copied out of the page stayed live for its full 2h TTL after
+    // the link was revoked.
+    const view_url = `/api/share/${encodeURIComponent(link.token)}/file/${encodeURIComponent(d.id)}`;
+
     documents.push({
       id: d.id,
       display_name: filename,
-      category_label: label_by_code.get(code) || code || "Document",
+      // The lender page groups by this label, so folding the account in is what
+      // turns a wall of statements into one section per account.
+      category_label: accountScopedCategoryLabel(
+        label_by_code.get(code) || code || "Document",
+        code,
+        d.bank_account_id,
+        accounts
+      ),
+      // Size is the ORIGINAL's — the stamped copy is a little larger, and we
+      // deliberately don't stat storage for 155 files just to refine a hint.
       size: d.size ?? null,
-      type: d.type ?? null,
+      type: will_be_pdf ? "application/pdf" : d.type ?? null,
       view_url,
-      download_url: `${view_url}${sep}download=${encodeURIComponent(filename)}`,
+      download_url: `${view_url}?download=1`,
+      // Computed from upload_date, not from "was it in the snapshot" — a file
+      // added by staff re-minting is just as new to the reader.
+      is_new: d.upload_date
+        ? new Date(d.upload_date).getTime() > link_created_ms
+        : false,
     });
   }
 
@@ -349,5 +726,10 @@ export async function resolveShareLink(token: string): Promise<ResolvedShare | n
     label: link.label ?? null,
     expires_at: link.expires_at,
     documents,
+    // Read off the link row rather than the local it used to close over —
+    // the eligibility logic moved into loadShareContext.
+    is_live: link.auto_include_new === true,
+    added_since_created: documents.filter((d) => d.is_new).length,
+    created_at: link.created_at as string,
   };
 }

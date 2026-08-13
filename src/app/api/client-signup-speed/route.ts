@@ -104,11 +104,17 @@ async function ghl_add_tags(contact_id: string, tags: string[]): Promise<void> {
   }
 }
 
-function create_custom_field(field_id_env: string, value: any, fallback_id?: string) {
+/**
+ * Same as /api/client-signup: the env var is the ONLY source of field ids. The
+ * hardcoded fallbacks that used to live at each call site all pointed at a
+ * different GHL location, so a missing env addressed a field that doesn't exist.
+ * Skipping is the safe failure; `resolved_id` is for ids looked up at runtime.
+ */
+function create_custom_field(field_id_env: string, value: any, resolved_id?: string) {
   if (value === undefined || value === null || value === '') return null;
-  const field_id = process.env[field_id_env] || fallback_id;
+  const field_id = process.env[field_id_env] || resolved_id;
   if (!field_id) {
-    console.warn(`⚠️ Custom field ID not found in .env and no fallback: ${field_id_env}`);
+    console.warn(`⚠️ Custom field ID not set: ${field_id_env} — field skipped`);
     return null;
   }
   return { id: field_id, value: String(value) };
@@ -504,35 +510,35 @@ export async function POST(request: Request) {
 
     // ========== STEP 3: GHL CONTACT (custom fields subset the speed form captures) ==========
     // Resolve the referral-partner field id once. Falls back to the merge key
-    // {{contact.data_vault_referral_assigned}} when GHL_CF_REFERRAL_ASSIGNED
-    // isn't set, so partner attribution still reaches the CRM before anyone
-    // configures the env. Cached in-process by ghlResolveFieldId.
+    // {{contact.referral_partner}} when GHL_CF_REFERRAL_ASSIGNED isn't set, so
+    // partner attribution still reaches the CRM before anyone configures the
+    // env. Cached in-process by ghlResolveFieldId.
     const referral_assigned_field_id = await resolvePartnerAssignedFieldId();
 
     const custom_fields = [
-      create_custom_field('GHL_CF_CLIENTS_NAME', client_name, 'htTNeG6SjgBb816NXzrM'),
-      create_custom_field('GHL_CF_BUSINESS_NAME', body.company_name, '4wCc6YtOB59baJTrMOsZ'),
-      create_custom_field('GHL_CF_CLIENTS_PHONE', client_phone_e164, 'BUdnGXCgH53LOYqZdEam'),
-      create_custom_field('GHL_CF_CLIENT_EMAIL', body.client_email, 'QSNzz62RcqhaEgqyP8hg'),
-      create_custom_field('GHL_CF_COMPANY_STATE', body.company_state, 'qjSxhRyhQUzlGkyCHeV4'),
-      create_custom_field('GHL_CF_COMPANY_CITY', body.company_city, 'sD6tg1NRCj9uHsc7xdZW'),
-      create_custom_field('GHL_CF_COMPANY_ZIP', body.company_zip_code, 'el0Wrlnb8pH30cfMkEhw'),
-      create_custom_field('GHL_CF_CAPITAL_REQUESTED', body.capital_requested, 'e3a1kLHpSXOtJcXvch9E'),
-      create_custom_field('GHL_CF_LOAN_PURPOSE', body.loan_purpose, 'bI6KKdbP0spHXNOa463U'),
-      create_custom_field('GHL_CF_PROPOSED_LOAN_TYPE', body.proposed_loan_type, 'geBSb3HaQsXl7mTjKkH6'),
-      create_custom_field('GHL_CF_AVG_MONTHLY_DEPOSITS', body.avg_monthly_deposits, 'jO6EKKiJWP0WhJG5TnGS'),
-      create_custom_field('GHL_CF_ANNUAL_REVENUE', body.avg_annual_revenue, '3rXoSHebmerVIqMA1l8X'),
-      create_custom_field('GHL_CF_LEGAL_ENTITY_TYPE', body.legal_entity_type, 'FugwTFOGp9pKo5SwHesK'),
-      create_custom_field('GHL_CF_BUSINESS_START_DATE', body.business_start_date, '4qvVNBqq2ZSz0MtaUwdy'),
-      create_custom_field('GHL_CF_NUMBER_OF_OWNERS', 'One', 'wfXQNMs2DhSqrYYqq5A7'),
-      create_custom_field('GHL_CF_OWNER_1_NAME', client_name, 'PaOPABkLZL3ZWxZxFrTV'),
-      create_custom_field('GHL_CF_OWNER_1_PCT', '100', 'DsjleQk3ABfV8AjtNTD1'),
-      create_custom_field('GHL_CF_CREDIT_SCORE', body.credit_score, 'G8suhHNaeaujGmC0fvk8'),
+      create_custom_field('GHL_CF_CLIENTS_NAME', client_name),
+      create_custom_field('GHL_CF_BUSINESS_NAME', body.company_name),
+      create_custom_field('GHL_CF_CLIENTS_PHONE', client_phone_e164),
+      create_custom_field('GHL_CF_CLIENT_EMAIL', body.client_email),
+      create_custom_field('GHL_CF_COMPANY_STATE', body.company_state),
+      create_custom_field('GHL_CF_COMPANY_CITY', body.company_city),
+      create_custom_field('GHL_CF_COMPANY_ZIP', body.company_zip_code),
+      create_custom_field('GHL_CF_CAPITAL_REQUESTED', body.capital_requested),
+      create_custom_field('GHL_CF_LOAN_PURPOSE', body.loan_purpose),
+      create_custom_field('GHL_CF_PROPOSED_LOAN_TYPE', body.proposed_loan_type),
+      create_custom_field('GHL_CF_AVG_MONTHLY_DEPOSITS', body.avg_monthly_deposits),
+      create_custom_field('GHL_CF_ANNUAL_REVENUE', body.avg_annual_revenue),
+      create_custom_field('GHL_CF_LEGAL_ENTITY_TYPE', body.legal_entity_type),
+      create_custom_field('GHL_CF_BUSINESS_START_DATE', body.business_start_date),
+      create_custom_field('GHL_CF_NUMBER_OF_OWNERS', 'One'),
+      create_custom_field('GHL_CF_OWNER_1_NAME', client_name),
+      create_custom_field('GHL_CF_OWNER_1_PCT', '100'),
+      create_custom_field('GHL_CF_CREDIT_SCORE', body.credit_score),
       // Level-2 referral partner (who referred this deal) → the program's OWN
-      // field, "Referral Assigned" ({{contact.data_vault_referral_assigned}}).
-      // Deliberately NOT AFFILIATE_ASSIGNED: that belongs to the public affiliate
-      // program, and sharing one field made "who referred this" ambiguous on
-      // every contact. The id is resolved by merge key when the env isn't set.
+      // field, "Referral Partner" (QOlQRlIm2BsT7EaHYZDh,
+      // {{contact.referral_partner}}). Deliberately NOT "[Data Vault] Affiliate
+      // Assigned": that identifies the public-program AFFILIATE owed a $500 gift
+      // card on funding. The id is resolved by merge key when the env isn't set.
       create_custom_field('GHL_CF_REFERRAL_ASSIGNED', body.referral_partner, referral_assigned_field_id ?? undefined),
     ].filter(Boolean);
 
