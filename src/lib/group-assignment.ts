@@ -1,31 +1,34 @@
-// src/lib/statement-assignment.ts
+// src/lib/group-assignment.ts
 /**
- * Server-side helper: move bank statements onto (or off) an account.
+ * Server-side helper: move documents onto (or off) a group.
  *
- * Shared by POST /api/bank-accounts/assign and the force path of
- * DELETE /api/bank-accounts/[id], because both do the same job — deleting an
- * account has to detach its statements AND strip the account back out of their
- * labels, or the files land in "Unassigned" still named after an account that
- * no longer exists.
+ * Shared by POST /api/document-groups/assign and the force path of
+ * DELETE /api/document-groups/[id], because both do the same job — deleting a
+ * group has to detach its files AND strip the group back out of their labels,
+ * or the files land in "Ungrouped" still named after a group that no longer
+ * exists.
  *
  * The label rewrite is not optional. `custom_label` is what the browser writes
  * to disk and what the lender share page displays, so it has to track
- * bank_account_id or the two disagree the moment anyone downloads.
+ * document_group_id or the two disagree the moment anyone downloads.
  *
  * Caller supplies the Supabase client, and RLS on that client is the
  * authorization boundary — this function does not check permissions. It DOES
  * report per-document outcomes, because a denied write returns no row rather
  * than raising ([[rls_client_writes_need_service_role]]).
+ *
+ * Generalized from statement-assignment.ts, which did this for bank statements
+ * only. Nothing in the logic was bank-specific; only the names were.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
-  buildStatementDisplayLabel,
-  getDocumentStatementPeriod,
-  type BankAccount,
-} from "@/lib/bank-accounts";
+  buildGroupedDisplayLabel,
+  getDocumentPeriod,
+  type DocumentGroup,
+} from "@/lib/document-groups";
 
-export interface StatementAssignmentResult {
+export interface GroupAssignmentResult {
   updated: number;
   skipped: { id: string; reason: string }[];
 }
@@ -35,38 +38,38 @@ export interface StatementAssignmentResult {
 const CHUNK_SIZE = 100;
 
 /**
- * Apply `account` (or null to detach) to every document in `documents`.
+ * Apply `group` (or null to detach) to every document in `documents`.
  *
- * `documents` must already be filtered to rows the caller verified are
- * statements on the right business — this function trusts that and only
+ * `documents` must already be filtered to rows the caller verified belong to
+ * the right field and the right business — this function trusts that and only
  * handles labelling + writing.
  */
-export async function applyStatementAccount(
+export async function applyDocumentGroup(
   supabase: SupabaseClient,
   params: {
     documents: { id: string; doc_code?: string | null; category?: string | null; metadata?: any }[];
-    account: BankAccount | null;
+    group: DocumentGroup | null;
     label_by_code: Map<string, string>;
     client_name: string | null;
   }
-): Promise<StatementAssignmentResult> {
-  const { documents, account, label_by_code, client_name } = params;
+): Promise<GroupAssignmentResult> {
+  const { documents, group, label_by_code, client_name } = params;
   const skipped: { id: string; reason: string }[] = [];
 
   if (documents.length === 0) return { updated: 0, skipped };
 
   // Bucket by the label each document will end up with. One UPDATE per document
   // would be 133 sequential round trips on a real file; documents only differ in
-  // label when a statement period was parsed out of the original filename, which
-  // is the minority, so this usually collapses to one or two queries.
+  // label when a period was parsed out of the original filename, which is the
+  // minority, so this usually collapses to one or two queries.
   const ids_by_label = new Map<string, string[]>();
   for (const doc of documents) {
     const code = (doc.doc_code ?? doc.category ?? "") as string;
-    const custom_label = buildStatementDisplayLabel({
+    const custom_label = buildGroupedDisplayLabel({
       doc_label: label_by_code.get(code) || code,
       client_name,
-      account,
-      period: getDocumentStatementPeriod(doc),
+      group,
+      period: getDocumentPeriod(doc),
     });
     const bucket = ids_by_label.get(custom_label);
     if (bucket) bucket.push(doc.id);
@@ -81,12 +84,12 @@ export async function applyStatementAccount(
 
       const { data, error } = await supabase
         .from("user_documents")
-        .update({ bank_account_id: account?.id ?? null, custom_label })
+        .update({ document_group_id: group?.id ?? null, custom_label })
         .in("id", chunk)
         .select("id");
 
       if (error) {
-        console.error("applyStatementAccount: chunk update failed:", error);
+        console.error("applyDocumentGroup: chunk update failed:", error);
         for (const id of chunk) skipped.push({ id, reason: "update_failed" });
         continue;
       }
@@ -105,7 +108,7 @@ export async function applyStatementAccount(
   return { updated, skipped };
 }
 
-/** Human labels for a set of doc codes. Both callers need the same lookup. */
+/** Human labels for a set of doc codes. Every caller needs the same lookup. */
 export async function loadDocLabels(
   supabase: SupabaseClient,
   codes: string[]

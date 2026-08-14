@@ -13,11 +13,7 @@
 import { randomBytes } from "crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { matchesActiveBusiness } from "@/lib/document-scope";
-import {
-  formatBankAccountShort,
-  isAccountScopedDoc,
-  type BankAccount,
-} from "@/lib/bank-accounts";
+import { formatGroupShort, type DocumentGroup } from "@/lib/document-groups";
 import { isStampable } from "@/lib/watermark";
 
 export const SHARE_BUCKET = "user-documents";
@@ -51,9 +47,9 @@ export interface ShareLinkRow {
   auto_include_new: boolean;
   /** Categories eligible for auto-inclusion. NULL/empty disables it. */
   auto_include_doc_codes: string[] | null;
-  /** Bank accounts eligible for auto-inclusion of new statements.
-   *  NULL = no account restriction. */
-  auto_include_bank_account_ids: string[] | null;
+  /** Document groups eligible for auto-inclusion of new files (the accounts for
+   *  statements, the years for tax returns…). NULL = no group restriction. */
+  auto_include_group_ids: string[] | null;
   /** Stamp every file on this link with the Credit Banc mark. Default true. */
   watermark_enabled: boolean;
 }
@@ -98,44 +94,62 @@ export interface ResolvedShare {
 }
 
 /**
- * Bank accounts for a business, keyed by id.
+ * Document groups for a business, keyed by id.
  *
- * Both the share modal and the lender page fold the account into the CATEGORY
+ * Both the share modal and the lender page fold the group into the CATEGORY
  * LABEL rather than adding a grouping axis of their own: each already groups by
  * that label, so "Business Bank Statements — Chase ••4821" splits a 124-file
- * category into per-account sections on both surfaces for free. That is the
- * whole reason a lender can navigate the packet.
+ * category into per-account sections on both surfaces for free, and "Tax
+ * Returns — 2024" does the same for a five-year run. That is the whole reason a
+ * lender can navigate the packet.
+ *
+ * Client-scoped groups (business_profile_id NULL — the person a licence or PFS
+ * belongs to) are pulled in alongside the business's own, since their documents
+ * appear on every business tab and would otherwise lose their label.
  *
  * Returns an empty map on failure — the labels then read exactly as they did
- * before accounts existed, which is a degraded packet, not a broken page.
+ * before groups existed, which is a degraded packet, not a broken page.
  */
-async function loadAccountsByBusiness(
+async function loadGroupsByBusiness(
   supabase: ReturnType<typeof createAdminClient>,
+  client_vault_id: string,
   business_profile_id: string | null
-): Promise<Map<string, BankAccount>> {
-  if (!business_profile_id) return new Map();
-  const { data, error } = await supabase
-    .from("bank_accounts")
-    .select("id, business_profile_id, bank_name, account_last4, account_type, nickname, is_active")
-    .eq("business_profile_id", business_profile_id);
+): Promise<Map<string, DocumentGroup>> {
+  // Scoped to the vault FIRST. This runs on the service-role client, which
+  // bypasses RLS entirely — the client_vault_id filter is the only thing
+  // keeping the `business_profile_id IS NULL` arm from sweeping up every
+  // client-scoped group in the database.
+  let query = supabase
+    .from("document_groups")
+    .select(
+      "id, client_vault_id, business_profile_id, doc_code, name, identifier, subtype, nickname, is_active"
+    )
+    .eq("client_vault_id", client_vault_id);
+
+  // On a link with no business (legacy rows), every group on the vault is fair
+  // game — there is no tab to narrow to.
+  if (business_profile_id) {
+    query = query.or(`business_profile_id.eq.${business_profile_id},business_profile_id.is.null`);
+  }
+
+  const { data, error } = await query;
   if (error) {
-    console.error("loadAccountsByBusiness error:", error);
+    console.error("loadGroupsByBusiness error:", error);
     return new Map();
   }
-  return new Map((data ?? []).map((a: any) => [a.id as string, a as BankAccount]));
+  return new Map((data ?? []).map((g: any) => [g.id as string, g as DocumentGroup]));
 }
 
 /** `Business Bank Statements — Chase ••4821`, or the plain label. */
-function accountScopedCategoryLabel(
+function groupScopedCategoryLabel(
   base_label: string,
-  doc_code: string,
-  bank_account_id: string | null | undefined,
-  accounts: Map<string, BankAccount>
+  document_group_id: string | null | undefined,
+  groups: Map<string, DocumentGroup>
 ): string {
-  if (!isAccountScopedDoc(doc_code) || !bank_account_id) return base_label;
-  const account = accounts.get(bank_account_id);
-  if (!account) return base_label;
-  return `${base_label} — ${formatBankAccountShort(account)}`;
+  if (!document_group_id) return base_label;
+  const group = groups.get(document_group_id);
+  if (!group) return base_label;
+  return `${base_label} — ${formatGroupShort(group)}`;
 }
 
 /**
@@ -203,51 +217,46 @@ export function generateShareToken(): string {
  * let today's document set redefine what a link sent last week is allowed to
  * expose.
  *
- * Returns doc codes plus, for bank statements, the accounts involved. The
- * account list is null — meaning "no restriction" — whenever any shared
- * statement was UNASSIGNED, because staff sharing unsorted statements have not
- * expressed an account intent and narrowing to whichever ones happened to be
- * sorted would quietly drop the rest.
+ * Returns doc codes plus the groups involved. The group list is null — meaning
+ * "no restriction" — whenever any shared file was UNGROUPED, because staff
+ * sharing unsorted files have not expressed a group intent and narrowing to
+ * whichever ones happened to be sorted would quietly drop the rest.
  */
 async function deriveAutoIncludeScope(
   supabase: ReturnType<typeof createAdminClient>,
   document_ids: string[]
-): Promise<{ doc_codes: string[]; bank_account_ids: string[] | null }> {
-  if (document_ids.length === 0) return { doc_codes: [], bank_account_ids: null };
+): Promise<{ doc_codes: string[]; group_ids: string[] | null }> {
+  if (document_ids.length === 0) return { doc_codes: [], group_ids: null };
 
   const { data, error } = await supabase
     .from("user_documents")
-    .select("doc_code, category, bank_account_id")
+    .select("doc_code, category, document_group_id")
     .in("id", document_ids);
 
   if (error) {
     console.error("deriveAutoIncludeScope error:", error);
     // Empty codes disable auto-inclusion. Failing CLOSED is the only safe
     // direction here — a broken lookup must never widen a link.
-    return { doc_codes: [], bank_account_ids: null };
+    return { doc_codes: [], group_ids: null };
   }
 
   const doc_codes = new Set<string>();
-  const account_ids = new Set<string>();
-  let shares_unassigned_statement = false;
+  const group_ids = new Set<string>();
+  let shares_ungrouped_file = false;
 
   for (const d of (data ?? []) as any[]) {
     const code = (d.doc_code ?? d.category ?? null) as string | null;
     if (!code) continue;
     doc_codes.add(code);
 
-    if (isAccountScopedDoc(code)) {
-      if (d.bank_account_id) account_ids.add(d.bank_account_id as string);
-      else shares_unassigned_statement = true;
-    }
+    if (d.document_group_id) group_ids.add(d.document_group_id as string);
+    else shares_ungrouped_file = true;
   }
 
   return {
     doc_codes: Array.from(doc_codes),
-    bank_account_ids:
-      shares_unassigned_statement || account_ids.size === 0
-        ? null
-        : Array.from(account_ids),
+    group_ids:
+      shares_ungrouped_file || group_ids.size === 0 ? null : Array.from(group_ids),
   };
 }
 
@@ -292,7 +301,7 @@ export async function createShareLink(params: {
       selected_document_ids: params.selected_document_ids,
       auto_include_new,
       auto_include_doc_codes: scope?.doc_codes ?? null,
-      auto_include_bank_account_ids: scope?.bank_account_ids ?? null,
+      auto_include_group_ids: scope?.group_ids ?? null,
       // Only an explicit false turns stamping off — an omitted or malformed
       // field leaves the link protected.
       watermark_enabled: params.watermark_enabled !== false,
@@ -388,10 +397,10 @@ export async function listShareableFiles(
 
   const { data: docs } = await supabase
     .from("user_documents")
-    .select("id, name, custom_label, doc_code, category, business_profile_id, status, bank_account_id")
+    .select("id, name, custom_label, doc_code, category, business_profile_id, status, document_group_id")
     .eq("user_id", client.user_id);
 
-  const accounts = await loadAccountsByBusiness(supabase, business_profile_id);
+  const groups = await loadGroupsByBusiness(supabase, client_id, business_profile_id);
 
   const files: ShareableFile[] = [];
   for (const d of (docs ?? []) as any[]) {
@@ -404,13 +413,13 @@ export async function listShareableFiles(
       id: d.id as string,
       file_name: (d.custom_label || d.name || "Document") as string,
       doc_code: code,
-      // Per-account grouping in the picker, so staff can tick "everything from
-      // the Chase account" instead of hunting through 124 identical rows.
-      label: accountScopedCategoryLabel(
+      // Per-group grouping in the picker, so staff can tick "everything from
+      // the Chase account" — or "everything from 2024" — instead of hunting
+      // through 124 identical rows.
+      label: groupScopedCategoryLabel(
         label_by_code.get(code) || code,
-        code,
-        d.bank_account_id,
-        accounts
+        d.document_group_id,
+        groups
       ),
       approved: approved_codes.has(code),
     });
@@ -529,15 +538,15 @@ async function loadShareContext(
   const auto_codes = (link.auto_include_doc_codes as string[] | null) ?? null;
   const auto_code_set =
     auto_include_new && auto_codes && auto_codes.length > 0 ? new Set(auto_codes) : null;
-  const auto_accounts = (link.auto_include_bank_account_ids as string[] | null) ?? null;
-  const auto_account_set = auto_accounts ? new Set(auto_accounts) : null;
+  const auto_groups = (link.auto_include_group_ids as string[] | null) ?? null;
+  const auto_group_set = auto_groups ? new Set(auto_groups) : null;
   const link_created_ms = new Date(link.created_at as string).getTime();
 
   // The client's uploaded files, narrowed to this business tab and then to the
   // link's stored selection (or, on legacy links, to approved categories).
   let docs_query = supabase
     .from("user_documents")
-    .select("id, name, custom_label, size, type, category, doc_code, business_profile_id, storage_path, bank_account_id, status, upload_date")
+    .select("id, name, custom_label, size, type, category, doc_code, business_profile_id, storage_path, document_group_id, status, upload_date")
     .eq("user_id", client.user_id);
   if (only_document_id) docs_query = docs_query.eq("id", only_document_id);
   const { data: docs } = await docs_query;
@@ -552,17 +561,17 @@ async function loadShareContext(
    *      time and was NOT ticked was deliberately withheld, and must stay
    *      withheld forever. This is the condition that keeps auto-include from
    *      quietly undoing staff's unticking;
-   *   4. for bank statements, it sits on one of the shared accounts (when the
-   *      link recorded an account restriction at all).
+   *   4. it sits in one of the shared groups (when the link recorded a group
+   *      restriction at all).
    */
   function joins_by_auto_include(d: any, code: string): boolean {
     if (!auto_code_set || !auto_code_set.has(code)) return false;
     const uploaded_ms = d.upload_date ? new Date(d.upload_date).getTime() : NaN;
     if (!Number.isFinite(uploaded_ms) || uploaded_ms <= link_created_ms) return false;
-    if (isAccountScopedDoc(code) && auto_account_set) {
-      // An unassigned statement has no account to match, so a link that named
-      // accounts does not pick it up. It reaches the lender once someone files it.
-      if (!d.bank_account_id || !auto_account_set.has(d.bank_account_id)) return false;
+    if (auto_group_set) {
+      // An ungrouped file has no group to match, so a link that named groups
+      // does not pick it up. It reaches the lender once someone files it.
+      if (!d.document_group_id || !auto_group_set.has(d.document_group_id)) return false;
     }
     return true;
   }
@@ -653,7 +662,11 @@ export async function resolveShareLink(token: string): Promise<ResolvedShare | n
   // would be one extra storage call per file in a 155-file ZIP.
   const eligible = await filterToExistingObjects(supabase, client.user_id, ctx.eligible);
 
-  const accounts = await loadAccountsByBusiness(supabase, business_profile_id);
+  const groups = await loadGroupsByBusiness(
+    supabase,
+    link.client_id as string,
+    business_profile_id
+  );
 
   // Whether files on this link are stamped decides what the lender actually
   // RECEIVES, and stamping converts images to PDF. Describing the original type
@@ -686,13 +699,13 @@ export async function resolveShareLink(token: string): Promise<ResolvedShare | n
     documents.push({
       id: d.id,
       display_name: filename,
-      // The lender page groups by this label, so folding the account in is what
-      // turns a wall of statements into one section per account.
-      category_label: accountScopedCategoryLabel(
+      // The lender page groups by this label, so folding the group in is what
+      // turns a wall of statements into one section per account — and a stack
+      // of returns into one section per year.
+      category_label: groupScopedCategoryLabel(
         label_by_code.get(code) || code || "Document",
-        code,
-        d.bank_account_id,
-        accounts
+        d.document_group_id,
+        groups
       ),
       // Size is the ORIGINAL's — the stamped copy is a little larger, and we
       // deliberately don't stat storage for 155 files just to refine a hint.

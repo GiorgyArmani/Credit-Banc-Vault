@@ -17,13 +17,14 @@ import { Send } from "lucide-react";
 import DocumentPreviewModal from "@/components/pdf/pdf-viewer";
 import { isClientScopedDoc, isCarryOverDoc, matchesActiveBusiness, matchesActiveDeal } from "@/lib/document-scope";
 import {
-  buildStatementDisplayLabel,
-  isAccountScopedDoc,
-  parseStatementPeriod,
-  type BankAccount,
-} from "@/lib/bank-accounts";
-import { BankAccountPicker } from "@/components/bank-account-picker";
-import { useBankAccounts } from "@/hooks/use-bank-accounts";
+  buildGroupedDisplayLabel,
+  groupsForDocCode,
+  offersGrouping,
+  parseDocumentPeriod,
+  type DocumentGroup,
+} from "@/lib/document-groups";
+import { DocumentGroupPicker } from "@/components/document-group-picker";
+import { useDocumentGroups } from "@/hooks/use-document-groups";
 
 /**
  * DocumentType: Interface for documents requested for the user
@@ -87,10 +88,10 @@ interface DocumentCardProps {
   activeDealId?: string | null;
   /** Optional DOM id for the website tour to anchor on (set on the first card). */
   anchorId?: string;
-  /** Bank accounts on the active business. Only read by statement cards. */
-  bankAccounts?: BankAccount[];
-  /** Lifts a newly created account up to the shared list. */
-  onAccountCreated?: (account: BankAccount) => void;
+  /** Every group on the file; each card slices out its own field's. */
+  documentGroups?: DocumentGroup[];
+  /** Lifts a newly created group up to the shared list. */
+  onGroupCreated?: (group: DocumentGroup) => void;
 }
 
 function DocumentCard({
@@ -110,8 +111,8 @@ function DocumentCard({
   activeBusinessId,
   activeDealId,
   anchorId,
-  bankAccounts = [],
-  onAccountCreated,
+  documentGroups = [],
+  onGroupCreated,
 }: DocumentCardProps) {
   const supabase = createClient();
   const { toast } = useToast();
@@ -119,10 +120,17 @@ function DocumentCard({
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [customName, setCustomName] = useState("");
-  // Bank statements only. Null means "not specified" — the file still uploads
-  // and lands in the Unassigned group for staff to sort.
-  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
-  const isStatementCard = isAccountScopedDoc(docType.code);
+  // Null means "not specified" — the file still uploads and lands in the
+  // Ungrouped section for staff to sort. Never a blocking requirement.
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  const fieldGroups = groupsForDocCode(documentGroups, docType.code);
+  // `multiple` is required_documents.is_multiple, threaded through the
+  // requirements API — the authoritative signal, so this card doesn't fall back
+  // to the static mirror in @/lib/document-groups.
+  const offersGroupPicker = offersGrouping(docType.code, {
+    isMultiple: docType.multiple,
+    groupCount: fieldGroups.length,
+  });
 
   const relevantDocs = documents.filter(doc =>
     doc.category === docType.code ||
@@ -179,25 +187,25 @@ function DocumentCard({
     if (selectedFiles.length === 0 || !userId) return;
     setUploading(true);
     let successCount = 0;
-    // Only honour the picker on a card that actually shows it, and only for an
-    // account that is really on this business's list — a stale id (business tab
+    // Only honour the picker on a card that actually shows it, and only for a
+    // group that is really on this field's list — a stale id (business tab
     // switched mid-upload) must not be written.
-    const selectedAccount = isStatementCard
-      ? bankAccounts.find(a => a.id === selectedAccountId) ?? null
+    const selectedGroup = offersGroupPicker
+      ? fieldGroups.find(g => g.id === selectedGroupId) ?? null
       : null;
 
     try {
       for (const file of selectedFiles) {
         const ext = file.name.split(".").pop() || "bin";
-        // With an account, the label carries the bank and — when the bank's own
-        // filename gives it up — the statement month, so twelve statements no
-        // longer download as twelve identically named files. Without one, this
-        // returns exactly the old `${label} - ${client}` string.
-        const standardizedName = buildStatementDisplayLabel({
+        // With a group, the label carries it and — when the original filename
+        // gives it up — the period, so twelve statements no longer download as
+        // twelve identically named files. Without one, this returns exactly the
+        // old `${label} - ${client}` string.
+        const standardizedName = buildGroupedDisplayLabel({
           doc_label: docType.label,
           client_name: clientName || "Client",
-          account: selectedAccount,
-          period: selectedAccount ? parseStatementPeriod(file.name) : null,
+          group: selectedGroup,
+          period: selectedGroup ? parseDocumentPeriod(file.name) : null,
         });
         const normalized = `${docType.code}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.${ext}`;
         const filePath = `${userId}/${normalized}`;
@@ -230,12 +238,12 @@ function DocumentCard({
             // it serves every future funding round; everything else belongs to
             // the round it was collected for.
             funding_deal_id: isCarryOverDoc(docType.code) ? null : (activeDealId ?? null),
-            bank_account_id: selectedAccount?.id ?? null,
+            document_group_id: selectedGroup?.id ?? null,
             metadata: {
               tags: [docType.code],
-              // `name` above is the standardized label, so the bank's own file
+              // `name` above is the standardized label, so the original file
               // name is otherwise discarded — and with it the only clue to which
-              // month a statement covers.
+              // period a file covers.
               original_file_name: file.name,
             },
           })
@@ -386,21 +394,21 @@ function DocumentCard({
               </div>
             </div>
           )}
-          {/* Which account these statements came from. Above the dropzone on
-              purpose: picked BEFORE the files, so a batch drop of twelve
-              months lands already sorted. Applies to every file in this
-              upload — one account per batch is how statements actually
-              arrive, and it keeps the client from tagging file-by-file. */}
-          {isStatementCard && (
-            <BankAccountPicker
+          {/* Which group these files belong to. Above the dropzone on purpose:
+              picked BEFORE the files, so a batch drop of twelve months lands
+              already sorted. Applies to every file in this upload — one group
+              per batch is how documents actually arrive, and it keeps the
+              client from tagging file-by-file. */}
+          {offersGroupPicker && (
+            <DocumentGroupPicker
+              docCode={docType.code}
               businessProfileId={activeBusinessId}
-              accounts={bankAccounts}
-              value={selectedAccountId}
-              onChange={setSelectedAccountId}
-              onAccountCreated={(account) => onAccountCreated?.(account)}
+              groups={documentGroups}
+              value={selectedGroupId}
+              onChange={setSelectedGroupId}
+              onGroupCreated={(group) => onGroupCreated?.(group)}
               disabled={uploading}
               tone="emerald"
-              helpText="Have statements from more than one account? Upload one account at a time so your file stays organized."
             />
           )}
 
@@ -496,10 +504,10 @@ export default function Vault({
   });
   const [renaming_file, set_renaming_file] = useState<{ id: string; label: string } | null>(null);
   const [is_renaming_loading, setIs_renaming_loading] = useState(false);
-  // Bank accounts for the business tab on screen. Reloads on tab switch —
-  // accounts are per-business and offering another business's would be rejected
-  // by the upload path anyway.
-  const { accounts: bankAccounts, addAccount: addBankAccount } = useBankAccounts(activeBusinessId);
+  // Filing groups for the business tab on screen, across every field. Reloads
+  // on tab switch — business-scoped groups belong to one tab, and offering
+  // another business's would be rejected by the upload path anyway.
+  const { groups: documentGroups, addGroup: addDocumentGroup } = useDocumentGroups(activeBusinessId);
 
   useEffect(() => {
     // Wait for the parent to resolve which business tab is active before
@@ -802,8 +810,8 @@ export default function Vault({
                   isApproved={d.isApproved}
                   isRejected={d.isRejected}
                   rejectionReason={d.rejectionReason}
-                  bankAccounts={bankAccounts}
-                  onAccountCreated={addBankAccount}
+                  documentGroups={documentGroups}
+                  onGroupCreated={addDocumentGroup}
                 />
               ))}
             </div>
@@ -836,8 +844,8 @@ export default function Vault({
                   onPreview={d => set_preview_modal({ isOpen: true, doc: d })}
                   isApproved={d.isApproved}
                   isRejected={d.isRejected}
-                  bankAccounts={bankAccounts}
-                  onAccountCreated={addBankAccount}
+                  documentGroups={documentGroups}
+                  onGroupCreated={addDocumentGroup}
                 />
               ))}
             </div>

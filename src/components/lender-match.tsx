@@ -58,8 +58,10 @@ interface MatchResult {
 }
 
 type LenderDecision = "approved" | "rejected" | null;
-// New, simpler model: UW selects which matched lenders to recommend to admin.
-// Admin then approves/rejects via admin_review on the unified client view.
+// New, simpler model: UW selects which matched lenders to take forward, and
+// those land CLEARED FOR SUBMISSION — no admin sign-off in between. Admins are
+// notified (Slack + email + in-app) and can still veto a lender by flipping
+// admin_review to 'rejected' on the unified client view.
 // "decisions" map below now only stores 'approved' | null — rejected is gone.
 
 const fmt$ = (v: number) =>
@@ -649,10 +651,26 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
 
     // Only insert lenders UW recommended (decision === "approved").
     // Skipped/unselected matches are simply not stored — admin sees a clean
-    // list of recommendations on their review queue, not every machine match.
+    // list of what UW chose, not every machine match.
     // Iterate lenderData directly (rather than re-parsing the composite decision
     // key) so tier_label / lender names containing "-" stay intact, and each
     // recommended tier is snapshotted as its own row.
+    //
+    // admin_review = 'approved' AT INSERT. What UW picks here is cleared for
+    // outreach immediately — no separate admin sign-off, same as the manual-add
+    // paths. The old gate described a review that does not happen: every
+    // match_tool row ever written sat in admin_review='pending' (7 of them, the
+    // oldest since 2026-04-15) while every auto-approved manual row moved on to
+    // submitted / funded / declined. Admins read the Slack post and act there;
+    // an approval queue nobody opens is just a place deals go to stall.
+    //
+    // The admin KEEPS the veto — flipping a row to 'rejected' on the review card
+    // still pulls it out (skipped_by_admin) and the submit route still refuses
+    // it. What changed is the default, not the authority.
+    //
+    // admin_reviewed_by stays null: nobody reviewed it, and stamping a
+    // reviewer's id would fabricate an audit trail. admin_reviewed_at records
+    // when it was cleared. `source` already tells the two apart.
     const assignedAt = new Date().toISOString();
     const rows = lenderData
       .filter((l) => decisions[decisionKey(l)] === "approved")
@@ -667,6 +685,8 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
         max_funding: l.max_funding ?? null,
         assigned_at: assignedAt,
         source: "match_tool",
+        admin_review: "approved" as const,
+        admin_reviewed_at: assignedAt,
       }));
 
     if (rows.length > 0) {
@@ -681,25 +701,26 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
         client_vault_id: selectedClientId,
         status: "lender_matched",
         changed_by_role: "underwriting",
-        note: `${rows.length} lender${rows.length > 1 ? "s" : ""} recommended for admin review: ${recommendedNames}`,
+        note: `${rows.length} lender${rows.length > 1 ? "s" : ""} selected and cleared for submission: ${recommendedNames}`,
       });
     }
 
     // Fan out admin notifications (best-effort, non-blocking for UX).
-    // Admins land on /admin/dashboard's "Pending lender reviews" tile and the
-    // notification bell next to a deep-link to the unified client view.
+    // These are INFORMATIONAL now, not a handoff — the lenders are already
+    // submittable when this fires. The Slack post is where admins actually read
+    // it and is the place to raise an objection.
     try {
       const { notified, emailed, admins } = await notifyAdminsOfLenderMatchSaved(
         selectedClientId,
         rows.map((r) => ({ lender_name: r.lender_name, specialty: r.specialty }))
       );
       if (rows.length === 0) {
-        toast.success("Cleared recommendations");
+        toast.success("Cleared selections");
       } else if (admins === 0) {
-        toast.warning("Saved, but no admins are configured to notify");
+        toast.warning("Saved and ready to submit, but no admins are configured to notify");
       } else {
         toast.success(
-          `Saved · ${notified}/${admins} admin${admins > 1 ? "s" : ""} notified${emailed > 0 ? `, ${emailed} emailed` : ""}`
+          `Ready to submit · ${notified}/${admins} admin${admins > 1 ? "s" : ""} notified${emailed > 0 ? `, ${emailed} emailed` : ""}`
         );
       }
     } catch (err) {
@@ -906,12 +927,13 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
         </div>
       )}
 
-      {/* Save bar — UW saves their recommendations; admins are notified */}
+      {/* Save bar — UW saves their selection; it is submittable on save and
+          admins are notified for information. */}
       {selectedClientId && recommendedCount > 0 && (
         <div className="rounded-xl border border-slate-200 p-3 flex items-center justify-between flex-wrap gap-3" style={{ background: "#ffffff" }}>
           <div className="text-xs text-gray-500 font-mono">
-            <span className="text-emerald-600 font-bold">{recommendedCount} recommended</span>
-            {" · admin will be notified to approve which lenders to contact"}
+            <span className="text-emerald-600 font-bold">{recommendedCount} selected</span>
+            {" · ready to submit on save · admin notified in Slack"}
           </div>
           <div className="flex items-center gap-3">
             {saveSuccess && <span className="text-xs text-emerald-600 font-mono">✓ Saved successfully</span>}
@@ -1177,7 +1199,7 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
                   : "border-emerald-300 text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-500"
                 }`}
             >
-              {decision === "approved" ? "★ Recommended — click to remove" : "★ Recommend to Admin"}
+              {decision === "approved" ? "★ Selected — click to remove" : "★ Select for Submission"}
             </button>
           )}
         </div>

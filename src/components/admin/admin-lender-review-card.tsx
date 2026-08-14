@@ -165,19 +165,12 @@ export function AdminLenderReviewCard({ clientId }: Props) {
                 toast.error(result?.error || 'Failed to add lender');
                 return;
             }
-            toast.success(`Added ${lender.lender_name} — click Save Review to notify UW`);
+            toast.success(`Added ${lender.lender_name} — cleared for submission, UW notified`);
             set_is_picker_open(false);
-            // Manual-add inserts admin_review='pending'. Auto-stage a Contact
-            // decision on the new row so the admin only has to click Save
-            // Review once to approve and trigger the UW email. The new
-            // assignment id comes back on result.assignment.
-            const new_assignment = result.assignment;
-            if (new_assignment?.id) {
-                set_pending(prev => ({
-                    ...prev,
-                    [new_assignment.id]: { decision: 'approved', notes: '' },
-                }));
-            }
+            // No staging any more. The row lands admin_review='approved' and the
+            // POST notifies UW itself, so there is nothing left for Save Review
+            // to do here — auto-staging a decision would just leave a dirty
+            // panel the admin has to clear.
             await fetch_assignments();
         } catch (err: any) {
             console.error('AdminLenderReviewCard add error:', err);
@@ -242,6 +235,9 @@ export function AdminLenderReviewCard({ clientId }: Props) {
 
     const pending_count = Object.keys(pending).length;
     const approved_final = assignments.filter(a => a.admin_review === 'approved').length;
+    // Only legacy rows can still be 'pending' — every new assignment, from the
+    // match tool and both manual paths, is born cleared. Kept because rows
+    // written before that change are still on file and must not look cleared.
     const still_pending = assignments.filter(a => a.admin_review === 'pending').length;
 
     return (
@@ -249,7 +245,8 @@ export function AdminLenderReviewCard({ clientId }: Props) {
         <div className="p-6">
             <div className="pb-4 mb-2 border-b border-slate-100 flex flex-row items-center justify-between gap-4">
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                    {still_pending} pending · {approved_final} approved
+                    {approved_final} cleared to submit
+                    {still_pending > 0 && ` · ${still_pending} awaiting decision`}
                 </p>
                 <div className="flex items-center gap-2 flex-wrap justify-end">
                     <Button
@@ -354,6 +351,19 @@ export function AdminLenderReviewCard({ clientId }: Props) {
                     )}
                 </div>
             </div>
+
+            {/* Says the quiet part out loud. This card used to be a gate — UW
+                could not submit until an admin cleared each lender — and the
+                buttons still look like an approval queue. Without this line an
+                admin reasonably assumes the deal is waiting on them, which is
+                the exact behaviour that left seven lenders parked for months. */}
+            {!is_loading && assignments.length > 0 && (
+                <p className="mb-1 text-[11px] leading-relaxed text-slate-400">
+                    These lenders are already cleared and UW can submit them.
+                    Use <span className="font-bold text-slate-500">Skip</span> only
+                    if you want one pulled before it goes out.
+                </p>
+            )}
 
             <div>
                 {is_loading ? (

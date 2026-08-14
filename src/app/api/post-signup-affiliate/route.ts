@@ -8,8 +8,9 @@
 // See [[role_model]].
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { ghlUpsertContact } from "@/lib/ghl-api";
+import { ghlUpsertContact, ghlResolveFieldId } from "@/lib/ghl-api";
 import { send_affiliate_welcome_email } from "@/lib/email";
+import { generateAffiliateDashboardMagicLink } from "@/lib/magic-link";
 import { formatPhoneUS, isValidUsPhone, toE164 } from "@/lib/phone";
 
 export const runtime = "nodejs";
@@ -168,21 +169,61 @@ export async function POST(req: NextRequest) {
       throw new Error("Could not generate a unique referral code");
     }
 
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://vault.creditbanc.io";
+    const referralUrl = `${appUrl}/r/${referralCode}`;
+    // One-click passwordless entry to their dashboard. This is what rides on the
+    // GHL custom field and in the welcome email, so reminders and re-activation
+    // campaigns drop the affiliate straight in instead of at a login form they
+    // may not remember the password for. Falls back to the plain URL if token
+    // signing fails — a login form beats a dead link.
+    const dashboardUrl =
+      (await generateAffiliateDashboardMagicLink(cleanEmail)) || `${appUrl}/affiliate/dashboard`;
+
     // Step 4: Mirror the affiliate into GHL as a contact carrying the single
-    //         `affiliate` tag. The mandatory opt-in above is the consent behind
-    //         it. Best-effort: the vault account is already live, so a GHL hiccup
-    //         must not fail the signup. See [[ghl_integration_contract]].
+    //         `new affiliate` tag — the joined-just-now signal onboarding
+    //         workflows trigger on. Nothing in the app ever removes it, so a GHL
+    //         workflow has to strip it once onboarding is done. The mandatory
+    //         opt-in above is the consent behind it. Best-effort: the vault
+    //         account is already live, so a GHL hiccup must not fail the signup.
+    //         See [[ghl_integration_contract]].
     //
-    //         NOTE: this replaced the previous `affiliate-partner` +
-    //         `vault-affiliate:<code>` pair. Any GHL workflow or smart list still
-    //         filtering on `affiliate-partner` must be repointed at `affiliate`,
-    //         and contacts created before this change keep the old tag until
-    //         backfilled. Referred LEADS are unaffected — they get their own
-    //         `vault-affiliate:<code>` tag from /api/refer/[code]/submit.
+    //         NOTE: the plain `affiliate` tag was dropped on Matt's call
+    //         (2026-08-14) — `new affiliate` is the only one written now. Two
+    //         earlier generations are still out there on older contacts and none
+    //         were backfilled: `affiliate-partner` + `vault-affiliate:<code>`
+    //         (oldest), then `affiliate`. Any GHL workflow or smart list still
+    //         filtering on either must be repointed. The contact TYPE
+    //         (`affiliate`) is untouched and is the durable "this is an
+    //         affiliate" marker now that no permanent tag says so. Referred LEADS
+    //         are unaffected — they get their own `vault-affiliate:<code>` tag
+    //         from /api/refer/[code]/submit.
+    //
+    //         Both links are stamped onto custom fields so reminder/re-activation
+    //         emails can merge them ({{contact.data_vault_personal_affiliate_link}}
+    //         and {{contact.data_vault_affiliate_dashboard_link}}) instead of the
+    //         CRM having to reconstruct URLs it doesn't own. Both are per-affiliate
+    //         and the dashboard one is a signed magic link on the standard 30-day
+    //         TTL, so this stamp goes stale by design. /api/cron/refresh-affiliate-links
+    //         re-stamps both weekly; without that cron running, the field silently
+    //         becomes a link that dumps the affiliate on /auth/login with
+    //         ?error=verification_failed a month after they sign up.
     let ghlContactId: string | null = null;
     try {
       const locationId = process.env.GHL_LOCATION_ID;
       if (locationId) {
+        // env first (one less API call), merge key as the fallback — same
+        // pattern as the affiliate-attribution field in /api/refer/[code]/submit.
+        const [dashboardFieldId, personalLinkFieldId] = await Promise.all([
+          process.env.GHL_CF_AFFILIATE_DASHBOARD_LINK ||
+            ghlResolveFieldId(locationId, "contact.data_vault_affiliate_dashboard_link"),
+          process.env.GHL_CF_PERSONAL_AFFILIATE_LINK ||
+            ghlResolveFieldId(locationId, "contact.data_vault_personal_affiliate_link"),
+        ]);
+        const customFields = [
+          dashboardFieldId ? { id: dashboardFieldId, value: dashboardUrl } : null,
+          personalLinkFieldId ? { id: personalLinkFieldId, value: referralUrl } : null,
+        ].filter(Boolean) as Array<{ id: string; value: string }>;
+
         const contact = {
           firstName: cleanFirst,
           lastName: cleanLast,
@@ -191,7 +232,8 @@ export async function POST(req: NextRequest) {
           phone: phoneE164,
           country: "US",
           locationId,
-          tags: ["affiliate"],
+          tags: ["new affiliate"],
+          ...(customFields.length ? { customFields } : {}),
         };
 
         try {
@@ -236,13 +278,12 @@ export async function POST(req: NextRequest) {
     // account and the link already exist, and the dashboard shows the same link,
     // so a mail hiccup must not fail a signup the user completed successfully.
     try {
-      const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://vault.creditbanc.io";
       const reward = Number(process.env.AFFILIATE_COMMISSION_AMOUNT ?? 500);
       await send_affiliate_welcome_email({
         affiliate_name: cleanFirst || "there",
         affiliate_email: cleanEmail,
-        referral_url: `${appUrl}/r/${referralCode}`,
-        dashboard_url: `${appUrl}/affiliate/dashboard`,
+        referral_url: referralUrl,
+        dashboard_url: dashboardUrl,
         reward_amount: reward.toLocaleString("en-US", {
           style: "currency",
           currency: "USD",

@@ -227,7 +227,7 @@ export async function PATCH(request: Request) {
 }
 
 // Admin adds a lender manually — picks from lender_guidelines, gets inserted
-// as a client_lender_assignments row pre-flagged as approved by admin. The
+// as a client_lender_assignments row already cleared for submission. The
 // lender's terms (specialty / payment_type / min_funding / max_funding) are
 // snapshotted from the guideline at insert time so subsequent guideline edits
 // don't retroactively change historical reviews.
@@ -276,13 +276,17 @@ export async function POST(request: Request) {
 
     const now = new Date().toISOString();
 
-    // Manual-adds land in admin_review='pending' rather than auto-approved so
-    // they flow through the same Save Review batch as matched lenders. That
-    // keeps the UW email a single event per save action — the admin clicks
-    // Contact + Save Review on the newly-added row and UW gets one email
-    // covering everything approved in that session. The row carries
-    // decision='approved' because the matching engine "would have" passed it
-    // (admin overrode the algorithm); admin_review is the separate gate.
+    // Manual-adds land CLEARED — admin_review='approved' — so UW can submit
+    // immediately. An admin adding a lender by hand IS the decision; making
+    // them then approve their own addition through the Save Review batch was a
+    // second click that expressed nothing, and it left the row indistinguishable
+    // from a match awaiting sign-off.
+    //
+    // This matches the UW manual path (/api/lender-assignments/manual) and, as
+    // of the same change, the match tool. decision='approved' because the
+    // matching engine "would have" passed it (the admin overrode the algorithm);
+    // admin_review is no longer a gate, only a veto — flipping it to 'rejected'
+    // via PATCH still pulls the lender out.
     const { data: inserted, error: insert_error } = await supabase_admin
       .from('client_lender_assignments')
       .insert({
@@ -296,7 +300,9 @@ export async function POST(request: Request) {
         decision: 'approved',
         source: 'admin_manual',
         status: 'pending',
-        admin_review: 'pending',
+        admin_review: 'approved',
+        admin_reviewed_by: advisor_id,
+        admin_reviewed_at: now,
         admin_review_notes: notes ?? null,
         assigned_at: now,
         created_at: now,
@@ -312,6 +318,18 @@ export async function POST(request: Request) {
         { status: 500 }
       );
     }
+
+    // Tell UW here, because the row no longer passes through the PATCH batch.
+    // It used to arrive as admin_review='pending' and get notified on the
+    // pending → approved transition; now it lands approved, that transition
+    // never happens, and without this the lender would be silently submittable
+    // with nobody told it exists. Non-fatal, same as the PATCH path.
+    notify_uw_of_approved_lenders(
+      client_id,
+      [guideline.lender_name],
+      { [guideline.lender_name]: notes ?? null },
+      advisor_id,
+    ).catch((err) => console.error('UW notification dispatch failed (non-fatal):', err));
 
     return NextResponse.json({ success: true, assignment: inserted });
   } catch (err: any) {

@@ -1990,7 +1990,7 @@ export async function send_lender_review_approved_notification(
   const mail_options = {
     from: `${from_name} <${from_email}>`,
     to: recipient_email,
-    subject: `Lenders cleared for submissio: ${data.client_name} (${data.approved_lenders.length})`,
+    subject: `Lenders cleared for submission: ${data.client_name} (${data.approved_lenders.length})`,
     html: html_content,
   };
 
@@ -2007,22 +2007,25 @@ export async function send_lender_review_approved_notification(
 }
 
 /**
- * Interface for the "UW saved lender match — admins please review" email.
- * Sent to all admins when underwriting recommends lenders for a client.
+ * Interface for the "UW selected lenders" admin email.
+ *
+ * INFORMATIONAL. The lenders are already cleared to submit when this sends —
+ * admins are told what was chosen, not asked to approve it. The copy has to
+ * carry that, or it recreates the approval stall the flow just removed.
  */
 export interface LenderMatchReadyNotificationData {
   /** Every admin recipient. The email goes to all of them at once. */
   admin_emails: string[];
   client_name: string;
   company_name?: string;
-  /** Recommended lender display names (optionally "Name (specialty)"). */
+  /** Selected lender display names (optionally "Name (specialty)"). */
   recommended_lenders: string[];
-  /** Deep link to the admin client file (Lender Match — Admin Review card). */
+  /** Deep link to the admin client file (Lender Match card, to veto a pick). */
   client_profile_url: string;
 }
 
 /**
- * HTML for the "lender match ready for review" admin notification.
+ * HTML for the "lenders selected" admin notification.
  */
 export function generate_lender_match_ready_html(data: LenderMatchReadyNotificationData): string {
   data = escape_email_strings(data);
@@ -2030,8 +2033,8 @@ export function generate_lender_match_ready_html(data: LenderMatchReadyNotificat
 
   const count = recommended_lenders.length;
   const count_label = count === 0
-    ? 'No lenders recommended'
-    : `${count} lender${count === 1 ? '' : 's'} recommended`;
+    ? 'Selection cleared'
+    : `${count} lender${count === 1 ? '' : 's'} cleared to submit`;
 
   const lender_rows = recommended_lenders
     .map((name) => `
@@ -2046,7 +2049,7 @@ export function generate_lender_match_ready_html(data: LenderMatchReadyNotificat
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Lender Match Ready for Review: ${client_name}</title>
+  <title>Lenders Selected: ${client_name}</title>
 </head>
 <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f6f9fc;">
   <table role="presentation" style="width: 100%; border-collapse: collapse;">
@@ -2057,7 +2060,7 @@ export function generate_lender_match_ready_html(data: LenderMatchReadyNotificat
           <!-- Header -->
           <tr>
             <td style="padding: 40px 40px 20px; text-align: center; background-color: #1d4ed8;">
-              <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 700;">Lender Match Ready for Review</h1>
+              <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 700;">Lenders Selected</h1>
               <p style="margin: 8px 0 0; color: #bfdbfe; font-size: 13px; font-weight: 500;">${count_label}</p>
             </td>
           </tr>
@@ -2066,22 +2069,22 @@ export function generate_lender_match_ready_html(data: LenderMatchReadyNotificat
           <tr>
             <td style="padding: 40px 40px 20px;">
               <p style="margin: 0 0 16px; color: #475569; font-size: 16px; line-height: 1.6;">
-                Underwriting has finished a lender match for <strong>${client_name}</strong>${company_name ? ` (${company_name})` : ''} and needs an admin to review and approve which lenders to contact.
+                Underwriting selected the lenders for <strong>${client_name}</strong>${company_name ? ` (${company_name})` : ''}. They are <strong>cleared to submit</strong> &mdash; no approval is needed from you.
               </p>
 
               ${count > 0 ? `
-              <h3 style="margin: 0 0 12px; color: #1e293b; font-size: 15px; font-weight: 600;">Recommended lenders</h3>
+              <h3 style="margin: 0 0 12px; color: #1e293b; font-size: 15px; font-weight: 600;">Cleared to submit</h3>
               <ul style="margin: 0 0 24px; padding: 0;">
                 ${lender_rows}
               </ul>
               ` : `
               <p style="margin: 0 0 24px; color: #475569; font-size: 16px; line-height: 1.6;">
-                Underwriting cleared the prior recommendations for this client.
+                Underwriting cleared the prior selections for this client.
               </p>
               `}
 
               <p style="margin: 0 0 24px; color: #475569; font-size: 16px; line-height: 1.6;">
-                Open the client file and use the <strong>Lender Match — Admin Review</strong> card to approve or skip each lender.
+                Nothing to do unless you disagree. To pull a lender before it goes out, open the client file and skip it on the <strong>Lender Match</strong> card.
               </p>
             </td>
           </tr>
@@ -2090,7 +2093,7 @@ export function generate_lender_match_ready_html(data: LenderMatchReadyNotificat
           <tr>
             <td style="padding: 0 40px 40px;" align="center">
               <a href="${client_profile_url}" style="display: inline-block; background-color: #1d4ed8; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-size: 16px; font-weight: 600;">
-                Review Lender Match
+                Open Client File
               </a>
             </td>
           </tr>
@@ -2112,7 +2115,7 @@ export function generate_lender_match_ready_html(data: LenderMatchReadyNotificat
 }
 
 /**
- * Sends the "lender match ready for review" notification to all admins at once.
+ * Sends the "lenders selected" notification to all admins at once.
  * Mirrors send_lender_review_approved_notification: logs, rethrows on SMTP error
  * so the caller can record the failure instead of silently swallowing it.
  */
@@ -2133,7 +2136,7 @@ export async function send_lender_match_ready_notification(data: LenderMatchRead
   const mail_options = {
     from: `${from_name} <${from_email}>`,
     to,
-    subject: `Lender match ready for review: ${data.client_name} (${data.recommended_lenders.length})`,
+    subject: `Lenders cleared to submit: ${data.client_name} (${data.recommended_lenders.length})`,
     html: html_content,
   };
 
@@ -2888,6 +2891,191 @@ export async function send_affiliate_welcome_email(data: AffiliateWelcomeEmailDa
         filename: "welcome-to-the-club.png",
         path: path.join(process.cwd(), "public", AFFILIATE_WELCOME_HERO_FILE),
         cid: AFFILIATE_WELCOME_HERO_CID,
+      },
+    ],
+  };
+
+  return await transporter.sendMail(mail_options);
+}
+
+/**
+ * ============================================================================
+ * AFFILIATE LINK USED — SOMEONE BOOKED A CALL
+ * ============================================================================
+ *
+ * The middle beat of the affiliate program. Welcome says "here's your link",
+ * funded says "here's your $500"; between them an affiliate can share a link for
+ * weeks with no signal that anything happened. This fires the first time one of
+ * their referrals actually books a call, which is the earliest moment there is
+ * something honest to report.
+ *
+ * DELIBERATELY DOES NOT PROMISE MONEY. A booked call is not a funded deal — most
+ * of them won't be — so the copy names the gap ("too early to start shopping")
+ * rather than implying the reward is close. An affiliate who reads this as "I've
+ * earned $500" and then hears nothing for two months is a support ticket and a
+ * lost advocate.
+ *
+ * Sent FROM the dedicated affiliate identity, like every other affiliate-facing
+ * email. See [[affiliate_program]] and affiliate_from_header above.
+ */
+
+// Hero art. The file MUST be committed — nodemailer resolves it from disk at
+// send time and every call site swallows the throw, so an uncommitted PNG is a
+// silent no-send in production. See [[email_hero_images_must_be_committed]].
+const AFFILIATE_LINK_USED_HERO_CID = "affiliate_link_used_hero";
+const AFFILIATE_LINK_USED_HERO_FILE = "Your link just got some action.png";
+
+export interface AffiliateLinkUsedEmailData {
+  affiliate_name: string;
+  affiliate_email: string;
+  /** The person who used the link. Shown to the affiliate, who already sees
+   *  their leads by name on the dashboard — this discloses nothing new. */
+  referral_name: string;
+  reward_amount: string;
+  dashboard_url: string;
+  terms_url: string;
+}
+
+export function generate_affiliate_link_used_email_html(data: AffiliateLinkUsedEmailData): string {
+  data = escape_email_strings(data);
+  const { affiliate_name, referral_name, reward_amount, dashboard_url, terms_url } = data;
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Someone used your link</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #faf9f6;">
+  <!-- Preheader: shown in the inbox preview, hidden in the body. -->
+  <div style="display: none; max-height: 0; overflow: hidden; opacity: 0; mso-hide: all;">
+    ${referral_name} booked a call with Credit Banc through your link. We&rsquo;ve got movement.
+  </div>
+
+  <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #faf9f6;">
+    <tr>
+      <td align="center" style="padding: 32px 12px;">
+        <table role="presentation" style="width: 600px; max-width: 100%; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 6px 24px rgba(32, 37, 54, 0.08);">
+
+          <!-- Hero art -->
+          <tr>
+            <td style="padding: 0; line-height: 0; background-color: #ffffff;">
+              <img src="cid:${AFFILIATE_LINK_USED_HERO_CID}" alt="Your link just got some action." width="600" style="border: 0; display: block; width: 100%; max-width: 600px; height: auto;">
+            </td>
+          </tr>
+
+          <!-- The news -->
+          <tr>
+            <td style="padding: 8px 40px 0;">
+              <h1 style="margin: 0 0 16px; color: #202536; font-size: 22px; font-weight: 700; line-height: 1.35;">Hi ${affiliate_name},</h1>
+              <p style="margin: 0 0 24px; color: #4b5563; font-size: 16px; line-height: 1.65;">
+                <strong style="color: #202536;">${referral_name}</strong> just used your affiliate link and booked a call with Credit Banc.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Expectation setting. The point of the whole email is that this is
+               movement, NOT money — the panel is deliberately neutral cream
+               rather than the mint the funded email uses for a real payout. -->
+          <tr>
+            <td style="padding: 0 40px 28px;">
+              <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #fdf8e8; border: 1px solid #f0e6c8; border-radius: 12px;">
+                <tr>
+                  <td style="padding: 22px 24px; text-align: center;">
+                    <p style="margin: 0; color: #6b5b2e; font-size: 16px; line-height: 1.6;">
+                      It&rsquo;s too early to start shopping with that <strong>${reward_amount} gift card</strong>, but hey&hellip; we&rsquo;ve got movement.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Sign-off -->
+          <tr>
+            <td style="padding: 0 40px 8px;">
+              <p style="margin: 0 0 24px; color: #4b5563; font-size: 16px; line-height: 1.65;">
+                See? Not a bad little system. Keep sharing that link. We&rsquo;ll keep you updated.
+              </p>
+            </td>
+          </tr>
+
+          <!-- CTA -->
+          <tr>
+            <td style="padding: 0 40px 32px; text-align: center;">
+              <a href="${dashboard_url}" style="display: inline-block; padding: 16px 34px; background-color: #202536; color: #a6f0ce; font-size: 16px; font-weight: 700; text-decoration: none; border-radius: 10px; letter-spacing: 0.02em;">OPEN MY AFFILIATE DASHBOARD</a>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding: 0 40px 40px;">
+              <p style="margin: 0 0 4px; color: #202536; font-size: 16px; font-weight: 700;">The Credit Banc Team</p>
+              <p style="margin: 0; color: #6b7280; font-size: 15px;">I Know Someone Club</p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding: 24px 40px 32px; background-color: #202536; text-align: center;">
+              <p style="margin: 0 0 8px; color: #b9bdc9; font-size: 13px; line-height: 1.6;">
+                Rewards are issued after a referred deal funds and closing conditions are complete.
+                <a href="${terms_url}" style="color: #a6f0ce; text-decoration: underline;">Full program terms</a>.
+              </p>
+              <p style="margin: 0; color: #8b90a0; font-size: 12px;">© ${new Date().getFullYear()} Credit Banc</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+// NOTE: no escape_email_strings here — escaping belongs to the HTML templates
+// only, otherwise a referral named "Tom O'Neill" reads as "Tom O&#39;Neill" in
+// the plain-text part.
+export function generate_affiliate_link_used_email_text(data: AffiliateLinkUsedEmailData): string {
+  const { affiliate_name, referral_name, reward_amount, dashboard_url, terms_url } = data;
+  return [
+    `Hi ${affiliate_name},`,
+    ``,
+    `${referral_name} just used your affiliate link and booked a call with`,
+    `Credit Banc.`,
+    ``,
+    `It's too early to start shopping with that ${reward_amount} gift card, but hey...`,
+    `we've got movement.`,
+    ``,
+    `See? Not a bad little system. Keep sharing that link. We'll keep you updated.`,
+    ``,
+    `The Credit Banc Team`,
+    `I Know Someone Club`,
+    ``,
+    `Open your affiliate dashboard: ${dashboard_url}`,
+    ``,
+    `Rewards are issued after a referred deal funds and closing conditions are`,
+    `complete. Full program terms: ${terms_url}`,
+    ``,
+    `© ${new Date().getFullYear()} Credit Banc`,
+  ].join("\n");
+}
+
+export async function send_affiliate_link_used_email(data: AffiliateLinkUsedEmailData) {
+  const transporter = create_smtp_transporter();
+
+  const mail_options: any = {
+    from: affiliate_from_header(),
+    to: data.affiliate_email,
+    subject: `Well, well, well...someone used your link. 👀`,
+    html: generate_affiliate_link_used_email_html(data),
+    text: generate_affiliate_link_used_email_text(data),
+    attachments: [
+      {
+        filename: "your-link-just-got-some-action.png",
+        path: path.join(process.cwd(), "public", AFFILIATE_LINK_USED_HERO_FILE),
+        cid: AFFILIATE_LINK_USED_HERO_CID,
       },
     ],
   };

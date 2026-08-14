@@ -100,10 +100,10 @@ import { ClientNotesCard, type FileNote } from "@/app/advisor/dashboard/clients/
 import { AdminLenderReviewCard } from "@/components/admin/admin-lender-review-card";
 import { CollapsibleSection, broadcast_toggle_all } from "@/app/advisor/dashboard/clients/[id]/_components/collapsible-section";
 import { isClientScopedDoc, matchesActiveBusiness, matchesActiveDeal, normalizeSupabaseJoin } from "@/lib/document-scope";
-import { isAccountScopedDoc } from "@/lib/bank-accounts";
+import { offersGrouping, groupsForDocCode } from "@/lib/document-groups";
 import { zipDocuments } from "@/lib/document-download";
-import { BankAccountPicker } from "@/components/bank-account-picker";
-import { useBankAccounts } from "@/hooks/use-bank-accounts";
+import { DocumentGroupPicker } from "@/components/document-group-picker";
+import { useDocumentGroups } from "@/hooks/use-document-groups";
 
 /**
  * ============================================================================
@@ -287,9 +287,9 @@ interface UserDocument {
     upload_date: string;
     storage_path: string;
     business_profile_id?: string | null;
-    /** Set on bank statements filed onto an account. */
-    bank_account_id?: string | null;
-    /** Carries metadata.original_file_name, which dates a statement. */
+    /** Set on files filed into a group within their own field. */
+    document_group_id?: string | null;
+    /** Carries metadata.original_file_name, which dates a periodic file. */
     metadata?: any;
 }
 
@@ -426,14 +426,15 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
     const [upload_doc_label, set_upload_doc_label] = useState<string>("");
     const [upload_files, set_upload_files] = useState<File[]>([]);
     const [is_uploading, set_is_uploading] = useState(false);
-    // Bank statements only: which account this upload is filed under. Cleared
-    // whenever the modal opens on a different category.
-    const [upload_bank_account_id, set_upload_bank_account_id] = useState<string | null>(null);
+    // Which group this upload is filed under. Cleared whenever the modal opens
+    // on a different category — groups are per-field, so a bank account is
+    // meaningless once the modal switches to tax returns.
+    const [upload_document_group_id, set_upload_document_group_id] = useState<string | null>(null);
     // Bulk-download progress. Non-null while an archive is being built.
     const [is_zipping, set_is_zipping] = useState<{ completed: number; total: number } | null>(null);
-    // Bank accounts for the business tab on screen. Feeds both the upload
-    // picker and the per-account grouping in the document list.
-    const { accounts: bank_accounts, addAccount: add_bank_account } = useBankAccounts(active_business_id);
+    // Filing groups for the business tab on screen, across every field. Feeds
+    // both the upload picker and the per-group sections in the document list.
+    const { groups: document_groups, addGroup: add_document_group } = useDocumentGroups(active_business_id);
 
     // vault-submit-state: Controls for advisor vault submission
     const [is_submit_confirm_open, set_is_submit_confirm_open] = useState(false);
@@ -1480,11 +1481,9 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
                     // business tab. The API stamps business_profile_id on the
                     // resulting user_documents row.
                     business_profile_id: active_business_id ?? null,
-                    // Statements only. The API ignores it for other codes and
-                    // re-verifies the account belongs to this business.
-                    bank_account_id: isAccountScopedDoc(upload_doc_code)
-                        ? upload_bank_account_id
-                        : null,
+                    // The API re-verifies the group belongs to this field and
+                    // this business, and silently ignores it otherwise.
+                    document_group_id: upload_document_group_id,
                     files: successful.map((s) => ({
                         storage_path: s.storage_path,
                         file_name: s.file_name,
@@ -1507,7 +1506,7 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
                 set_is_upload_modal_open(false);
                 set_upload_files([]);
                 set_upload_doc_code("");
-                set_upload_bank_account_id(null);
+                set_upload_document_group_id(null);
                 if (Array.isArray(result.documents) && result.documents.length > 0) {
                     set_documents(prev => [...result.documents, ...prev]);
                 }
@@ -2430,7 +2429,7 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
                             approvals={approvals}
                             expanded_categories={expanded_categories}
                             completion_percentage={completion_percentage}
-                            bank_accounts={bank_accounts}
+                            document_groups={document_groups}
                             zipping={is_zipping}
                             on_download_packet={download_entire_packet}
                             requesting_again_code={requesting_again_code}
@@ -2443,7 +2442,7 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
                                 set_upload_files([]);
                                 // A leftover account from the last upload would
                                 // silently file this batch under the wrong one.
-                                set_upload_bank_account_id(null);
+                                set_upload_document_group_id(null);
                                 set_is_upload_modal_open(true);
                             }}
                             on_approve={(doc) => {
@@ -2609,19 +2608,21 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
                         </DialogHeader>
 
                         <div className="py-4 space-y-4">
-                            {/* Which account these statements came from. Above
-                                the file picker so a twelve-month batch is filed
-                                before it is chosen, not after. */}
-                            {isAccountScopedDoc(upload_doc_code) && (
-                                <BankAccountPicker
+                            {/* Which group these files belong to. Above the file
+                                picker so a twelve-month batch is filed before it
+                                is chosen, not after. */}
+                            {offersGrouping(upload_doc_code, {
+                                groupCount: groupsForDocCode(document_groups, upload_doc_code).length,
+                            }) && (
+                                <DocumentGroupPicker
+                                    docCode={upload_doc_code}
                                     businessProfileId={active_business_id}
-                                    accounts={bank_accounts}
-                                    value={upload_bank_account_id}
-                                    onChange={set_upload_bank_account_id}
-                                    onAccountCreated={add_bank_account}
+                                    groups={document_groups}
+                                    value={upload_document_group_id}
+                                    onChange={set_upload_document_group_id}
+                                    onGroupCreated={add_document_group}
                                     disabled={is_uploading}
                                     tone="slate"
-                                    helpText="Upload one account at a time so the file stays organized for underwriting."
                                 />
                             )}
 

@@ -141,6 +141,32 @@ export async function generatePartnerPortalMagicLink(email: string): Promise<str
 }
 
 /**
+ * Same passwordless login, landing an affiliate on /affiliate/dashboard.
+ *
+ * Written to the "[Data Vault] Affiliate Dashboard Link" custom field so GHL
+ * reminder and re-activation emails merge a one-click entry instead of a login
+ * form. It carries the SAME 30-day TTL as every other link here — deliberately.
+ * The field is kept usable by /api/cron/refresh-affiliate-links re-stamping it
+ * weekly, not by handing out a long-lived credential. GHL merges the field at
+ * SEND time, so a fresh field is all a months-later campaign needs; a link in an
+ * already-delivered email going stale is fine, and is the point.
+ *
+ * Affiliates DO set a password at signup, so this is convenience rather than
+ * the only way in (which is what it is for clients and partners).
+ */
+export async function generateAffiliateDashboardMagicLink(email: string): Promise<string | null> {
+  try {
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://vault.creditbanc.io";
+    const token = signMagicToken(email);
+    const next = encodeURIComponent("/affiliate/dashboard");
+    return `${appUrl}/auth/magic?token=${token}&next=${next}`;
+  } catch (err) {
+    console.error("❌ Affiliate dashboard magic link generation threw:", err);
+    return null;
+  }
+}
+
+/**
  * Pushes the magic link to GHL: writes it to the MAGIC_LINK custom field and
  * adds the `send-magic-link` tag so a GHL workflow can dispatch the SMS.
  * Non-fatal — logs and swallows errors so it never breaks the calling flow.

@@ -16,10 +16,14 @@ interface RecommendedLender {
 }
 
 /**
- * Notifies all admins (in-app + email) when UW saves their lender-match
- * recommendations for a client. Admins then review/curate which lenders
- * UW should actually contact via the Lender Match — Admin Review card on
- * the unified client view.
+ * Notifies all admins (in-app + email + Slack) when UW saves their lender
+ * selection for a client.
+ *
+ * INFORMATIONAL, NOT A HANDOFF. The lenders are already cleared for submission
+ * when this fires — UW is not waiting on anyone. Admins read the Slack post and
+ * can veto a lender from the Lender Match card on the unified client view; the
+ * wording below has to say that, because a message that reads like a request for
+ * approval recreates the stall this change removed.
  *
  * Returns { notified, emailed, admins } so the caller can surface a count and
  * so a missed recipient is observable in logs (an earlier incident silently
@@ -78,8 +82,8 @@ export async function notifyAdminsOfLenderMatchSaved(
             ? lender_names[0]
             : `${recommended.length} lenders`;
 
-    const title = `Lender match ready for review — ${client_name}`;
-    const message = `Underwriting recommended ${lender_summary} for ${client_name}. Review and approve which lenders to contact.`;
+    const title = `Lenders selected — ${client_name}`;
+    const message = `Underwriting selected ${lender_summary} for ${client_name} and they are cleared to submit. No action needed — open the file only if you want one pulled.`;
 
     // ── In-app: one row per admin (service role → bypasses RLS). ──────────────
     let notified = 0;
@@ -130,14 +134,24 @@ export async function notifyAdminsOfLenderMatchSaved(
     }
 
     // ── Slack: post into the deal channel (if one exists) so Matt/Luigi + the
-    //    advisor are pinged to review and approve the lender selection. ─────────
+    //    advisor see the selection. This is the surface admins actually read,
+    //    and it is now the whole review step — hence the lender names inline,
+    //    rather than a link asking them to go and approve something. ───────────
     try {
         if (slack_channel_id) {
             const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "https://vault.creditbanc.io";
             const mentions = formatMentions([...getApproverUserIds(), resolveAdvisorSlackId(advisor_email)]);
+            // Spelled out here rather than summarised as a count: the point of
+            // the post is that an objection can be raised from Slack without
+            // opening the app, and that needs the actual names.
+            const lender_lines = lender_names.length > 0
+                ? lender_names.map((n) => `• ${n}`).join("\n")
+                : "• (none — the selection was cleared)";
             const text =
-                `${mentions ? mentions + " " : ""}Underwriting has finished the lender selection for this file. ` +
-                `Please visit their profile under your admin portal to review and approve the lenders for this file.\n` +
+                `${mentions ? mentions + " " : ""}Underwriting selected the lenders for this file. ` +
+                `*These are cleared to submit — no approval needed.*\n` +
+                `${lender_lines}\n` +
+                `Reply here if you want one pulled, or open the file to skip it:\n` +
                 `${baseUrl}/admin/clients/${clientId}`;
             await slackPostMessage(slack_channel_id, text);
         }

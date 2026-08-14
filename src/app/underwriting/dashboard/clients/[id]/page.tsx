@@ -97,20 +97,19 @@ import { BusinessTabStrip, type BusinessTab } from "@/app/advisor/dashboard/clie
 import { CollapsibleSection, broadcast_toggle_all } from "@/app/advisor/dashboard/clients/[id]/_components/collapsible-section";
 import { isClientScopedDoc, matchesActiveBusiness, matchesActiveDeal, normalizeSupabaseJoin, formatRequirementLabel } from "@/lib/document-scope";
 import {
-    BANK_ACCOUNT_TYPES,
-    BANK_ACCOUNT_TYPE_LABELS,
-    formatBankAccountLabel,
-    getDocumentStatementPeriod,
-    groupDocumentsByBankAccount,
-    isAccountScopedDoc,
-    UNASSIGNED_ACCOUNT_KEY,
-    UNASSIGNED_ACCOUNT_LABEL,
-    type BankAccount,
-    type BankAccountType,
-} from "@/lib/bank-accounts";
+    formatGroupLabel,
+    getGroupConfig,
+    getDocumentPeriod,
+    groupDocuments,
+    groupsForDocCode,
+    offersGrouping,
+    UNGROUPED_KEY,
+    UNGROUPED_LABEL,
+    type DocumentGroup,
+} from "@/lib/document-groups";
 import { zipDocuments } from "@/lib/document-download";
-import { BankAccountPicker } from "@/components/bank-account-picker";
-import { useBankAccounts } from "@/hooks/use-bank-accounts";
+import { DocumentGroupPicker } from "@/components/document-group-picker";
+import { useDocumentGroups } from "@/hooks/use-document-groups";
 
 // Slack deal-channel integration is built but not yet tested end-to-end.
 // Flip to `true` to re-enable the "Create / Open Slack Channel" button.
@@ -202,14 +201,20 @@ interface LenderAssignment {
 }
 
 // Effective UI states for a lender assignment. The matching engine proposes
-// (decision), admin clears for outreach (admin_review), UW physically pushes
-// the file out (status='submitted'), then records the lender's verdict
+// (decision), UW selects, and the selection is cleared for outreach on the spot
+// (admin_review='approved' at insert). UW then physically pushes the file out
+// (status='submitted') and records the lender's verdict
 // (status='approved_by_lender' | 'declined_by_lender'). The label rendered to
 // UW is the derived combination of those columns.
+//
+// admin_review is a VETO, not a gate: an admin flipping it to 'rejected' pulls
+// the lender out (skipped_by_admin, and the submit route refuses it). 'pending'
+// is now reachable only on rows written before that change — they were left
+// alone deliberately rather than backfilled, so 'awaiting_admin' stays.
 type LenderRowState =
     | 'rejected_by_matcher'   // decision = rejected
     | 'skipped_by_admin'       // decision = approved, admin_review = rejected
-    | 'awaiting_admin'         // decision = approved, admin_review = pending
+    | 'awaiting_admin'         // legacy only: decision = approved, admin_review = pending
     | 'ready_to_submit'        // all approved, status = pending
     | 'submitted'              // status = submitted, awaiting lender
     | 'approved_by_lender'     // lender approved the submission
@@ -240,9 +245,9 @@ interface UserDocument {
     viewed_at: string | null;
     uploaded_by_role?: 'advisor' | 'client';
     business_profile_id?: string | null;
-    /** Set on bank statements that have been sorted onto an account. */
-    bank_account_id?: string | null;
-    /** Carries metadata.original_file_name, which dates a statement. */
+    /** Set on files that have been filed into a group within their own field. */
+    document_group_id?: string | null;
+    /** Carries metadata.original_file_name, which dates a periodic file. */
     metadata?: any;
 }
 
@@ -418,13 +423,6 @@ export default function UnderwritingClientDetailsPage() {
         }
     }
 
-    // Pending per-row admin review changes (assignment_id -> { decision, notes }).
-    // Buffered locally so the admin can mark several lenders before submitting in one batch.
-    const [pending_admin_reviews, set_pending_admin_reviews] = useState<
-        Record<string, { decision: 'approved' | 'rejected'; notes: string }>
-    >({});
-    const [is_submitting_review, set_is_submitting_review] = useState(false);
-
     // Admin-only: client profile edit modal
     const [is_edit_profile_open, set_is_edit_profile_open] = useState(false);
 
@@ -552,67 +550,70 @@ export default function UnderwritingClientDetailsPage() {
     });
 
     // ------------------------------------------------------------------
-    // Bank-statement organisation
+    // Document organisation
     // ------------------------------------------------------------------
-    // Statements group by account instead of rendering as one flat list — a
-    // four-account, twelve-month file is 48+ rows, and the O'Rourke file is
-    // 124. See @/lib/bank-accounts.
+    // Fields group by their own axis instead of rendering as one flat list —
+    // a four-account, twelve-month statement run is 48+ rows and the O'Rourke
+    // file is 124, and the same file carries several years of tax returns and a
+    // licence per owner. See @/lib/document-groups.
     const {
-        accounts: bank_accounts,
-        addAccount: add_bank_account,
-        refresh: refresh_bank_accounts,
-    } = useBankAccounts(active_business_id);
-    // The account new uploads are filed under. Chosen once in the category
-    // header, then reused for the whole batch — statements arrive one account
-    // at a time, so per-file tagging would be busywork.
-    const [statement_upload_account_id, set_statement_upload_account_id] = useState<string | null>(null);
-    // The retrofit path: everything uploaded before this feature has no
-    // account, so UW multi-selects those rows and files them in one go.
-    const [selected_statement_ids, set_selected_statement_ids] = useState<Set<string>>(new Set());
-    const [assign_target_account_id, set_assign_target_account_id] = useState<string | null>(null);
-    const [is_assigning_statements, set_is_assigning_statements] = useState(false);
-    // Account pending deletion, with the number of files that will be detached.
-    const [account_pending_delete, set_account_pending_delete] = useState<
+        groups: document_groups,
+        addGroup: add_document_group,
+        refresh: refresh_document_groups,
+    } = useDocumentGroups(active_business_id);
+    // The group new uploads are filed under. Chosen once in the category
+    // header, then reused for the whole batch — documents arrive one group at a
+    // time, so per-file tagging would be busywork.
+    const [upload_group_id, set_upload_group_id] = useState<string | null>(null);
+    // The retrofit path: everything uploaded before this feature has no group,
+    // so UW multi-selects those rows and files them in one go.
+    const [selected_document_ids, set_selected_document_ids] = useState<Set<string>>(new Set());
+    const [assign_target_group_id, set_assign_target_group_id] = useState<string | null>(null);
+    const [is_assigning_documents, set_is_assigning_documents] = useState(false);
+    // Group pending deletion, with the number of files that will be detached.
+    const [group_pending_delete, set_group_pending_delete] = useState<
         { id: string; label: string; document_count: number } | null
     >(null);
-    const [is_deleting_account, set_is_deleting_account] = useState(false);
+    const [is_deleting_group, set_is_deleting_group] = useState(false);
     // Bulk-download progress. Non-null while an archive is being built; the
     // buttons disable so two archives can't be assembled at once.
     const [is_zipping, set_is_zipping] = useState<{ completed: number; total: number } | null>(null);
-    // Account being edited, held as a working copy so Cancel is a real cancel.
-    const [account_being_edited, set_account_being_edited] = useState<
-        { id: string; bank_name: string; account_last4: string; account_type: BankAccountType; nickname: string } | null
+    // Group being edited, held as a working copy so Cancel is a real cancel.
+    // doc_code rides along because it decides what the edit form's fields are
+    // called and what counts as valid.
+    const [group_being_edited, set_group_being_edited] = useState<
+        { id: string; doc_code: string; name: string; identifier: string; subtype: string; nickname: string } | null
     >(null);
-    const [is_saving_account, set_is_saving_account] = useState(false);
-    const [account_edit_error, set_account_edit_error] = useState<string | null>(null);
+    const [is_saving_group, set_is_saving_group] = useState(false);
+    const [group_edit_error, set_group_edit_error] = useState<string | null>(null);
 
-    // Switching business tabs invalidates both — the account ids belong to the
-    // tab we just left, and a selection carried across tabs would assign
+    // Switching business tabs invalidates all three — the group ids belong to
+    // the tab we just left, and a selection carried across tabs would file
     // documents the user can no longer see.
     useEffect(() => {
-        set_statement_upload_account_id(null);
-        set_selected_statement_ids(new Set());
-        set_assign_target_account_id(null);
+        set_upload_group_id(null);
+        set_selected_document_ids(new Set());
+        set_assign_target_group_id(null);
     }, [active_business_id]);
 
-    // Seed the assign target from the account already chosen at the top of the
-    // section, the first time a selection is made. On a file with one account —
+    // Seed the assign target from the group already chosen at the top of the
+    // section, the first time a selection is made. On a field with one group —
     // the common case when sorting a backlog — that means selecting rows and
-    // hitting Assign, with no dropdown step in between.
+    // hitting File, with no dropdown step in between.
     //
     // Only on the empty → non-empty transition, so an explicit "Move to
-    // Unassigned" (null) is never overwritten while the selection is still live.
-    const had_statement_selection = useRef(false);
+    // Ungrouped" (null) is never overwritten while the selection is still live.
+    const had_document_selection = useRef(false);
     useEffect(() => {
-        const has_selection = selected_statement_ids.size > 0;
-        if (has_selection && !had_statement_selection.current) {
-            set_assign_target_account_id(prev => prev ?? statement_upload_account_id);
+        const has_selection = selected_document_ids.size > 0;
+        if (has_selection && !had_document_selection.current) {
+            set_assign_target_group_id(prev => prev ?? upload_group_id);
         }
-        had_statement_selection.current = has_selection;
-    }, [selected_statement_ids, statement_upload_account_id]);
+        had_document_selection.current = has_selection;
+    }, [selected_document_ids, upload_group_id]);
 
-    function toggle_statement_selection(doc_id: string) {
-        set_selected_statement_ids(prev => {
+    function toggle_document_selection(doc_id: string) {
+        set_selected_document_ids(prev => {
             const next = new Set(prev);
             if (next.has(doc_id)) next.delete(doc_id);
             else next.add(doc_id);
@@ -620,9 +621,9 @@ export default function UnderwritingClientDetailsPage() {
         });
     }
 
-    /** Select / clear every statement in one group (the group header checkbox). */
-    function toggle_statement_group(doc_ids: string[], select: boolean) {
-        set_selected_statement_ids(prev => {
+    /** Select / clear every file in one section (the section header checkbox). */
+    function toggle_document_section(doc_ids: string[], select: boolean) {
+        set_selected_document_ids(prev => {
             const next = new Set(prev);
             for (const id of doc_ids) {
                 if (select) next.add(id);
@@ -633,26 +634,26 @@ export default function UnderwritingClientDetailsPage() {
     }
 
     /**
-     * File the selected statements onto an account (or, with a null target,
-     * pull them back out). The endpoint also rewrites each file's label so the
-     * download name carries the account — grouping the list without renaming
+     * File the selected documents into a group (or, with a null target, pull
+     * them back out). The endpoint also rewrites each file's label so the
+     * download name carries the group — sectioning the list without renaming
      * the files would leave the lender's copy exactly as ambiguous as before.
      */
-    async function handle_assign_statements(target_account_id: string | null) {
-        const ids = Array.from(selected_statement_ids);
+    async function handle_assign_documents(target_group_id: string | null) {
+        const ids = Array.from(selected_document_ids);
         if (ids.length === 0) return;
 
-        set_is_assigning_statements(true);
+        set_is_assigning_documents(true);
         try {
-            const res = await fetch('/api/bank-accounts/assign', {
+            const res = await fetch('/api/document-groups/assign', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ document_ids: ids, bank_account_id: target_account_id }),
+                body: JSON.stringify({ document_ids: ids, document_group_id: target_group_id }),
             });
             const result = await res.json().catch(() => null);
 
             if (!res.ok) {
-                toast.error(result?.error || 'Could not assign the statements');
+                toast.error(result?.error || 'Could not file the documents');
                 return;
             }
 
@@ -660,113 +661,106 @@ export default function UnderwritingClientDetailsPage() {
             const skipped = Array.isArray(result?.skipped) ? result.skipped.length : 0;
 
             if (updated === 0) {
-                toast.error('No statements were assigned');
+                toast.error('No documents were filed');
                 return;
             }
             // Report partial success honestly — silently succeeding on 40 of 50
             // is how a packet goes out half-organised.
             toast.success(
                 skipped > 0
-                    ? `${updated} statement(s) assigned, ${skipped} skipped`
-                    : `${updated} statement(s) assigned`
+                    ? `${updated} file(s) filed, ${skipped} skipped`
+                    : `${updated} file(s) filed`
             );
 
-            set_selected_statement_ids(new Set());
-            set_assign_target_account_id(null);
+            set_selected_document_ids(new Set());
+            set_assign_target_group_id(null);
             fetch_client_details();
         } catch (err: any) {
-            console.error('assign statements error:', err);
+            console.error('assign documents error:', err);
             toast.error('An unexpected error occurred');
         } finally {
-            set_is_assigning_statements(false);
+            set_is_assigning_documents(false);
         }
     }
 
     /**
-     * Save an edited bank account.
+     * Save an edited group.
      *
-     * Correcting the bank name or the last four also re-labels every statement
-     * on the account — the API does that, because custom_label embeds the
-     * account and would otherwise keep the typo forever.
+     * Correcting the name or the identifier also re-labels every file in the
+     * group — the API does that, because custom_label embeds the group and
+     * would otherwise keep the typo forever.
+     *
+     * Validation is the API's: it runs the field's own rules (bank statements
+     * still demand four digits, a tax year does not) and returns a message
+     * written for the person typing, so duplicating them here would only create
+     * a second set to drift.
      */
-    async function handle_save_bank_account() {
-        if (!account_being_edited) return;
+    async function handle_save_group() {
+        if (!group_being_edited) return;
 
-        const bank_name = account_being_edited.bank_name.trim();
-        const account_last4 = account_being_edited.account_last4.trim();
-
-        if (!bank_name) {
-            set_account_edit_error('Bank name is required');
-            return;
-        }
-        if (!/^\d{4}$/.test(account_last4)) {
-            set_account_edit_error('Enter exactly the last 4 digits');
-            return;
-        }
-
-        set_is_saving_account(true);
-        set_account_edit_error(null);
+        set_is_saving_group(true);
+        set_group_edit_error(null);
         try {
-            const res = await fetch(`/api/bank-accounts/${account_being_edited.id}`, {
+            const res = await fetch(`/api/document-groups/${group_being_edited.id}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    bank_name,
-                    account_last4,
-                    account_type: account_being_edited.account_type,
-                    nickname: account_being_edited.nickname.trim() || null,
+                    name: group_being_edited.name.trim(),
+                    identifier: group_being_edited.identifier.trim() || null,
+                    subtype: group_being_edited.subtype.trim() || null,
+                    nickname: group_being_edited.nickname.trim() || null,
                 }),
             });
             const result = await res.json().catch(() => null);
 
-            if (!res.ok || !result?.account) {
-                // 409 = another account on this business already owns that
-                // bank + last4, which is the dedupe index doing its job.
-                set_account_edit_error(result?.error || 'Could not save the account');
+            if (!res.ok || !result?.group) {
+                // 409 = another group on this field already owns that name,
+                // which is the dedupe index doing its job.
+                set_group_edit_error(result?.error || 'Could not save the group');
                 return;
             }
 
             const relabelled = result.relabelled ?? 0;
             toast.success(
                 relabelled > 0
-                    ? `Account updated · ${relabelled} file(s) renamed`
-                    : 'Account updated'
+                    ? `Group updated · ${relabelled} file(s) renamed`
+                    : 'Group updated'
             );
 
-            set_account_being_edited(null);
-            await refresh_bank_accounts();
+            set_group_being_edited(null);
+            await refresh_document_groups();
             // Labels changed on the documents themselves, so the list has to
             // come back from the server rather than being patched locally.
             if (relabelled > 0) fetch_client_details();
         } catch (err: any) {
-            console.error('save bank account error:', err);
-            set_account_edit_error('An unexpected error occurred');
+            console.error('save group error:', err);
+            set_group_edit_error('An unexpected error occurred');
         } finally {
-            set_is_saving_account(false);
+            set_is_saving_group(false);
         }
     }
 
     /**
-     * Delete a bank account. Two-step on purpose: the first call is sent without
+     * Delete a group. Two-step on purpose: the first call is sent without
      * ?force and comes back 409 with the real file count, which is what the
      * confirm dialog quotes. Nothing is guessed client-side.
      *
      * The client's documents are never deleted — the FK is ON DELETE SET NULL,
-     * so they detach back to "Unassigned" (and get relabelled on the way).
+     * so they detach back to "Ungrouped" (and get relabelled on the way).
      */
-    async function handle_delete_bank_account(account_id: string, label: string, force = false) {
-        if (force) set_is_deleting_account(true);
+    async function handle_delete_group(group_id: string, label: string, force = false) {
+        if (force) set_is_deleting_group(true);
         try {
             const res = await fetch(
-                `/api/bank-accounts/${account_id}${force ? '?force=true' : ''}`,
+                `/api/document-groups/${group_id}${force ? '?force=true' : ''}`,
                 { method: 'DELETE' }
             );
             const result = await res.json().catch(() => null);
 
             // Still holds files — surface the count and let the user decide.
-            if (res.status === 409 && result?.error === 'account_has_documents') {
-                set_account_pending_delete({
-                    id: account_id,
+            if (res.status === 409 && result?.error === 'group_has_documents') {
+                set_group_pending_delete({
+                    id: group_id,
                     label,
                     document_count: result.document_count ?? 0,
                 });
@@ -774,27 +768,27 @@ export default function UnderwritingClientDetailsPage() {
             }
 
             if (!res.ok) {
-                toast.error(result?.error || 'Could not delete the account');
+                toast.error(result?.error || 'Could not delete the group');
                 return;
             }
 
             const detached = result?.detached ?? 0;
             toast.success(
                 detached > 0
-                    ? `Account deleted · ${detached} file(s) moved to Unassigned`
-                    : 'Account deleted'
+                    ? `Group deleted · ${detached} file(s) moved to Ungrouped`
+                    : 'Group deleted'
             );
 
-            set_account_pending_delete(null);
-            if (statement_upload_account_id === account_id) set_statement_upload_account_id(null);
-            if (assign_target_account_id === account_id) set_assign_target_account_id(null);
-            await refresh_bank_accounts();
+            set_group_pending_delete(null);
+            if (upload_group_id === group_id) set_upload_group_id(null);
+            if (assign_target_group_id === group_id) set_assign_target_group_id(null);
+            await refresh_document_groups();
             fetch_client_details();
         } catch (err: any) {
-            console.error('delete bank account error:', err);
+            console.error('delete group error:', err);
             toast.error('An unexpected error occurred');
         } finally {
-            set_is_deleting_account(false);
+            set_is_deleting_group(false);
         }
     }
 
@@ -1117,9 +1111,13 @@ export default function UnderwritingClientDetailsPage() {
         const label_by_code = new Map<string, string>(
             required_docs.map(r => [r.code, r.label])
         );
-        const account_labels = new Map<string, string>(
-            bank_accounts.map(a => [a.id, formatBankAccountLabel(a)])
+        const group_labels = new Map<string, string>(
+            document_groups.map(g => [g.id, formatGroupLabel(g)])
         );
+        // Which fields are actually organised on this file. A field with no
+        // groups keeps its flat folder rather than gaining an "Ungrouped"
+        // subfolder that holds everything and says nothing.
+        const organised_codes = new Set(document_groups.map(g => g.doc_code));
 
         set_is_zipping({ completed: 0, total: docs.length });
         try {
@@ -1128,13 +1126,14 @@ export default function UnderwritingClientDetailsPage() {
                     const doc = d as UserDocument;
                     const code = doc.doc_code ?? doc.category ?? "";
                     const category = label_by_code.get(code) || code || "Other";
-                    // Statements nest one level deeper so a 133-file category
-                    // doesn't reproduce the flat pile this all exists to fix.
-                    if (isAccountScopedDoc(code)) {
-                        const account = doc.bank_account_id
-                            ? account_labels.get(doc.bank_account_id) ?? UNASSIGNED_ACCOUNT_LABEL
-                            : UNASSIGNED_ACCOUNT_LABEL;
-                        return `${category} - ${account}`;
+                    // Organised fields nest one level deeper so a 133-file
+                    // category doesn't reproduce the flat pile this all exists
+                    // to fix.
+                    if (organised_codes.has(code)) {
+                        const group = doc.document_group_id
+                            ? group_labels.get(doc.document_group_id) ?? UNGROUPED_LABEL
+                            : UNGROUPED_LABEL;
+                        return `${category} - ${group}`;
                     }
                     return category;
                 },
@@ -1163,9 +1162,9 @@ export default function UnderwritingClientDetailsPage() {
      * and, in practice, a browser that blocked the sequence partway and left
      * the underwriter with a fraction of the files and no error.
      *
-     * `folderOf` is passed only for multi-account statement sets: a zip of one
-     * account's statements is already about that account, so nesting it inside a
-     * folder of the same name would just add a click.
+     * `folderOf` is passed only when more than one group is represented: a zip
+     * of one account's statements is already about that account, so nesting it
+     * inside a folder of the same name would just add a click.
      */
     async function download_all_documents(docs: UserDocument[]) {
         if (docs.length === 0) return;
@@ -1175,13 +1174,13 @@ export default function UnderwritingClientDetailsPage() {
         const first_code = docs[0]?.doc_code ?? docs[0]?.category ?? null;
         const label = required_docs.find(r => r.code === first_code)?.label ?? "Documents";
 
-        // More than one account represented → folder the archive by account so
-        // the statements don't land as one flat pile of same-named files.
-        const account_labels = new Map<string, string>(
-            bank_accounts.map(a => [a.id, formatBankAccountLabel(a)])
+        // More than one group represented → folder the archive by group so the
+        // files don't land as one flat pile of same-named files.
+        const group_labels = new Map<string, string>(
+            document_groups.map(g => [g.id, formatGroupLabel(g)])
         );
-        const distinct_accounts = new Set(docs.map(d => d.bank_account_id ?? UNASSIGNED_ACCOUNT_KEY));
-        const should_folder = isAccountScopedDoc(first_code) && distinct_accounts.size > 1;
+        const distinct_groups = new Set(docs.map(d => d.document_group_id ?? UNGROUPED_KEY));
+        const should_folder = distinct_groups.size > 1;
 
         set_is_zipping({ completed: 0, total: docs.length });
         try {
@@ -1192,8 +1191,8 @@ export default function UnderwritingClientDetailsPage() {
                 {
                     folderOf: should_folder
                         ? (d) => {
-                            const id = (d as UserDocument).bank_account_id;
-                            return id ? account_labels.get(id) ?? UNASSIGNED_ACCOUNT_LABEL : UNASSIGNED_ACCOUNT_LABEL;
+                            const id = (d as UserDocument).document_group_id;
+                            return id ? group_labels.get(id) ?? UNGROUPED_LABEL : UNGROUPED_LABEL;
                         }
                         : undefined,
                     onProgress: (p) => set_is_zipping({ completed: p.completed, total: p.total }),
@@ -1566,13 +1565,10 @@ export default function UnderwritingClientDetailsPage() {
                     // from every per-business tab (client-scoped codes surface
                     // correctly regardless).
                     business_profile_id: active_business_id ?? null,
-                    // Statements only. The API ignores it for any other code and
-                    // re-checks that the account belongs to this business, so a
-                    // stale selection downgrades to unassigned rather than
-                    // failing the upload.
-                    bank_account_id: isAccountScopedDoc(doc_code)
-                        ? statement_upload_account_id
-                        : null,
+                    // The API re-checks that the group belongs to this field and
+                    // this business, so a stale selection downgrades to
+                    // ungrouped rather than failing the upload.
+                    document_group_id: upload_group_id,
                     files: successful.map((s) => ({
                         storage_path: s.storage_path,
                         file_name: s.file_name,
@@ -1717,10 +1713,10 @@ export default function UnderwritingClientDetailsPage() {
      */
     function render_document_card(doc: UserDocument, options?: { selectable?: boolean }) {
         const is_selectable = options?.selectable ?? false;
-        const is_selected = selected_statement_ids.has(doc.id);
-        // Only ever a hint — it comes from parsing the bank's own filename, and
+        const is_selected = selected_document_ids.has(doc.id);
+        // Only ever a hint — it comes from parsing the original filename, and
         // every document uploaded before that name was recorded returns null.
-        const period = getDocumentStatementPeriod(doc);
+        const period = getDocumentPeriod(doc);
 
         return (
             <Card
@@ -1737,7 +1733,7 @@ export default function UnderwritingClientDetailsPage() {
                                 {is_selectable && (
                                     <Checkbox
                                         checked={is_selected}
-                                        onCheckedChange={() => toggle_statement_selection(doc.id)}
+                                        onCheckedChange={() => toggle_document_selection(doc.id)}
                                         aria-label={`Select ${doc.custom_label || doc.name}`}
                                         className="flex-shrink-0"
                                     />
@@ -1826,28 +1822,30 @@ export default function UnderwritingClientDetailsPage() {
      * render_document_category: Renders a category section with its documents for underwriting
      */
     /**
-     * render_statement_groups: the bank-statement body, cut into one section
-     * per account.
+     * render_group_sections: a category body, cut into one section per group.
      *
      * This is the whole point of the feature for underwriting. Flat, a funded
      * file's statements are one undifferentiated scroll (124 rows on the
-     * O'Rourke file) with no way to tell which account any given PDF is from.
-     * Grouped, the same list reads as four runs of twelve, each downloadable on
-     * its own — which is also the shape a lender wants the packet in.
+     * O'Rourke file) with no way to tell which account any given PDF is from —
+     * and its 132 tax returns are the same problem wearing a different hat.
+     * Sectioned, that list reads as four runs of twelve (or five years of
+     * returns), each downloadable on its own — which is also the shape a lender
+     * wants the packet in.
      *
-     * Selection lives here rather than on the whole category because assigning
-     * is only meaningful for statements. The Unassigned group is where every
-     * pre-existing file starts, so it renders with its checkboxes ready.
+     * The Ungrouped section is where every pre-existing file starts, so it
+     * renders with its checkboxes ready.
      */
-    function render_statement_groups(category_docs: UserDocument[]) {
-        // includeEmptyAccounts: this is the management surface. An account with
+    function render_group_sections(doc_code: string, category_docs: UserDocument[]) {
+        const field_groups = groupsForDocCode(document_groups, doc_code);
+        const config = getGroupConfig(doc_code);
+        // includeEmptyGroups: this is the management surface. A group with
         // nothing filed under it still has to be visible, because invisible
         // here means undeletable — which is exactly how a mistyped or test
-        // account becomes permanent.
-        const groups = groupDocumentsByBankAccount(category_docs, bank_accounts, {
-            includeEmptyAccounts: can_upload,
+        // group becomes permanent.
+        const sections = groupDocuments(category_docs, field_groups, {
+            includeEmptyGroups: can_upload,
         });
-        const selected_count = selected_statement_ids.size;
+        const selected_count = selected_document_ids.size;
 
         return (
             <div className="space-y-4">
@@ -1855,31 +1853,32 @@ export default function UnderwritingClientDetailsPage() {
                     twelve-file drop lands sorted instead of needing a second pass. */}
                 {can_upload && (
                     <div className="rounded-2xl border border-slate-200 bg-white/70 p-4">
-                        <BankAccountPicker
+                        <DocumentGroupPicker
+                            docCode={doc_code}
                             businessProfileId={active_business_id}
-                            accounts={bank_accounts}
-                            value={statement_upload_account_id}
-                            onChange={set_statement_upload_account_id}
-                            onAccountCreated={add_bank_account}
+                            groups={document_groups}
+                            value={upload_group_id}
+                            onChange={set_upload_group_id}
+                            onGroupCreated={add_document_group}
                             tone="slate"
-                            helpText="New uploads in this category are filed under this account. Upload one account at a time."
+                            helpText={`New uploads in this category are filed under this ${config.noun.toLowerCase()}. Upload one at a time.`}
                         />
                     </div>
                 )}
 
-                {groups.map(group => {
+                {sections.map(group => {
                     const group_ids = group.documents.map(d => d.id);
-                    const all_selected = group_ids.every(id => selected_statement_ids.has(id));
-                    const is_unassigned = group.key === UNASSIGNED_ACCOUNT_KEY;
+                    const all_selected = group_ids.every(id => selected_document_ids.has(id));
+                    const is_unassigned = group.key === UNGROUPED_KEY;
 
                     return (
                         <div
                             key={group.key}
                             className={clsx(
                                 "rounded-2xl border overflow-hidden",
-                                // Unassigned is the work queue, so it reads as
+                                // Ungrouped is the work queue, so it reads as
                                 // something to act on rather than as a peer of
-                                // the organised accounts.
+                                // the organised sections.
                                 is_unassigned
                                     ? "border-dashed border-slate-300 bg-slate-50/60"
                                     : "border-slate-200 bg-white"
@@ -1892,7 +1891,7 @@ export default function UnderwritingClientDetailsPage() {
                                         <Checkbox
                                             checked={all_selected}
                                             onCheckedChange={(checked) =>
-                                                toggle_statement_group(group_ids, checked === true)
+                                                toggle_document_section(group_ids, checked === true)
                                             }
                                             aria-label={`Select all in ${group.label}`}
                                         />
@@ -1908,7 +1907,7 @@ export default function UnderwritingClientDetailsPage() {
                                             {group.documents.length === 0
                                                 ? 'Empty · no files yet'
                                                 : `${group.documents.length} file${group.documents.length === 1 ? '' : 's'}`}
-                                            {group.account && ` · ${group.account.account_type}`}
+                                            {group.group?.subtype && ` · ${group.group.subtype}`}
                                             {is_unassigned && ' · needs sorting'}
                                         </p>
                                     </div>
@@ -1932,45 +1931,46 @@ export default function UnderwritingClientDetailsPage() {
                                         </Button>
                                     )}
 
-                                    {/* Fix a typo in the bank or the digits. The
-                                        API re-labels this account's files too,
+                                    {/* Fix a typo in the name or the identifier.
+                                        The API re-labels this group's files too,
                                         so the correction reaches the download
                                         name and the lender page. */}
-                                    {can_upload && group.account && (
+                                    {can_upload && group.group && (
                                         <Button
                                             variant="ghost"
                                             size="sm"
                                             onClick={() => {
-                                                const a = group.account as BankAccount;
-                                                set_account_edit_error(null);
-                                                set_account_being_edited({
-                                                    id: a.id,
-                                                    bank_name: a.bank_name,
-                                                    account_last4: a.account_last4,
-                                                    account_type: a.account_type,
-                                                    nickname: a.nickname ?? '',
+                                                const g = group.group as DocumentGroup;
+                                                set_group_edit_error(null);
+                                                set_group_being_edited({
+                                                    id: g.id,
+                                                    doc_code: g.doc_code,
+                                                    name: g.name,
+                                                    identifier: g.identifier ?? '',
+                                                    subtype: g.subtype ?? '',
+                                                    nickname: g.nickname ?? '',
                                                 });
                                             }}
                                             className="h-8 w-8 p-0 text-slate-300 hover:text-slate-900"
-                                            title="Edit this account"
+                                            title={`Edit this ${config.noun.toLowerCase()}`}
                                         >
                                             <Pencil className="h-3.5 w-3.5" />
                                         </Button>
                                     )}
 
-                                    {/* Delete the ACCOUNT, never the files. On a
-                                        loaded account the API answers 409 with
+                                    {/* Delete the GROUP, never the files. On a
+                                        loaded group the API answers 409 with
                                         the real count, which opens the confirm
                                         below — nothing is deleted on this click. */}
-                                    {can_upload && group.account && (
+                                    {can_upload && group.group && (
                                         <Button
                                             variant="ghost"
                                             size="sm"
                                             onClick={() =>
-                                                handle_delete_bank_account(group.account!.id, group.label)
+                                                handle_delete_group(group.group!.id, group.label)
                                             }
                                             className="h-8 w-8 p-0 text-slate-300 hover:text-red-600 hover:bg-red-50"
-                                            title="Delete this account (files move to Unassigned)"
+                                            title={`Delete this ${config.noun.toLowerCase()} (files move to Ungrouped)`}
                                         >
                                             <Trash2 className="h-3.5 w-3.5" />
                                         </Button>
@@ -2007,37 +2007,40 @@ export default function UnderwritingClientDetailsPage() {
                             Move to
                         </span>
                         <select
-                            value={assign_target_account_id ?? ""}
-                            onChange={(e) => set_assign_target_account_id(e.target.value || null)}
-                            disabled={is_assigning_statements}
+                            value={assign_target_group_id ?? ""}
+                            onChange={(e) => set_assign_target_group_id(e.target.value || null)}
+                            disabled={is_assigning_documents}
                             className="min-w-[12rem] flex-1 rounded-lg border-0 bg-white/10 px-3 py-1.5 text-xs font-semibold text-white outline-none disabled:opacity-60"
                         >
                             {/* Listed first so the dropdown always has a valid
                                 option, but it is the un-do, not the default —
-                                the target is seeded from the account picker
-                                above the moment a selection starts. */}
-                            <option value="" className="text-slate-900">Unassigned (remove from account)</option>
-                            {bank_accounts.filter(a => a.is_active).map(account => (
-                                <option key={account.id} value={account.id} className="text-slate-900">
-                                    {formatBankAccountLabel(account)}
+                                the target is seeded from the group picker above
+                                the moment a selection starts. */}
+                            <option value="" className="text-slate-900">Ungrouped (remove from group)</option>
+                            {/* This FIELD's groups only. Offering another
+                                field's would be an assign the API rejects as
+                                wrong_field. */}
+                            {field_groups.filter(g => g.is_active).map(group_option => (
+                                <option key={group_option.id} value={group_option.id} className="text-slate-900">
+                                    {formatGroupLabel(group_option)}
                                 </option>
                             ))}
                         </select>
                         <Button
                             size="sm"
-                            disabled={is_assigning_statements}
-                            onClick={() => handle_assign_statements(assign_target_account_id)}
+                            disabled={is_assigning_documents}
+                            onClick={() => handle_assign_documents(assign_target_group_id)}
                             className="shrink-0 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl h-8 px-4 font-black text-[9px] uppercase tracking-widest"
                         >
-                            {is_assigning_statements
+                            {is_assigning_documents
                                 ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
                                 : `Move ${selected_count} file${selected_count === 1 ? '' : 's'}`}
                         </Button>
                         <Button
                             variant="ghost"
                             size="sm"
-                            disabled={is_assigning_statements}
-                            onClick={() => set_selected_statement_ids(new Set())}
+                            disabled={is_assigning_documents}
+                            onClick={() => set_selected_document_ids(new Set())}
                             className="text-white/60 hover:text-white hover:bg-white/10 rounded-xl h-8 px-3 font-black text-[9px] uppercase tracking-widest"
                         >
                             Clear
@@ -2056,9 +2059,14 @@ export default function UnderwritingClientDetailsPage() {
         const has_docs = category_docs.length > 0;
         const is_approved = approvals.has(doc_type.code);
         const is_expanded = expanded_categories.has(doc_type.code);
-        // Bank statements render grouped by account; everything else stays the
-        // flat list it has always been.
-        const is_statement_category = isAccountScopedDoc(doc_type.code);
+        // A field that subdivides renders as sections; everything else stays the
+        // flat list it has always been. This is the MANAGEMENT surface, so the
+        // sectioned view also appears on a field with no groups yet — that empty
+        // state is where the group picker and the bulk-file bar live, and
+        // without it there is nowhere to start organising from.
+        const is_grouped_category = offersGrouping(doc_type.code, {
+            groupCount: groupsForDocCode(document_groups, doc_type.code).length,
+        });
 
         // Define status theme
         const status = is_approved ? 'approved' : has_docs ? 'uploaded' : 'pending';
@@ -2188,26 +2196,27 @@ export default function UnderwritingClientDetailsPage() {
                 {/* Docs List if expanded */}
                 {is_expanded && has_docs && (
                     <div className="px-5 pb-5 space-y-3">
-                        {is_statement_category
-                            ? render_statement_groups(category_docs)
+                        {is_grouped_category
+                            ? render_group_sections(doc_type.code, category_docs)
                             : category_docs.map(doc => render_document_card(doc))}
                     </div>
                 )}
 
-                {/* The account picker is the only thing worth showing in an
-                    empty statement category — it lets UW set up the accounts
-                    before the client uploads anything. */}
-                {is_expanded && !has_docs && is_statement_category && can_upload && (
+                {/* The group picker is the only thing worth showing in an empty
+                    subdividable category — it lets UW set the groups up before
+                    the client uploads anything. */}
+                {is_expanded && !has_docs && is_grouped_category && can_upload && (
                     <div className="px-5 pb-5">
                         <div className="rounded-2xl border border-slate-200 bg-white/70 p-4">
-                            <BankAccountPicker
+                            <DocumentGroupPicker
+                                docCode={doc_type.code}
                                 businessProfileId={active_business_id}
-                                accounts={bank_accounts}
-                                value={statement_upload_account_id}
-                                onChange={set_statement_upload_account_id}
-                                onAccountCreated={add_bank_account}
+                                groups={document_groups}
+                                value={upload_group_id}
+                                onChange={set_upload_group_id}
+                                onGroupCreated={add_document_group}
                                 tone="slate"
-                                helpText="Set up the accounts now and uploads will file themselves."
+                                helpText="Set these up now and uploads will file themselves."
                             />
                         </div>
                     </div>
@@ -3666,100 +3675,134 @@ export default function UnderwritingClientDetailsPage() {
                 </DialogContent>
             </Dialog>
 
-            {/* Edit Bank Account */}
+            {/* Edit a document group.
+                Every label and every input in here comes from the FIELD's
+                config, so this one dialog edits a bank account, a tax year and
+                a person without knowing what any of them are. */}
             <Dialog
-                open={!!account_being_edited}
-                onOpenChange={(open) => { if (!open && !is_saving_account) set_account_being_edited(null); }}
+                open={!!group_being_edited}
+                onOpenChange={(open) => { if (!open && !is_saving_group) set_group_being_edited(null); }}
             >
                 <DialogContent className="sm:max-w-md">
-                    <DialogHeader>
-                        <DialogTitle>Edit bank account</DialogTitle>
-                        <DialogDescription>
-                            Correcting the bank or the last 4 digits also renames every statement
-                            filed under this account, so the fix reaches the download name and the
-                            lender packet.
-                        </DialogDescription>
-                    </DialogHeader>
+                    {(() => {
+                        const edit_config = getGroupConfig(group_being_edited?.doc_code);
+                        return (
+                            <>
+                                <DialogHeader>
+                                    <DialogTitle>Edit {edit_config.noun.toLowerCase()}</DialogTitle>
+                                    <DialogDescription>
+                                        Correcting the {edit_config.nameLabel.toLowerCase()}
+                                        {edit_config.identifier ? ` or the ${edit_config.identifier.label.toLowerCase()}` : ''} also
+                                        renames every file filed under it, so the fix reaches the download name
+                                        and the lender packet.
+                                    </DialogDescription>
+                                </DialogHeader>
 
-                    {account_being_edited && (
-                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 py-2">
-                            <div className="space-y-1.5">
-                                <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                                    Bank name
-                                </Label>
-                                <Input
-                                    value={account_being_edited.bank_name}
-                                    onChange={(e) => set_account_being_edited(prev =>
-                                        prev ? { ...prev, bank_name: e.target.value } : prev
-                                    )}
-                                    placeholder="Chase"
-                                />
-                            </div>
-                            <div className="space-y-1.5">
-                                <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                                    Last 4 digits
-                                </Label>
-                                <Input
-                                    value={account_being_edited.account_last4}
-                                    inputMode="numeric"
-                                    // Digits only, capped at 4 — the field cannot
-                                    // hold a full account number even on a paste.
-                                    onChange={(e) => set_account_being_edited(prev =>
-                                        prev ? { ...prev, account_last4: e.target.value.replace(/\D/g, '').slice(0, 4) } : prev
-                                    )}
-                                    placeholder="4821"
-                                />
-                            </div>
-                            <div className="space-y-1.5">
-                                <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                                    Type
-                                </Label>
-                                <select
-                                    value={account_being_edited.account_type}
-                                    onChange={(e) => set_account_being_edited(prev =>
-                                        prev ? { ...prev, account_type: e.target.value as BankAccountType } : prev
-                                    )}
-                                    className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400"
-                                >
-                                    {BANK_ACCOUNT_TYPES.map((t) => (
-                                        <option key={t} value={t}>{BANK_ACCOUNT_TYPE_LABELS[t]}</option>
-                                    ))}
-                                </select>
-                            </div>
-                            <div className="space-y-1.5">
-                                <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                                    Nickname
-                                </Label>
-                                <Input
-                                    value={account_being_edited.nickname}
-                                    onChange={(e) => set_account_being_edited(prev =>
-                                        prev ? { ...prev, nickname: e.target.value } : prev
-                                    )}
-                                    placeholder="Operating (optional)"
-                                />
-                            </div>
-                            {account_edit_error && (
-                                <p className="sm:col-span-2 text-xs font-semibold text-rose-600">
-                                    {account_edit_error}
-                                </p>
-                            )}
-                        </div>
-                    )}
+                                {group_being_edited && (
+                                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 py-2">
+                                        <div className="space-y-1.5">
+                                            <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                                {edit_config.nameLabel}
+                                            </Label>
+                                            <Input
+                                                value={group_being_edited.name}
+                                                onChange={(e) => set_group_being_edited(prev =>
+                                                    prev ? { ...prev, name: e.target.value } : prev
+                                                )}
+                                                placeholder={edit_config.namePlaceholder}
+                                            />
+                                        </div>
+
+                                        {edit_config.identifier && (
+                                            <div className="space-y-1.5">
+                                                <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                                    {edit_config.identifier.label}
+                                                </Label>
+                                                <Input
+                                                    value={group_being_edited.identifier}
+                                                    inputMode={edit_config.identifier.digitsOnly ? 'numeric' : undefined}
+                                                    // Digits-only fields cannot hold a full
+                                                    // account number even on a paste.
+                                                    onChange={(e) => set_group_being_edited(prev => {
+                                                        if (!prev) return prev;
+                                                        const cfg = edit_config.identifier!;
+                                                        const cleaned = cfg.digitsOnly
+                                                            ? e.target.value.replace(/\D/g, '')
+                                                            : e.target.value;
+                                                        return {
+                                                            ...prev,
+                                                            identifier: cfg.maxLength ? cleaned.slice(0, cfg.maxLength) : cleaned,
+                                                        };
+                                                    })}
+                                                    placeholder={edit_config.identifier.placeholder}
+                                                />
+                                            </div>
+                                        )}
+
+                                        {edit_config.subtypes && (
+                                            <div className="space-y-1.5">
+                                                <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                                    {edit_config.subtypeLabel ?? 'Type'}
+                                                </Label>
+                                                <select
+                                                    value={group_being_edited.subtype}
+                                                    onChange={(e) => set_group_being_edited(prev =>
+                                                        prev ? { ...prev, subtype: e.target.value } : prev
+                                                    )}
+                                                    className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400"
+                                                >
+                                                    {/* A group created before this field had a
+                                                        subtype list carries none — the blank
+                                                        option keeps that state selectable
+                                                        instead of silently retyping it. */}
+                                                    <option value="">—</option>
+                                                    {edit_config.subtypes.map((s) => (
+                                                        <option key={s.value} value={s.value}>{s.label}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                        )}
+
+                                        {edit_config.nicknameLabel && (
+                                            <div className="space-y-1.5">
+                                                <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                                    {edit_config.nicknameLabel}
+                                                </Label>
+                                                <Input
+                                                    value={group_being_edited.nickname}
+                                                    onChange={(e) => set_group_being_edited(prev =>
+                                                        prev ? { ...prev, nickname: e.target.value } : prev
+                                                    )}
+                                                    placeholder={edit_config.nicknamePlaceholder ?? 'Optional'}
+                                                />
+                                            </div>
+                                        )}
+
+                                        {group_edit_error && (
+                                            <p className="sm:col-span-2 text-xs font-semibold text-rose-600">
+                                                {group_edit_error}
+                                            </p>
+                                        )}
+                                    </div>
+                                )}
+                            </>
+                        );
+                    })()}
 
                     <DialogFooter>
                         <Button
                             variant="ghost"
-                            onClick={() => set_account_being_edited(null)}
-                            disabled={is_saving_account}
+                            onClick={() => set_group_being_edited(null)}
+                            disabled={is_saving_group}
                         >
                             Cancel
                         </Button>
                         <Button
-                            onClick={handle_save_bank_account}
-                            disabled={is_saving_account}
+                            onClick={handle_save_group}
+                            disabled={is_saving_group}
                             className="bg-slate-900 hover:bg-slate-800 text-white"
                         >
-                            {is_saving_account ? (
+                            {is_saving_group ? (
                                 <>
                                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                                     Saving...
@@ -3770,46 +3813,46 @@ export default function UnderwritingClientDetailsPage() {
                 </DialogContent>
             </Dialog>
 
-            {/* Delete Bank Account Confirmation.
+            {/* Delete Group Confirmation.
                 Opened only after the API answered 409 — document_count is the
                 server's number, not a client-side guess. The wording leads with
                 what does NOT happen, because "delete" next to a list of files
                 reads as "delete the files". */}
             <Dialog
-                open={!!account_pending_delete}
-                onOpenChange={(open) => { if (!open && !is_deleting_account) set_account_pending_delete(null); }}
+                open={!!group_pending_delete}
+                onOpenChange={(open) => { if (!open && !is_deleting_group) set_group_pending_delete(null); }}
             >
                 <DialogContent className="sm:max-w-md">
                     <DialogHeader>
-                        <DialogTitle>Delete this bank account?</DialogTitle>
+                        <DialogTitle>Delete this group?</DialogTitle>
                         <DialogDescription>
-                            <strong>{account_pending_delete?.label}</strong> will be removed from this
-                            business. Its <strong>{account_pending_delete?.document_count} file(s) are
-                            not deleted</strong> — they move back to <strong>Unassigned</strong>, where
-                            you can file them onto another account.
+                            <strong>{group_pending_delete?.label}</strong> will be removed. Its{' '}
+                            <strong>{group_pending_delete?.document_count} file(s) are
+                            not deleted</strong> — they move back to <strong>Ungrouped</strong>, where
+                            you can file them somewhere else.
                         </DialogDescription>
                     </DialogHeader>
                     <DialogFooter>
                         <Button
                             variant="ghost"
-                            onClick={() => set_account_pending_delete(null)}
-                            disabled={is_deleting_account}
+                            onClick={() => set_group_pending_delete(null)}
+                            disabled={is_deleting_group}
                         >
                             Cancel
                         </Button>
                         <Button
                             onClick={() => {
-                                if (!account_pending_delete) return;
-                                handle_delete_bank_account(
-                                    account_pending_delete.id,
-                                    account_pending_delete.label,
+                                if (!group_pending_delete) return;
+                                handle_delete_group(
+                                    group_pending_delete.id,
+                                    group_pending_delete.label,
                                     true
                                 );
                             }}
-                            disabled={is_deleting_account}
+                            disabled={is_deleting_group}
                             className="bg-red-600 hover:bg-red-700 text-white"
                         >
-                            {is_deleting_account ? (
+                            {is_deleting_group ? (
                                 <>
                                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                                     Deleting...

@@ -23,12 +23,12 @@ import { useState } from "react";
 import clsx from "clsx";
 import { BANK_STATEMENTS_DOC_CODE } from "@/lib/document-scope";
 import {
-    getDocumentStatementPeriod,
-    groupDocumentsByBankAccount,
-    isAccountScopedDoc,
-    UNASSIGNED_ACCOUNT_KEY,
-    type BankAccount,
-} from "@/lib/bank-accounts";
+    getDocumentPeriod,
+    groupDocuments,
+    groupsForDocCode,
+    UNGROUPED_KEY,
+    type DocumentGroup,
+} from "@/lib/document-groups";
 
 // ── Type definitions (mirrored from page.tsx) ────────────────────────────────
 
@@ -43,9 +43,9 @@ interface UserDocument {
     is_favorite: boolean;
     upload_date: string;
     storage_path: string;
-    /** Set on bank statements filed onto an account. */
-    bank_account_id?: string | null;
-    /** Carries metadata.original_file_name, which dates a statement. */
+    /** Set on files filed into a group within their own field. */
+    document_group_id?: string | null;
+    /** Carries metadata.original_file_name, which dates a periodic file. */
     metadata?: any;
 }
 
@@ -55,11 +55,11 @@ interface DocumentUploadStatusProps {
     approvals: Set<string>;
     expanded_categories: Set<string>;
     completion_percentage: number;
-    /** Accounts on the active business. Statements group under these; every
-     *  other category ignores them. Empty is fine — everything then renders in
-     *  a single "Unassigned" group, which is what a file looks like before
+    /** Every group on the file, across all fields — each category slices out
+     *  its own with groupsForDocCode. Empty is fine: everything then renders in
+     *  a single "Ungrouped" section, which is what a file looks like before
      *  anyone has sorted it. */
-    bank_accounts?: BankAccount[];
+    document_groups?: DocumentGroup[];
     /** Non-null while a bulk ZIP is being built — disables every Download All
      *  and shows progress, so a 155-file archive isn't 30 silent seconds. */
     zipping?: { completed: number; total: number } | null;
@@ -122,7 +122,7 @@ function DocumentFileRow({
                         {/* Statement month, when the bank's own filename gave it
                             up. A hint only — most rows won't have one. */}
                         {(() => {
-                            const period = getDocumentStatementPeriod(doc);
+                            const period = getDocumentPeriod(doc);
                             return period ? (
                                 <span className="shrink-0 rounded bg-indigo-50 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-indigo-500">
                                     {period.label}
@@ -176,7 +176,7 @@ function DocCategoryRow({
     doc_type,
     documents,
     approvals,
-    bank_accounts,
+    document_groups,
     zipping,
     is_expanded,
     is_requesting_again,
@@ -195,7 +195,7 @@ function DocCategoryRow({
     doc_type: { code: string; label: string };
     documents: UserDocument[];
     approvals: Set<string>;
-    bank_accounts: BankAccount[];
+    document_groups: DocumentGroup[];
     zipping: { completed: number; total: number } | null;
     is_expanded: boolean;
     is_requesting_again: boolean;
@@ -215,8 +215,13 @@ function DocCategoryRow({
     const has_docs = category_docs.length > 0;
     const is_approved = approvals.has(doc_type.code);
     const is_bank_statements = doc_type.code === BANK_STATEMENTS_DOC_CODE;
-    // Statements render one section per bank account instead of a flat list.
-    const is_statement_category = isAccountScopedDoc(doc_type.code);
+    // This field's own groups — the accounts for statements, the years for tax
+    // returns, the people for licences.
+    const field_groups = groupsForDocCode(document_groups, doc_type.code);
+    // Section the list only once groups actually exist. A field nobody has
+    // organised keeps the flat list it has always had, rather than gaining a
+    // single "Ungrouped" wrapper that adds a box and says nothing.
+    const is_grouped_category = field_groups.length > 0;
     // Local month picker for re-requesting bank statements (advisor may need a
     // different period than the original request).
     const [again_months, set_again_months] = useState(12);
@@ -396,17 +401,17 @@ function DocCategoryRow({
                         </div>
                     )}
 
-                    {/* Statements group by account; every other category keeps
-                        the flat list. Grouping is read-only here — sorting the
-                        backlog of already-uploaded files is done from the
-                        underwriting view, which has the bulk assign. */}
-                    {is_statement_category
-                        ? groupDocumentsByBankAccount(category_docs, bank_accounts).map((group) => (
+                    {/* An organised field renders one section per group; every
+                        other keeps the flat list. Grouping is read-only here —
+                        sorting the backlog of already-uploaded files is done
+                        from the underwriting view, which has the bulk assign. */}
+                    {is_grouped_category
+                        ? groupDocuments(category_docs, field_groups).map((group) => (
                             <div
                                 key={group.key}
                                 className={clsx(
                                     "rounded-xl border overflow-hidden",
-                                    group.key === UNASSIGNED_ACCOUNT_KEY
+                                    group.key === UNGROUPED_KEY
                                         ? "border-dashed border-slate-200 bg-slate-50/60"
                                         : "border-slate-100"
                                 )}
@@ -471,7 +476,7 @@ export function DocumentUploadStatus({
     approvals,
     expanded_categories,
     completion_percentage,
-    bank_accounts = [],
+    document_groups = [],
     zipping = null,
     requesting_again_code,
     on_toggle_expand,
@@ -564,7 +569,7 @@ export function DocumentUploadStatus({
                         doc_type={doc_type}
                         documents={documents}
                         approvals={approvals}
-                        bank_accounts={bank_accounts}
+                        document_groups={document_groups}
                         zipping={zipping}
                         is_expanded={expanded_categories.has(doc_type.code)}
                         is_requesting_again={requesting_again_code === doc_type.code}

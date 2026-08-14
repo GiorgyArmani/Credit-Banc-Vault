@@ -238,18 +238,7 @@ export function AffiliateLeadForm({
           />
         </motion.div>
 
-        <p className="mt-8 text-center text-sm text-cb-ink/50">
-          Calendar not loading? Book directly at{" "}
-          <a
-            href={BOOK_PAGE_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="font-semibold text-cb-mint underline underline-offset-4 decoration-cb-mint/40 hover:decoration-cb-mint transition-colors"
-          >
-            creditbanc.io/book-with-creditbanc
-          </a>
-          .
-        </p>
+        
 
         {/* GHL resize script — auto-fits the booking iframe height. afterInteractive
             so the resize listener attaches before the iframe posts its height. */}

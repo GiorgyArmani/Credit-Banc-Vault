@@ -14,7 +14,7 @@
  *   {
  *     client_id,
  *     doc_code,
- *     bank_account_id?,   // bank statements only — see STEP 3b
+ *     document_group_id?, // optional filing group for this field — see STEP 3b
  *     files: [{ storage_path, file_name, file_size, file_type }]
  *   }
  *
@@ -34,11 +34,10 @@ import { createClient as createAdminClient } from '@supabase/supabase-js';
 import { ghlAddTags } from '@/lib/ghl-api';
 import { isCarryOverDoc, isClientScopedDoc } from '@/lib/document-scope';
 import {
-    buildStatementDisplayLabel,
-    isAccountScopedDoc,
-    parseStatementPeriod,
-    type BankAccount,
-} from '@/lib/bank-accounts';
+    buildGroupedDisplayLabel,
+    parseDocumentPeriod,
+    type DocumentGroup,
+} from '@/lib/document-groups';
 import { getActiveDeal } from '@/lib/funding-deals';
 
 export const maxDuration = 60;
@@ -75,8 +74,8 @@ export async function POST(request: Request) {
         const client_id: string | undefined = body?.client_id;
         const doc_code: string | undefined = body?.doc_code;
         const business_profile_id: string | null = body?.business_profile_id ?? null;
-        // Optional. Only meaningful for bank statements; validated in STEP 3b.
-        const requested_bank_account_id: string | null = body?.bank_account_id ?? null;
+        // Optional filing group for this field; validated in STEP 3b.
+        const requested_document_group_id: string | null = body?.document_group_id ?? null;
         const files: UploadedFileMeta[] = Array.isArray(body?.files) ? body.files : [];
 
         if (!client_id || !doc_code || files.length === 0) {
@@ -181,33 +180,42 @@ export async function POST(request: Request) {
         }
 
         // ========================================================================
-        // STEP 3b: RESOLVE THE BANK ACCOUNT (bank statements only)
+        // STEP 3b: RESOLVE THE FILING GROUP
         // ========================================================================
-        // The account the uploader picked, so a 12-month × 4-account packet
-        // arrives already sorted instead of landing in one flat pile that
-        // underwriting has to untangle later. See [[bank_statement_accounts]].
+        // The group the uploader picked — the bank account for statements, the
+        // year for tax returns, the person for licences — so a 12-month ×
+        // 4-account packet (or a five-year run of returns) arrives already
+        // sorted instead of landing in one flat pile that underwriting has to
+        // untangle later. See [[bank_statement_accounts]] for the original case.
         //
-        // Two guards, both silently downgrade to "unassigned" rather than
-        // failing the upload — a mis-picked account must never cost the user a
+        // Two guards, both silently downgrade to "ungrouped" rather than
+        // failing the upload — a mis-picked group must never cost the user a
         // file they already pushed to storage:
-        //   * the code has to be one that carries an account at all, and
-        //   * the account has to belong to the SAME business this upload is
-        //     being scoped to. Otherwise the file would group under an account
-        //     its own business tab cannot see, and disappear from both.
-        let bank_account: BankAccount | null = null;
-        if (requested_bank_account_id && isAccountScopedDoc(doc_code)) {
-            const { data: account_row } = await supabase_admin
-                .from('bank_accounts')
-                .select('id, business_profile_id, bank_name, account_last4, account_type, nickname, is_active')
-                .eq('id', requested_bank_account_id)
+        //   * the group has to belong to the FIELD being uploaded to, and
+        //   * it has to belong to the SAME business this upload is scoped to.
+        //     Otherwise the file would sit in a section its own business tab
+        //     cannot see, and disappear from both. Client-scoped groups
+        //     (business_profile_id NULL, for DL / PFS / MyScoreIQ) are exempt
+        //     from the business check — they deliberately span every tab.
+        let document_group: DocumentGroup | null = null;
+        if (requested_document_group_id) {
+            const { data: group_row } = await supabase_admin
+                .from('document_groups')
+                .select('id, client_vault_id, business_profile_id, doc_code, name, identifier, subtype, nickname, is_active')
+                .eq('id', requested_document_group_id)
                 .maybeSingle();
 
-            if (account_row && account_row.business_profile_id === resolved_business_profile_id) {
-                bank_account = account_row as BankAccount;
+            const wrong_field = group_row && group_row.doc_code !== doc_code;
+            const wrong_business =
+                group_row?.business_profile_id &&
+                group_row.business_profile_id !== resolved_business_profile_id;
+
+            if (group_row && !wrong_field && !wrong_business) {
+                document_group = group_row as DocumentGroup;
             } else {
                 console.warn(
-                    `⚠️ Ignoring bank_account_id ${requested_bank_account_id}: ` +
-                    `${account_row ? 'belongs to a different business' : 'not found'}`
+                    `⚠️ Ignoring document_group_id ${requested_document_group_id}: ` +
+                    `${!group_row ? 'not found' : wrong_field ? 'belongs to a different field' : 'belongs to a different business'}`
                 );
             }
         }
@@ -240,16 +248,16 @@ export async function POST(request: Request) {
 
             const ext = (f.file_name.split('.').pop() || 'bin').toLowerCase();
 
-            // Per FILE, not per batch. Without an account every statement in a
-            // category gets the identical `${doc_label} - ${client_name}`, which
-            // is why a 124-file download collides on name; with one, the label
-            // carries the account and (when the bank's own filename gives it up)
-            // the statement month.
-            const standardized_name = buildStatementDisplayLabel({
+            // Per FILE, not per batch. Without a group every file in a category
+            // gets the identical `${doc_label} - ${client_name}`, which is why a
+            // 124-file download collides on name; with one, the label carries
+            // the group and (when the original filename gives it up) the period
+            // the file covers.
+            const standardized_name = buildGroupedDisplayLabel({
                 doc_label,
                 client_name: client.client_name,
-                account: bank_account,
-                period: bank_account ? parseStatementPeriod(f.file_name) : null,
+                group: document_group,
+                period: document_group ? parseDocumentPeriod(f.file_name) : null,
             });
 
             const { data: doc_record, error: db_error } = await supabase_admin
@@ -266,15 +274,15 @@ export async function POST(request: Request) {
                     uploaded_by_role: 'advisor',
                     business_profile_id: resolved_business_profile_id,
                     funding_deal_id: resolved_funding_deal_id,
-                    bank_account_id: bank_account?.id ?? null,
+                    document_group_id: document_group?.id ?? null,
                     metadata: {
                         tags: [doc_code],
                         uploaded_by: 'advisor',
                         advisor_id: advisor_data?.id ?? null,
-                        // The name the bank gave the file. `name` above is the
+                        // The name the source gave the file. `name` above is the
                         // standardized label, so without this the original is
-                        // lost — and with it the only clue to which month a
-                        // statement covers. Retrofitting is impossible, which is
+                        // lost — and with it the only clue to which period a
+                        // file covers. Retrofitting is impossible, which is
                         // why every existing row can never be dated.
                         original_file_name: f.file_name,
                     },

@@ -204,9 +204,11 @@ async function load_metrics(
       .from('user_documents')
       .select('user_id, upload_date'),
 
-    // "Ready to send to lender UW" queue — matched by the algorithm, approved
-    // by an admin, and not yet submitted to the lender. We pull client_id so
-    // we can count DISTINCT files (one file with 3 ready lenders = 1 review).
+    // "Awaiting submission" queue — cleared for outreach and not yet pushed to
+    // the lender. admin_review='approved' is now the state every new assignment
+    // is BORN in, so this counts work UW still has to do rather than anything
+    // an admin must action. We pull client_id so we can count DISTINCT files
+    // (one file with 3 cleared lenders = 1 entry).
     supabase_admin
       .from('client_lender_assignments')
       .select('client_id')
@@ -645,12 +647,18 @@ export default async function AdminDashboardPage({ searchParams }: PageProps) {
           tone="emerald"
           hint={`Activity in last ${ACTIVITY_WINDOW_DAYS} days`}
         />
+        {/* Counts files with lenders cleared and not yet pushed out. It never
+            was a review queue — the query has always filtered on
+            admin_review='approved' — and now that nothing waits on an admin
+            review, the old "Pending lender reviews" label described a state
+            that cannot exist. Slate, not amber: this is UW's queue to work, not
+            an admin alarm. */}
         <MetricTile
-          label="Pending lender reviews"
+          label="Awaiting submission"
           value={String(m.pending_lender_reviews)}
           icon={Star}
-          tone={m.pending_lender_reviews > 0 ? 'amber' : 'slate'}
-          hint={m.pending_lender_reviews > 0 ? 'Ready to send to lender UW' : 'All caught up'}
+          tone="slate"
+          hint={m.pending_lender_reviews > 0 ? 'Lenders cleared, not yet sent out' : 'All caught up'}
         />
         <MetricTile
           label="Pipeline $"
