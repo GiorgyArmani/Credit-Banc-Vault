@@ -2470,27 +2470,55 @@ export interface AffiliatePayoutNotificationData {
   reward_amount: string; // pre-formatted, e.g. "$500"
   login_url: string;
   /**
-   * Who funded — the referred company, falling back to the contact's name.
-   * Optional because the copy has to still read correctly for a payout whose
-   * vault row we could not resolve; see referral_label() for the fallback.
+   * Who funded — the CONTACT at the referred business ("Dana Whitfield"), not
+   * the affiliate receiving this email. Optional because the copy has to still
+   * read correctly for a payout whose vault row we could not resolve; see
+   * referral_label() for the fallbacks.
    */
   referral_name?: string | null;
+  /** The referred business itself ("Ridgeline Coffee Roasters"). */
+  referral_company?: string | null;
 }
 
 /**
- * Subject of the "X officially funded" sentence. A blank/unknown referral must
- * never render as an empty gap or a literal "null", so it degrades to a phrase
- * that still scans as English.
+ * Greedy wrap for a plain-text line whose width depends on data. 78 cols is the
+ * conventional ceiling for text/plain. A single word longer than the limit is
+ * left over-long rather than broken mid-token — a URL or address split across
+ * two lines stops being clickable.
  */
-function referral_label(name?: string | null): string {
-  const clean = (name ?? "").trim();
-  return clean || "Your referral";
+function wrap_plain_text(text: string, width = 78): string {
+  const lines: string[] = [];
+  let line = "";
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    if (!line) line = word;
+    else if (line.length + 1 + word.length <= width) line += ` ${word}`;
+    else {
+      lines.push(line);
+      line = word;
+    }
+  }
+  if (line) lines.push(line);
+  return lines.join("\n");
+}
+
+/**
+ * Subject of the "X officially funded" sentence: "Dana Whitfield from Ridgeline
+ * Coffee Roasters". Either half can be missing — a vault row carries whichever
+ * of client_name / company_name was captured — and a blank/unknown referral must
+ * never render as an empty gap, a dangling "from", or a literal "null". Every
+ * branch below still scans as English.
+ */
+function referral_label(name?: string | null, company?: string | null): string {
+  const person = (name ?? "").trim();
+  const business = (company ?? "").trim();
+  if (person && business) return `${person} from ${business}`;
+  return person || business || "Your referral";
 }
 
 export function generate_affiliate_payout_notification_html(data: AffiliatePayoutNotificationData): string {
   data = escape_email_strings(data);
   const { affiliate_name, reward_amount, login_url } = data;
-  const referral = referral_label(data.referral_name);
+  const referral = referral_label(data.referral_name, data.referral_company);
 
   return `
 <!DOCTYPE html>
@@ -2595,15 +2623,21 @@ export function generate_affiliate_payout_notification_html(data: AffiliatePayou
 // Escaping the plain-text body surfaced literal "&amp;" / "&#39;" to any
 // affiliate whose name contains & or an apostrophe.
 export function generate_affiliate_payout_notification_text(data: AffiliatePayoutNotificationData): string {
-  const referral = referral_label(data.referral_name);
+  const referral = referral_label(data.referral_name, data.referral_company);
   return [
     `Hi ${data.affiliate_name},`,
     ``,
     `Pop the champagne. Pour something expensive. Or just take a victory lap`,
     `around the kitchen.`,
     ``,
-    `${referral} officially funded through Credit Banc, which means another small`,
-    `business got the help it needed thanks to you.`,
+    // Wrapped at runtime, unlike the hand-wrapped copy around it: `referral`
+    // carries a name AND a company now, so where this sentence needs to break
+    // depends on data ("Dana Whitfield from Ridgeline Coffee Roasters" alone is
+    // 46 chars). A fixed break put the first line ~100 cols wide.
+    wrap_plain_text(
+      `${referral} officially funded through Credit Banc, which means another ` +
+        `small business got the help it needed thanks to you.`
+    ),
     ``,
     `It also means you've earned a ${data.reward_amount} gift card. Keep an eye out for an email`,
     `from Giftronaut within the next three business days so you can choose your`,

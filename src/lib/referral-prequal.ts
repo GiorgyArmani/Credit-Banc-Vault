@@ -39,14 +39,47 @@ export interface PrequalAnswers {
   time_in_business: string;
 }
 
+/** Which rule rejected the lead. Machine-readable counterpart to `reason`. */
+export type DisqualifyCode = "fico" | "revenue" | "tib";
+
+/**
+ * GHL tag per disqualification reason. These route the rejected applicant into
+ * a reason-specific GHL workflow, so the strings must match the workflow trigger
+ * filters EXACTLY — spaces around the hyphen included. Changing one here without
+ * changing it in GHL silently strands those contacts in no workflow at all.
+ *
+ * Exactly one is ever applied. evaluatePrequal returns on its first failing
+ * rule, so a lead who fails FICO and revenue is tagged `disqualified - fico`
+ * only — one tag means one workflow, not three overlapping nurture sequences.
+ * The full answer set is still on the affiliate_leads row for reporting.
+ */
+export const DISQUALIFY_TAGS: Record<DisqualifyCode, string> = {
+  fico: "disqualified - fico",
+  revenue: "disqualified - revenue",
+  tib: "disqualified - tib",
+};
+
 /**
  * Disqualify rules (from the GHL form): FICO below 600, monthly revenue below
  * $25,000, or less than 6 months in business. Anyone else qualifies.
+ *
+ * Rule ORDER is load-bearing, not cosmetic: it decides which single tag a
+ * multi-failure lead gets. FICO first, then revenue, then time in business.
+ *
+ * `reason` is the human string stored on affiliate_leads.disqualified_reason —
+ * left exactly as it was so historical rows keep matching new ones. `code` is
+ * the same verdict in a form worth switching on.
  */
-export function evaluatePrequal(a: PrequalAnswers): { qualified: boolean; reason: string | null } {
-  if (a.fico_band === "Below 600") return { qualified: false, reason: "FICO below 600" };
-  if (a.monthly_revenue === "Below $25,000") return { qualified: false, reason: "Monthly revenue below $25,000" };
+export function evaluatePrequal(a: PrequalAnswers): {
+  qualified: boolean;
+  reason: string | null;
+  code: DisqualifyCode | null;
+} {
+  if (a.fico_band === "Below 600")
+    return { qualified: false, reason: "FICO below 600", code: "fico" };
+  if (a.monthly_revenue === "Below $25,000")
+    return { qualified: false, reason: "Monthly revenue below $25,000", code: "revenue" };
   if (a.time_in_business === "Less than 6 months")
-    return { qualified: false, reason: "Less than 6 months in business" };
-  return { qualified: true, reason: null };
+    return { qualified: false, reason: "Less than 6 months in business", code: "tib" };
+  return { qualified: true, reason: null, code: null };
 }

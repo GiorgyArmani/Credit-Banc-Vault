@@ -92,11 +92,17 @@ export async function POST(request: Request) {
       "id, affiliate_id, first_name, last_name, email, booked_at, status";
     let lead: any = null;
 
+    // Disqualified leads are excluded from both lookups. They now DO carry a
+    // ghl_contact_id (submit tags them `disqualified - *` so a GHL workflow can
+    // work the rejection), which means a workflow that puts one on a calendar
+    // would otherwise stamp booked_at and email the affiliate "your referral
+    // booked a call" about somebody we already turned down.
     if (contactId) {
       const { data } = await db
         .from("affiliate_leads")
         .select(columns)
         .eq("ghl_contact_id", contactId)
+        .neq("status", "disqualified")
         .maybeSingle();
       lead = data ?? null;
     }
@@ -105,6 +111,7 @@ export async function POST(request: Request) {
         .from("affiliate_leads")
         .select(columns)
         .eq("email", email)
+        .neq("status", "disqualified")
         .maybeSingle();
       lead = data ?? null;
     }

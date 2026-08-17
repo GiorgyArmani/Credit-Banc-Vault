@@ -456,8 +456,10 @@ export async function processAffiliatePayout(
     }
 
     // --- Re-verify the deal, 24h on. ---------------------------------------
-    // company_name/client_name ride along for the payout email, which names the
-    // business that funded ("Acme Coffee officially funded through Credit Banc").
+    // company_name/client_name ride along for the payout email, which names who
+    // funded ("Dana Whitfield from Acme Coffee officially funded through Credit
+    // Banc"). Both are passed separately — the email composes the phrase and
+    // degrades on its own when either half is missing.
     const { data: vault } = await db
       .from("client_data_vault")
       .select("id, affiliate_lead_id, user_id, client_email, company_name, client_name")
@@ -638,7 +640,8 @@ export async function processAffiliatePayout(
         recipientEmail,
         clientVaultId: payout.client_vault_id,
         commission,
-        referralName: vault.company_name || vault.client_name || null,
+        referralName: vault.client_name || null,
+        referralCompany: vault.company_name || null,
       });
 
       return { outcome: "sent", orderId: result.orderId };
@@ -735,11 +738,14 @@ async function notifyAffiliateOfReward(
     recipientEmail: string;
     clientVaultId: string | null;
     commission: number;
-    /** Referred business (or contact) name, for the "X officially funded" line. */
+    /** Contact at the referred business, for the "X officially funded" line. */
     referralName?: string | null;
+    /** The referred business itself, for the same line. */
+    referralCompany?: string | null;
   }
 ): Promise<void> {
-  const { affiliate, recipientEmail, clientVaultId, commission, referralName } = args;
+  const { affiliate, recipientEmail, clientVaultId, commission, referralName, referralCompany } =
+    args;
   const rewardStr = commission.toLocaleString("en-US", {
     style: "currency",
     currency: "USD",
@@ -768,6 +774,7 @@ async function notifyAffiliateOfReward(
       reward_amount: rewardStr,
       login_url: `${appUrl}/affiliate/dashboard`,
       referral_name: referralName ?? null,
+      referral_company: referralCompany ?? null,
     });
   } catch (emailErr) {
     console.error("[affiliates] payout email failed (non-fatal):", emailErr);

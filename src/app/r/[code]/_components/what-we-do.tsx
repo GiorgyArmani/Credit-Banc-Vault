@@ -11,6 +11,7 @@ import Image from "next/image";
 import { ArrowRight } from "lucide-react";
 import { CTA, Eyebrow } from "@/components/marketing/brand-chrome";
 import { Reveal } from "@/components/ui/reveal";
+import { cn } from "@/lib/utils";
 import { BAND_MIN_H_LG } from "./band";
 
 // Runs vertically, opposite to the metrics strip's 120deg, so the two greens
@@ -83,9 +84,14 @@ export function WhatWeDo() {
               CTA halfway down reads as two different offers. A plain anchor,
               so this section stays a server component. */}
           <div className="mt-10 flex flex-col items-start gap-3">
-            <a href="#prequal" className={`${CTA.primary} text-base`}>
+            {/* Sized to match the hero's button for the same reason the label
+                matches — see ReferralHero for why it is bigger than the token. */}
+            <a
+              href="#prequal"
+              className={cn(CTA.primary, "gap-3 px-10 py-5 text-lg sm:px-12 sm:py-6 sm:text-xl")}
+            >
               Let&rsquo;s Do This
-              <ArrowRight className="h-5 w-5" />
+              <ArrowRight className="h-6 w-6 sm:h-7 sm:w-7" />
             </a>
             <p className="text-sm font-semibold text-cb-ink/50">
               Takes just a few minutes. No impact on your credit score.

@@ -26,6 +26,11 @@ const STATUS_META: Record<string, { label: string; cls: string }> = {
   disqualified: { label: "Not a fit", cls: "bg-cb-gray/10 text-cb-gray" },
 };
 
+// Not a `status` value — booking is tracked on affiliate_leads.booked_at,
+// stamped by POST /api/webhooks/ghl-appointment when GHL reports the
+// appointment. See [[affiliate_lead_qualified_is_not_booked]].
+const BOOKED_META = { label: "Booked", cls: "bg-emerald-50 text-emerald-600" };
+
 // Payout status → affiliate-facing label (`failed` shown as the softer
 // "Processing" so partners never see a raw failure) + pill colors.
 // The affiliate never needs to see our internal review machinery — a queued,
@@ -82,18 +87,53 @@ export default async function AffiliateDashboardPage() {
     );
   }
 
-  const [{ data: leads }, { data: payouts }] = await Promise.all([
+  // booked_at is selected separately from the rest of the row because it arrives
+  // with migration 20260814_affiliate_lead_booked_at, which trails the code to
+  // production. A single select naming a column the database doesn't have yet
+  // fails the WHOLE query — the affiliate would see "No referrals yet" rather
+  // than a missing pill. So: ask for it, and fall back to the pre-migration
+  // shape if it isn't there. Delete the fallback once the migration is applied
+  // everywhere. See [[refactor_alongside_production]].
+  // The column list is built at runtime, so name the shape we rely on —
+  // a dynamic select string erases supabase-js's inferred row type.
+  type LeadRow = {
+    id: string;
+    first_name: string | null;
+    last_name: string | null;
+    business_name: string | null;
+    status: string;
+    created_at: string;
+    /** Absent until migration 20260814 is applied. */
+    booked_at?: string | null;
+  };
+
+  const leadColumns = "id, first_name, last_name, business_name, status, created_at";
+  const selectLeads = (columns: string) =>
     db
       .from("affiliate_leads")
-      .select("id, first_name, last_name, business_name, status, created_at")
+      .select(columns)
       .eq("affiliate_id", affiliate.id)
-      .order("created_at", { ascending: false }),
+      .order("created_at", { ascending: false });
+
+  const [leadsResult, { data: payouts }] = await Promise.all([
+    (async (): Promise<LeadRow[]> => {
+      const withBooked = await selectLeads(`${leadColumns}, booked_at`);
+      if (!withBooked.error) return (withBooked.data ?? []) as unknown as LeadRow[];
+      console.warn(
+        "[affiliate/dashboard] booked_at unavailable — falling back (apply migration 20260814_affiliate_lead_booked_at):",
+        withBooked.error.message
+      );
+      const { data } = await selectLeads(leadColumns);
+      return (data ?? []) as unknown as LeadRow[];
+    })(),
     db
       .from("affiliate_payouts")
       .select("id, commission_amount, status, created_at")
       .eq("affiliate_id", affiliate.id)
       .order("created_at", { ascending: false }),
   ]);
+  const leads = leadsResult;
+
 
   const leadRows = leads ?? [];
   const payoutRows = payouts ?? [];
@@ -120,8 +160,24 @@ export default async function AffiliateDashboardPage() {
     { icon: Clock, label: "Pending", value: fmtMoney(pending), accent: false },
   ];
 
+  // first_name is nullable, and "Welcome," with nothing after it reads as a bug.
+  const greetingName = (affiliate.first_name ?? "").trim();
+
   return (
     <div id="overview" className="max-w-6xl mx-auto px-4 py-10 md:py-14">
+      <header className="mb-8 md:mb-10">
+        <p className="text-xs font-bold uppercase tracking-[0.2em] text-cb-gray">Affiliate program</p>
+        <h1 className="font-manrope text-4xl md:text-5xl font-extrabold tracking-tight text-cb-ink mt-2">
+          {greetingName ? (
+            <>
+              Welcome, <span className="text-cb-mint">{greetingName}</span>
+            </>
+          ) : (
+            "Welcome back"
+          )}
+        </h1>
+      </header>
+
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-8 items-start">
       {/* main column */}
       <div className="order-2 lg:order-1 space-y-8">
@@ -181,7 +237,14 @@ export default async function AffiliateDashboardPage() {
               </thead>
               <tbody>
                 {leadRows.map((l) => {
-                  const meta = STATUS_META[l.status] ?? { label: l.status, cls: "bg-cb-gray/10 text-cb-gray" };
+                  // A lead who actually booked a call is further along than one
+                  // who merely passed the pre-qual and closed the tab at the
+                  // calendar — and "Qualified" reads as the same thing for both.
+                  // `converted` outranks it: they already have a vault.
+                  const meta =
+                    l.booked_at && l.status !== "converted"
+                      ? BOOKED_META
+                      : STATUS_META[l.status] ?? { label: l.status, cls: "bg-cb-gray/10 text-cb-gray" };
                   return (
                     <tr key={l.id} className="border-t border-black/5 hover:bg-cb-cream/40 transition-colors">
                       <td className="px-6 py-4">

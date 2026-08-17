@@ -13,6 +13,7 @@ import Image from "next/image";
 import { motion } from "framer-motion";
 import { ArrowRight } from "lucide-react";
 import { CTA } from "@/components/marketing/brand-chrome";
+import { cn } from "@/lib/utils";
 import { MetricsRow } from "./metrics-row";
 import { BAND_MIN_H } from "./band";
 
@@ -124,9 +125,17 @@ export function ReferralHero({
               variants={item}
               className="mt-8 flex flex-col items-start gap-3"
             >
-              <a href="#prequal" className={`${CTA.primary} text-base`}>
+              {/* Deliberately larger than CTA.primary's default 8/4 padding:
+                  this is the one action the whole band exists to drive, and at
+                  the base size it read as a footnote under a 96px headline.
+                  cn() rather than string concat so tailwind-merge drops the
+                  token's px-8/py-4 instead of leaving both to CSS order. */}
+              <a
+                href="#prequal"
+                className={cn(CTA.primary, "gap-3 px-10 py-5 text-lg sm:px-12 sm:py-6 sm:text-xl")}
+              >
                 Let&rsquo;s Do This
-                <ArrowRight className="h-5 w-5" />
+                <ArrowRight className="h-6 w-6 sm:h-7 sm:w-7" />
               </a>
               <p className="text-sm font-semibold text-on-secondary-fixed/60">
                 Takes just a few minutes. No impact on your credit score.

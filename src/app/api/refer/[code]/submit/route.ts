@@ -7,13 +7,16 @@
 //   3. for QUALIFIED leads: upsert the contact into GHL WITHOUT assignedTo (the
 //      GHL round-robin calendar assigns the owner when they book) + store an
 //      `affiliate_leads` row recording the affiliate + the answers,
-//   4. for DISQUALIFIED leads: store the row (status=disqualified) with no GHL
-//      push; the client redirects them to the thanks-for-applying page.
+//   4. for DISQUALIFIED leads: upsert the contact into GHL and tag it with the
+//      ONE reason that rejected them (`disqualified - fico` / `- revenue` /
+//      `- tib`, see DISQUALIFY_TAGS) so a reason-specific GHL workflow can pick
+//      them up, + store the row (status=disqualified); the client redirects
+//      them to the thanks-for-applying page.
 // See [[ghl_integration_contract]], [[role_model]], [[affiliate_program]].
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { ghlUpsertContact, ghlResolveFieldId } from "@/lib/ghl-api";
-import { evaluatePrequal } from "@/lib/referral-prequal";
+import { ghlUpsertContact, ghlResolveFieldId, ghlAddTags } from "@/lib/ghl-api";
+import { evaluatePrequal, DISQUALIFY_TAGS } from "@/lib/referral-prequal";
 import { formatPhoneUS, isValidUsPhone, toE164 } from "@/lib/phone";
 
 export const runtime = "nodejs";
@@ -84,7 +87,7 @@ export async function POST(
     }
 
     // 2. Evaluate qualification server-side (source of truth).
-    const { qualified, reason } = evaluatePrequal({
+    const { qualified, reason, code: disqualifyCode } = evaluatePrequal({
       loan_amount: loanAmount,
       fico_band: ficoBand,
       monthly_revenue: monthlyRevenue,
@@ -108,6 +111,54 @@ export async function POST(
     // Disqualified → store (unless dup) and tell the client to redirect out.
     if (!qualified) {
       if (!isDuplicate) {
+        // Push to GHL so the rejection can be worked. This used to be a
+        // no-GHL path entirely: the reason tag IS the routing signal, and a tag
+        // needs a contact to sit on, so the contact has to exist first.
+        //
+        // Deliberately inside the !isDuplicate guard. A duplicate email belongs
+        // to an existing lead or an EXISTING CLIENT, and tagging their contact
+        // `disqualified - *` would drop a live client into a rejection
+        // workflow. Skipping them is the whole point of the guard.
+        let ghlContactId: string | null = null;
+        if (disqualifyCode) {
+          try {
+            const locationId = process.env.GHL_LOCATION_ID;
+            if (locationId) {
+              ghlContactId = await ghlUpsertContact({
+                firstName,
+                lastName: lastName || null,
+                name: fullName,
+                email,
+                phone: phoneE164,
+                companyName: businessName || null,
+                country: "US",
+                locationId,
+                // No tags on the upsert body, and no affiliate attribution
+                // field: the qualified path stamps those to say "this affiliate
+                // is owed $500 when this funds", which is exactly what a
+                // rejected applicant is not.
+              });
+              // Tagged in a SEPARATE call on purpose. `tags` on the upsert body
+              // is part of a whole-contact write and can clobber tags a contact
+              // already carries; POST /contacts/{id}/tags is additive.
+              if (ghlContactId) {
+                await ghlAddTags(ghlContactId, [DISQUALIFY_TAGS[disqualifyCode]]);
+              }
+            } else {
+              console.warn(
+                "[refer/submit] Missing GHL_LOCATION_ID — disqualified lead stored without a GHL contact or tag"
+              );
+            }
+          } catch (ghlErr) {
+            // Never lose the lead over a GHL hiccup — same contract as the
+            // qualified path. The row below still records the rejection.
+            console.error(
+              "[refer/submit] GHL disqualify push failed (lead stored anyway):",
+              ghlErr
+            );
+          }
+        }
+
         await db.from("affiliate_leads").insert({
           affiliate_id: affiliate.id,
           first_name: firstName,
@@ -118,6 +169,7 @@ export async function POST(
           status: "disqualified",
           qualified: false,
           disqualified_reason: reason,
+          ghl_contact_id: ghlContactId,
           source: "referral_link",
           ...answerCols,
         });
