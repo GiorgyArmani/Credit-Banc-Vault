@@ -22,6 +22,22 @@ import { ghlUpdateContact, ghlAddTags } from "@/lib/ghl-api";
 // survive a few milliseconds.
 const MAGIC_LINK_TTL_DAYS = Number(process.env.MAGIC_LINK_TTL_DAYS || 30);
 
+/**
+ * Affiliate dashboard links are re-stamped weekly by
+ * /api/cron/refresh-affiliate-links, so they get a TTL scoped to that cycle
+ * rather than the 30 days a client's one-shot onboarding link needs. Short TTL
+ * is the whole point: the value sits in a CRM field, so it should stop working
+ * about as fast as the cron replaces it.
+ *
+ * 8 and not 7: the cron runs weekly at a fixed hour, and a token minted to
+ * expire exactly one week later would race its own replacement — any delay in
+ * the run leaves the field holding an already-dead link. The extra day is the
+ * margin for one late run, not for a missed one. A MISSED run does break the
+ * links until the following week; that is the accepted cost of not leaving a
+ * long-lived one-click login lying around.
+ */
+const AFFILIATE_MAGIC_LINK_TTL_DAYS = Number(process.env.AFFILIATE_MAGIC_LINK_TTL_DAYS || 8);
+
 function signingSecret(): string {
   const secret = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!secret) throw new Error("SUPABASE_SERVICE_ROLE_KEY missing — cannot sign magic-link tokens");
@@ -41,10 +57,10 @@ function hmac(payload: string): string {
  * epoch-seconds}) + "." + HMAC-SHA256 signature. Stateless = no DB row and no
  * migration; verification is pure crypto in /auth/magic.
  */
-export function signMagicToken(email: string): string {
+export function signMagicToken(email: string, ttlDays: number = MAGIC_LINK_TTL_DAYS): string {
   const payload = b64url(Buffer.from(JSON.stringify({
     e: email.toLowerCase(),
-    x: Math.floor(Date.now() / 1000) + MAGIC_LINK_TTL_DAYS * 86400,
+    x: Math.floor(Date.now() / 1000) + ttlDays * 86400,
   })));
   return `${payload}.${hmac(payload)}`;
 }
@@ -145,11 +161,12 @@ export async function generatePartnerPortalMagicLink(email: string): Promise<str
  *
  * Written to the "[Data Vault] Affiliate Dashboard Link" custom field so GHL
  * reminder and re-activation emails merge a one-click entry instead of a login
- * form. It carries the SAME 30-day TTL as every other link here — deliberately.
- * The field is kept usable by /api/cron/refresh-affiliate-links re-stamping it
- * weekly, not by handing out a long-lived credential. GHL merges the field at
- * SEND time, so a fresh field is all a months-later campaign needs; a link in an
- * already-delivered email going stale is fine, and is the point.
+ * form. It carries a deliberately SHORT TTL (AFFILIATE_MAGIC_LINK_TTL_DAYS, one
+ * week + a day) and is kept usable by /api/cron/refresh-affiliate-links
+ * re-stamping it weekly, rather than by handing out a long-lived credential.
+ * GHL merges the field at SEND time, so a weekly-fresh field is all a
+ * months-later campaign needs; a link in an already-delivered email going stale
+ * is fine, and is the point.
  *
  * Affiliates DO set a password at signup, so this is convenience rather than
  * the only way in (which is what it is for clients and partners).
@@ -157,7 +174,7 @@ export async function generatePartnerPortalMagicLink(email: string): Promise<str
 export async function generateAffiliateDashboardMagicLink(email: string): Promise<string | null> {
   try {
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://vault.creditbanc.io";
-    const token = signMagicToken(email);
+    const token = signMagicToken(email, AFFILIATE_MAGIC_LINK_TTL_DAYS);
     const next = encodeURIComponent("/affiliate/dashboard");
     return `${appUrl}/auth/magic?token=${token}&next=${next}`;
   } catch (err) {

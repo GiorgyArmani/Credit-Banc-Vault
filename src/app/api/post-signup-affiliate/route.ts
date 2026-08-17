@@ -202,11 +202,11 @@ export async function POST(req: NextRequest) {
     //         emails can merge them ({{contact.data_vault_personal_affiliate_link}}
     //         and {{contact.data_vault_affiliate_dashboard_link}}) instead of the
     //         CRM having to reconstruct URLs it doesn't own. Both are per-affiliate
-    //         and the dashboard one is a signed magic link on the standard 30-day
-    //         TTL, so this stamp goes stale by design. /api/cron/refresh-affiliate-links
-    //         re-stamps both weekly; without that cron running, the field silently
-    //         becomes a link that dumps the affiliate on /auth/login with
-    //         ?error=verification_failed a month after they sign up.
+    //         and the dashboard one is a signed magic link on a ONE-WEEK TTL, so
+    //         this stamp goes stale by design. /api/cron/refresh-affiliate-links
+    //         re-stamps both every Monday; if that cron stops running, the field
+    //         silently becomes a link that dumps the affiliate on /auth/login
+    //         with ?error=verification_failed about a week later.
     let ghlContactId: string | null = null;
     try {
       const locationId = process.env.GHL_LOCATION_ID;
