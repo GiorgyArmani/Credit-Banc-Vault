@@ -1,8 +1,9 @@
 // src/app/api/webhooks/ghl-appointment/route.ts
 //
 // PUBLIC (secret-authenticated) — GoHighLevel calls this when a contact books an
-// appointment. Its only job is the affiliate program: if the person who booked
-// came in through an affiliate link, tell that affiliate their link worked.
+// appointment. It RECORDS the booking on the affiliate lead. It sends nothing:
+// the affiliate is emailed at pre-qualification now, in-process, and a second
+// notice for the same referral would be a duplicate.
 //
 // WHY A WEBHOOK AT ALL. The pre-qual stepper at /r/[code] is ours and we know
 // exactly when someone qualifies — but the booking that follows happens inside
@@ -10,10 +11,15 @@
 // app never observes it. GHL is the only party that knows a slot was taken, so
 // it has to tell us.
 //
-// WHY NOT FIRE ON PRE-QUAL INSTEAD. Qualifying is not booking. A meaningful
-// share of qualified leads never pick a slot, and an email saying "someone
-// booked a call" for a person who didn't is the kind of thing an affiliate
-// notices exactly once before distrusting every later message.
+// WHY THE EMAIL MOVED TO PRE-QUAL. Qualifying is not booking, and firing on the
+// stronger milestone was the right call on paper. In practice this endpoint was
+// never wired up on the GHL side: `booked_at` was NULL on every row the program
+// had ever produced, contacts carried GHL's own `appointment booked` tag while
+// we knew nothing, and not one affiliate was ever told their link worked. A
+// notice that depends on an external automation someone has to remember to
+// configure is a notice that silently does not exist. The email now fires from
+// /api/refer/[code]/submit the moment a lead qualifies and their GHL contact is
+// created — ours, in-process, unskippable. See notifyAffiliateLinkUsed.
 //
 // This is deliberately NOT folded into /api/webhooks/ghl-tags: that endpoint
 // resolves contacts against client_data_vault and 404s when there is no vault,
@@ -30,7 +36,6 @@
 
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { send_affiliate_link_used_email } from "@/lib/email";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -126,11 +131,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, matched: false, reason: "no_affiliate" });
     }
 
-    // ── 3. Claim the booking ──────────────────────────────────────────────
+    // ── 3. Record the booking ─────────────────────────────────────────────
     // The conditional update IS the lock. GHL re-fires appointment webhooks on
-    // reschedule, on confirmation, and on its own retry after a non-2xx, so
-    // without this one booking emails the affiliate several times. Whoever
-    // flips booked_at from NULL wins and is the only one that sends.
+    // reschedule, on confirmation, and on its own retry after a non-2xx, so the
+    // first writer wins and the rest are no-ops. Nothing is sent either way —
+    // this only has to be written once and correctly.
     const bookedAt = new Date().toISOString();
     const { data: claimed, error: claimError } = await db
       .from("affiliate_leads")
@@ -147,90 +152,20 @@ export async function POST(request: Request) {
     if (!claimed) {
       // Already booked — a reschedule or a duplicate delivery. Nothing to do,
       // and reporting success stops GHL retrying.
-      return NextResponse.json({ ok: true, matched: true, already_notified: true });
+      return NextResponse.json({ ok: true, matched: true, already_recorded: true });
     }
 
-    // ── 4. Who do we tell? ────────────────────────────────────────────────
-    const { data: affiliate } = await db
-      .from("affiliates")
-      .select("id, first_name, last_name, email, user_id, status")
-      .eq("id", lead.affiliate_id)
-      .maybeSingle();
-
-    if (!affiliate?.email) {
-      // The claim stands — the booking genuinely happened and the milestone is
-      // worth keeping even though there is nobody to email.
-      console.warn(
-        `[ghl-appointment] lead ${lead.id} booked but affiliate ${lead.affiliate_id} has no email`
-      );
-      return NextResponse.json({ ok: true, matched: true, emailed: false });
-    }
-
-    const referralName =
-      [lead.first_name, lead.last_name].filter(Boolean).join(" ").trim() || "Someone";
-    const affiliateName =
-      [affiliate.first_name, affiliate.last_name].filter(Boolean).join(" ").trim() || "there";
-
-    // Same clamp as the payout path in @/lib/affiliates — the figure is only
-    // quoted here, never paid, but the two must not disagree in front of the
-    // affiliate.
-    const configured = Number(process.env.AFFILIATE_COMMISSION_AMOUNT ?? 500);
-    const ceilingRaw = Number(process.env.AFFILIATE_COMMISSION_MAX ?? 1000);
-    const ceiling = Number.isFinite(ceilingRaw) && ceilingRaw > 0 ? ceilingRaw : 1000;
-    const commission = Math.min(
-      Number.isFinite(configured) && configured > 0 ? configured : 500,
-      ceiling
-    );
-    const rewardStr = commission.toLocaleString("en-US", {
-      style: "currency",
-      currency: "USD",
-      maximumFractionDigits: 0,
-    });
-
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://vault.creditbanc.io";
-
-    try {
-      await send_affiliate_link_used_email({
-        affiliate_name: affiliateName,
-        affiliate_email: affiliate.email,
-        referral_name: referralName,
-        reward_amount: rewardStr,
-        dashboard_url: `${appUrl}/affiliate/dashboard`,
-        terms_url: `${appUrl}/affiliate`,
-      });
-    } catch (emailErr) {
-      // RELEASE THE CLAIM. Unlike the payout email — where the money is already
-      // recorded and a lost email is a support question — this notification IS
-      // the entire feature. Handing the claim back and answering 5xx lets GHL's
-      // retry deliver it, which is worth the small risk of a duplicate if the
-      // send actually succeeded and then threw.
-      console.error("[ghl-appointment] affiliate email failed, releasing claim:", emailErr);
-      await db
-        .from("affiliate_leads")
-        .update({ booked_at: null })
-        .eq("id", lead.id);
-      return NextResponse.json({ error: "Notification failed" }, { status: 500 });
-    }
-
-    // In-app, for affiliates who have a portal login. Best-effort: the email is
-    // the real delivery and has already succeeded by this point, so a failure
-    // here must not undo the claim or fail the webhook.
-    if (affiliate.user_id) {
-      try {
-        await db.from("in_app_notifications").insert({
-          user_id: affiliate.user_id,
-          title: "Someone used your link 👀",
-          message: `${referralName} booked a call with Credit Banc through your affiliate link.`,
-        });
-      } catch (notifErr) {
-        console.error("[ghl-appointment] in-app notification failed (non-fatal):", notifErr);
-      }
-    }
-
-    console.log(
-      `✅ [ghl-appointment] affiliate ${affiliate.id} notified of booking by lead ${lead.id}`
-    );
-    return NextResponse.json({ ok: true, matched: true, emailed: true });
+    // ── 4. Recorded, not announced ────────────────────────────────────────
+    // The affiliate already heard from us the moment this person pre-qualified
+    // and their GHL contact was created (notifyAffiliateLinkUsed, called from
+    // /api/refer/[code]/submit). Emailing again here would be a second "someone
+    // used your link" for one referral.
+    //
+    // booked_at still earns its keep: it flips the affiliate dashboard's pill
+    // from "Qualified" to "Booked", which is how anyone tells a referral who
+    // took a slot from one who closed the tab at the calendar.
+    console.log(`✅ [ghl-appointment] booking recorded for lead ${lead.id}`);
+    return NextResponse.json({ ok: true, matched: true, recorded: true });
   } catch (error: any) {
     console.error("[ghl-appointment] unexpected error:", error);
     return NextResponse.json(

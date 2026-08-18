@@ -2478,6 +2478,17 @@ export interface AffiliatePayoutNotificationData {
   referral_name?: string | null;
   /** The referred business itself ("Ridgeline Coffee Roasters"). */
   referral_company?: string | null;
+  /**
+   * Giftronaut reward-link claim URL. When present this email IS the gift card
+   * delivery — the affiliate claims from here and Giftronaut sends them nothing.
+   * When absent the copy falls back to "watch for an email from Giftronaut",
+   * which is the older choice-card flow. Both shapes must keep reading right:
+   * the two paths are switched by AFFILIATE_PAYOUT_MODE, not by the template.
+   *
+   * The URL is a bearer credential (reward links carry no recipient OTP), so it
+   * belongs in the body of THIS email and nowhere else.
+   */
+  claim_url?: string | null;
 }
 
 /**
@@ -2519,6 +2530,7 @@ export function generate_affiliate_payout_notification_html(data: AffiliatePayou
   data = escape_email_strings(data);
   const { affiliate_name, reward_amount, login_url } = data;
   const referral = referral_label(data.referral_name, data.referral_company);
+  const claim_url = data.claim_url?.trim() || null;
 
   return `
 <!DOCTYPE html>
@@ -2565,9 +2577,19 @@ export function generate_affiliate_payout_notification_html(data: AffiliatePayou
               <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #f2fbf7; border: 1px solid #cdeee0; border-radius: 12px;">
                 <tr>
                   <td style="padding: 24px; text-align: center;">
-                    <p style="margin: 0; color: #00553b; font-size: 18px; line-height: 1.6;">
-                      It also means you've earned a ${reward_amount} gift card. Keep an eye out for an email from <strong>Giftronaut</strong> within the next three business days so you can choose your reward.
+                    ${
+                      claim_url
+                        ? `<p style="margin: 0 0 20px; color: #00553b; font-size: 18px; line-height: 1.6;">
+                      It also means you've earned a <strong>${reward_amount} gift card</strong> — it's ready right now. Claim it below and pick whichever card you want.
                     </p>
+                    <a href="${claim_url}" style="display: inline-block; padding: 16px 34px; background-color: #55cf9e; color: #202536; font-size: 16px; font-weight: 700; text-decoration: none; border-radius: 10px; letter-spacing: 0.02em;">CLAIM MY ${reward_amount} GIFT CARD</a>
+                    <p style="margin: 18px 0 0; color: #00553b; font-size: 13px; line-height: 1.6;">
+                      This link is your gift card — anyone who opens it can redeem it, so keep it to yourself. It expires 180 days from today.
+                    </p>`
+                        : `<p style="margin: 0; color: #00553b; font-size: 18px; line-height: 1.6;">
+                      It also means you've earned a ${reward_amount} gift card. Keep an eye out for an email from <strong>Giftronaut</strong> within the next three business days so you can choose your reward.
+                    </p>`
+                    }
                   </td>
                 </tr>
               </table>
@@ -2639,9 +2661,23 @@ export function generate_affiliate_payout_notification_text(data: AffiliatePayou
         `small business got the help it needed thanks to you.`
     ),
     ``,
-    `It also means you've earned a ${data.reward_amount} gift card. Keep an eye out for an email`,
-    `from Giftronaut within the next three business days so you can choose your`,
-    `reward.`,
+    ...(data.claim_url?.trim()
+      ? [
+          `It also means you've earned a ${data.reward_amount} gift card, and it's ready`,
+          `right now. Claim it here and pick whichever card you want:`,
+          ``,
+          data.claim_url.trim(),
+          ``,
+          wrap_plain_text(
+            `This link IS your gift card — anyone who opens it can redeem it, so keep ` +
+              `it to yourself. It expires 180 days from today.`
+          ),
+        ]
+      : [
+          `It also means you've earned a ${data.reward_amount} gift card. Keep an eye out for an email`,
+          `from Giftronaut within the next three business days so you can choose your`,
+          `reward.`,
+        ]),
     ``,
     `Thanks for making the introduction.`,
     ``,
@@ -2664,7 +2700,13 @@ export async function send_affiliate_payout_notification(data: AffiliatePayoutNo
   const mail_options: any = {
     from: affiliate_from_header(),
     to: data.affiliate_email,
-    subject: `Cue the Confetti. Your Referral Funded!`,
+    // When the email carries the claim link it IS the gift card, so the subject
+    // has to say so — an unopened bearer link is the whole failure mode of the
+    // reward-link flow. Without a link the second email (Giftronaut's) does that
+    // job and this one stays pure celebration.
+    subject: data.claim_url?.trim()
+      ? `Cue the Confetti — your ${data.reward_amount} gift card is ready`
+      : `Cue the Confetti. Your Referral Funded!`,
     html: generate_affiliate_payout_notification_html(data),
     text: generate_affiliate_payout_notification_text(data),
     attachments: [
@@ -2984,7 +3026,7 @@ export function generate_affiliate_link_used_email_html(data: AffiliateLinkUsedE
 <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #faf9f6;">
   <!-- Preheader: shown in the inbox preview, hidden in the body. -->
   <div style="display: none; max-height: 0; overflow: hidden; opacity: 0; mso-hide: all;">
-    ${referral_name} booked a call with Credit Banc through your link. We&rsquo;ve got movement.
+    ${referral_name} just pre-qualified through your link. We&rsquo;ve got movement.
   </div>
 
   <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #faf9f6;">
@@ -3004,7 +3046,7 @@ export function generate_affiliate_link_used_email_html(data: AffiliateLinkUsedE
             <td style="padding: 8px 40px 0;">
               <h1 style="margin: 0 0 16px; color: #202536; font-size: 22px; font-weight: 700; line-height: 1.35;">Hi ${affiliate_name},</h1>
               <p style="margin: 0 0 24px; color: #4b5563; font-size: 16px; line-height: 1.65;">
-                <strong style="color: #202536;">${referral_name}</strong> just used your affiliate link and booked a call with Credit Banc.
+                <strong style="color: #202536;">${referral_name}</strong> just used your affiliate link and pre-qualified with Credit Banc.
               </p>
             </td>
           </tr>
@@ -3076,7 +3118,7 @@ export function generate_affiliate_link_used_email_text(data: AffiliateLinkUsedE
   return [
     `Hi ${affiliate_name},`,
     ``,
-    `${referral_name} just used your affiliate link and booked a call with`,
+    `${referral_name} just used your affiliate link and pre-qualified with`,
     `Credit Banc.`,
     ``,
     `It's too early to start shopping with that ${reward_amount} gift card, but hey...`,

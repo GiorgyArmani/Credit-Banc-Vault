@@ -6,7 +6,10 @@
 //   2. evaluate the pre-qual answers SERVER-SIDE (can't be bypassed),
 //   3. for QUALIFIED leads: upsert the contact into GHL WITHOUT assignedTo (the
 //      GHL round-robin calendar assigns the owner when they book) + store an
-//      `affiliate_leads` row recording the affiliate + the answers,
+//      `affiliate_leads` row recording the affiliate + the answers, + EMAIL THE
+//      AFFILIATE that their link produced a referral — the contact existing in
+//      GHL with their tags on it IS the milestone, and it is the last one they
+//      get to see (everything after is the client's private file),
 //   4. for DISQUALIFIED leads: upsert the contact into GHL and tag it with the
 //      ONE reason that rejected them (`disqualified - fico` / `- revenue` /
 //      `- tib`, see DISQUALIFY_TAGS) so a reason-specific GHL workflow can pick
@@ -17,6 +20,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ghlUpsertContact, ghlResolveFieldId, ghlAddTags } from "@/lib/ghl-api";
 import { evaluatePrequal, DISQUALIFY_TAGS } from "@/lib/referral-prequal";
+import { notifyAffiliateLinkUsed } from "@/lib/affiliates";
 import { formatPhoneUS, isValidUsPhone, toE164 } from "@/lib/phone";
 
 export const runtime = "nodejs";
@@ -251,6 +255,20 @@ export async function POST(
     });
 
     if (insertErr) throw insertErr;
+
+    // 6. Tell the affiliate, now. Deliberately AFTER the insert and awaited but
+    //    non-throwing (notifyAffiliateLinkUsed swallows its own errors): the
+    //    lead is already safely stored, so a mail hiccup can degrade the notice
+    //    but can never cost us the referral or fail the applicant's form.
+    //
+    //    Only new qualified leads reach this line — the duplicate guard above
+    //    returns early — so one referral is one email, no send-once column
+    //    needed. Sent even when the GHL push failed: the affiliate earned the
+    //    notice by producing a qualified lead, not by our CRM being up.
+    await notifyAffiliateLinkUsed(db, {
+      affiliateId: affiliate.id,
+      referralName: fullName || firstName,
+    });
 
     return NextResponse.json({ ok: true, qualified: true });
   } catch (err: any) {

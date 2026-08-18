@@ -17,6 +17,10 @@ export const dynamic = "force-dynamic";
 const PAYOUT_LABELS: Record<string, string> = {
   queued: "Queued",
   pending: "Pending",
+  // Paid for, but Giftronaut hasn't minted the claim URL yet. Says "Paid" and
+  // not "Pending" on purpose: the money is gone, and an admin reading this row
+  // must not think it can still be stopped.
+  awaiting_link: "Paid — link pending",
   sent: "Sent",
   delivered: "Delivered",
   failed: "Failed",
@@ -38,7 +42,16 @@ function isHeld(p: { status: string; hold_reason?: string | null }): boolean {
 
 /** Still inside the 24h review window — the worker hasn't been allowed to send yet. */
 function isWaiting(p: { status: string; hold_reason?: string | null; release_at?: string | null }): boolean {
-  if (isHeld(p) || p.status === "sent" || p.status === "delivered" || p.status === "canceled") return false;
+  // awaiting_link is excluded: the money already left, so the "sends in Xh, you
+  // can still cancel" affordance would be a lie.
+  if (
+    isHeld(p) ||
+    p.status === "sent" ||
+    p.status === "delivered" ||
+    p.status === "canceled" ||
+    p.status === "awaiting_link"
+  )
+    return false;
   return Boolean(p.release_at) && new Date(p.release_at as string) > new Date();
 }
 
@@ -92,13 +105,15 @@ export default async function AdminAffiliatesPage() {
     if (p.status !== "canceled") {
       fundedByAff.set(p.affiliate_id, (fundedByAff.get(p.affiliate_id) ?? 0) + 1);
     }
-    if (p.status === "sent" || p.status === "delivered") {
+    // awaiting_link counts as paid too — the charge happened, only the claim
+    // link is still being minted.
+    if (p.status === "sent" || p.status === "delivered" || p.status === "awaiting_link") {
       paidByAff.set(p.affiliate_id, (paidByAff.get(p.affiliate_id) ?? 0) + Number(p.commission_amount || 0));
     }
   }
 
   const totalPaid = payoutRows
-    .filter((p) => p.status === "sent" || p.status === "delivered")
+    .filter((p) => p.status === "sent" || p.status === "delivered" || p.status === "awaiting_link")
     .reduce((s, p) => s + Number(p.commission_amount || 0), 0);
 
   return (

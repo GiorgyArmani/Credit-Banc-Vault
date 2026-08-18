@@ -69,6 +69,17 @@ export async function cancelAffiliatePayout(
   if (payout.status === "sent" || payout.status === "delivered") {
     return { success: false, error: "Gift card already sent — it can't be canceled" };
   }
+  // 'awaiting_link' looks unsent — nobody has been emailed — but the reward-link
+  // order is already placed and the balance already deducted. Cancelling here
+  // wouldn't refund anything; it would only strand a card we paid for. Let the
+  // worker finish delivering it.
+  if (payout.status === "awaiting_link") {
+    return {
+      success: false,
+      error:
+        "The gift card is already paid for — only its claim link is still being generated. It will deliver on the next payout run.",
+    };
+  }
   if (payout.status === "canceled") return { success: true };
 
   const note = reason?.trim() || "Canceled by an admin before release";
@@ -81,7 +92,7 @@ export async function cancelAffiliatePayout(
       updated_at: new Date().toISOString(),
     })
     .eq("id", payoutId)
-    .not("status", "in", "(sent,delivered)");
+    .not("status", "in", "(sent,delivered,awaiting_link)");
 
   if (error) return { success: false, error: error.message };
 
@@ -109,4 +120,55 @@ export async function markPayoutDelivered(
   if (error) return { success: false, error: error.message };
   revalidatePath("/admin/affiliates");
   return { success: true };
+}
+
+/**
+ * Reveal the gift card's claim link for one payout (admin only).
+ *
+ * Deliberately a fetch-on-demand action rather than a column in the payouts
+ * table: a reward link has no recipient OTP, so anyone who reads it can redeem
+ * the balance. It must not sit in the page HTML of a list view that an admin
+ * might screen-share. This exists for the one case that matters — our email
+ * bounced, or the affiliate lost it, and someone has to hand the link over.
+ *
+ * Falls back to re-fetching from Giftronaut when the stored copy is missing:
+ * the order is the source of truth, `reward_link` is only a cache.
+ */
+export async function revealPayoutClaimLink(
+  payoutId: string
+): Promise<{ success: boolean; link?: string; error?: string }> {
+  const admin = await requireAdminUser();
+  if (!admin) return { success: false, error: "Forbidden" };
+
+  const db = createAdminClient();
+  const { data: payout } = await db
+    .from("affiliate_payouts")
+    .select("id, reward_link, giftronaut_order_id")
+    .eq("id", payoutId)
+    .maybeSingle();
+
+  if (!payout) return { success: false, error: "Payout not found" };
+  if (payout.reward_link) {
+    console.warn(`[affiliates] claim link revealed for payout ${payoutId} by admin ${admin.id}`);
+    return { success: true, link: payout.reward_link };
+  }
+  if (!payout.giftronaut_order_id) {
+    return { success: false, error: "This payout has no reward link (choice-card email flow)" };
+  }
+
+  try {
+    const { getOrder } = await import("@/lib/giftronaut");
+    const order = await getOrder(payout.giftronaut_order_id);
+    if (!order.rewardLink) {
+      return { success: false, error: `Order is ${order.status} — no claim link minted yet` };
+    }
+    await db
+      .from("affiliate_payouts")
+      .update({ reward_link: order.rewardLink, updated_at: new Date().toISOString() })
+      .eq("id", payoutId);
+    console.warn(`[affiliates] claim link revealed for payout ${payoutId} by admin ${admin.id}`);
+    return { success: true, link: order.rewardLink };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
 }

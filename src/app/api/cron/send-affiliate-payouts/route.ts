@@ -52,6 +52,13 @@ const BATCH_SIZE = 50;
  */
 const RETRY_BACKOFF_MINUTES = 60;
 
+/**
+ * Slack left at the end of `maxDuration` for the DB writes, Slack alerts and the
+ * response after the last poll. Without it a run that waits to the last second
+ * gets killed mid-update, leaving a paid order with no row to prove it.
+ */
+const RESERVE_SECONDS = 45;
+
 function hasCronSecret(req: Request): boolean {
   const expected = process.env.CRON_SECRET;
   if (!expected) {
@@ -86,7 +93,10 @@ export async function GET(req: Request) {
   let query = db
     .from("affiliate_payouts")
     .select("id, client_vault_id, commission_amount, status, release_at, attempts")
-    .in("status", ["queued", "pending", "failed"])
+    // 'awaiting_link' rows are already PAID: their reward-link order exists and
+    // only its claim URL is still being minted. They come back here so the
+    // worker can finish the job (poll + send our email) — never to re-order.
+    .in("status", ["queued", "pending", "failed", "awaiting_link"])
     .is("hold_reason", null)
     .lt("attempts", maxSendAttempts())
     .lte("release_at", startedAt.toISOString())
@@ -133,9 +143,21 @@ export async function GET(req: Request) {
   // Sequential on purpose: these are money orders against a third-party API, and
   // the daily-spend cap inside processAffiliatePayout reads what has already been
   // sent. Running them in parallel would let a batch race past that ceiling.
+  //
+  // The budget below is about the reward-link path specifically. Those orders
+  // are asynchronous: the charge lands immediately but the claim URL is minted
+  // by a background job on Giftronaut's side, and our email can't go out until
+  // it exists. Whatever is left of this request is spent waiting for it, because
+  // the alternative — parking the row — means the affiliate waits until the NEXT
+  // daily run for a card that was already paid for. Rows that run out of budget
+  // still park safely as 'awaiting_link'; nothing is ever double-ordered.
+  const deadline = startedAt.getTime() + (maxDuration - RESERVE_SECONDS) * 1000;
   const results: Array<{ payoutId: string } & PayoutOutcome> = [];
   for (const p of due) {
-    const outcome = await processAffiliatePayout(db, p.id, { actorLabel: "cron" });
+    const outcome = await processAffiliatePayout(db, p.id, {
+      actorLabel: "cron",
+      pollBudgetMs: Math.max(0, deadline - Date.now()),
+    });
     results.push({ payoutId: p.id, ...outcome });
   }
 
