@@ -2433,6 +2433,295 @@ export async function send_loan_funded_notification(data: LoanFundedNotification
 
 /**
  * ============================================================================
+ * CLIENT FUNDED EMAIL
+ * ============================================================================
+ * The one funded email that goes to the CLIENT.
+ *
+ * `send_loan_funded_notification` above reads like the client's email and is
+ * not — it is addressed to the advisor ("Congratulations {advisor_name}") and
+ * CCs the follower advisors. Until this template existed, funding a deal
+ * notified the advisor, tagged the GHL contact `Loan Funded`, stamped
+ * FUNDING_DATE and wrote an internal note, and said nothing at all to the
+ * person whose money it was.
+ *
+ * It carries NO figures — no amount, lender or term. That is deliberate: the
+ * lender confirms the money and this is a thank-you with a review ask, so
+ * restating the numbers only creates a second, staler record of them to be
+ * contradicted later.
+ *
+ * It is signed by the client's own advisor, with their photo, because the whole
+ * point of the send is that a person worked the file. Everything in the
+ * signature comes off the `advisors` row the deal already carries.
+ */
+const CLIENT_FUNDED_HERO_CID = "client_funded_hero";
+const CLIENT_FUNDED_HERO_FILE = "funded email.png";
+/** cid for the advisor headshot, when it can be inlined. See resolve_advisor_photo. */
+const CLIENT_FUNDED_ADVISOR_CID = "client_funded_advisor";
+
+/**
+ * Where "Leave A Review Here" points. Env so the link can be repointed without
+ * a deploy; the fallback is the public site rather than a dead anchor, so a
+ * missing env var costs a review rather than sending a broken button.
+ */
+function google_review_url(): string {
+  return process.env.GOOGLE_REVIEW_URL || "https://www.creditbanc.io";
+}
+
+export interface ClientFundedEmailData {
+  client_name: string;
+  client_email: string;
+  /** The advisor who worked the file — signs the email. */
+  advisor_name?: string | null;
+  /**
+   * Job title for the signature line. `advisors` has no title column, so the
+   * caller supplies it or it falls back to the generic role. Add a column and
+   * this keeps working unchanged.
+   */
+  advisor_title?: string | null;
+  /** advisors.phone, rendered as stored — the column holds no single format. */
+  advisor_phone?: string | null;
+  /** advisors.profile_pic_url. Resolved to a cid or a remote src by the sender. */
+  advisor_photo_url?: string | null;
+  /** Overrides GOOGLE_REVIEW_URL for a one-off send. */
+  review_url?: string | null;
+}
+
+/** What the template actually renders the headshot from: a cid: reference when
+ *  the image could be inlined, the original https URL when it could not, or
+ *  nothing at all — in which case the signature simply has no photo. */
+type ClientFundedRenderData = ClientFundedEmailData & { advisor_photo_src?: string | null };
+
+export function generate_client_funded_email_html(data: ClientFundedRenderData): string {
+  // MUST come first — client_name and the advisor fields are operator-entered
+  // free text that reaches this template unescaped. See [[email_html_escaping]].
+  data = escape_email_strings(data);
+  const review = (data.review_url ?? "").trim() || google_review_url();
+  const advisor = (data.advisor_name ?? "").trim();
+  const title = (data.advisor_title ?? "").trim() || "Business Advisor";
+  const phone = (data.advisor_phone ?? "").trim();
+  const photo = (data.advisor_photo_src ?? "").trim();
+  // First name only — "Hi Robert" reads like a person wrote it, "Hi Robert
+  // Castellano-Diaz" reads like a mail merge.
+  const first_name = (data.client_name ?? "").split(/\s+/)[0] || "";
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Approved. Funded. Done.</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f4f4f4;">
+  <!-- Preheader: inbox preview text, hidden in the body itself. -->
+  <div style="display: none; max-height: 0; overflow: hidden; opacity: 0; mso-hide: all;">
+    Thanks for working with us. Now go pop that champagne.
+  </div>
+
+  <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #f4f4f4;">
+    <tr>
+      <td align="center" style="padding: 24px 12px;">
+        <table role="presentation" style="width: 600px; max-width: 100%; background-color: #ffffff; border-radius: 8px; overflow: hidden;">
+
+          <!-- Hero -->
+          <tr>
+            <td style="padding: 0; line-height: 0;">
+              <img src="cid:${CLIENT_FUNDED_HERO_CID}" alt="Approved. Funded. Done." width="600" style="border: 0; display: block; width: 100%; max-width: 600px; height: auto;">
+            </td>
+          </tr>
+
+          <!-- Headline -->
+          <tr>
+            <td style="padding: 36px 40px 8px; text-align: center;">
+              <h1 style="margin: 0; color: #1a1a1a; font-size: 24px; font-weight: 700; line-height: 1.3;">Approved. Funded. Done.</h1>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding: 24px 40px 0;">
+              <p style="margin: 0 0 18px; color: #333333; font-size: 16px; line-height: 1.6;">Hi ${first_name},</p>
+              <p style="margin: 0 0 18px; color: #333333; font-size: 16px; line-height: 1.6;">
+                Just wanted to send a quick note and say thanks for working with us on this.
+              </p>
+              <p style="margin: 0 0 18px; color: #333333; font-size: 16px; line-height: 1.6;">
+                Whether this helps you clean things up, invest in growth, or take a little pressure off day-to-day operations, we&rsquo;re glad we could be part of the process.
+              </p>
+              <p style="margin: 0 0 24px; color: #333333; font-size: 16px; line-height: 1.6;">
+                If you&rsquo;ve got a minute and want to share your experience, a quick Google review would be appreciated.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Review CTA -->
+          <tr>
+            <td style="padding: 0 40px 28px;">
+              <table role="presentation" style="width: 100%; border-collapse: collapse;">
+                <tr>
+                  <td style="background-color: #55cf9e; border-radius: 4px; text-align: center;">
+                    <a href="${review}" style="display: block; padding: 15px 20px; color: #1a1a1a; font-size: 16px; font-weight: 700; text-decoration: none;">Leave A Review Here</a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Sign-off -->
+          <tr>
+            <td style="padding: 0 40px;">
+              <p style="margin: 0 0 18px; color: #333333; font-size: 16px; line-height: 1.6;">
+                We&rsquo;ll stay in touch. And if you need us before then, you know where to find us.
+              </p>
+              <p style="margin: 0 0 18px; color: #333333; font-size: 16px; line-height: 1.6;">
+                Now, pop that champagne and celebrate!
+              </p>
+              <p style="margin: 0 0 28px; color: #333333; font-size: 16px; line-height: 1.6; font-style: italic;">
+                Speak soon,
+              </p>
+            </td>
+          </tr>
+
+          <!-- Signature -->
+          <tr>
+            <td style="padding: 0 40px 40px; text-align: center;">${
+              photo
+                ? `
+              <img src="${photo}" alt="${advisor}" width="150" height="150" style="border: 0; display: block; width: 150px; height: 150px; border-radius: 75px; margin: 0 auto 18px;">`
+                : ""
+            }
+              <p style="margin: 0 0 8px; color: #1a1a1a; font-size: 20px; font-weight: 700; line-height: 1.3;">${advisor}</p>
+              <p style="margin: 0 0 2px; color: #1a1a1a; font-size: 13px; font-weight: 700; line-height: 1.5;">${title} | Credit Banc</p>${
+                phone
+                  ? `
+              <p style="margin: 0 0 14px; color: #333333; font-size: 13px; line-height: 1.5;">TEL: ${phone}</p>`
+                  : `
+              <p style="margin: 0 0 14px;"></p>`
+              }
+              <p style="margin: 0; color: #333333; font-size: 13px; line-height: 1.5;">Learn more at <a href="https://www.creditbanc.io" style="color: #1a73e8; text-decoration: none;">creditbanc.io</a></p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `;
+}
+
+// NOTE: no escape_email_strings here — escaping belongs to the HTML template
+// only. A client named "Tom O'Neill" must not read as "Tom O&#39;Neill" in the
+// plain-text part.
+export function generate_client_funded_email_text(data: ClientFundedEmailData): string {
+  const review = (data.review_url ?? "").trim() || google_review_url();
+  const advisor = (data.advisor_name ?? "").trim();
+  const title = (data.advisor_title ?? "").trim() || "Business Advisor";
+  const phone = (data.advisor_phone ?? "").trim();
+  const first_name = (data.client_name ?? "").split(/\s+/)[0] || "";
+
+  return [
+    `APPROVED. FUNDED. DONE.`,
+    ``,
+    `Hi ${first_name},`,
+    ``,
+    `Just wanted to send a quick note and say thanks for working with us on`,
+    `this.`,
+    ``,
+    `Whether this helps you clean things up, invest in growth, or take a little`,
+    `pressure off day-to-day operations, we're glad we could be part of the`,
+    `process.`,
+    ``,
+    `If you've got a minute and want to share your experience, a quick Google`,
+    `review would be appreciated.`,
+    ``,
+    `Leave a review here: ${review}`,
+    ``,
+    `We'll stay in touch. And if you need us before then, you know where to`,
+    `find us.`,
+    ``,
+    `Now, pop that champagne and celebrate!`,
+    ``,
+    `Speak soon,`,
+    ``,
+    advisor,
+    `${title} | Credit Banc`,
+    ...(phone ? [`TEL: ${phone}`] : []),
+    ``,
+    `Learn more at creditbanc.io`,
+  ].join("\n");
+}
+
+/**
+ * Turn `advisors.profile_pic_url` into something an email client will actually
+ * render.
+ *
+ * The bucket serves EVERY headshot as `Content-Type: image/webp` regardless of
+ * what was uploaded — the signup route hardcoded it (see actions/staff-profile.ts).
+ * Luigi's file, for instance, is a real PNG announced as webp. Mail clients that
+ * trust the header rather than sniffing the bytes then show a broken image, so
+ * the bytes are fetched, normalised to PNG and inlined as an attachment.
+ *
+ * Falls back to the remote URL on any failure, and to no photo at all if there
+ * is no URL. A headshot is never worth failing a send over.
+ */
+async function resolve_advisor_photo(
+  url?: string | null
+): Promise<{ src: string | null; attachment: any | null }> {
+  const clean_url = (url ?? "").trim();
+  if (!clean_url) return { src: null, attachment: null };
+
+  try {
+    const res = await fetch(clean_url);
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    const input = Buffer.from(await res.arrayBuffer());
+    // 300px covers the 150px display box on retina without shipping the 1080px
+    // original, which is ~1.1MB and would dominate the message size.
+    const sharp = (await import("sharp")).default;
+    const png = await sharp(input).resize(300, 300, { fit: "cover" }).png().toBuffer();
+    return {
+      src: `cid:${CLIENT_FUNDED_ADVISOR_CID}`,
+      attachment: {
+        filename: "advisor.png",
+        content: png,
+        cid: CLIENT_FUNDED_ADVISOR_CID,
+      },
+    };
+  } catch (err) {
+    console.warn("[email] advisor photo could not be inlined, linking remotely:", err);
+    return { src: clean_url, attachment: null };
+  }
+}
+
+export async function send_client_funded_email(data: ClientFundedEmailData) {
+  const transporter = create_smtp_transporter();
+
+  const from_email = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  const from_name = process.env.SMTP_FROM_NAME || "Credit Banc";
+
+  const photo = await resolve_advisor_photo(data.advisor_photo_url);
+
+  const attachments: any[] = [
+    {
+      filename: "approved-funded-done.png",
+      path: path.join(process.cwd(), "public", CLIENT_FUNDED_HERO_FILE),
+      cid: CLIENT_FUNDED_HERO_CID,
+    },
+  ];
+  if (photo.attachment) attachments.push(photo.attachment);
+
+  return await transporter.sendMail({
+    from: `${from_name} <${from_email}>`,
+    to: data.client_email,
+    subject: `Approved. Funded. Done.`,
+    html: generate_client_funded_email_html({ ...data, advisor_photo_src: photo.src }),
+    text: generate_client_funded_email_text(data),
+    attachments,
+  });
+}
+
+/**
+ * ============================================================================
  * AFFILIATE PAYOUT NOTIFICATION
  * ============================================================================
  * Sent to an affiliate when one of their referrals gets funded and the fixed

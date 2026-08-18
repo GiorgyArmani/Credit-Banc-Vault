@@ -87,7 +87,7 @@ export default function LoginForm({
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <BrandCard>
-        <Eyebrow className="mb-3">Access the vault</Eyebrow>
+        <Eyebrow className="text-cb-ink/50">Sign in to your account</Eyebrow>
         <h1 className="font-headline text-4xl font-extrabold leading-tight tracking-tight text-cb-ink">
           Welcome <span className="text-cb-mint">back</span>
         </h1>

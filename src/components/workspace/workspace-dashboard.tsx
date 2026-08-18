@@ -399,9 +399,7 @@ export function WorkspaceDashboard({
         {/* Header Section */}
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 border-b border-emerald-50 pb-8" id="tour-advisor-welcome">
           <div>
-            <h1 className="text-4xl md:text-5xl font-black text-emerald-950 mb-3 tracking-tighter uppercase leading-none">
-              Advisor Dashboard
-            </h1>
+           
             <p className="text-emerald-900/60 text-lg font-bold">
               {userData ? `Welcome back, ${userData.first_name}!` : "Welcome back!"}
             </p>
