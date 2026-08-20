@@ -131,7 +131,18 @@ export async function postAffiliateAlert(text: string): Promise<void> {
   try {
     const channel = process.env.SLACK_AFFILIATE_CHANNEL_ID;
     if (!channel) return;
-    await slackPostMessage(channel, text);
+    // slackPostMessage swallows its own errors, so the only way to notice a
+    // misconfigured channel is the boolean. Name the env var and the id in the
+    // log: the bare "channel_not_found" from the Slack layer says nothing about
+    // WHICH channel, and this one is set once and then forgotten.
+    const ok = await slackPostMessage(channel, text);
+    if (!ok) {
+      console.error(
+        `[affiliates] Slack alert dropped — SLACK_AFFILIATE_CHANNEL_ID=${channel} was rejected. ` +
+          `channel_not_found normally means the channel is private and the bot was never invited, ` +
+          `the channel was archived, or the id belongs to a different workspace in the Grid.`
+      );
+    }
   } catch (err) {
     console.error("[affiliates] Slack alert failed (non-fatal):", err);
   }
