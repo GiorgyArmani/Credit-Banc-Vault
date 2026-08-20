@@ -25,6 +25,7 @@ import {
 } from "@/lib/document-groups";
 import { DocumentGroupPicker } from "@/components/document-group-picker";
 import { useDocumentGroups } from "@/hooks/use-document-groups";
+import { markLabelAsManual } from '@/lib/group-assignment';
 
 /**
  * DocumentType: Interface for documents requested for the user
@@ -644,6 +645,10 @@ export default function Vault({
         .eq('id', renaming_file.id);
 
       if (error) throw error;
+
+      // Mark the name as hand-typed so filing this document into a group later
+      // never rebuilds over it.
+      await markLabelAsManual(supabase, renaming_file.id);
 
       toast({ title: 'Success', description: 'File renamed successfully' });
       setDocuments(prev => prev.map(d =>

@@ -247,3 +247,73 @@ export async function notifyLenderResponseNoteRecorded(
     console.error('notifyLenderResponseNoteRecorded error (non-fatal):', err);
   }
 }
+
+/**
+ * Slack-only announcement that the deal FUNDED, posted into the deal channel.
+ *
+ * The funded event was the one hole in the lender lifecycle's Slack coverage:
+ * submitted / approved / declined all post, but funding — the outcome the
+ * channel exists for — only ever reached GHL, the advisor's inbox, and the
+ * pipeline. The channel where the file was actually worked heard nothing.
+ *
+ * Slack-only on purpose: fundLoanAction already emails the advisor and fires
+ * the in-app notification, so routing this through
+ * notifyAdminsOfLenderPipelineEvent would double up on both.
+ *
+ * Best-effort — never throws. Funding must never fail because Slack did.
+ */
+export async function notifyDealFundedToSlack(
+  client_id: string,
+  details: {
+    lender_name?: string | null;
+    amount_funded?: string | null;
+    term?: string | null;
+    amount_requested?: string | number | null;
+    sales_rep?: string | null;
+  }
+): Promise<void> {
+  if (!client_id) return;
+
+  try {
+    const { data: client_row } = await supabase_admin
+      .from('client_data_vault')
+      .select('company_name, client_name, slack_channel_id, advisors(email)')
+      .eq('id', client_id)
+      .maybeSingle();
+
+    const channel_id = (client_row as any)?.slack_channel_id as string | null;
+    if (!channel_id) return;
+
+    const company_name =
+      (client_row as any)?.company_name || (client_row as any)?.client_name || 'this file';
+    const adv: any = Array.isArray((client_row as any)?.advisors)
+      ? (client_row as any).advisors[0]
+      : (client_row as any)?.advisors;
+    const mentions = formatMentions([
+      ...getApproverUserIds(),
+      resolveAdvisorSlackId(adv?.email ?? null),
+    ]);
+
+    // Only the figures we actually have. A funded post padded with "—" reads
+    // like the deal was recorded with details missing.
+    const lines: string[] = [];
+    if (details.amount_funded) lines.push(`• Amount funded: *${details.amount_funded}*`);
+    if (details.amount_requested) lines.push(`• Originally requested: ${details.amount_requested}`);
+    if (details.term) lines.push(`• Term: ${details.term}`);
+    if (details.sales_rep) lines.push(`• Sales rep: ${details.sales_rep}`);
+
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://vault.creditbanc.io';
+    const headline = details.lender_name
+      ? `🎉 *FUNDED* — ${company_name} funded by *${details.lender_name}*.`
+      : `🎉 *FUNDED* — ${company_name}.`;
+
+    await slackPostMessage(
+      channel_id,
+      `${mentions ? mentions + ' ' : ''}${headline}` +
+        `${lines.length ? `\n${lines.join('\n')}` : ''}\n` +
+        `${baseUrl}/admin/clients/${client_id}`
+    );
+  } catch (err) {
+    console.error('notifyDealFundedToSlack error (non-fatal):', err);
+  }
+}

@@ -14,6 +14,7 @@ import { resolveCatchAllAdvisor } from "@/lib/catch-all-advisor";
 import { send_file_reassignment_notification } from "@/lib/email";
 import { resolvePartnerByName } from "@/lib/referral-partners";
 import { partnerAssignedCustomFields } from "@/lib/referral-partner-attribution";
+import { markLabelAsManual } from "@/lib/group-assignment";
 
 /**
  * Owner OR follower check. Admin flow isn't covered here (advisor-persona actions).
@@ -166,11 +167,36 @@ export async function addManualFundingApplication(clientId: string, formData: Fo
  */
 /**
  * requestDocuments
- * 
- * Allows an advisor to request one or more new documents from a client.
- * Updates the database and syncs the request tags to GoHighLevel.
+ *
+ * Opens one or more document slots on a client's vault, and — by default —
+ * asks the client for them.
+ *
+ * `notifyClient: false` opens the slot SILENTLY. That is the case where staff
+ * already hold the document (the client emailed it, or it came from a lender)
+ * and just need somewhere to file it before the packet goes out. Chasing the
+ * client for a document sitting in your inbox is the one thing that must not
+ * happen, so silent mode skips every outbound path:
+ *
+ *   • GHL request tags     — the trigger for the doc-chase SMS/email automation
+ *   • the MyScoreIQ email  — sent straight to the client
+ *   • submissions.status   — leaving a locked vault locked also keeps the
+ *                            outstanding-docs reminder cron off the file
+ *   • the pipeline move to `documents_requested` — nothing was requested, and
+ *                            on a file about to go to lenders it reads as a
+ *                            step backwards
+ *
+ * What silent mode still does: create the request row, so the category renders
+ * and can hold a file. That is all. It deliberately does NOT clear the
+ * category's approval the way a real re-request does — see 5a.
  */
-export async function requestDocuments(clientId: string, documentIds: string[], businessProfileId?: string | null, statementMonths?: number | null) {
+export async function requestDocuments(
+    clientId: string,
+    documentIds: string[],
+    businessProfileId?: string | null,
+    statementMonths?: number | null,
+    options?: { notifyClient?: boolean }
+) {
+    const notify_client = options?.notifyClient !== false;
     try {
         if (!documentIds || documentIds.length === 0) {
             throw new Error("No documents selected");
@@ -246,11 +272,17 @@ export async function requestDocuments(clientId: string, documentIds: string[], 
             throw new Error("Failed to update document requirements in database");
         }
 
-        // 5a. Re-requesting a document means it must be (re)reviewed. Clear any
+        // 5a. Re-REQUESTING a document means it must be (re)reviewed. Clear any
         // existing advisor approval for these codes (scoped to the same business
         // as the request) so the field drops from "Advisor Approved" back to
         // "waiting approval" (Ready for Review) until the new upload is approved.
-        for (const def of docDefs) {
+        //
+        // NOT in silent mode. Nothing was requested there and no unknown file is
+        // on its way: staff are filing a document that was already vetted, at
+        // the underwriting stage. Un-approving the category would invent review
+        // work, drop the completion count and make a finished file look unfinished
+        // — the opposite of what opening the slot was for.
+        for (const def of notify_client ? docDefs : []) {
             const code: string | undefined = (def as any).code;
             if (!code) continue;
             const bizId = isClientScopedDoc(code) ? primaryId : defaultBusinessProfileId;
@@ -271,23 +303,38 @@ export async function requestDocuments(clientId: string, documentIds: string[], 
         }
 
         // 5. Update submission status to 'documents_requested'
-        // This ensures the vault is no longer marked as 'locked' or 'submitted'
-        const { error: statusError } = await supabaseAdmin
-            .from("submissions")
-            .upsert({
-                user_id: client.user_id,
-                status: 'documents_requested'
-            }, { onConflict: 'user_id' });
-        
-        // 5.1 Update Loan Pipeline status
-        await updateLoanStatus(clientId, 'documents_requested', `Advisor requested ${documentIds.length} new documents`);
+        // This ensures the vault is no longer marked as 'locked' or 'submitted'.
+        //
+        // SKIPPED when silent. Unlocking the vault is what puts the file back in
+        // range of the outstanding-docs reminder cron (it stops on `locked`), so
+        // doing it here would nag the client for the very document staff are
+        // about to upload themselves. The pipeline move is skipped for the same
+        // reason plus one of its own: on a file heading to lenders, "documents
+        // requested" is a step backwards that nobody asked for.
+        if (notify_client) {
+            const { error: statusError } = await supabaseAdmin
+                .from("submissions")
+                .upsert({
+                    user_id: client.user_id,
+                    status: 'documents_requested'
+                }, { onConflict: 'user_id' });
 
-        if (statusError) {
-            console.error("Error updating submission status:", statusError);
+            // 5.1 Update Loan Pipeline status
+            await updateLoanStatus(clientId, 'documents_requested', `Advisor requested ${documentIds.length} new documents`);
+
+            if (statusError) {
+                console.error("Error updating submission status:", statusError);
+            }
         }
 
-        // 6. GHL Sync: Add requested tags for each document
-        if (client.ghl_contact_id) {
+        // 6. GHL Sync: Add requested tags for each document.
+        //
+        // SKIPPED ENTIRELY when silent — this block is the outbound one. The
+        // request tags are what start the doc-chase automation on GHL's side,
+        // and syncOutstandingDocuments writes the list that automation reads
+        // out. Neither belongs on a slot staff opened for a document they are
+        // holding. The next upload re-syncs the field anyway.
+        if (notify_client && client.ghl_contact_id) {
             const tagsToAdd = docDefs
                 .map(d => d.ghl_tag)
                 .filter(tag => !!tag) as string[];
@@ -315,7 +362,7 @@ export async function requestDocuments(clientId: string, documentIds: string[], 
         // 7. MyScoreIQ side-effect: when the advisor requests a MyScoreIQ Report we
         //    also email the client the offer-coded signup link with instructions to
         //    share the report with Credit Banc. Non-fatal — request stands either way.
-        if (docDefs.some(d => d.code === "myscoreiq") && client.client_email) {
+        if (notify_client && docDefs.some(d => d.code === "myscoreiq") && client.client_email) {
             try {
                 const { send_myscoreiq_setup_email } = await import("@/lib/email");
                 let advisor_name: string | null = null;
@@ -1323,14 +1370,30 @@ export async function approveDocumentCategory(clientId: string, docCode: string,
 
         if (!client) throw new Error("Client not found");
 
-        const { data: advisorData } = await supabase
-            .from("advisors")
-            .select("id")
-            .eq("user_id", advisorUser.id)
+        // Underwriting and admin approve too, not just the assigned advisor.
+        // They have no `advisors` row, so the advisor-ownership check below can
+        // never pass for them — which left every document UW uploads themselves
+        // stuck at "ready for audit" with no control on their own page to clear
+        // it. In the final phase the advisor or an admin sends the file over
+        // Slack and UW files it; the review already happened off-screen.
+        // (Mirrors the role escape hatch renameClientFile has had all along.)
+        const { data: callerRole } = await supabase
+            .from("users")
+            .select("role")
+            .eq("id", advisorUser.id)
             .single();
+        const isStaffApprover = callerRole?.role === "underwriting" || callerRole?.role === "admin";
 
-        if (!advisorData || !(await hasClientAccess(supabase, advisorData.id, clientId, client.advisor_id))) {
-            throw new Error("Access denied");
+        if (!isStaffApprover) {
+            const { data: advisorData } = await supabase
+                .from("advisors")
+                .select("id")
+                .eq("user_id", advisorUser.id)
+                .single();
+
+            if (!advisorData || !(await hasClientAccess(supabase, advisorData.id, clientId, client.advisor_id))) {
+                throw new Error("Access denied");
+            }
         }
 
         const supabaseAdmin = createAdminClient();
@@ -1583,6 +1646,10 @@ export async function renameClientFile(clientId: string, documentId: string, new
             .eq("id", documentId);
 
         if (error) throw error;
+
+        // Mark the name as hand-typed so filing this document into a group
+        // never rebuilds over it. See markLabelAsManual.
+        await markLabelAsManual(supabaseAdmin, documentId);
 
         revalidatePath(`/advisor/dashboard/clients/${clientId}`);
         return { success: true };

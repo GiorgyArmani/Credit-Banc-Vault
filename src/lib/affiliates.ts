@@ -5,6 +5,8 @@ import {
   send_affiliate_link_used_email,
 } from "@/lib/email";
 import { slackPostMessage } from "@/lib/slack-api";
+import { canRecordFunded } from "@/lib/auth/roles";
+import { phoneKey } from "@/lib/phone";
 
 /**
  * How the gift card reaches the affiliate.
@@ -49,10 +51,15 @@ function rewardLinkStaleHours(): number {
 }
 
 /**
- * Roles whose `funded` transition is allowed to trigger a real payout. Mirrors
- * FUNDED_ROLES in app/actions/pipeline.ts — keep the two in sync.
+ * Roles whose `funded` transition is allowed to trigger a real payout.
+ *
+ * This used to be a local set that "mirrored" FUNDED_ROLES in
+ * app/actions/pipeline.ts, and it had already drifted: the pipeline allowed
+ * partner_advisor and this list did not, so a deal funded by a partner advisor
+ * was refused here and SILENTLY never enqueued a payout — no row, nothing on
+ * /admin/affiliates, just a console warning. Both now call canRecordFunded()
+ * from @/lib/auth/roles. Never re-inline the role strings here.
  */
-const PAYOUT_ACTOR_ROLES = new Set(["admin", "underwriting", "advisor"]);
 
 /**
  * Pipeline statuses that mean the deal is NOT funded. If the file's latest
@@ -72,6 +79,28 @@ const UNFUNDED_STATUSES = new Set([
   "declined",
 ]);
 
+/**
+ * Payout statuses where the MONEY IS GONE.
+ *
+ * 'awaiting_link' belongs here and its absence was a real hole: the reward-link
+ * order is placed and the balance deducted at that moment — only the claim URL
+ * is still being minted. Both spend guardrails counted just sent/delivered, so a
+ * charged awaiting_link row scored $0 against the daily cap and did not count
+ * toward the per-affiliate cap either.
+ */
+const CHARGED_STATUSES = ["sent", "delivered", "awaiting_link"] as const;
+
+/**
+ * Charged, plus rows committed but not yet spent.
+ *
+ * Used by the per-affiliate cap only. That cap answers "how many rewards has
+ * this affiliate got coming?", and a queued row is coming — two deals funding on
+ * the same day used to see a count of zero apiece and both sail past a cap of 1.
+ * The daily SPEND cap deliberately does not use this list: a queued row has not
+ * cost anything yet, and counting it would defer sends that are within budget.
+ */
+const COMMITTED_STATUSES = [...CHARGED_STATUSES, "queued", "pending"] as const;
+
 /** Read a positive number from env, falling back when unset or unparseable. */
 function numEnv(name: string, fallback: number): number {
   const n = Number(process.env[name]);
@@ -84,7 +113,7 @@ function numEnv(name: string, fallback: number): number {
  * mis-clicked "Funded" or a reversed deal can still be caught. Mirrored by the
  * DB default on affiliate_payouts.release_at.
  */
-function payoutDelayHours(): number {
+export function payoutDelayHours(): number {
   return numEnv("AFFILIATE_PAYOUT_DELAY_HOURS", 24);
 }
 
@@ -98,7 +127,7 @@ export function maxSendAttempts(): number {
  * no-ops when SLACK_AFFILIATE_CHANNEL_ID is unset, so payouts never depend on
  * Slack being configured. See [[slack_uw_channels]].
  */
-async function postAffiliateAlert(text: string): Promise<void> {
+export async function postAffiliateAlert(text: string): Promise<void> {
   try {
     const channel = process.env.SLACK_AFFILIATE_CHANNEL_ID;
     if (!channel) return;
@@ -109,11 +138,87 @@ async function postAffiliateAlert(text: string): Promise<void> {
 }
 
 /**
+ * Comparison key for "is this the same person?" checks.
+ *
+ * The self-referral guard used to compare raw lowercased addresses, so
+ * `dana@x.com` and `dana+lead@x.com` — or `d.a.n.a@gmail.com` — read as two
+ * different people and the guard missed them. Sub-addressing is stripped for
+ * every domain (nothing legitimate depends on the tag surviving a comparison)
+ * and dots are stripped only for Google-run domains, where they genuinely do not
+ * distinguish mailboxes.
+ *
+ * Returns '' for anything unusable, and callers must treat '' as "no answer"
+ * rather than as a match — two blanks are not the same person.
+ */
+function emailKey(value?: string | null): string {
+  const raw = (value ?? "").trim().toLowerCase();
+  const at = raw.lastIndexOf("@");
+  if (at <= 0 || at === raw.length - 1) return "";
+
+  let local = raw.slice(0, at);
+  const domain = raw.slice(at + 1);
+
+  const plus = local.indexOf("+");
+  if (plus > 0) local = local.slice(0, plus);
+  if (domain === "gmail.com" || domain === "googlemail.com") local = local.replace(/\./g, "");
+
+  return local ? `${local}@${domain}` : "";
+}
+
+/**
+ * Does this payout look like an affiliate paying themselves?
+ *
+ * Shared by the queue-time and send-time checks so the two can't drift. Returns
+ * the reason it matched, or null.
+ *
+ * The identity match (same auth user) is conclusive. The contact matches are
+ * STRONG SIGNALS, not proof — a spouse, a business partner or a shared office
+ * line are all real, legitimate referrals that look like this. That is why the
+ * callers treat a contact match as a HOLD for a human rather than an automatic
+ * cancellation: refusing a genuine payout silently is a worse failure than
+ * asking someone to look.
+ */
+function selfReferralReason(
+  affiliate: { user_id?: string | null; email?: string | null; phone?: string | null },
+  vault: { user_id?: string | null; client_email?: string | null; client_phone?: string | null }
+): { reason: string; conclusive: boolean } | null {
+  if (affiliate.user_id && vault.user_id && affiliate.user_id === vault.user_id) {
+    return { reason: "Self-referral — the affiliate and the client are the same account", conclusive: true };
+  }
+
+  const aRaw = (affiliate.email ?? "").trim().toLowerCase();
+  const vRaw = (vault.client_email ?? "").trim().toLowerCase();
+  if (aRaw && vRaw && aRaw === vRaw) {
+    return { reason: "Self-referral — affiliate matches the referred client", conclusive: true };
+  }
+
+  const aEmail = emailKey(affiliate.email);
+  const vEmail = emailKey(vault.client_email);
+  if (aEmail && vEmail && aEmail === vEmail) {
+    return {
+      reason: `Possible self-referral — the affiliate's email and the client's resolve to the same mailbox (${aEmail})`,
+      conclusive: false,
+    };
+  }
+
+  const aPhone = phoneKey(affiliate.phone);
+  const vPhone = phoneKey(vault.client_phone);
+  if (aPhone && vPhone && aPhone === vPhone) {
+    return {
+      reason: "Possible self-referral — the affiliate and the client share a phone number",
+      conclusive: false,
+    };
+  }
+
+  return null;
+}
+
+/**
  * Link a newly-created client vault back to the affiliate lead that produced it,
  * so affiliate attribution survives from the public pre-qualification flow all
  * the way to a funded deal.
  *
- * Called at the end of every vault-creation path. Matches an unconverted
+ * Called at the end of every vault-creation path. Matches an eligible
  * `affiliate_leads` row by GHL contact id first (most reliable — the referral
  * already created the GHL contact), then by email. On a match it:
  *   - marks the lead `converted` and stamps `converted_vault_id`,
@@ -121,9 +226,30 @@ async function postAffiliateAlert(text: string): Promise<void> {
  *     this), and mirrors the affiliate name onto `referral_partner` for the
  *     existing client-profile UI.
  *
+ * ELIGIBILITY is deliberately an allow-list, because a match here is what makes
+ * a $500 gift card owed and the submit route that creates leads is PUBLIC and
+ * unauthenticated — anybody can post anybody's email through an affiliate's
+ * code, so a lead is a claim, not proof of a referral. Two bounds:
+ *
+ *   status === 'qualified' — the only status that means "this lead passed our
+ *     own pre-qualification". It used to be `.neq('converted')`, which also let
+ *     through 'disqualified': a lead the program formally REJECTED for FICO,
+ *     revenue or time-in-business still carried full attribution, so if that
+ *     person came back later through any other channel and funded, the affiliate
+ *     collected on a lead we had turned down.
+ *
+ *   recency — the lead must be no older than AFFILIATE_ATTRIBUTION_WINDOW_DAYS
+ *     (90). Without a bound, pre-claiming a list of prospect emails paid out
+ *     whenever one of them eventually became a client, however many months
+ *     later, and the claim never expired.
+ *
+ * Every successful link is announced to the affiliate Slack channel with the
+ * match key and the lead's age, because a poisoning pattern is only visible in
+ * aggregate — one link looks perfectly normal.
+ *
  * Best-effort and non-throwing: attribution must never break signup. Pass a
  * SERVICE-ROLE client (affiliate_leads is RLS-locked to service role).
- * See [[ghl_integration_contract]], [[role_model]].
+ * See [[affiliate_program]], [[ghl_integration_contract]], [[role_model]].
  */
 export async function linkAffiliateLeadToVault(
   db: SupabaseClient,
@@ -133,30 +259,40 @@ export async function linkAffiliateLeadToVault(
   if (!vaultId) return;
 
   try {
-    let lead: { id: string; affiliate_id: string | null } | null = null;
+    type EligibleLead = { id: string; affiliate_id: string | null; created_at: string };
+    let lead: EligibleLead | null = null;
+    let matchedBy: "ghl_contact_id" | "email" | null = null;
+
+    // Only leads that PASSED pre-qual, and only recent ones. See the eligibility
+    // note above — both bounds guard real money.
+    const windowDays = numEnv("AFFILIATE_ATTRIBUTION_WINDOW_DAYS", 90);
+    const earliest = new Date(Date.now() - windowDays * 86_400_000).toISOString();
+
+    // Newest-first: with the window in place the oldest matching claim is the
+    // least likely to be the real referral.
+    const eligible = () =>
+      db
+        .from("affiliate_leads")
+        .select("id, affiliate_id, created_at")
+        .eq("status", "qualified")
+        .gte("created_at", earliest)
+        .order("created_at", { ascending: false })
+        .limit(1);
 
     if (ghlContactId) {
-      const { data } = await db
-        .from("affiliate_leads")
-        .select("id, affiliate_id")
-        .eq("ghl_contact_id", ghlContactId)
-        .neq("status", "converted")
-        .order("created_at", { ascending: true })
-        .limit(1)
-        .maybeSingle();
-      lead = data ?? null;
+      const { data } = await eligible().eq("ghl_contact_id", ghlContactId).maybeSingle();
+      if (data) {
+        lead = data as EligibleLead;
+        matchedBy = "ghl_contact_id";
+      }
     }
 
     if (!lead && email) {
-      const { data } = await db
-        .from("affiliate_leads")
-        .select("id, affiliate_id")
-        .eq("email", email.toLowerCase())
-        .neq("status", "converted")
-        .order("created_at", { ascending: true })
-        .limit(1)
-        .maybeSingle();
-      lead = data ?? null;
+      const { data } = await eligible().eq("email", email.toLowerCase()).maybeSingle();
+      if (data) {
+        lead = data as EligibleLead;
+        matchedBy = "email";
+      }
     }
 
     if (!lead) return;
@@ -176,6 +312,25 @@ export async function linkAffiliateLeadToVault(
       .from("client_data_vault")
       .update({ affiliate_lead_id: lead.id })
       .eq("id", vaultId);
+
+    // Audit trail. A single attribution always looks legitimate; abuse of the
+    // public submit route only shows up as a PATTERN — one affiliate accumulating
+    // links they had no hand in, or leads that sat at the edge of the window.
+    // Logged and posted so there is something to notice.
+    const ageDays = Math.floor(
+      (Date.now() - new Date(lead.created_at).getTime()) / 86_400_000
+    );
+    console.log(
+      `[affiliates] ATTRIBUTED vault ${vaultId} to affiliate ${lead.affiliate_id} ` +
+        `via lead ${lead.id} (matched on ${matchedBy}, lead was ${ageDays}d old)`
+    );
+    await postAffiliateAlert(
+      `:link: *Referral attributed*\n` +
+        `• Affiliate: \`${lead.affiliate_id}\`\n` +
+        `• Vault: \`${vaultId}\`\n` +
+        `• Matched on: ${matchedBy} (lead ${ageDays}d old)\n` +
+        `A funded deal on this vault now owes this affiliate a reward.`
+    );
   } catch (err) {
     console.error("[affiliates] linkAffiliateLeadToVault failed (non-fatal):", err);
   }
@@ -308,7 +463,7 @@ export async function createAffiliatePayoutForFundedVault(
     // 1. Is this vault a referral?
     const { data: vault } = await db
       .from("client_data_vault")
-      .select("id, affiliate_lead_id, user_id, client_email")
+      .select("id, affiliate_lead_id, user_id, client_email, client_phone")
       .eq("id", clientVaultId)
       .maybeSingle();
     if (!vault?.affiliate_lead_id) return;
@@ -326,7 +481,7 @@ export async function createAffiliatePayoutForFundedVault(
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
-    if (!fundedEntry || !PAYOUT_ACTOR_ROLES.has(fundedEntry.changed_by_role ?? "")) {
+    if (!fundedEntry || !canRecordFunded(fundedEntry.changed_by_role)) {
       console.warn(
         `[affiliates] REFUSED payout for ${clientVaultId}: funded transition actor role`,
         fundedEntry?.changed_by_role ?? "(no funded row)"
@@ -344,22 +499,27 @@ export async function createAffiliatePayoutForFundedVault(
 
     const { data: affiliate } = await db
       .from("affiliates")
-      .select("id, user_id, first_name, last_name, email, giftronaut_email")
+      .select("id, user_id, first_name, last_name, email, giftronaut_email, phone")
       .eq("id", lead.affiliate_id)
       .maybeSingle();
     if (!affiliate) return;
 
     // 2b. Self-referral guard: an affiliate must not collect on their own vault.
-    //     Recorded as a `canceled` payout rather than a silent return so it is
+    //
+    //     A CONCLUSIVE match (same account, or the very same email address) is
+    //     recorded as a `canceled` payout rather than a silent return, so it is
     //     visible on /admin/affiliates and the UNIQUE(client_vault_id) row is
     //     claimed — an admin can still override deliberately.
-    const affiliateEmail = affiliate.email?.trim().toLowerCase() || null;
-    const vaultEmail = vault.client_email?.trim().toLowerCase() || null;
-    const isSelfReferral =
-      (!!affiliate.user_id && !!vault.user_id && affiliate.user_id === vault.user_id) ||
-      (!!affiliateEmail && !!vaultEmail && affiliateEmail === vaultEmail);
+    //
+    //     A NON-CONCLUSIVE match — same mailbox after stripping +tags or Gmail
+    //     dots, or a shared phone number — is only a strong signal. A spouse, a
+    //     business partner and a shared office line are all legitimate
+    //     referrals that look exactly like this, so it becomes a HOLD for a
+    //     human further down rather than an automatic refusal. Cancelling a real
+    //     payout silently is the worse of the two mistakes.
+    const selfRef = selfReferralReason(affiliate, vault);
 
-    if (isSelfReferral) {
+    if (selfRef?.conclusive) {
       console.warn(
         `[affiliates] REFUSED payout for ${clientVaultId}: self-referral by affiliate ${affiliate.id}`
       );
@@ -369,7 +529,7 @@ export async function createAffiliatePayoutForFundedVault(
         client_vault_id: clientVaultId,
         commission_amount: 0,
         status: "canceled",
-        error: "Self-referral — affiliate matches the referred client",
+        error: selfRef.reason,
       });
       return;
     }
@@ -420,6 +580,12 @@ export async function createAffiliatePayoutForFundedVault(
       holds.push("No funded funding_deals row for this vault");
     }
 
+    // 3a-ii. The non-conclusive half of the self-referral check (see 2b). It
+    //     lands here rather than cancelling because it is a signal, not proof.
+    if (selfRef) {
+      holds.push(selfRef.reason);
+    }
+
     // 3b. Per-affiliate velocity: an unusual burst from one affiliate is the
     //     signature of an abused referral flow.
     const windowDays = numEnv("AFFILIATE_PAYOUT_WINDOW_DAYS", 30);
@@ -429,11 +595,11 @@ export async function createAffiliatePayoutForFundedVault(
       .from("affiliate_payouts")
       .select("id", { count: "exact", head: true })
       .eq("affiliate_id", affiliate.id)
-      .in("status", ["sent", "delivered"])
+      .in("status", COMMITTED_STATUSES as unknown as string[])
       .gte("created_at", windowStart);
     if ((recentForAffiliate ?? 0) >= maxPerAffiliate) {
       holds.push(
-        `Affiliate hit the cap of ${maxPerAffiliate} payouts in ${windowDays} days (${recentForAffiliate} sent)`
+        `Affiliate hit the cap of ${maxPerAffiliate} payouts in ${windowDays} days (${recentForAffiliate} already queued or paid)`
       );
     }
 
@@ -614,7 +780,7 @@ export async function processAffiliatePayout(
     // degrades on its own when either half is missing.
     const { data: vault } = await db
       .from("client_data_vault")
-      .select("id, affiliate_lead_id, user_id, client_email, company_name, client_name")
+      .select("id, affiliate_lead_id, user_id, client_email, client_phone, company_name, client_name")
       .eq("id", payout.client_vault_id)
       .maybeSingle();
 
@@ -657,7 +823,7 @@ export async function processAffiliatePayout(
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
-    if (!fundedEntry || !PAYOUT_ACTOR_ROLES.has(fundedEntry.changed_by_role ?? "")) {
+    if (!fundedEntry || !canRecordFunded(fundedEntry.changed_by_role)) {
       return await cancelPayout(
         db,
         payout,
@@ -682,7 +848,7 @@ export async function processAffiliatePayout(
     // --- Re-verify the affiliate. ------------------------------------------
     const { data: affiliate } = await db
       .from("affiliates")
-      .select("id, user_id, first_name, last_name, email, giftronaut_email, status")
+      .select("id, user_id, first_name, last_name, email, giftronaut_email, phone, status")
       .eq("id", payout.affiliate_id)
       .maybeSingle();
 
@@ -693,13 +859,16 @@ export async function processAffiliatePayout(
       return await holdPayout(db, payout, `Affiliate is ${affiliate.status}`);
     }
 
-    const affiliateEmail = affiliate.email?.trim().toLowerCase() || null;
-    const vaultEmail = vault.client_email?.trim().toLowerCase() || null;
-    if (
-      (!!affiliate.user_id && !!vault.user_id && affiliate.user_id === vault.user_id) ||
-      (!!affiliateEmail && !!vaultEmail && affiliateEmail === vaultEmail)
-    ) {
-      return await cancelPayout(db, payout, "Self-referral — affiliate matches the referred client");
+    // Same split as at queue time: a conclusive match cancels, a signal holds.
+    // This runs again here because 24h have passed and either record may have
+    // been edited since — an affiliate changing their email to match the client
+    // after the payout was queued is exactly what this catches.
+    const selfRef = selfReferralReason(affiliate, vault);
+    if (selfRef?.conclusive) {
+      return await cancelPayout(db, payout, selfRef.reason);
+    }
+    if (selfRef && !admin) {
+      return await holdPayout(db, payout, selfRef.reason);
     }
 
     const recipientEmail = affiliate.giftronaut_email || affiliate.email;
@@ -710,12 +879,16 @@ export async function processAffiliatePayout(
     // --- Global daily spend cap. -------------------------------------------
     // Transient by nature, so it DEFERS rather than holds: push release_at out
     // an hour and the worker picks the row up again once the window clears.
+    //
+    // Counts every CHARGED status, awaiting_link included — that row's balance
+    // is already deducted, so treating it as $0 spent let the cap approve a
+    // second card on a budget that was in fact exhausted.
     const maxDaily = numEnv("AFFILIATE_MAX_DAILY_PAYOUT_TOTAL", 5000);
     const dayStart = new Date(Date.now() - 86_400_000).toISOString();
     const { data: recentSends } = await db
       .from("affiliate_payouts")
       .select("commission_amount")
-      .in("status", ["sent", "delivered"])
+      .in("status", CHARGED_STATUSES as unknown as string[])
       .gte("sent_at", dayStart);
     const spentToday = (recentSends ?? []).reduce(
       (sum: number, r: { commission_amount: number | string | null }) =>

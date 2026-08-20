@@ -60,6 +60,28 @@ export const DISQUALIFY_TAGS: Record<DisqualifyCode, string> = {
 };
 
 /**
+ * Is every answer one this form actually offers?
+ *
+ * evaluatePrequal below is a DENY-list of three exact strings, so anything it
+ * does not recognise qualifies. That is fine for the real stepper, which can
+ * only submit the options above — but the submit route is public and
+ * unauthenticated, and it only checked that the four answers were non-empty. A
+ * crafted POST with `fico_band: "x"` therefore sailed through the gate every
+ * time, and the arbitrary string was stored on the lead and counted in reporting.
+ *
+ * Validate first, then evaluate. Keep this an ALLOW-list: adding an option means
+ * adding it to the arrays above, which is also what the form renders from.
+ */
+export function isKnownPrequalAnswers(a: PrequalAnswers): boolean {
+  return (
+    (LOAN_AMOUNT_OPTIONS as readonly string[]).includes(a.loan_amount) &&
+    (FICO_OPTIONS as readonly string[]).includes(a.fico_band) &&
+    (REVENUE_OPTIONS as readonly string[]).includes(a.monthly_revenue) &&
+    (TIME_IN_BUSINESS_OPTIONS as readonly string[]).includes(a.time_in_business)
+  );
+}
+
+/**
  * Disqualify rules (from the GHL form): FICO below 600, monthly revenue below
  * $25,000, or less than 6 months in business. Anyone else qualifies.
  *

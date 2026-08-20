@@ -264,8 +264,12 @@ export interface LenderMatchProps {
   industry?: string;
 }
 
-// Picker dropdown + ownership display only.
-// State/industry/match criteria come from bank_analysis_results.
+// The client profile IS the base deal. Everything the matcher needs — FICO
+// band, time in business, revenue, deposits, ask, state, industry, bankruptcy —
+// is captured at vault creation, so a file with no bank analysis is still
+// matchable. A saved analysis, when one exists, is layered on top (see
+// mergeAnalysisOverDeal): it refines the profile numbers, it isn't a
+// precondition for running the tool.
 interface ClientOption {
   id: string;
   client_name: string;
@@ -274,7 +278,23 @@ interface ClientOption {
   company_state?: string;
   // Industry is captured at vault creation onto business_profiles (not the vault
   // row), so we embed it here as the reliable source for the industry filter.
-  business_profiles?: { industry: string | null; is_primary: boolean; display_order: number }[];
+  business_profiles?: {
+    id: string;
+    industry: string | null;
+    is_primary: boolean;
+    display_order: number;
+    business_start_date?: string | null;
+    company_state?: string | null;
+    avg_monthly_deposits?: number | null;
+    avg_annual_revenue?: number | null;
+    amount_requested?: number | null;
+    credit_score?: string | null;
+  }[];
+  credit_score?: string | null;
+  capital_requested?: number | null;
+  avg_monthly_deposits?: number | null;
+  avg_annual_revenue?: number | null;
+  has_bankruptcy_foreclosure_3y?: boolean | null;
   proposed_loan_type: string;
   loan_purpose: string;
   business_start_date: string;
@@ -290,6 +310,134 @@ interface ClientOption {
   owner_5_name?: string;
   owner_5_ownership_pct?: number;
 }
+
+// ─── Profile → deal ───────────────────────────────────────────────────────────
+// Turns the data captured at vault creation into a DealSummary the matcher can
+// run on. Two fields have no profile equivalent and stay 0 — average daily
+// balance and negative days only exist once statements are read. That is safe:
+// the engine skips any rule whose deal value is 0, so a profile-only deal is
+// matched on what we actually know instead of being disqualified for what we
+// don't. UW can type either number in by hand when they know it.
+
+/** "700+" → 700, "600-700" → 600, "712" → 712. Ranges resolve to their LOW end:
+ *  matching on the optimistic end of a band would surface lenders the file
+ *  can't actually clear. */
+function parseFicoBand(raw: string | null | undefined): number {
+  if (!raw) return 0;
+  const n = parseInt(String(raw).replace(/[^0-9-]/g, ""), 10);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function monthsSince(startDate: string | null | undefined): number {
+  if (!startDate) return 0;
+  const start = new Date(startDate);
+  if (Number.isNaN(start.getTime())) return 0;
+  const now = new Date();
+  const months =
+    (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
+  return months > 0 ? months : 0;
+}
+
+/** Primary business first, then display_order — the same ordering the rest of
+ *  the app uses to decide which business represents the file. */
+function primaryBusiness(client: ClientOption | undefined) {
+  return (client?.business_profiles ?? [])
+    .slice()
+    .sort(
+      (a, b) => Number(b.is_primary) - Number(a.is_primary) || a.display_order - b.display_order
+    )[0];
+}
+
+function buildProfileDeal(client: ClientOption | undefined, openPositions: number): DealSummary {
+  if (!client) return { ...DEFAULT_DEAL };
+  const biz = primaryBusiness(client);
+
+  // Business-level values win over the vault row when present: on a
+  // multi-business file the vault row still carries the first business's
+  // numbers, and the deal being matched belongs to the primary business.
+  const startDate = biz?.business_start_date || client.business_start_date || "";
+  const annualRevenue = Number(biz?.avg_annual_revenue ?? client.avg_annual_revenue) || 0;
+  const rawIndustry = (biz?.industry || client.industry || "").trim();
+
+  return {
+    fico: parseFicoBand(biz?.credit_score || client.credit_score),
+    tibMonths: monthsSince(startDate),
+    // Signup captures ANNUAL revenue; the matcher compares monthly.
+    avgRevenue: annualRevenue > 0 ? Math.round(annualRevenue / 12) : 0,
+    avgDailyBalance: 0,
+    totalNegDays: 0,
+    numOpenPositions: openPositions,
+    avgMonthlyDeposits: Number(biz?.avg_monthly_deposits ?? client.avg_monthly_deposits) || 0,
+    hasBankruptcy: !!client.has_bankruptcy_foreclosure_3y,
+    businessName: client.company_name || "",
+    ownerName: client.client_name || "",
+    capitalRequested: Number(biz?.amount_requested ?? client.capital_requested) || 0,
+    state: (biz?.company_state || client.company_state || "").toUpperCase().slice(0, 2),
+    industry: matchNaics(rawIndustry)?.title ?? rawIndustry,
+    proposedLoanType: client.proposed_loan_type || "",
+    loanPurpose: client.loan_purpose || "",
+    businessStartDate: startDate
+      ? new Date(startDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+      : "",
+    numOwners: client.number_of_owners || "",
+    ownershipDetails: [
+      { name: client.owner_1_name || "", pct: Number(client.owner_1_ownership_pct) || 0 },
+      { name: client.owner_2_name || "", pct: Number(client.owner_2_ownership_pct) || 0 },
+      { name: client.owner_3_name || "", pct: Number(client.owner_3_ownership_pct) || 0 },
+      { name: client.owner_4_name || "", pct: Number(client.owner_4_ownership_pct) || 0 },
+      { name: client.owner_5_name || "", pct: Number(client.owner_5_ownership_pct) || 0 },
+    ].filter((o) => o.name && o.pct > 0),
+  };
+}
+
+/** The subset of a bank_analysis_results row the matcher reads. Every field is
+ *  optional: snapshots saved before a column existed simply don't carry it. */
+interface AnalysisRow {
+  created_at?: string | null;
+  fico?: number | null;
+  tib_months?: number | null;
+  avg_revenue?: number | string | null;
+  avg_daily_balance?: number | string | null;
+  avg_monthly_deposits?: number | string | null;
+  total_neg_days?: number | null;
+  num_open_positions?: number | null;
+  has_bankruptcy?: boolean | null;
+  capital_requested?: number | string | null;
+  company_state?: string | null;
+  industry?: string | null;
+  business_name?: string | null;
+  owner_name?: string | null;
+}
+
+/** Layer a saved analysis over the profile deal. Only fields the analysis
+ *  actually carries a value for override — a snapshot saved before a field
+ *  existed, or left blank, must not blank out good profile data. */
+function mergeAnalysisOverDeal(base: DealSummary, analysis: AnalysisRow): DealSummary {
+  const num = (v: unknown, fallback: number) => (Number(v) > 0 ? Number(v) : fallback);
+  const rawIndustry = (analysis.industry || "").trim();
+  return {
+    ...base,
+    fico: num(analysis.fico, base.fico),
+    tibMonths: num(analysis.tib_months, base.tibMonths),
+    avgRevenue: num(analysis.avg_revenue, base.avgRevenue),
+    avgDailyBalance: num(analysis.avg_daily_balance, base.avgDailyBalance),
+    avgMonthlyDeposits: num(analysis.avg_monthly_deposits, base.avgMonthlyDeposits),
+    totalNegDays: num(analysis.total_neg_days, base.totalNegDays),
+    numOpenPositions: num(analysis.num_open_positions, base.numOpenPositions),
+    // Bankruptcy is a boolean: the analysis asserting one is authoritative, but
+    // its `false` never clears a bankruptcy already declared on the profile.
+    hasBankruptcy: analysis.has_bankruptcy || base.hasBankruptcy,
+    capitalRequested: num(analysis.capital_requested, base.capitalRequested),
+    state: (analysis.company_state || base.state || "").toUpperCase().slice(0, 2),
+    industry: rawIndustry ? (matchNaics(rawIndustry)?.title ?? rawIndustry) : base.industry,
+    businessName: analysis.business_name || base.businessName,
+    ownerName: analysis.owner_name || base.ownerName,
+  };
+}
+
+/** Where the numbers on screen came from — drives the source badge so nobody
+ *  mistakes a profile-based match for a statement-verified one. */
+type DealSource = "none" | "profile" | "analysis" | "manual";
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -317,6 +465,11 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
   const [clientList, setClientList] = useState<ClientOption[]>([]);
   const [selectedClientId, setSelectedClientId] = useState<string>(initial_client_id);
   const [isLoadingClient, setIsLoadingClient] = useState(false);
+  // Provenance of the numbers currently on screen, surfaced as a badge. A
+  // profile-based match is a legitimate match, but the team has to be able to
+  // see at a glance that no statements were read.
+  const [dealSource, setDealSource] = useState<DealSource>("none");
+  const [analysisDate, setAnalysisDate] = useState<string | null>(null);
   const [clientSearch, setClientSearch] = useState("");
   const [clientDropdownOpen, setClientDropdownOpen] = useState(false);
   const clientSearchRef = useRef<HTMLDivElement | null>(null);
@@ -357,19 +510,38 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
       .from("client_data_vault")
       .select(`
         id, client_name, company_name, industry, company_state,
+        credit_score, capital_requested, avg_monthly_deposits, avg_annual_revenue,
+        has_bankruptcy_foreclosure_3y,
         proposed_loan_type, loan_purpose, business_start_date, number_of_owners,
         owner_1_name, owner_1_ownership_pct,
         owner_2_name, owner_2_ownership_pct,
         owner_3_name, owner_3_ownership_pct,
         owner_4_name, owner_4_ownership_pct,
         owner_5_name, owner_5_ownership_pct,
-        business_profiles ( industry, is_primary, display_order )
+        business_profiles (
+          id, industry, is_primary, display_order, business_start_date, company_state,
+          avg_monthly_deposits, avg_annual_revenue, amount_requested, credit_score
+        )
       `)
       .order("client_name", { ascending: true })
       .then(({ data }) => {
         if (data) setClientList(data as any as ClientOption[]);
       });
   }, []);
+
+  // Deep-link load: ?client=<id> only ever seeded selectedClientId, so arriving
+  // from the client detail view showed the client as selected with an empty
+  // deal — the analyst had to re-pick them from the dropdown to get any data.
+  // Fire the load once the client list (which loadClientResults reads the
+  // profile from) has arrived, and only once per client.
+  const deepLinkedRef = useRef<string>("");
+  useEffect(() => {
+    if (!initial_client_id || clientList.length === 0) return;
+    if (deepLinkedRef.current === initial_client_id) return;
+    deepLinkedRef.current = initial_client_id;
+    loadClientResults(initial_client_id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initial_client_id, clientList.length]);
 
   // Close the client search dropdown when clicking outside of it.
   useEffect(() => {
@@ -410,10 +582,20 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
     setClientSearch("");
     setClientDropdownOpen(false);
     setDeal({ ...DEFAULT_DEAL });
+    setDealSource("none");
+    setAnalysisDate(null);
     setFilterState("");
     setFilterIndustry("");
     setSelectedSpecialties(new Set());
     setDecisions({});
+  }
+
+  /** Hand-edit of any match criterion. Flags the deal as manual so the badge
+   *  stops claiming the numbers came straight from the profile or a snapshot. */
+  function editDeal(patch: Partial<DealSummary>) {
+    setDeal((prev) => ({ ...prev, ...patch }));
+    setDealSource((prev) => (prev === "none" ? prev : "manual"));
+    setSaveSuccess(false);
   }
 
   const loadDecisions = useCallback(async (clientId: string) => {
@@ -432,11 +614,34 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
     }
   }, []);
 
-  // Change 2: Single query — bank_analysis_results is source of truth
+  // The client profile is the base deal; a saved bank analysis refines it.
+  //
+  // This used to be analysis-only: no bank_analysis_results row meant the
+  // function warned to the console and left the deal at all-zeros, so the tool
+  // sat on "Select a client above" and the file could not be matched at all.
+  // Plenty of files never need statements read to go out to lenders, and every
+  // number the engine needs is already captured at vault creation — so the
+  // profile is now always loaded first, and the analysis is layered over it
+  // when one exists.
   async function loadClientResults(clientId: string) {
     if (!clientId) return;
     setIsLoadingClient(true);
     const supabase = createClient();
+    const client = clientList.find((c) => c.id === clientId);
+
+    // Open positions come from the vault's own ground-truth table, so a
+    // profile-only deal still gets scored on position count. Best-effort: a
+    // failure leaves 0, which the engine reads as "unknown" and skips.
+    let openPositions = 0;
+    try {
+      const { count } = await supabase
+        .from("client_open_positions")
+        .select("id", { count: "exact", head: true })
+        .eq("client_vault_id", clientId);
+      openPositions = count ?? 0;
+    } catch (err) {
+      console.warn("lender-match: open positions lookup failed (non-fatal):", err);
+    }
 
     // History-aware load: take the LATEST snapshot. bank_analysis_results
     // no longer has UNIQUE(client_id) — each save in the bank-analysis tool
@@ -449,61 +654,46 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
       .limit(1)
       .maybeSingle();
 
-    if (analysis && !aError) {
-      const client = clientList.find((c) => c.id === clientId);
-      // Industry lives on business_profiles (primary business first), since the
-      // vault row's own industry column isn't populated at signup. Fall back
-      // through analysis → vault column → primary business for resilience.
-      const primaryBusinessIndustry =
-        (client?.business_profiles ?? [])
-          .slice()
-          .sort(
-            (a, b) =>
-              Number(b.is_primary) - Number(a.is_primary) ||
-              a.display_order - b.display_order
-          )
-          .map((b) => (b.industry ?? "").trim())
-          .find(Boolean) ?? "";
-      const rawIndustry = analysis.industry || client?.industry || primaryBusinessIndustry || "";
-      // Canonicalize to a NAICS title when we can confidently map the stored
-      // value; otherwise keep the raw text so nothing is lost.
-      const naicsIndustry = matchNaics(rawIndustry)?.title ?? rawIndustry;
-      const newDeal: DealSummary = {
-        fico: analysis.fico || 0,
-        tibMonths: analysis.tib_months || 0,
-        avgRevenue: Number(analysis.avg_revenue) || 0,
-        avgDailyBalance: Number(analysis.avg_daily_balance) || 0,
-        totalNegDays: analysis.total_neg_days || 0,
-        numOpenPositions: analysis.num_open_positions || 0,
-        avgMonthlyDeposits: Number(analysis.avg_monthly_deposits) || 0,
-        hasBankruptcy: analysis.has_bankruptcy || false,
-        capitalRequested: Number(analysis.capital_requested) || 0,
-        state: analysis.company_state || client?.company_state || "",
-        industry: naicsIndustry,
-        businessName: analysis.business_name || client?.company_name || "",
-        ownerName: analysis.owner_name || client?.client_name || "",
-        proposedLoanType: client?.proposed_loan_type || "",
-        loanPurpose: client?.loan_purpose || "",
-        businessStartDate: client?.business_start_date
-          ? new Date(client.business_start_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-          : "",
-        numOwners: client?.number_of_owners || "",
-        ownershipDetails: [
-          { name: client?.owner_1_name || "", pct: Number(client?.owner_1_ownership_pct) || 0 },
-          { name: client?.owner_2_name || "", pct: Number(client?.owner_2_ownership_pct) || 0 },
-          { name: client?.owner_3_name || "", pct: Number(client?.owner_3_ownership_pct) || 0 },
-          { name: client?.owner_4_name || "", pct: Number(client?.owner_4_ownership_pct) || 0 },
-          { name: client?.owner_5_name || "", pct: Number(client?.owner_5_ownership_pct) || 0 },
-        ].filter((o) => o.name && o.pct > 0),
-      };
-      setDeal(newDeal);
-      setFilterState(newDeal.state || "");
-      setFilterIndustry(newDeal.industry || "");
-      setDecisions({});
-      await loadDecisions(clientId);
-    } else {
-      console.warn(`No bank analysis found for client ${clientId}`);
+    // The ask being worked lives on the CURRENT funding round, not on the vault
+    // row — that one still carries the first round's numbers for a repeat
+    // client. Newest deal wins (see the funding-rounds contract). Best-effort:
+    // no row, or no read access, falls back to the profile ask.
+    const businessId = primaryBusiness(client)?.id;
+    let activeDeal: {
+      capital_requested?: number | null;
+      proposed_loan_type?: string | null;
+      loan_purpose?: string | null;
+    } | null = null;
+    if (businessId) {
+      const { data: dealRow } = await supabase
+        .from("funding_deals")
+        .select("capital_requested, proposed_loan_type, loan_purpose")
+        .eq("business_profile_id", businessId)
+        .order("display_order", { ascending: false })
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      activeDeal = dealRow ?? null;
     }
+
+    const profileDeal = buildProfileDeal(client, openPositions);
+    if (activeDeal) {
+      profileDeal.capitalRequested =
+        Number(activeDeal.capital_requested) || profileDeal.capitalRequested;
+      profileDeal.proposedLoanType = activeDeal.proposed_loan_type || profileDeal.proposedLoanType;
+      profileDeal.loanPurpose = activeDeal.loan_purpose || profileDeal.loanPurpose;
+    }
+
+    const hasAnalysis = !!analysis && !aError;
+    const newDeal = hasAnalysis ? mergeAnalysisOverDeal(profileDeal, analysis) : profileDeal;
+
+    setDeal(newDeal);
+    setDealSource(hasAnalysis ? "analysis" : "profile");
+    setAnalysisDate(hasAnalysis ? (analysis.created_at ?? null) : null);
+    setFilterState(newDeal.state || "");
+    setFilterIndustry(newDeal.industry || "");
+    setDecisions({});
+    await loadDecisions(clientId);
     setIsLoadingClient(false);
   }
 
@@ -712,7 +902,19 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
     try {
       const { notified, emailed, admins } = await notifyAdminsOfLenderMatchSaved(
         selectedClientId,
-        rows.map((r) => ({ lender_name: r.lender_name, specialty: r.specialty }))
+        rows.map((r) => ({ lender_name: r.lender_name, specialty: r.specialty })),
+        // Ship the basis with the notification: an admin deciding whether to
+        // veto a lender needs to know whether statements were read or whether
+        // this ran on intake data.
+        {
+          basis: dealSource === "none" ? "profile" : dealSource,
+          analysis_date: analysisDate,
+          fico: deal.fico,
+          tib_months: deal.tibMonths,
+          avg_revenue: deal.avgRevenue,
+          num_open_positions: deal.numOpenPositions,
+          capital_requested: deal.capitalRequested,
+        }
       );
       if (rows.length === 0) {
         toast.success("Cleared selections");
@@ -760,7 +962,7 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
                   <input
                     type="text"
                     value={clientDropdownOpen ? clientSearch : selectedClient ? `${selectedClient.company_name} (${selectedClient.client_name})` : clientSearch}
-                    placeholder="Search bank analysis by client or company..."
+                    placeholder="Search by client or company..."
                     onChange={(e) => {
                       setClientSearch(e.target.value);
                       if (!clientDropdownOpen) setClientDropdownOpen(true);
@@ -785,7 +987,7 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
                 {clientDropdownOpen && (
                   <div className="absolute z-20 mt-1 w-full max-h-72 overflow-y-auto rounded-md border border-slate-200 bg-white shadow-lg">
                     {filteredClientList.length === 0 ? (
-                      <div className="px-3 py-2 text-xs text-slate-400 font-mono">No matching analysis found.</div>
+                      <div className="px-3 py-2 text-xs text-slate-400 font-mono">No matching client found.</div>
                     ) : (
                       filteredClientList.map((c) => (
                         <button
@@ -824,21 +1026,87 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
             </div>
           )}
         </div>
+        {/* Source badge — a profile-based match is valid, but it must never be
+            mistaken for one backed by read statements. */}
+        {dealSource !== "none" && (
+          <div className="flex items-center gap-2 mb-2">
+            <span
+              className={`text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded border ${
+                dealSource === "analysis"
+                  ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                  : dealSource === "manual"
+                    ? "bg-amber-50 text-amber-700 border-amber-200"
+                    : "bg-slate-50 text-slate-600 border-slate-200"
+              }`}
+            >
+              {dealSource === "analysis"
+                ? `Bank analysis${analysisDate ? ` · ${new Date(analysisDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}` : ""}`
+                : dealSource === "manual"
+                  ? "Manually adjusted"
+                  : "Client profile · no bank analysis"}
+            </span>
+            {dealSource === "profile" && (
+              <span className="text-[10px] font-mono text-slate-400">
+                Matching on vault intake data — daily balance and negative days unknown, so those rules are skipped.
+              </span>
+            )}
+          </div>
+        )}
 
-        {/* Deal summary pills */}
-        <div className="flex flex-wrap gap-2">
+        {/* Match criteria — editable.
+            These are the values the engine runs on, wherever they came from.
+            They have to be editable because a file with no bank analysis still
+            has numbers only the analyst knows (negative days, daily balance,
+            an updated FICO pull), and because a stale profile figure shouldn't
+            force a full statement analysis just to re-run the match. */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-9 gap-2">
+          {([
+            { key: "fico", label: "FICO", value: deal.fico, money: false },
+            { key: "tibMonths", label: "TIB (mo)", value: deal.tibMonths, money: false },
+            { key: "avgRevenue", label: "Avg Mo Revenue", value: deal.avgRevenue, money: true },
+            { key: "avgMonthlyDeposits", label: "Avg Mo Deposits", value: deal.avgMonthlyDeposits, money: true },
+            { key: "avgDailyBalance", label: "Avg Daily Bal", value: deal.avgDailyBalance, money: true },
+            { key: "totalNegDays", label: "Neg Days", value: deal.totalNegDays, money: false },
+            { key: "numOpenPositions", label: "Positions", value: deal.numOpenPositions, money: false },
+            { key: "capitalRequested", label: "Requested", value: deal.capitalRequested, money: true },
+          ] as const).map(({ key, label, value, money }) => (
+            <div key={key} className="bg-white border border-slate-200 rounded-lg px-2 py-1.5">
+              <label className="block text-[9px] text-gray-500 uppercase tracking-widest mb-0.5">{label}</label>
+              <div className="flex items-center gap-0.5">
+                {money && <span className="text-xs text-slate-400">$</span>}
+                <input
+                  type="number"
+                  min={0}
+                  value={value || ""}
+                  placeholder="—"
+                  onChange={(e) => editDeal({ [key]: Number(e.target.value) || 0 } as Partial<DealSummary>)}
+                  className="w-full bg-transparent text-xs font-mono font-bold text-blue-500 focus:outline-none placeholder:text-slate-300 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                />
+              </div>
+            </div>
+          ))}
+          <label className="bg-white border border-slate-200 rounded-lg px-2 py-1.5 flex flex-col justify-between cursor-pointer">
+            <span className="text-[9px] text-gray-500 uppercase tracking-widest mb-0.5">Bankruptcy</span>
+            <span className="flex items-center gap-1.5">
+              <input
+                type="checkbox"
+                checked={deal.hasBankruptcy}
+                onChange={(e) => editDeal({ hasBankruptcy: e.target.checked })}
+                className="accent-emerald-600"
+              />
+              <span className="text-xs font-mono font-bold text-blue-500">{deal.hasBankruptcy ? "Yes" : "No"}</span>
+            </span>
+          </label>
+        </div>
+
+        {/* Read-only context from the file — not match inputs, but the analyst
+            reads them alongside the criteria. */}
+        <div className="flex flex-wrap gap-2 mt-2">
           {[
-            { label: "FICO", value: deal.fico && deal.fico > 0 ? String(deal.fico) : null },
-            { label: "TIB", value: deal.tibMonths && deal.tibMonths > 0 ? `${deal.tibMonths}mo${deal.businessStartDate ? ` (${deal.businessStartDate})` : ""}` : null },
-            { label: "Avg Monthly Revenue", value: deal.avgRevenue && deal.avgRevenue > 0 ? fmt$(deal.avgRevenue) : null },
-            { label: "Neg Days", value: deal.totalNegDays && deal.totalNegDays > 0 ? String(deal.totalNegDays) : null },
-            { label: "Positions", value: deal.numOpenPositions && deal.numOpenPositions > 0 ? String(deal.numOpenPositions) : null },
-            { label: "Requested", value: deal.capitalRequested && deal.capitalRequested > 0 ? fmt$(deal.capitalRequested) : null },
             { label: "Type", value: deal.proposedLoanType || null },
             { label: "Purpose", value: deal.loanPurpose || null },
             { label: "Start Date", value: deal.businessStartDate || null },
             { label: "Owners", value: deal.numOwners || null },
-            { label: "Bankruptcy", value: deal.hasBankruptcy ? "Yes" : null },
           ]
             .filter((p) => p.value !== null)
             .map(({ label, value }) => (
@@ -923,7 +1191,7 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
 
       {!dataEntered && (
         <div className="rounded-lg border border-blue-800/40 bg-blue-900/10 px-4 py-3 text-xs text-blue-400 font-mono">
-          Select a client above to load their bank analysis and run lender matching.
+          Select a client above to load their file and run lender matching. A bank analysis is used when one exists — otherwise the match runs on the profile captured at vault creation.
         </div>
       )}
 
@@ -963,8 +1231,8 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
           </div>
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
             <div className="text-2xl font-black tabular-nums text-slate-400">{shownIncomplete}</div>
-            <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mt-0.5">Incomplete</div>
-            <div className="text-[10px] font-mono text-slate-400 mt-0.5">no guidelines set</div>
+            <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mt-0.5">Not scored</div>
+            <div className="text-[10px] font-mono text-slate-400 mt-0.5">no guidelines — pick by hand</div>
           </div>
         </div>
       )}
@@ -1151,7 +1419,7 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
               )}
               {decision === "approved" && (
                 <span className="text-xs font-mono font-bold text-emerald-700 bg-emerald-100 border border-emerald-300 rounded px-1.5 py-0.5">
-                  ★ RECOMMENDED
+                  RECOMMENDED
                 </span>
               )}
             </div>
@@ -1159,7 +1427,9 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
               <div className="text-xs text-green-600 mt-0.5">✓ Meets all entered criteria</div>
             )}
             {isIncomplete && (
-              <div className="text-[10px] text-gray-500 uppercase tracking-wider mt-0.5">Incomplete Guidelines</div>
+              <div className="text-[10px] text-gray-500 uppercase tracking-wider mt-0.5">
+                Not scored — no guidelines on file. Selectable anyway.
+              </div>
             )}
             {result.flags.length > 0 && !isIncomplete && (
               <div className="flex flex-wrap gap-1 mt-1.5">
@@ -1180,27 +1450,31 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
           <span className="text-gray-600 text-xs flex-shrink-0 mt-1">{isExpanded ? "▲" : "▼"}</span>
         </div>
 
-        {/* Action row — Incomplete cards route straight to that lender's
-            guidelines editor; scored cards get the recommend-to-admin toggle. */}
+        {/* Action row.
+            EVERY card can be selected, including the ones with no guidelines.
+            Incomplete used to offer only "+ Add guidelines", which made an
+            unscoreable lender unselectable — and some lenders simply never give
+            us their guidelines, so the card was a dead end for exactly the
+            lenders that need to be picked by hand. Adding guidelines is still
+            offered there, as the secondary action it actually is. */}
         <div className="flex items-center gap-2 px-3 pb-3">
-          {isIncomplete ? (
+          <button
+            onClick={() => toggleRecommended(result.lender)}
+            className={`flex-1 py-1.5 text-xs font-mono font-bold uppercase tracking-wider rounded border transition-all ${decision === "approved"
+                ? "bg-emerald-600 border-emerald-600 text-white"
+                : "border-emerald-300 text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-500"
+              }`}
+          >
+            {decision === "approved" ? "★ Selected — click to remove" : "★ Select for Submission"}
+          </button>
+          {isIncomplete && (
             <Link
               href={guidelinesHref(result.lender.lender_name)}
               onClick={(e) => e.stopPropagation()}
-              className="flex-1 py-1.5 text-xs font-mono font-bold uppercase tracking-wider rounded border border-slate-300 text-slate-600 hover:bg-slate-100 hover:text-slate-800 hover:border-slate-400 transition-all text-center"
+              className="py-1.5 px-3 text-xs font-mono font-bold uppercase tracking-wider rounded border border-slate-300 text-slate-600 hover:bg-slate-100 hover:text-slate-800 hover:border-slate-400 transition-all text-center whitespace-nowrap"
             >
-              + Add guidelines
+              + Guidelines
             </Link>
-          ) : (
-            <button
-              onClick={() => toggleRecommended(result.lender)}
-              className={`flex-1 py-1.5 text-xs font-mono font-bold uppercase tracking-wider rounded border transition-all ${decision === "approved"
-                  ? "bg-emerald-600 border-emerald-600 text-white"
-                  : "border-emerald-300 text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-500"
-                }`}
-            >
-              {decision === "approved" ? "★ Selected — click to remove" : "★ Select for Submission"}
-            </button>
           )}
         </div>
 

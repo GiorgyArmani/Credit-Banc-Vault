@@ -204,16 +204,16 @@ async function load_metrics(
       .from('user_documents')
       .select('user_id, upload_date'),
 
-    // "Awaiting submission" queue — cleared for outreach and not yet pushed to
-    // the lender. admin_review='approved' is now the state every new assignment
-    // is BORN in, so this counts work UW still has to do rather than anything
-    // an admin must action. We pull client_id so we can count DISTINCT files
-    // (one file with 3 cleared lenders = 1 entry).
+    // "Awaiting submission" queue — on the file and not yet pushed to the
+    // lender. Excludes only lenders an admin REMOVED; there is no approval to
+    // wait on, so this counts work UW still has to do rather than anything an
+    // admin must action. We pull client_id so we can count DISTINCT files
+    // (one file with 3 selected lenders = 1 entry).
     supabase_admin
       .from('client_lender_assignments')
       .select('client_id')
       .eq('decision', 'approved')
-      .eq('admin_review', 'approved')
+      .neq('admin_review', 'rejected')
       .eq('status', 'pending'),
 
     // The real funded amount per vault, stamped by UW's Loan Funded flow onto
@@ -647,12 +647,11 @@ export default async function AdminDashboardPage({ searchParams }: PageProps) {
           tone="emerald"
           hint={`Activity in last ${ACTIVITY_WINDOW_DAYS} days`}
         />
-        {/* Counts files with lenders cleared and not yet pushed out. It never
-            was a review queue — the query has always filtered on
-            admin_review='approved' — and now that nothing waits on an admin
-            review, the old "Pending lender reviews" label described a state
-            that cannot exist. Slate, not amber: this is UW's queue to work, not
-            an admin alarm. */}
+        {/* Counts files with lenders selected and not yet pushed out. It never
+            was a review queue, and there is no admin review left to wait on, so
+            the old "Pending lender reviews" label described a state that cannot
+            exist. Slate, not amber: this is UW's queue to work, not an admin
+            alarm. */}
         <MetricTile
           label="Awaiting submission"
           value={String(m.pending_lender_reviews)}

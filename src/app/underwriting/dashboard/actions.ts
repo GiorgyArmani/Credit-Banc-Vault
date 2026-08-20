@@ -11,6 +11,8 @@ import { updateLoanStatus } from "@/app/actions/pipeline";
 import { getActiveDeal, isDealFunded } from "@/lib/funding-deals";
 import { computeRenewalDates } from "@/lib/renewals";
 import { revalidatePath } from "next/cache";
+import { markLabelAsManual } from "@/lib/group-assignment";
+import { canRecordFunded } from "@/lib/auth/roles";
 
 /**
  * Centralizes the cache-invalidation surface every mutation in this file
@@ -143,6 +145,28 @@ export async function notifyAdvisor(clientId: string, missingDocs: string[], add
     }
 }
 
+/**
+ * Resolve the caller's role with the SERVICE ROLE, so RLS can't mask it.
+ *
+ * A server action is reachable by POSTing its action id to any route, so an
+ * `await supabase.auth.getUser()` null-check is authentication only — it proves
+ * somebody is logged in, not that they are allowed. Anything below that writes
+ * with createAdminClient() needs this second check too.
+ */
+async function resolveActorRole(): Promise<{ userId: string; role: string } | null> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return null;
+
+    const { data: actorRow } = await createAdminClient()
+        .from("users")
+        .select("role")
+        .eq("id", user.id)
+        .maybeSingle();
+
+    return { userId: user.id, role: actorRow?.role ?? "unknown" };
+}
+
 export async function fundLoanAction(clientId: string, data: {
     fileSinopsis: string;
     termOfFundedLoan: string;
@@ -161,11 +185,25 @@ export async function fundLoanAction(clientId: string, data: {
     fundedAssignmentId?: string | null;
 }) {
     const supabaseAdmin = createAdminClient();
-    const supabase = await createClient();
 
     try {
-        const { data: { user: currentUser } } = await supabase.auth.getUser();
-        if (!currentUser) throw new Error("Unauthorized");
+        // AUTHORIZATION, not just authentication. This action writes
+        // funding_deals.funded_at with the service role for a caller-supplied
+        // clientId, flips a lender assignment to funded, tags the client's GHL
+        // contact "Loan Funded" and emails their advisor. `funded_at` is also
+        // the row the affiliate payout path treats as proof that money moved
+        // (see createAffiliatePayoutForFundedVault), so an unauthorized caller
+        // reaching here could forge the guardrail standing behind a $500 gift
+        // card. Same gate as the pipeline's funded transition, by the same
+        // shared list — see [[affiliate_program]].
+        const actor = await resolveActorRole();
+        if (!actor) throw new Error("Unauthorized");
+        if (!canRecordFunded(actor.role)) {
+            console.warn(
+                `[fundLoanAction] BLOCKED funding of ${clientId} by ${actor.role} ${actor.userId}`
+            );
+            return { success: false, error: "Forbidden" };
+        }
 
         // 1. Fetch client GHL ID
         const { data: client, error: clientError } = await supabaseAdmin
@@ -274,7 +312,7 @@ export async function fundLoanAction(clientId: string, data: {
         const { data: profile } = await supabaseAdmin
             .from("users")
             .select("first_name, last_name")
-            .eq("id", currentUser.id)
+            .eq("id", actor.userId)
             .single();
 
         const authorName = profile ? `${profile.first_name} ${profile.last_name || ''}`.trim() : "Underwriter";
@@ -289,7 +327,7 @@ export async function fundLoanAction(clientId: string, data: {
 
         await supabaseAdmin.from("client_internal_notes").insert({
             client_id: clientId,
-            author_id: currentUser.id,
+            author_id: actor.userId,
             author_role: "underwriting",
             author_name: authorName,
             content: noteContent
@@ -399,6 +437,24 @@ export async function fundLoanAction(clientId: string, data: {
             }
         }
 
+        // 7.5 Announce the funding in the deal's Slack channel. Every other
+        //     lender-lifecycle event (submitted / approved / declined) already
+        //     posts there; funding — the outcome the channel exists for — did
+        //     not. Best-effort and never throws: the funding is already
+        //     recorded by this point and must not be undone by a Slack failure.
+        try {
+            const { notifyDealFundedToSlack } = await import("@/lib/notifications/lender-pipeline");
+            await notifyDealFundedToSlack(clientId, {
+                lender_name: data.lenderFunded,
+                amount_funded: data.totalAmountFunded,
+                term: data.termOfFundedLoan,
+                amount_requested: data.amountRequested ?? null,
+                sales_rep: data.salesRepFunded,
+            });
+        } catch (slackError) {
+            console.error("fundLoanAction Error: Slack funded post failed (non-fatal):", slackError);
+        }
+
         // 8. Record the pipeline transition. Reuses updateLoanStatus, which writes
         //    loan_status_history (drives the admin funded-$ KPI) and fires the
         //    advisor "Loan Funded 🎉" in-app notification.
@@ -497,6 +553,10 @@ export async function renameClientFile(documentId: string, newLabel: string) {
             .eq("id", documentId);
 
         if (error) throw error;
+
+        // Mark the name as hand-typed so filing this document into a group
+        // never rebuilds over it. See markLabelAsManual.
+        await markLabelAsManual(supabaseAdmin, documentId);
 
         // Find the client to revalidate. The rename only updates the file,
         // so we lookup the user_id → client_vault_id for the cache touch.

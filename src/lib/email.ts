@@ -2009,9 +2009,10 @@ export async function send_lender_review_approved_notification(
 /**
  * Interface for the "UW selected lenders" admin email.
  *
- * INFORMATIONAL. The lenders are already cleared to submit when this sends —
- * admins are told what was chosen, not asked to approve it. The copy has to
- * carry that, or it recreates the approval stall the flow just removed.
+ * A RECORD OF THE RESULT. Admins commonly name the lender themselves and UW
+ * selects and contacts it, so this is telling them what the match came out as —
+ * not asking for anything. The copy states that and stops; wording that insists
+ * no approval is needed keeps the idea of an approval in the reader's head.
  */
 export interface LenderMatchReadyNotificationData {
   /** Every admin recipient. The email goes to all of them at once. */
@@ -2020,12 +2021,12 @@ export interface LenderMatchReadyNotificationData {
   company_name?: string;
   /** Selected lender display names (optionally "Name (specialty)"). */
   recommended_lenders: string[];
-  /** Deep link to the admin client file (Lender Match card, to veto a pick). */
+  /** Deep link to the admin client file (Lenders & Responses card). */
   client_profile_url: string;
 }
 
 /**
- * HTML for the "lenders selected" admin notification.
+ * HTML for the "lender match result" admin notification.
  */
 export function generate_lender_match_ready_html(data: LenderMatchReadyNotificationData): string {
   data = escape_email_strings(data);
@@ -2034,7 +2035,7 @@ export function generate_lender_match_ready_html(data: LenderMatchReadyNotificat
   const count = recommended_lenders.length;
   const count_label = count === 0
     ? 'Selection cleared'
-    : `${count} lender${count === 1 ? '' : 's'} cleared to submit`;
+    : `${count} lender${count === 1 ? '' : 's'} selected`;
 
   const lender_rows = recommended_lenders
     .map((name) => `
@@ -2049,7 +2050,7 @@ export function generate_lender_match_ready_html(data: LenderMatchReadyNotificat
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Lenders Selected: ${client_name}</title>
+  <title>Lender Match Result: ${client_name}</title>
 </head>
 <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f6f9fc;">
   <table role="presentation" style="width: 100%; border-collapse: collapse;">
@@ -2060,7 +2061,7 @@ export function generate_lender_match_ready_html(data: LenderMatchReadyNotificat
           <!-- Header -->
           <tr>
             <td style="padding: 40px 40px 20px; text-align: center; background-color: #1d4ed8;">
-              <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 700;">Lenders Selected</h1>
+              <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 700;">Lender Match Result</h1>
               <p style="margin: 8px 0 0; color: #bfdbfe; font-size: 13px; font-weight: 500;">${count_label}</p>
             </td>
           </tr>
@@ -2069,11 +2070,11 @@ export function generate_lender_match_ready_html(data: LenderMatchReadyNotificat
           <tr>
             <td style="padding: 40px 40px 20px;">
               <p style="margin: 0 0 16px; color: #475569; font-size: 16px; line-height: 1.6;">
-                Underwriting selected the lenders for <strong>${client_name}</strong>${company_name ? ` (${company_name})` : ''}. They are <strong>cleared to submit</strong> &mdash; no approval is needed from you.
+                This is the lender match result for <strong>${client_name}</strong>${company_name ? ` (${company_name})` : ''}.
               </p>
 
               ${count > 0 ? `
-              <h3 style="margin: 0 0 12px; color: #1e293b; font-size: 15px; font-weight: 600;">Cleared to submit</h3>
+              <h3 style="margin: 0 0 12px; color: #1e293b; font-size: 15px; font-weight: 600;">Selected</h3>
               <ul style="margin: 0 0 24px; padding: 0;">
                 ${lender_rows}
               </ul>
@@ -2083,9 +2084,6 @@ export function generate_lender_match_ready_html(data: LenderMatchReadyNotificat
               </p>
               `}
 
-              <p style="margin: 0 0 24px; color: #475569; font-size: 16px; line-height: 1.6;">
-                Nothing to do unless you disagree. To pull a lender before it goes out, open the client file and skip it on the <strong>Lender Match</strong> card.
-              </p>
             </td>
           </tr>
 
@@ -2115,7 +2113,7 @@ export function generate_lender_match_ready_html(data: LenderMatchReadyNotificat
 }
 
 /**
- * Sends the "lenders selected" notification to all admins at once.
+ * Sends the "lender match result" notification to all admins at once.
  * Mirrors send_lender_review_approved_notification: logs, rethrows on SMTP error
  * so the caller can record the failure instead of silently swallowing it.
  */
@@ -2136,7 +2134,7 @@ export async function send_lender_match_ready_notification(data: LenderMatchRead
   const mail_options = {
     from: `${from_name} <${from_email}>`,
     to,
-    subject: `Lenders cleared to submit: ${data.client_name} (${data.recommended_lenders.length})`,
+    subject: `Lender match result: ${data.client_name} (${data.recommended_lenders.length})`,
     html: html_content,
   };
 

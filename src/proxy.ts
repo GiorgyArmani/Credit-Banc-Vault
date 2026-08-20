@@ -53,27 +53,49 @@ export async function proxy(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // Define public paths that don't require authentication
-  const publicPaths = [
-    "/auth/login",
-    // Staff invitation landing. Resolves the token and forwards to the right
-    // role's onboarding form — all three of those are public paths below, but
-    // each now refuses to render without a live invitation in ?token=.
-    "/auth/join",
-    "/auth/advisor-signup",
-    "/auth/callback",
-    "/auth/sign-up-success",
-    "/auth/advisor-signup-success",
-    "/auth/underwriting-signup",
-    "/auth/underwriting-signup-success",
-    "/auth/setter-signup",
-    "/auth/setter-signup-success",
-    "/auth/update-password",
-    "/auth/forgot-password",
+  /**
+   * Paths reachable with NO session.
+   *
+   * Split into exact matches and prefixes on purpose. The list used to be one
+   * array tested with a bare `startsWith`, and because "/" was a member of it
+   * EVERY path matched — which quietly turned the anonymous-user redirect below
+   * into dead code for the whole application. Keep "/" and any other bare page
+   * in publicExactPaths; only put an entry in publicPathPrefixes when every path
+   * beneath it is genuinely public.
+   *
+   * Getting this list SHORT is not the goal — getting it RIGHT is. A public
+   * route missing from here now breaks (webhook, cron and share-link traffic
+   * carries no session), while an over-broad prefix silently unprotects a
+   * subtree. Prefer an exact entry when in doubt.
+   */
+  const publicExactPaths = [
+    "/", // marketing landing (also hosts the affiliate signup form)
+    "/affiliate", // PUBLIC affiliate program signup — /affiliate/dashboard stays gated
+    "/support",
+    "/terms",
+  ];
+
+  const publicPathPrefixes = [
+    // Every /auth surface is by definition pre-login: login, the staff
+    // invitation landing (/auth/join, which forwards to the role signup forms —
+    // each refuses to render without a live invitation in ?token=), the signup
+    // success pages, password reset and the magic-link entry point.
+    "/auth/",
     "/r/", // public affiliate referral pre-qualification landing
-    "/api/refer", // public referral submission endpoint
-    "/api/post-signup-affiliate", // public affiliate self-signup (form lives on "/")
-    "/",
+    "/share/", // lender document share links — public by token, no session
+    "/api/refer/", // public referral submission endpoint (NOT /api/referral-partners)
+    // Signup completion endpoints: they run BEFORE the user has a session. The
+    // staff variants are invite-gated inside the route itself.
+    "/api/post-signup",
+    "/api/reset-password",
+    "/api/support",
+    "/api/share/", // token-gated lender file access
+    // Called by outside systems that authenticate with a shared secret or
+    // signature, never with a session cookie. Redirecting these to /auth/login
+    // would break GHL, SignWell, Mailgun and Telzio silently.
+    "/api/webhooks/",
+    // Vercel cron, authenticated with Bearer CRON_SECRET.
+    "/api/cron/",
   ];
 
   // Helper to create a redirect response that preserves cookies
@@ -86,8 +108,43 @@ export async function proxy(request: NextRequest) {
     return redirectResponse;
   };
 
-  // If user is not authenticated and trying to access protected route
-  if (!user && !publicPaths.some((p) => path.startsWith(p))) {
+  /**
+   * Auth pages an ALREADY authenticated user has no business on — they get sent
+   * to their own dashboard instead.
+   *
+   * Deliberately enumerated rather than derived from the "/auth/" prefix above.
+   * Several /auth routes REQUIRE a live session and must never bounce:
+   * /auth/set-password (magic-link onboarding step 3 — the user is logged in by
+   * the link and then chooses a password), /auth/signout, /auth/confirm and
+   * /auth/magic. Sweeping the whole prefix in here would break passwordless
+   * onboarding. See [[magic_link_onboarding]].
+   */
+  const authPagesForAnonymousOnly = [
+    "/auth/login",
+    "/auth/join",
+    "/auth/advisor-signup",
+    "/auth/advisor-signup-success",
+    "/auth/underwriting-signup",
+    "/auth/underwriting-signup-success",
+    "/auth/setter-signup",
+    "/auth/setter-signup-success",
+    "/auth/sign-up-success",
+    "/auth/callback",
+    "/auth/update-password",
+    "/auth/forgot-password",
+  ];
+
+  const isPublicPath = (p: string) =>
+    publicExactPaths.includes(p) || publicPathPrefixes.some((pub) => p.startsWith(pub));
+
+  // Not authenticated, and the path isn't public.
+  if (!user && !isPublicPath(path)) {
+    // An API route must answer, not redirect: a 307 to an HTML login page turns
+    // a clean 401 into an unparseable response for every fetch() caller. Same
+    // reasoning as the /api/admin branch further down.
+    if (path.startsWith("/api/")) {
+      return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+    }
     return redirectWithCookies("/auth/login");
   }
 
@@ -146,14 +203,12 @@ export async function proxy(request: NextRequest) {
       }
     }
 
-    const isPublicPath = publicPaths.some((p) =>
-      p === "/" ? path === "/" : path.startsWith(p)
-    );
+    const isPublicPathForUser = isPublicPath(path);
 
     // If client hasn't finished onboarding or signed contract, and is trying to access a protected page
     // (but not the onboarding page itself, the onboarding API, or public paths)
     // Admins are never subject to the onboarding gate
-    if (isClient && !isAdmin && !isOnboardingComplete && !path.startsWith("/onboarding") && !path.startsWith("/api/onboarding") && !isPublicPath) {
+    if (isClient && !isAdmin && !isOnboardingComplete && !path.startsWith("/onboarding") && !path.startsWith("/api/onboarding") && !isPublicPathForUser) {
       console.log(`[Onboarding] User ${user.id} incomplete (Contract: ${isContractCompleted}), redirecting to /onboarding`);
       return redirectWithCookies("/onboarding");
     }
@@ -249,7 +304,7 @@ export async function proxy(request: NextRequest) {
     }
 
     // Redirect authenticated users away from auth pages
-    if (publicPaths.some((p) => path.startsWith(p) && p.includes("/auth/"))) {
+    if (authPagesForAnonymousOnly.some((p) => path.startsWith(p))) {
       const redirectMap: Record<string, string> = {
         advisor: "/advisor/dashboard",
         underwriting: "/underwriting/dashboard",

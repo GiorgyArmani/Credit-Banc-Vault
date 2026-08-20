@@ -19,9 +19,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ghlUpsertContact, ghlResolveFieldId, ghlAddTags } from "@/lib/ghl-api";
-import { evaluatePrequal, DISQUALIFY_TAGS } from "@/lib/referral-prequal";
+import { evaluatePrequal, isKnownPrequalAnswers, DISQUALIFY_TAGS } from "@/lib/referral-prequal";
 import { notifyAffiliateLinkUsed } from "@/lib/affiliates";
 import { formatPhoneUS, isValidUsPhone, toE164 } from "@/lib/phone";
+import { checkRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
+import { isValidEmailShape } from "@/lib/email-address";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,6 +34,24 @@ export async function POST(
 ) {
   try {
     const { code } = await params;
+
+    // Rate limit BEFORE reading the body or touching the database. A qualified
+    // submission creates a GHL contact and emails the affiliate, so an unmetered
+    // loop here fills the CRM and bombs an affiliate's inbox. Two buckets: the
+    // caller's address, and the referral code itself — the per-IP limit does
+    // nothing against a rotating pool, and it is the affiliate who receives the
+    // consequence either way.
+    const [byIp, byCode] = await Promise.all([
+      checkRateLimit(req, RATE_LIMITS.referSubmit),
+      checkRateLimit(req, RATE_LIMITS.referSubmitPerCode, code),
+    ]);
+    if (!byIp.allowed || !byCode.allowed) {
+      return NextResponse.json(
+        { message: "Too many submissions. Please try again in a little while." },
+        { status: 429 }
+      );
+    }
+
     const body = await req.json().catch(() => ({}));
 
     // Honeypot: bots fill hidden fields. Silently accept (200) without storing.
@@ -39,12 +59,17 @@ export async function POST(
       return NextResponse.json({ ok: true, qualified: false });
     }
 
-    const fullName = String(body.full_name || "").trim();
+    // Cap free-text before it is stored or sent anywhere. These land in the
+    // database, in GoHighLevel and in the affiliate's notification email; there
+    // is no reason for any of them to be longer than a form field.
+    const cap = (v: unknown, n: number) => String(v ?? "").trim().slice(0, n);
+
+    const fullName = cap(body.full_name, 120);
     const [firstName, ...restName] = fullName.split(/\s+/);
     const lastName = restName.join(" ");
     const email = String(body.email || "").trim().toLowerCase();
-    const rawPhone = String(body.phone || "").trim();
-    const businessName = String(body.business_name || "").trim();
+    const rawPhone = cap(body.phone, 40);
+    const businessName = cap(body.business_name, 160);
 
     const loanAmount = String(body.loan_amount || "").trim();
     const ficoBand = String(body.fico_band || "").trim();
@@ -54,6 +79,16 @@ export async function POST(
     if (!firstName || !email || !rawPhone) {
       return NextResponse.json(
         { message: "Please provide your name, email, and phone." },
+        { status: 400 }
+      );
+    }
+    // The email is the attribution key: it is what the duplicate guard locks,
+    // what the unique index enforces and what links this lead to a vault months
+    // later. An unvalidated one becomes a permanent junk claim on that key, plus
+    // a GHL contact that can never be mailed.
+    if (!isValidEmailShape(email)) {
+      return NextResponse.json(
+        { message: "Please enter a valid email address." },
         { status: 400 }
       );
     }
@@ -68,6 +103,23 @@ export async function POST(
     const phone = formatPhoneUS(rawPhone);
     const phoneE164 = toE164(rawPhone)!;
     if (!loanAmount || !ficoBand || !monthlyRevenue || !timeInBusiness) {
+      return NextResponse.json(
+        { message: "Please answer all the pre-qualification questions." },
+        { status: 400 }
+      );
+    }
+    // Presence is not enough. evaluatePrequal disqualifies on three exact
+    // strings and qualifies everything else, so an answer this form never
+    // offered ("x") used to pass the gate outright. The real stepper can only
+    // send known options; anything else is a crafted request.
+    const answers = {
+      loan_amount: loanAmount,
+      fico_band: ficoBand,
+      monthly_revenue: monthlyRevenue,
+      time_in_business: timeInBusiness,
+    };
+    if (!isKnownPrequalAnswers(answers)) {
+      console.warn("[refer/submit] rejected unrecognised pre-qual answers:", answers);
       return NextResponse.json(
         { message: "Please answer all the pre-qualification questions." },
         { status: 400 }
@@ -91,26 +143,36 @@ export async function POST(
     }
 
     // 2. Evaluate qualification server-side (source of truth).
-    const { qualified, reason, code: disqualifyCode } = evaluatePrequal({
-      loan_amount: loanAmount,
-      fico_band: ficoBand,
-      monthly_revenue: monthlyRevenue,
-      time_in_business: timeInBusiness,
-    });
+    const { qualified, reason, code: disqualifyCode } = evaluatePrequal(answers);
 
     // 3. Duplicate guard: same email already a lead or an existing client.
+    //
+    // Ordered + limit(1) rather than a bare .maybeSingle() on the filter. The
+    // previous form returned an ERROR when more than one row matched, and the
+    // route discarded it — so `existingLead` read as null and the guard did not
+    // just fail, it INVERTED: once an address had two rows (a race, a backfill),
+    // every later submission of it inserted another lead and sent the affiliate
+    // another "someone used your link" email, forever. limit(1) makes a
+    // multi-row state resolve to "yes, this is a duplicate", which is the safe
+    // answer. Migration 20260819 stops the state arising at all.
     const [{ data: existingLead }, { data: existingClient }] = await Promise.all([
-      db.from("affiliate_leads").select("id").eq("email", email).maybeSingle(),
-      db.from("client_data_vault").select("id").eq("client_email", email).maybeSingle(),
+      db
+        .from("affiliate_leads")
+        .select("id")
+        .eq("email", email)
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle(),
+      db
+        .from("client_data_vault")
+        .select("id")
+        .eq("client_email", email)
+        .limit(1)
+        .maybeSingle(),
     ]);
     const isDuplicate = Boolean(existingLead || existingClient);
 
-    const answerCols = {
-      loan_amount: loanAmount,
-      fico_band: ficoBand,
-      monthly_revenue: monthlyRevenue,
-      time_in_business: timeInBusiness,
-    };
+    const answerCols = answers;
 
     // Disqualified → store (unless dup) and tell the client to redirect out.
     if (!qualified) {
@@ -163,7 +225,7 @@ export async function POST(
           }
         }
 
-        await db.from("affiliate_leads").insert({
+        const { error: dqInsertErr } = await db.from("affiliate_leads").insert({
           affiliate_id: affiliate.id,
           first_name: firstName,
           last_name: lastName || null,
@@ -177,6 +239,10 @@ export async function POST(
           source: "referral_link",
           ...answerCols,
         });
+        // 23505 = the unique-email index caught a concurrent submission that
+        // slipped past the read above. That IS the duplicate case, so treat it
+        // as one rather than failing the applicant's form.
+        if (dqInsertErr && dqInsertErr.code !== "23505") throw dqInsertErr;
       }
       return NextResponse.json({ ok: true, qualified: false, reason });
     }
@@ -254,7 +320,16 @@ export async function POST(
       ...answerCols,
     });
 
-    if (insertErr) throw insertErr;
+    // Same race as above. A duplicate here means another request already stored
+    // this lead and already notified the affiliate — return the duplicate answer
+    // instead of throwing, so the applicant still reaches the booking calendar
+    // and the affiliate does not get a second email.
+    if (insertErr) {
+      if (insertErr.code === "23505") {
+        return NextResponse.json({ ok: true, qualified: true, duplicate: true });
+      }
+      throw insertErr;
+    }
 
     // 6. Tell the affiliate, now. Deliberately AFTER the insert and awaited but
     //    non-throwing (notifyAffiliateLinkUsed swallows its own errors): the

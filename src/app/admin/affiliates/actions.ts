@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { processAffiliatePayout } from "@/lib/affiliates";
+import { processAffiliatePayout, payoutDelayHours, postAffiliateAlert } from "@/lib/affiliates";
 import { revalidatePath } from "next/cache";
 
 async function requireAdminUser() {
@@ -104,6 +104,21 @@ export async function cancelAffiliatePayout(
 /**
  * Manually mark a payout delivered/paid (admin only) — e.g. after confirming the
  * gift was handled outside the automated flow.
+ *
+ * Guarded on the way in, for two states where "delivered" would be a lie:
+ *
+ *   awaiting_link — the card is BOUGHT but its claim URL has not been minted, so
+ *     nobody has been emailed yet. `delivered` is terminal to the worker
+ *     (processAffiliatePayout skips sent/delivered outright), so marking it here
+ *     strands the charge: $500 spent and the affiliate never receives a link.
+ *     Let the worker finish; it resumes these on the next pass.
+ *   canceled — resurrecting a canceled payout as delivered claims money moved
+ *     when it never did, and it inflates the "rewards paid" total on the page.
+ *     Reopening a canceled payout is reopenAffiliatePayout's job, not this one.
+ *
+ * `sent_at` is stamped when it is missing, because the daily-spend cap measures
+ * spend through that column — a delivered row with a null sent_at is money the
+ * cap cannot see.
  */
 export async function markPayoutDelivered(
   payoutId: string
@@ -112,12 +127,115 @@ export async function markPayoutDelivered(
   if (!admin) return { success: false, error: "Forbidden" };
 
   const db = createAdminClient();
+  const { data: payout } = await db
+    .from("affiliate_payouts")
+    .select("id, status, sent_at")
+    .eq("id", payoutId)
+    .maybeSingle();
+
+  if (!payout) return { success: false, error: "Payout not found" };
+  if (payout.status === "awaiting_link") {
+    return {
+      success: false,
+      error:
+        "The gift card is already paid for and its claim link is still being generated. " +
+        "Marking it delivered now would strand the charge — it delivers on the next payout run.",
+    };
+  }
+  if (payout.status === "canceled") {
+    return {
+      success: false,
+      error: "This payout was canceled. Reopen it first if it should be paid after all.",
+    };
+  }
+
+  const nowIso = new Date().toISOString();
   const { error } = await db
     .from("affiliate_payouts")
-    .update({ status: "delivered", updated_at: new Date().toISOString() })
-    .eq("id", payoutId);
+    .update({
+      status: "delivered",
+      sent_at: payout.sent_at ?? nowIso,
+      updated_at: nowIso,
+    })
+    .eq("id", payoutId)
+    .not("status", "in", "(awaiting_link,canceled)");
 
   if (error) return { success: false, error: error.message };
+  revalidatePath("/admin/affiliates");
+  return { success: true };
+}
+
+/**
+ * Reopen a CANCELED payout (admin only), putting it back in the queue.
+ *
+ * Cancellation is otherwise terminal and unrecoverable: processAffiliatePayout
+ * returns early on a canceled row even for `admin: true`, and
+ * UNIQUE(client_vault_id) means the funded hook can never create a replacement
+ * row for that vault. So a deal canceled inside the 24h window and then
+ * legitimately re-funded had no path back except a hand-written DB edit.
+ *
+ * It comes back as `queued` with a FRESH release gate rather than sending
+ * immediately — reopening is a correction, and the whole point of the gate is
+ * that a correction gets the same cooling-off period a new payout does. The
+ * admin can still release it early with the existing retry control.
+ *
+ * Only `canceled` is reopenable. Every other state is either live in the queue
+ * already or represents money that has actually moved.
+ */
+export async function reopenAffiliatePayout(
+  payoutId: string,
+  reason?: string
+): Promise<{ success: boolean; error?: string }> {
+  const admin = await requireAdminUser();
+  if (!admin) return { success: false, error: "Forbidden" };
+
+  const db = createAdminClient();
+  const { data: payout } = await db
+    .from("affiliate_payouts")
+    .select("id, status, client_vault_id, commission_amount")
+    .eq("id", payoutId)
+    .maybeSingle();
+
+  if (!payout) return { success: false, error: "Payout not found" };
+  if (payout.status !== "canceled") {
+    return { success: false, error: `Only a canceled payout can be reopened (this one is ${payout.status}).` };
+  }
+
+  const nowIso = new Date().toISOString();
+  const delayHours = payoutDelayHours();
+  const releaseAt = new Date(Date.now() + delayHours * 3_600_000).toISOString();
+
+  const { error } = await db
+    .from("affiliate_payouts")
+    .update({
+      status: "queued",
+      release_at: releaseAt,
+      // Clear the cancellation so the worker's own re-verification decides the
+      // outcome from scratch; `attempts` is reset so a row that burned its cap
+      // before being canceled is genuinely retryable.
+      error: null,
+      hold_reason: null,
+      attempts: 0,
+      updated_at: nowIso,
+    })
+    .eq("id", payoutId)
+    .eq("status", "canceled");
+
+  if (error) return { success: false, error: error.message };
+
+  console.warn(
+    `[affiliates] payout ${payoutId} REOPENED by admin ${admin.email ?? admin.id}` +
+      (reason ? `: ${reason}` : "")
+  );
+  await postAffiliateAlert(
+    `:arrows_counterclockwise: *Affiliate payout reopened*\n` +
+      `• Amount: $${payout.commission_amount}\n` +
+      `• Vault: \`${payout.client_vault_id}\`\n` +
+      `• By: ${admin.email ?? admin.id}\n` +
+      (reason ? `• Reason: ${reason}\n` : "") +
+      `It re-enters the queue and sends in ${delayHours}h if the deal still verifies as funded.`
+  );
+
   revalidatePath("/admin/affiliates");
   return { success: true };
 }

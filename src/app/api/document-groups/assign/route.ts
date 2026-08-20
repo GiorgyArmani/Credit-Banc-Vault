@@ -15,12 +15,17 @@
  *
  * document_group_id = null un-files, which is how a mis-sorted batch is undone.
  *
- * SIDE EFFECT ON PURPOSE — custom_label is rebuilt for every affected file.
- * Filing documents into a group without renaming them would leave 124 rows
- * still called `Business Bank Statements - O'Rourke LLC`: grouped on screen,
- * still indistinguishable the moment anyone downloads them. The label is what
- * the browser writes to disk and what the lender share page shows, so the two
- * have to move together. Un-filing reverses it symmetrically.
+ * SIDE EFFECT ON PURPOSE — custom_label is rebuilt for every affected file
+ * THAT STILL CARRIES A GENERATED NAME. Filing documents into a group without
+ * renaming them would leave 124 rows still called `Business Bank Statements -
+ * O'Rourke LLC`: grouped on screen, still indistinguishable the moment anyone
+ * downloads them. The label is what the browser writes to disk and what the
+ * lender share page shows, so the two have to move together. Un-filing reverses
+ * it symmetrically.
+ *
+ * A file someone RENAMED keeps its name and only moves group — the rename and
+ * the generated label share one column, and rebuilding over a typed name threw
+ * the team's work away. `preserved_labels` in the response counts those.
  *
  * AUTHORIZATION IS RLS. Reads and writes both run through the RLS-gated server
  * client: ud_update admits admin, UW, the assigned advisor and the owning
@@ -94,7 +99,9 @@ export async function POST(req: Request) {
     // ------------------------------------------------------------------
     const { data: docs, error: docs_error } = await supabase
       .from("user_documents")
-      .select("id, user_id, name, doc_code, category, business_profile_id, metadata")
+      .select(
+        "id, user_id, name, doc_code, category, business_profile_id, metadata, custom_label, document_group_id"
+      )
       .in("id", document_ids);
 
     if (docs_error) {
@@ -154,6 +161,28 @@ export async function POST(req: Request) {
       .maybeSingle();
     const client_name = vault?.client_name ?? null;
 
+    // The groups these documents are filed under today. Needed to recognise a
+    // label we generated for their CURRENT group — without it, re-filing an
+    // already-grouped document would read its own generated name as hand-typed
+    // and freeze the old group into the label forever.
+    const current_group_ids = Array.from(
+      new Set(
+        eligible
+          .map((d: any) => d.document_group_id as string | null)
+          .filter((v: string | null): v is string => !!v)
+      )
+    );
+    let current_groups: DocumentGroup[] = [];
+    if (current_group_ids.length > 0) {
+      const { data: rows } = await supabase
+        .from("document_groups")
+        .select(
+          "id, client_vault_id, business_profile_id, doc_code, name, identifier, subtype, nickname, is_active"
+        )
+        .in("id", current_group_ids);
+      current_groups = (rows ?? []) as DocumentGroup[];
+    }
+
     // ------------------------------------------------------------------
     // 4. Apply. Shared with the force path of DELETE /api/document-groups/[id],
     //    which detaches a group's files the same way.
@@ -163,10 +192,12 @@ export async function POST(req: Request) {
       group,
       label_by_code,
       client_name,
+      current_groups,
     });
 
     return NextResponse.json({
       updated: result.updated,
+      preserved_labels: result.preserved_labels,
       skipped: [...skipped, ...result.skipped],
     });
   } catch (err: any) {

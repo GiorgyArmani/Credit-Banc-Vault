@@ -77,7 +77,7 @@ import { ShareWithLenderButton } from "@/components/share/share-with-lender-butt
 import { FundingRoundsCard } from "@/components/funding/funding-rounds-card";
 import { LenderResponsePanel } from "@/components/lender/lender-response-panel";
 import { UwAddLenderButton } from "@/components/lender/uw-add-lender-button";
-import { requestDocuments } from "@/app/advisor/dashboard/clients/[id]/actions";
+import { requestDocuments, approveDocumentCategory } from "@/app/advisor/dashboard/clients/[id]/actions";
 import { getClientPipelineHistory, updateLoanStatus, type LoanStatus, type PipelineStatusEntry } from "@/app/actions/pipeline";
 import { LoanPipelineFull, LoanPipelineBadge, PIPELINE_STEPS } from "@/components/loan-pipeline-status";
 import { getBulkClientActivity } from "@/app/actions/advisor";
@@ -119,9 +119,14 @@ const SLACK_FEATURE_ENABLED = true;
  * Deep link to a deal channel. The ?team= param is not optional on Enterprise
  * Grid: without it Slack resolves the channel against whichever workspace the
  * browser has active, and errors out if the channel does not live there.
+ *
+ * The workspace id arrives from GET /api/slack/workspace rather than a
+ * NEXT_PUBLIC_ env var. A NEXT_PUBLIC_ value is inlined into the JS bundle,
+ * which is served to anyone who can reach the app — logged in or not — whereas
+ * this page is staff-only. Falls back to a link without ?team= while the fetch
+ * is in flight or if it fails; that link still works off Enterprise Grid.
  */
-function slack_deep_link(channel_id: string): string {
-    const team_id = process.env.NEXT_PUBLIC_SLACK_TEAM_ID;
+function slack_deep_link(channel_id: string, team_id: string | null): string {
     const team_param = team_id ? `&team=${team_id}` : '';
     return `https://slack.com/app_redirect?channel=${channel_id}${team_param}`;
 }
@@ -207,15 +212,15 @@ interface LenderAssignment {
 // (status='approved_by_lender' | 'declined_by_lender'). The label rendered to
 // UW is the derived combination of those columns.
 //
-// admin_review is a VETO, not a gate: an admin flipping it to 'rejected' pulls
-// the lender out (skipped_by_admin, and the submit route refuses it). 'pending'
-// is now reachable only on rows written before that change — they were left
-// alone deliberately rather than backfilled, so 'awaiting_admin' stays.
+// Admins do not approve lenders any more — they are informed of them. The only
+// thing admin_review still expresses is REMOVAL: 'rejected' means the lender was
+// taken off the file (removed_by_admin, and the submit route refuses it).
+// 'pending' — the state every legacy row was left in, never backfilled — now
+// reads as "nobody removed this", so those rows are submittable like any other.
 type LenderRowState =
     | 'rejected_by_matcher'   // decision = rejected
-    | 'skipped_by_admin'       // decision = approved, admin_review = rejected
-    | 'awaiting_admin'         // legacy only: decision = approved, admin_review = pending
-    | 'ready_to_submit'        // all approved, status = pending
+    | 'removed_by_admin'       // decision = approved, admin_review = rejected
+    | 'ready_to_submit'        // on the file, status = pending
     | 'submitted'              // status = submitted, awaiting lender
     | 'approved_by_lender'     // lender approved the submission
     | 'declined_by_lender'     // lender declined the submission
@@ -223,8 +228,7 @@ type LenderRowState =
 
 function derive_lender_row_state(a: LenderAssignment): LenderRowState {
     if (a.decision !== 'approved') return 'rejected_by_matcher';
-    if (a.admin_review === 'rejected') return 'skipped_by_admin';
-    if (a.admin_review !== 'approved') return 'awaiting_admin';
+    if (a.admin_review === 'rejected') return 'removed_by_admin';
     if (a.status === 'funded') return 'funded';
     if (a.status === 'approved_by_lender') return 'approved_by_lender';
     if (a.status === 'declined_by_lender') return 'declined_by_lender';
@@ -456,7 +460,22 @@ export default function UnderwritingClientDetailsPage() {
     const [selected_request_ids, set_selected_request_ids] = useState<string[]>([]);
     const [request_search, set_request_search] = useState("");
     const [is_requesting_docs, set_is_requesting_docs] = useState(false);
+    /**
+     * What this modal is actually for, at the underwriting stage: a LENDER asked
+     * for a document type that isn't on the file yet, so it needs a slot.
+     *
+     * Adding the slot is the action; asking the client is the exception, which
+     * is why it is opt-in. Some stips the client has to supply and this gets
+     * ticked; most are documents staff already hold or produce, and ticking it
+     * would chase the client for something nobody is waiting on them for.
+     * Unticked, requestDocuments runs with notifyClient:false — see there.
+     */
+    const [also_ask_client, set_also_ask_client] = useState(false);
+    /** Which lender asked for it, if any. Context only — recorded as an internal
+     *  note so the slot's reason outlives the person who opened it. */
+    const [stip_lender, set_stip_lender] = useState("");
     const [requesting_again_code, set_requesting_again_code] = useState<string | null>(null);
+    const [approving_code, set_approving_code] = useState<string | null>(null);
 
     // Admin-only: delete vault confirmation
     const [is_delete_vault_open, set_is_delete_vault_open] = useState(false);
@@ -638,6 +657,10 @@ export default function UnderwritingClientDetailsPage() {
      * them back out). The endpoint also rewrites each file's label so the
      * download name carries the group — sectioning the list without renaming
      * the files would leave the lender's copy exactly as ambiguous as before.
+     *
+     * Files someone RENAMED keep their name and only change group; the toast
+     * says how many, because "12 files filed" while two of them quietly kept a
+     * name that doesn't mention the account is a surprise at download time.
      */
     async function handle_assign_documents(target_group_id: string | null) {
         const ids = Array.from(selected_document_ids);
@@ -659,6 +682,7 @@ export default function UnderwritingClientDetailsPage() {
 
             const updated = result?.updated ?? 0;
             const skipped = Array.isArray(result?.skipped) ? result.skipped.length : 0;
+            const preserved = result?.preserved_labels ?? 0;
 
             if (updated === 0) {
                 toast.error('No documents were filed');
@@ -666,11 +690,10 @@ export default function UnderwritingClientDetailsPage() {
             }
             // Report partial success honestly — silently succeeding on 40 of 50
             // is how a packet goes out half-organised.
-            toast.success(
-                skipped > 0
-                    ? `${updated} file(s) filed, ${skipped} skipped`
-                    : `${updated} file(s) filed`
-            );
+            const parts = [`${updated} file(s) filed`];
+            if (skipped > 0) parts.push(`${skipped} skipped`);
+            if (preserved > 0) parts.push(`${preserved} kept their custom name`);
+            toast.success(parts.join(', '));
 
             set_selected_document_ids(new Set());
             set_assign_target_group_id(null);
@@ -802,6 +825,29 @@ export default function UnderwritingClientDetailsPage() {
     const [is_creating_slack_channel, set_is_creating_slack_channel] = useState(false);
     const [is_archiving_slack_channel, set_is_archiving_slack_channel] = useState(false);
     const [show_archive_slack_confirm, set_show_archive_slack_confirm] = useState(false);
+    /**
+     * Slack workspace id for the "Open Slack Channel" deep link, fetched from a
+     * staff-gated route instead of a NEXT_PUBLIC_ env var (see slack_deep_link).
+     * Null until it lands; the link degrades to one without ?team=, which is
+     * only wrong on Enterprise Grid.
+     */
+    const [slack_team_id, set_slack_team_id] = useState<string | null>(null);
+
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const res = await fetch('/api/slack/workspace');
+                if (!res.ok) return;
+                const data = await res.json();
+                if (!cancelled) set_slack_team_id(data?.team_id ?? null);
+            } catch (err) {
+                // Non-fatal: the deep link just loses its ?team= param.
+                console.error('slack workspace lookup failed (non-fatal):', err);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, []);
 
     // Renaming state
     const [renaming_file, set_renaming_file] = useState<{ id: string; label: string } | null>(null);
@@ -1368,17 +1414,84 @@ export default function UnderwritingClientDetailsPage() {
         });
     }
 
-    // Request a batch of document types from the client (modal "Request" button).
+    /**
+     * Mark a category reviewed from this page.
+     *
+     * Only reachable for a category holding files that nobody has approved yet
+     * — normally one the CLIENT uploaded, since a staff upload approves itself.
+     * Until now approving was an advisor-only action on an advisor-only page,
+     * so a file sitting at "ready for audit" could not be cleared by the person
+     * actually auditing it.
+     */
+    async function handle_approve_category(doc_type: { code: string; label: string }) {
+        set_approving_code(doc_type.code);
+        try {
+            const result = await approveDocumentCategory(client_id, doc_type.code, active_business_id);
+            if (result?.success) {
+                toast.success(`${doc_type.label} approved`);
+                fetch_client_details();
+            } else {
+                toast.error((result as any)?.error || 'Failed to approve');
+            }
+        } catch (err: any) {
+            console.error('approve category error:', err);
+            toast.error('An unexpected error occurred');
+        } finally {
+            set_approving_code(null);
+        }
+    }
+
+    /**
+     * Add one or more document types to this file.
+     *
+     * At the underwriting stage this is nearly always a LENDER STIP: a lender
+     * asked for something the file doesn't carry yet, so it needs a slot to be
+     * filled — usually by staff, occasionally by the client. Hence "add" is the
+     * verb and the client ask is a tick-box, not the other way round.
+     */
     async function handle_request_documents() {
         if (selected_request_ids.length === 0) return;
         set_is_requesting_docs(true);
         try {
-            const result = await requestDocuments(client_id, selected_request_ids, active_business_id);
+            const result = await requestDocuments(
+                client_id,
+                selected_request_ids,
+                active_business_id,
+                null,
+                { notifyClient: also_ask_client },
+            );
             if (result?.success) {
-                toast.success("Documents requested from client");
+                // Record WHY the slot exists. There is no column on
+                // client_dynamic_documents for it, and a stip whose reason lives
+                // only in someone's memory becomes an unexplained empty slot the
+                // next person deletes. An internal note is the surface the team
+                // already reads on this page. Non-fatal.
+                if (stip_lender) {
+                    const labels = selected_request_ids
+                        .map(id => all_available_docs.find(d => d.id === id)?.label)
+                        .filter(Boolean)
+                        .join(", ");
+                    try {
+                        await addInternalNote(
+                            client_id,
+                            `Added at ${stip_lender}'s request: ${labels}${also_ask_client ? " (client asked to provide it)" : ""}`,
+                            "underwriting",
+                        );
+                    } catch (note_err) {
+                        console.error('stip note failed (non-fatal):', note_err);
+                    }
+                }
+
+                toast.success(
+                    also_ask_client
+                        ? "Added and requested from the client"
+                        : "Added to the vault — client not notified"
+                );
                 set_is_request_modal_open(false);
                 set_selected_request_ids([]);
                 set_request_search("");
+                set_also_ask_client(false);
+                set_stip_lender("");
                 fetch_client_details();
             } else {
                 toast.error((result as any)?.error || "Failed to request documents");
@@ -1586,7 +1699,48 @@ export default function UnderwritingClientDetailsPage() {
 
             const result = await res.json();
             if (result.success) {
-                toast.success(`${result.uploaded} file(s) uploaded`);
+                // Give the file somewhere to show up.
+                //
+                // The document list on this page renders scoped_required_docs —
+                // i.e. only doc codes with an ACTIVE request row. Uploading a
+                // type nobody requested therefore stored the file and then hid
+                // it: no section, no approval control, invisible in the packet
+                // review. Open the slot after the fact, SILENTLY: staff are
+                // holding the document, so notifying the client about it would
+                // be chasing them for something already in hand.
+                const needs_slot = !required_docs.some(r => r.code === doc_code);
+                if (needs_slot) {
+                    const def = all_available_docs.find(d => d.code === doc_code);
+                    if (def) {
+                        try {
+                            await requestDocuments(client_id, [def.id], active_business_id, null, {
+                                notifyClient: false,
+                            });
+                        } catch (slot_err) {
+                            // Non-fatal: the file is stored either way, and the
+                            // Request flow can still open the slot by hand.
+                            console.error('silent doc-slot creation failed (non-fatal):', slot_err);
+                        }
+                    }
+                }
+
+                // Staff upload = already reviewed. By this phase the advisor or
+                // an admin has sent the document over Slack and UW is filing it;
+                // the review happened off-screen, and leaving the category at
+                // "ready for audit" only asked someone to re-do it — from a
+                // page that has no approve control at all.
+                //
+                // Goes through approveDocumentCategory rather than writing the
+                // row here so the outstanding-docs sync and the vault_completed
+                // tag stay in their single writer. Non-fatal: the file is
+                // stored either way.
+                try {
+                    await approveDocumentCategory(client_id, doc_code, active_business_id);
+                } catch (approve_err) {
+                    console.error('auto-approve after staff upload failed (non-fatal):', approve_err);
+                }
+
+                toast.success(`${result.uploaded} file(s) uploaded and approved`);
                 fetch_client_details();
                 return true;
             }
@@ -2103,8 +2257,13 @@ export default function UnderwritingClientDetailsPage() {
                         <div>
                             <h3 className="font-black text-slate-900 leading-tight uppercase tracking-tighter">{doc_type.label}</h3>
                             <div className="flex items-center gap-2 mt-1">
+                                {/* "Verified", not "Advisor Verified": UW and admin
+                                    approve here too, and a staff upload is approved
+                                    on the spot. The approvals table records who
+                                    (approved_by) but not their role, so naming one
+                                    role in the badge was already a guess. */}
                                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                                    {status === 'approved' ? 'Advisor Verified' :
+                                    {status === 'approved' ? 'Verified' :
                                      status === 'uploaded' ? 'Ready for Audit' : 'Awaiting Submission'}
                                 </p>
                                 {has_docs && (
@@ -2120,6 +2279,26 @@ export default function UnderwritingClientDetailsPage() {
                     </div>
 
                     <div className="flex items-center gap-3">
+                        {/* Approve — only while files are sitting unreviewed. */}
+                        {can_upload && status === 'uploaded' && (
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={approving_code === doc_type.code}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handle_approve_category(doc_type);
+                                }}
+                                className="border-emerald-200 text-emerald-600 hover:bg-emerald-50 rounded-xl h-8 px-3 font-black text-[9px] uppercase tracking-widest"
+                            >
+                                {approving_code === doc_type.code ? (
+                                    <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                                ) : (
+                                    <ShieldCheck className="h-3.5 w-3.5 mr-1" />
+                                )}
+                                Approve
+                            </Button>
+                        )}
                         {/* Request this doc from the client + upload it (admin + UW),
                             mirroring the advisor view */}
                         {can_upload && (
@@ -2226,18 +2405,21 @@ export default function UnderwritingClientDetailsPage() {
     }
 
     /**
-     * render_lender_assignments: UI component for the lender matching results
+     * render_lender_assignments: the lenders on this file.
+     *
+     * Renders even with NONE on it. It used to return null on an empty list,
+     * which hid the whole card — and with it the Add Lender button — on exactly
+     * the file that needs it: the common case is an admin naming the lender and
+     * UW attaching and contacting it, no match run at all. The empty card is
+     * where that starts, so it has to be on screen.
      */
     function render_lender_assignments() {
-        if (lender_assignments.length === 0) return null;
-
         const ready_count = lender_assignments.filter(a => derive_lender_row_state(a) === 'ready_to_submit').length;
         const submitted_count = lender_assignments.filter(a => derive_lender_row_state(a) === 'submitted').length;
 
         const STATE_BADGE: Record<LenderRowState, { label: string; classes: string }> = {
             rejected_by_matcher: { label: 'Rejected (matcher)', classes: 'bg-rose-100 text-rose-700 hover:bg-rose-100' },
-            skipped_by_admin:    { label: 'Skipped (admin)',     classes: 'bg-orange-100 text-orange-700 hover:bg-orange-100' },
-            awaiting_admin:      { label: 'Awaiting admin',      classes: 'bg-amber-100 text-amber-700 hover:bg-amber-100' },
+            removed_by_admin:    { label: 'Removed (admin)',     classes: 'bg-orange-100 text-orange-700 hover:bg-orange-100' },
             ready_to_submit:     { label: 'Ready to submit',     classes: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100' },
             submitted:           { label: 'Submitted · awaiting lender', classes: 'bg-blue-100 text-blue-700 hover:bg-blue-100' },
             approved_by_lender:  { label: 'Approved by lender',  classes: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100' },
@@ -2295,6 +2477,17 @@ export default function UnderwritingClientDetailsPage() {
                     </div>
                 </div>
                 <div>
+                    {lender_assignments.length === 0 && (
+                        <div className="p-10 text-center">
+                            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">
+                                No lenders on this file yet
+                            </p>
+                            <p className="text-[11px] font-medium text-slate-400 mt-2">
+                                Add the lender directly if you already know who this deal is going to —
+                                no match run or bank analysis needed. Or open the match tool to score the file.
+                            </p>
+                        </div>
+                    )}
                     <div className="divide-y divide-slate-100">
                         {lender_assignments.map((assign) => {
                             const row_state = derive_lender_row_state(assign);
@@ -2311,15 +2504,13 @@ export default function UnderwritingClientDetailsPage() {
                                 row_state === 'approved_by_lender'  ? 'bg-emerald-500 text-white' :
                                 row_state === 'ready_to_submit'     ? 'bg-emerald-500 text-white' :
                                 row_state === 'funded'              ? 'bg-violet-500 text-white' :
-                                row_state === 'awaiting_admin'      ? 'bg-amber-500 text-white' :
-                                row_state === 'skipped_by_admin'    ? 'bg-orange-500 text-white' :
+                                row_state === 'removed_by_admin'    ? 'bg-orange-500 text-white' :
                                                                        'bg-rose-500 text-white';
                             const tile_glyph =
                                 row_state === 'submitted'           ? '→' :
                                 row_state === 'approved_by_lender'  ? '✓' :
                                 row_state === 'ready_to_submit'     ? '✓' :
                                 row_state === 'funded'              ? '★' :
-                                row_state === 'awaiting_admin'      ? '…' :
                                                                        '✕';
 
                             return (
@@ -2787,12 +2978,44 @@ export default function UnderwritingClientDetailsPage() {
                 >
                     <DialogContent className="sm:max-w-md">
                         <DialogHeader>
-                            <DialogTitle>Request Documents from Client</DialogTitle>
+                            <DialogTitle>Add a Document Type</DialogTitle>
                             <DialogDescription>
-                                Select the document types to request. The client is notified and the items appear in their vault.
+                                {also_ask_client
+                                    ? "Opens the slot on the vault AND asks the client for it — email, SMS and reminders."
+                                    : "Opens the slot on the vault so it can be filled. The client is not notified."}
                             </DialogDescription>
                         </DialogHeader>
                         <div className="py-2 space-y-3">
+                            <div className="space-y-1.5">
+                                <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                    Requested by (optional)
+                                </Label>
+                                <select
+                                    value={stip_lender}
+                                    onChange={(e) => set_stip_lender(e.target.value)}
+                                    className="w-full h-10 rounded-xl border border-slate-200 px-3 text-sm font-medium bg-white"
+                                >
+                                    <option value="">Not a lender stip</option>
+                                    {lender_assignments.map((a) => (
+                                        <option key={a.id} value={a.lender_name}>{a.lender_name}</option>
+                                    ))}
+                                </select>
+                                <p className="text-[10px] text-slate-400">
+                                    Recorded as an internal note, so the slot&apos;s reason survives.
+                                </p>
+                            </div>
+                            <label className="flex items-start gap-3 rounded-xl border border-slate-200 p-3 cursor-pointer hover:bg-slate-50">
+                                <Checkbox
+                                    checked={also_ask_client}
+                                    onCheckedChange={(c) => set_also_ask_client(c === true)}
+                                    className="mt-0.5"
+                                />
+                                <span className="text-xs text-slate-600">
+                                    <span className="font-black uppercase tracking-widest text-slate-500">Also ask the client for it</span>
+                                    <br />
+                                    Tick only if the CLIENT has to supply this one. Off, nothing is sent and any approval already on the file stays put.
+                                </span>
+                            </label>
                             <div className="relative">
                                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                                 <Input
@@ -2839,7 +3062,11 @@ export default function UnderwritingClientDetailsPage() {
                                 disabled={is_requesting_docs || selected_request_ids.length === 0}
                                 className="bg-emerald-500 hover:bg-emerald-600 text-white"
                             >
-                                {is_requesting_docs ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Requesting…</> : <><Send className="h-4 w-4 mr-2" />Request {selected_request_ids.length > 0 ? `(${selected_request_ids.length})` : ""}</>}
+                                {is_requesting_docs
+                                    ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />{also_ask_client ? "Requesting…" : "Adding…"}</>
+                                    : also_ask_client
+                                        ? <><Send className="h-4 w-4 mr-2" />Add &amp; request {selected_request_ids.length > 0 ? `(${selected_request_ids.length})` : ""}</>
+                                        : <><Plus className="h-4 w-4 mr-2" />Add {selected_request_ids.length > 0 ? `(${selected_request_ids.length})` : ""}</>}
                             </Button>
                         </DialogFooter>
                     </DialogContent>
@@ -3132,7 +3359,7 @@ export default function UnderwritingClientDetailsPage() {
                             slack_channel.id ? (
                                 <>
                                     <a
-                                        href={slack_deep_link(slack_channel.id)}
+                                        href={slack_deep_link(slack_channel.id, slack_team_id)}
                                         target="_blank"
                                         rel="noopener noreferrer"
                                         className="inline-flex items-center gap-2 h-11 px-5 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/20 text-white font-black uppercase tracking-widest text-[10px] transition-all"
@@ -3557,10 +3784,12 @@ export default function UnderwritingClientDetailsPage() {
                                                 <Button
                                                     variant="ghost"
                                                     size="sm"
-                                                    aria-label="Request a document from the client"
+                                                    aria-label="Add a document type to this file"
                                                     onClick={() => {
                                                         set_selected_request_ids([]);
                                                         set_request_search("");
+                                                        set_also_ask_client(false);
+                                                        set_stip_lender("");
                                                         set_is_request_modal_open(true);
                                                     }}
                                                     className="h-8 px-2 rounded-lg text-slate-600 hover:bg-slate-100"
@@ -3568,7 +3797,7 @@ export default function UnderwritingClientDetailsPage() {
                                                     <Send className="w-4 h-4" />
                                                 </Button>
                                             </TooltipTrigger>
-                                            <TooltipContent>Request doc</TooltipContent>
+                                            <TooltipContent>Add doc type</TooltipContent>
                                         </Tooltip>
 
                                         {/* Share sits with the documents, not with the

@@ -32,6 +32,7 @@
 
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { secretsMatch } from "@/lib/secret-compare";
 import { processAffiliatePayout, maxSendAttempts, type PayoutOutcome } from "@/lib/affiliates";
 
 export const runtime = "nodejs";
@@ -65,7 +66,9 @@ function hasCronSecret(req: Request): boolean {
     console.error("[cron/send-affiliate-payouts] CRON_SECRET is not set in env");
     return false;
   }
-  return (req.headers.get("authorization") || "") === `Bearer ${expected}`;
+  const header = req.headers.get("authorization") || "";
+  const token = header.startsWith("Bearer ") ? header.slice(7) : "";
+  return secretsMatch(token, expected);
 }
 
 export async function GET(req: Request) {

@@ -27,21 +27,39 @@ export default async function ReferralLandingPage({
   const { code } = await params;
   const db = createAdminClient();
 
-  const { data: affiliate } = await db
-    .from("affiliates")
-    .select("id, status, link_clicks, first_name")
-    .eq("referral_code", code)
-    .maybeSingle();
+  // Resolve the code and count the visit in ONE atomic statement.
+  //
+  // This used to read link_clicks and write back value+1, which is a lost-update
+  // race on a page anyone can request as fast as they like — concurrent visitors
+  // counted as one, and the affiliate's own dashboard under-reported precisely
+  // when their link was working. register_affiliate_link_click (migration
+  // 20260819) does the increment in the UPDATE and returns the landing fields,
+  // so there is no read-modify-write left to race and one round trip instead of
+  // two. It returns no rows for an unknown or suspended code, which is the same
+  // "link isn't active" answer the page already rendered.
+  const { data: rows, error: clickErr } = await db.rpc("register_affiliate_link_click", {
+    p_code: code,
+  });
+  if (clickErr) {
+    // Before the migration is applied the RPC does not exist. Degrade to a plain
+    // lookup so a real referral link still renders — it just isn't counted.
+    // See [[refactor_alongside_production]].
+    console.error("[r/code] register_affiliate_link_click failed:", clickErr.message);
+  }
 
-  const active = affiliate && affiliate.status === "active";
+  let firstName: string | null =
+    (Array.isArray(rows) ? rows[0]?.affiliate_first_name : null) ?? null;
+  let active = Array.isArray(rows) && rows.length > 0;
 
-  // Usage tracking: count this visit. Best-effort, non-atomic — fine for a
-  // click counter (a lost increment under a race is acceptable).
-  if (active) {
-    await db
+  if (clickErr) {
+    const { data: fallback } = await db
       .from("affiliates")
-      .update({ link_clicks: (affiliate.link_clicks ?? 0) + 1 })
-      .eq("id", affiliate.id);
+      .select("first_name")
+      .eq("referral_code", code)
+      .eq("status", "active")
+      .maybeSingle();
+    active = Boolean(fallback);
+    firstName = fallback?.first_name ?? null;
   }
 
   return (
@@ -53,7 +71,7 @@ export default async function ReferralLandingPage({
       {active ? (
         <ReferralLanding
           code={code}
-          affiliateFirstName={affiliate?.first_name ?? null}
+          affiliateFirstName={firstName}
         />
       ) : (
         // Dead link — no marketing, no funnel. Just tell them and stop.

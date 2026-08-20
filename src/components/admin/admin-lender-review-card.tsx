@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
     Command,
@@ -50,9 +49,10 @@ interface LenderAssignment {
     status: 'pending' | 'submitted' | 'approved_by_lender' | 'declined_by_lender' | 'funded';
 }
 
-// The lender-side pipeline status, set by UW after admin clears a lender for
-// outreach: submitted → (approved | declined) by lender → funded. Rendered as
-// a secondary pill so admins see the lender's verdict without leaving the page.
+// The lender-side pipeline: submitted → (approved | declined) by lender →
+// funded. This is the only verdict the card tracks now, so it drives both the
+// row's pill and its avatar — an admin reads the lender's answer without
+// leaving the page, and can record it here too.
 const LENDER_STATUS_PILL: Record<
     LenderAssignment['status'],
     { label: string; classes: string } | null
@@ -69,34 +69,42 @@ interface Props {
 }
 
 /**
- * Admin-only card on the unified client view.
- * Shows the lender matching results UW saved (rows where decision='approved')
- * and lets admins approve or reject each lender for outreach. Decisions are
- * batched locally so the admin can mark several lenders, optionally add notes,
- * and submit in one round-trip via /api/admin/lender-reviews.
+ * Admin-only card on the unified client view: WHICH lenders were chosen and
+ * WHAT each one answered. Not an approval queue.
+ *
+ * It used to be one — UW picked, the admin approved or rejected each lender,
+ * and only then could it go out. That gate is gone: admins are informed, not
+ * asked. What remains is
+ *   • the list of chosen lenders and their live lender-side status,
+ *   • each lender's recorded response (offer / stips / decline reasons),
+ *   • "Add lender" for the common case where the admin already knows exactly
+ *     who this file is going to — no match run, no bank analysis needed,
+ *   • "Mark submitted" so that same admin can push it out from here instead of
+ *     handing off to the UW screen,
+ *   • "Remove", to take a mistaken pick off the list. That is list-keeping, not
+ *     a veto: nothing waits on it and nothing is pending without it.
  */
 export function AdminLenderReviewCard({ clientId }: Props) {
     const supabase = createClient();
     const [assignments, set_assignments] = useState<LenderAssignment[]>([]);
     const [is_loading, set_is_loading] = useState(true);
-    const [is_submitting, set_is_submitting] = useState(false);
-    const [pending, set_pending] = useState<
-        Record<string, { decision: 'approved' | 'rejected'; notes: string }>
-    >({});
     const [is_bank_analysis_open, set_is_bank_analysis_open] = useState(false);
     const [lender_options, set_lender_options] = useState<LenderGuideline[]>([]);
     const [taken_lender_names, set_taken_lender_names] = useState<Set<string>>(new Set());
     const [is_picker_open, set_is_picker_open] = useState(false);
     const [is_adding_lender, set_is_adding_lender] = useState(false);
+    /** Assignment id whose Remove is one click from happening. Two-step instead
+     *  of a browser confirm(), which blocks the whole tab. */
+    const [confirm_remove_id, set_confirm_remove_id] = useState<string | null>(null);
+    const [busy_row_id, set_busy_row_id] = useState<string | null>(null);
 
     async function fetch_assignments() {
         set_is_loading(true);
-        // Two queries: one filtered for the visible list (no rejected rows),
-        // one unfiltered to know which lenders have ever been used on this
-        // client so the + Add Lender picker hides them too. Lender selection
-        // is per-client — once a lender is rejected for client X, it's off
-        // the table for client X regardless of how the admin re-opens the
-        // file. (Matches the backend duplicate check in POST.)
+        // Two queries: one for the visible list, one for the set of lender
+        // names the picker should hide. Both exclude REMOVED rows — a removed
+        // lender is off the list but back on offer, because removing is now a
+        // one-click operation and the POST restores such a row instead of
+        // refusing it. Hiding them permanently would make a misclick final.
         const [{ data: visible, error: visible_error }, { data: all_for_client, error: all_error }] = await Promise.all([
             supabase
                 .from("client_lender_assignments")
@@ -108,7 +116,8 @@ export function AdminLenderReviewCard({ clientId }: Props) {
             supabase
                 .from("client_lender_assignments")
                 .select("lender_name")
-                .eq("client_id", clientId),
+                .eq("client_id", clientId)
+                .neq("admin_review", "rejected"),
         ]);
         if (visible_error) {
             console.error("AdminLenderReviewCard fetch error:", visible_error);
@@ -141,10 +150,9 @@ export function AdminLenderReviewCard({ clientId }: Props) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [clientId]);
 
-    // Hide lenders that have ever been assigned to this client — including
-    // previously rejected ones, since lender selection is per-client and a
-    // skip means "off the table for this client". Backend POST enforces the
-    // same rule, this filter just stops the UI from offering doomed picks.
+    // Hide lenders already on this client's list. Removed ones are NOT hidden:
+    // re-picking one restores it. Backend POST enforces the same rule; this
+    // filter just stops the UI from offering picks that would 409.
     const available_lenders = useMemo(() => {
         return lender_options.filter(l => !taken_lender_names.has(l.lender_name.toLowerCase()));
     }, [lender_options, taken_lender_names]);
@@ -165,12 +173,16 @@ export function AdminLenderReviewCard({ clientId }: Props) {
                 toast.error(result?.error || 'Failed to add lender');
                 return;
             }
-            toast.success(`Added ${lender.lender_name} — cleared for submission, UW notified`);
-            set_is_picker_open(false);
-            // No staging any more. The row lands admin_review='approved' and the
-            // POST notifies UW itself, so there is nothing left for Save Review
-            // to do here — auto-staging a decision would just leave a dirty
-            // panel the admin has to clear.
+            toast.success(
+                result.restored
+                    ? `${lender.lender_name} put back on this file`
+                    : `Added ${lender.lender_name} — ready to submit, UW notified`
+            );
+            // Picker stays OPEN. An admin who already knows the file's lenders
+            // usually knows more than one, and closing after each pick made
+            // adding three lenders three round-trips through the popover.
+            // fetch_assignments refreshes taken_lender_names, so the one just
+            // added drops out of the list on its own.
             await fetch_assignments();
         } catch (err: any) {
             console.error('AdminLenderReviewCard add error:', err);
@@ -180,73 +192,116 @@ export function AdminLenderReviewCard({ clientId }: Props) {
         }
     }
 
-    const stage_decision = (assignment_id: string, decision: 'approved' | 'rejected') => {
-        set_pending(prev => ({
-            ...prev,
-            [assignment_id]: { decision, notes: prev[assignment_id]?.notes ?? "" },
-        }));
-    };
+    /**
+     * Push this lender out to market from here. Same endpoint the UW screen
+     * calls; it accepts admins too. The point is that an admin who added a
+     * lender they already knew shouldn't have to hand the file to another
+     * screen just to mark it sent.
+     */
+    async function mark_submitted(assignment_id: string, lender_name: string) {
+        set_busy_row_id(assignment_id);
+        try {
+            const res = await fetch(`/api/lender-assignments/${assignment_id}/submit`, {
+                method: 'PATCH',
+            });
+            const result = await res.json();
+            if (!res.ok || !result.success) {
+                toast.error(result?.error || 'Failed to mark as submitted');
+                return;
+            }
+            toast.success(`${lender_name} marked as submitted — posted to the deal channel`);
+            await fetch_assignments();
+        } catch (err: any) {
+            console.error('AdminLenderReviewCard mark_submitted error:', err);
+            toast.error('An unexpected error occurred');
+        } finally {
+            set_busy_row_id(null);
+        }
+    }
 
-    const stage_notes = (assignment_id: string, notes: string) => {
-        set_pending(prev => ({
-            ...prev,
-            [assignment_id]: { decision: prev[assignment_id]?.decision ?? 'approved', notes },
-        }));
-    };
+    /**
+     * Record what the lender came back with. Same endpoint the UW screen's
+     * dropdown calls. An admin who added the lender and marked it submitted has
+     * to be able to close the loop here too — otherwise the card shows a
+     * verdict it can never receive.
+     */
+    async function set_lender_response(
+        assignment_id: string,
+        lender_name: string,
+        status: 'submitted' | 'approved_by_lender' | 'declined_by_lender'
+    ) {
+        set_busy_row_id(assignment_id);
+        try {
+            const res = await fetch(`/api/lender-assignments/${assignment_id}/response`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status }),
+            });
+            const result = await res.json();
+            if (!res.ok || !result.success) {
+                toast.error(result?.error || 'Failed to record the response');
+                return;
+            }
+            toast.success(
+                status === 'approved_by_lender' ? `${lender_name} approved`
+                    : status === 'declined_by_lender' ? `${lender_name} declined`
+                    : `${lender_name} back to awaiting`
+            );
+            await fetch_assignments();
+        } catch (err: any) {
+            console.error('AdminLenderReviewCard set_lender_response error:', err);
+            toast.error('An unexpected error occurred');
+        } finally {
+            set_busy_row_id(null);
+        }
+    }
 
-    const clear_pending = (assignment_id: string) => {
-        set_pending(prev => {
-            const next = { ...prev };
-            delete next[assignment_id];
-            return next;
-        });
-    };
-
-    async function submit_review() {
-        const items = Object.entries(pending).map(([assignment_id, v]) => ({
-            assignment_id,
-            decision: v.decision,
-            notes: v.notes || undefined,
-        }));
-        if (items.length === 0) return;
-
-        set_is_submitting(true);
+    /**
+     * Take a lender off this client's list. Reuses the review endpoint's
+     * 'rejected' state, which is what hides the row and stops it being
+     * submitted — but it is no longer a review step: the list is complete and
+     * submittable without anyone touching this.
+     */
+    async function remove_lender(assignment_id: string, lender_name: string) {
+        set_busy_row_id(assignment_id);
         try {
             const res = await fetch('/api/admin/lender-reviews', {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ items }),
+                body: JSON.stringify({
+                    items: [{ assignment_id, decision: 'rejected', notes: 'Removed by admin' }],
+                }),
             });
             const result = await res.json();
             if (!res.ok || !result.success) {
-                toast.error(result?.error || 'Failed to save review');
+                toast.error(result?.error || 'Failed to remove lender');
                 return;
             }
-            toast.success(`Saved review for ${items.length} lender${items.length > 1 ? 's' : ''}`);
-            set_pending({});
+            toast.success(`${lender_name} removed from this file`);
+            set_confirm_remove_id(null);
             await fetch_assignments();
         } catch (err: any) {
-            console.error('AdminLenderReviewCard submit error:', err);
+            console.error('AdminLenderReviewCard remove error:', err);
             toast.error('An unexpected error occurred');
         } finally {
-            set_is_submitting(false);
+            set_busy_row_id(null);
         }
     }
 
-    const pending_count = Object.keys(pending).length;
-    const approved_final = assignments.filter(a => a.admin_review === 'approved').length;
-    // Only legacy rows can still be 'pending' — every new assignment, from the
-    // match tool and both manual paths, is born cleared. Kept because rows
-    // written before that change are still on file and must not look cleared.
-    const still_pending = assignments.filter(a => a.admin_review === 'pending').length;
+    // Headline counts describe the OUTREACH, not a review backlog: how many
+    // lenders this file is going to, and how many are already out the door.
+    const selected_count = assignments.length;
+    const out_count = assignments.filter(a =>
+        ['submitted', 'approved_by_lender', 'declined_by_lender', 'funded'].includes(a.status)
+    ).length;
 
     return (
         <>
         <div className="p-6">
             <div className="pb-4 mb-2 border-b border-slate-100 flex flex-row items-center justify-between gap-4">
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                    {approved_final} cleared to submit
-                    {still_pending > 0 && ` · ${still_pending} awaiting decision`}
+                    {selected_count} lender{selected_count === 1 ? '' : 's'} selected
+                    {out_count > 0 && ` · ${out_count} out to lender`}
                 </p>
                 <div className="flex items-center gap-2 flex-wrap justify-end">
                     <Button
@@ -335,33 +390,19 @@ export function AdminLenderReviewCard({ clientId }: Props) {
                             </Command>
                         </PopoverContent>
                     </Popover>
-                    {pending_count > 0 && (
-                        <Button
-                            size="sm"
-                            onClick={submit_review}
-                            disabled={is_submitting}
-                            className="h-9 rounded-xl text-[10px] font-black uppercase tracking-widest bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm"
-                        >
-                            {is_submitting ? (
-                                <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />Saving</>
-                            ) : (
-                                `Save review (${pending_count})`
-                            )}
-                        </Button>
-                    )}
                 </div>
             </div>
 
             {/* Says the quiet part out loud. This card used to be a gate — UW
-                could not submit until an admin cleared each lender — and the
-                buttons still look like an approval queue. Without this line an
-                admin reasonably assumes the deal is waiting on them, which is
-                the exact behaviour that left seven lenders parked for months. */}
+                could not submit until an admin cleared each lender — and an
+                admin who still reads it as an approval queue will assume the
+                deal is waiting on them, which is exactly what left seven
+                lenders parked for months. Nothing here is pending on anyone. */}
             {!is_loading && assignments.length > 0 && (
                 <p className="mb-1 text-[11px] leading-relaxed text-slate-400">
-                    These lenders are already cleared and UW can submit them.
-                    Use <span className="font-bold text-slate-500">Skip</span> only
-                    if you want one pulled before it goes out.
+                    Nothing here needs your approval — this is who the file is going to and
+                    what each lender said back. Add a lender if you already know who this
+                    one is for.
                 </p>
             )}
 
@@ -373,30 +414,40 @@ export function AdminLenderReviewCard({ clientId }: Props) {
                 ) : assignments.length === 0 ? (
                     <div className="p-10 text-center">
                         <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">
-                            No lender matches yet
+                            No lenders on this file yet
                         </p>
                         <p className="text-[11px] font-medium text-slate-400 mt-2">
-                            UW hasn't run the lender match for this client.
+                            Add the lender directly if you already know who this deal is going to,
+                            or run the match tool.
                         </p>
                     </div>
                 ) : (
                     <div className="divide-y divide-slate-100">
                         {assignments.map((a) => {
-                            const staged = pending[a.id];
-                            const effective = staged?.decision ?? a.admin_review;
-                            const is_pending_review = a.admin_review === 'pending' && !staged;
+                            const is_busy = busy_row_id === a.id;
+                            // Only rows still sitting with us can be marked out
+                            // or pulled; once a lender has the file, its state
+                            // is driven by their answer, not by us.
+                            const is_actionable = a.status === 'pending';
 
                             return (
                                 <div key={a.id} className="p-5">
                                     <div className="flex items-start justify-between gap-4">
                                         <div className="flex items-center gap-3 min-w-0">
+                                            {/* Avatar tracks the LENDER's answer, which is the
+                                                only verdict that matters now. */}
                                             <div className={clsx(
                                                 "w-9 h-9 rounded-xl flex items-center justify-center font-black text-xs shadow-sm shrink-0",
-                                                effective === 'approved' ? "bg-emerald-500 text-white" :
-                                                effective === 'rejected' ? "bg-orange-500 text-white" :
+                                                a.status === 'funded' ? "bg-violet-500 text-white" :
+                                                a.status === 'approved_by_lender' ? "bg-emerald-500 text-white" :
+                                                a.status === 'declined_by_lender' ? "bg-rose-500 text-white" :
+                                                a.status === 'submitted' ? "bg-blue-500 text-white" :
                                                 "bg-slate-200 text-slate-500"
                                             )}>
-                                                {effective === 'approved' ? '✓' : effective === 'rejected' ? '✕' : '?'}
+                                                {a.status === 'funded' ? '★' :
+                                                 a.status === 'approved_by_lender' ? '✓' :
+                                                 a.status === 'declined_by_lender' ? '✕' :
+                                                 a.status === 'submitted' ? '→' : '•'}
                                             </div>
                                             <div className="min-w-0">
                                                 <div className="flex items-center gap-2 flex-wrap">
@@ -437,106 +488,117 @@ export function AdminLenderReviewCard({ clientId }: Props) {
                                             </div>
                                         </div>
                                         <div className="text-right shrink-0 flex flex-col items-end gap-1.5">
+                                            {/* One pill, the lender's status. The old second pill
+                                                echoed admin_review ("approved") next to it, which
+                                                read as a decision the admin had made. */}
                                             <Badge className={clsx(
                                                 "font-black text-[9px] uppercase tracking-widest px-3 py-1",
-                                                effective === 'approved' ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-100" :
-                                                effective === 'rejected' ? "bg-orange-100 text-orange-700 hover:bg-orange-100" :
-                                                "bg-slate-100 text-slate-500 hover:bg-slate-100"
+                                                LENDER_STATUS_PILL[a.status]?.classes
+                                                    ?? "bg-slate-100 text-slate-500 hover:bg-slate-100"
                                             )}>
-                                                {staged ? `${effective} (unsaved)` : effective}
+                                                {LENDER_STATUS_PILL[a.status]?.label ?? 'Not sent yet'}
                                             </Badge>
-                                            {LENDER_STATUS_PILL[a.status] && (
-                                                <Badge className={clsx(
-                                                    "font-black text-[9px] uppercase tracking-widest px-3 py-1",
-                                                    LENDER_STATUS_PILL[a.status]!.classes
-                                                )}>
-                                                    {LENDER_STATUS_PILL[a.status]!.label}
-                                                </Badge>
-                                            )}
-                                            {a.admin_reviewed_at && !staged && (
+                                            {a.assigned_at && (
                                                 <p className="text-[8px] font-bold text-slate-300 mt-1 uppercase tracking-tighter">
-                                                    Reviewed {format(new Date(a.admin_reviewed_at), 'MMM d')}
+                                                    Selected {format(new Date(a.assigned_at), 'MMM d')}
                                                 </p>
                                             )}
                                         </div>
                                     </div>
 
-                                    {/* Action row — only while a decision is still needed or being
-                                        staged. Once the lender has been marked Contact/Skip and saved,
-                                        collapse to a single "Change decision" link so reviewed rows
-                                        don't keep showing the buttons. */}
-                                    {(is_pending_review || staged) ? (
+                                    {/* Action row — only for a lender that hasn't gone out yet.
+                                        Send it, or take it off the list. No decision to record. */}
+                                    {is_actionable && (
                                         <div className="mt-4 flex items-center gap-2 flex-wrap">
                                             <Button
                                                 size="sm"
-                                                variant={effective === 'approved' ? "default" : "outline"}
-                                                onClick={() => stage_decision(a.id, 'approved')}
-                                                className={clsx(
-                                                    "h-8 rounded-lg text-[10px] font-black uppercase tracking-widest",
-                                                    effective === 'approved' && "bg-emerald-500 hover:bg-emerald-600 text-white"
-                                                )}
+                                                onClick={() => mark_submitted(a.id, a.lender_name)}
+                                                disabled={is_busy}
+                                                className="h-8 rounded-lg text-[10px] font-black uppercase tracking-widest bg-emerald-500 hover:bg-emerald-600 text-white"
                                             >
-                                                <Check className="h-3 w-3 mr-1" />
-                                                Contact
-                                            </Button>
-                                            <Button
-                                                size="sm"
-                                                variant={effective === 'rejected' ? "default" : "outline"}
-                                                onClick={() => stage_decision(a.id, 'rejected')}
-                                                className={clsx(
-                                                    "h-8 rounded-lg text-[10px] font-black uppercase tracking-widest",
-                                                    effective === 'rejected' && "bg-orange-500 hover:bg-orange-600 text-white"
+                                                {is_busy ? (
+                                                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                                ) : (
+                                                    <Check className="h-3 w-3 mr-1" />
                                                 )}
-                                            >
-                                                <X className="h-3 w-3 mr-1" />
-                                                Skip
+                                                Mark submitted
                                             </Button>
-                                            {staged && (
+                                            {confirm_remove_id === a.id ? (
+                                                <>
+                                                    <Button
+                                                        size="sm"
+                                                        variant="outline"
+                                                        onClick={() => remove_lender(a.id, a.lender_name)}
+                                                        disabled={is_busy}
+                                                        className="h-8 rounded-lg text-[10px] font-black uppercase tracking-widest border-orange-300 text-orange-600 hover:bg-orange-50"
+                                                    >
+                                                        <X className="h-3 w-3 mr-1" />
+                                                        Confirm remove
+                                                    </Button>
+                                                    <Button
+                                                        size="sm"
+                                                        variant="ghost"
+                                                        onClick={() => set_confirm_remove_id(null)}
+                                                        className="h-8 rounded-lg text-[10px] font-bold uppercase tracking-widest text-slate-500"
+                                                    >
+                                                        Cancel
+                                                    </Button>
+                                                </>
+                                            ) : (
                                                 <Button
                                                     size="sm"
                                                     variant="ghost"
-                                                    onClick={() => clear_pending(a.id)}
-                                                    className="h-8 rounded-lg text-[10px] font-bold uppercase tracking-widest text-slate-500"
+                                                    onClick={() => set_confirm_remove_id(a.id)}
+                                                    disabled={is_busy}
+                                                    className="h-8 px-2 rounded-lg text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:text-slate-600"
                                                 >
-                                                    Cancel
+                                                    Remove
                                                 </Button>
                                             )}
                                         </div>
-                                    ) : (
-                                        <div className="mt-4">
-                                            <Button
-                                                size="sm"
-                                                variant="ghost"
-                                                onClick={() => stage_decision(a.id, a.admin_review === 'rejected' ? 'rejected' : 'approved')}
-                                                className="h-8 px-2 rounded-lg text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:text-slate-600"
-                                            >
-                                                Change decision
-                                            </Button>
-                                        </div>
                                     )}
 
-                                    {/* Notes — show when staging or when notes exist */}
-                                    {(staged || a.admin_review_notes) && (
+                                    {/* Historical admin note, from back when this card recorded
+                                        review decisions. Read-only — nothing writes these now. */}
+                                    {a.admin_review_notes && (
                                         <div className="mt-3">
-                                            {staged ? (
-                                                <Textarea
-                                                    value={staged.notes}
-                                                    onChange={(e) => stage_notes(a.id, e.target.value)}
-                                                    placeholder="Optional note (visible to UW)…"
-                                                    className="min-h-[60px] rounded-xl border-slate-200 text-sm"
-                                                />
-                                            ) : (
-                                                <p className="text-xs text-slate-500 italic px-3 py-2 bg-slate-50 rounded-lg">
-                                                    {a.admin_review_notes}
-                                                </p>
-                                            )}
+                                            <p className="text-xs text-slate-500 italic px-3 py-2 bg-slate-50 rounded-lg">
+                                                {a.admin_review_notes}
+                                            </p>
                                         </div>
                                     )}
 
-                                    {is_pending_review && !staged && (
-                                        <p className="mt-2 text-[10px] font-bold text-amber-600 uppercase tracking-widest">
-                                            Awaiting admin decision
-                                        </p>
+                                    {/* What the lender said. Editable up to (not including)
+                                        funded — that one is set by the Loan Funded flow, which
+                                        records amounts and terms, and must not be reachable from
+                                        a three-button toggle. */}
+                                    {a.status !== 'pending' && a.status !== 'funded' && (
+                                        <div className="mt-4 flex items-center gap-2 flex-wrap">
+                                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">
+                                                Lender said
+                                            </span>
+                                            {([
+                                                { value: 'submitted', label: 'Awaiting' },
+                                                { value: 'approved_by_lender', label: 'Approved' },
+                                                { value: 'declined_by_lender', label: 'Declined' },
+                                            ] as const).map(({ value, label }) => (
+                                                <Button
+                                                    key={value}
+                                                    size="sm"
+                                                    variant={a.status === value ? 'default' : 'outline'}
+                                                    disabled={is_busy || a.status === value}
+                                                    onClick={() => set_lender_response(a.id, a.lender_name, value)}
+                                                    className={clsx(
+                                                        "h-7 rounded-lg text-[10px] font-black uppercase tracking-widest disabled:opacity-100",
+                                                        a.status === value && value === 'approved_by_lender' && "bg-emerald-500 hover:bg-emerald-500 text-white",
+                                                        a.status === value && value === 'declined_by_lender' && "bg-rose-500 hover:bg-rose-500 text-white",
+                                                        a.status === value && value === 'submitted' && "bg-blue-500 hover:bg-blue-500 text-white"
+                                                    )}
+                                                >
+                                                    {label}
+                                                </Button>
+                                            ))}
+                                        </div>
                                     )}
 
                                     {/* Lender's recorded response (note + screenshots) once the

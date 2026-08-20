@@ -2369,14 +2369,16 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
                     />
                 </div>
 
-                {/* ── Admin Lender Review (admin-only) ──────────────────
-                    UW selects matched lenders; admins approve which ones
-                    UW should actually contact. Self-fetches its own data. */}
+                {/* ── Lenders & responses (admin-only) ──────────────────
+                    Who this file is going to and what each lender answered.
+                    Informational — there is no admin approval step. The admin
+                    can add a lender they already know and mark it submitted
+                    from here. Self-fetches its own data. */}
                 {is_admin_path && (
                     <CollapsibleSection
                         clientId={client_profile.id}
                         slug="lender-match"
-                        title="Lender Match — Admin Review"
+                        title="Lenders & Responses"
                         defaultOpen
                     >
                         <AdminLenderReviewCard clientId={client_profile.id} />

@@ -12,6 +12,8 @@ import { ghlUpsertContact, ghlResolveFieldId } from "@/lib/ghl-api";
 import { send_affiliate_welcome_email } from "@/lib/email";
 import { generateAffiliateDashboardMagicLink } from "@/lib/magic-link";
 import { formatPhoneUS, isValidUsPhone, toE164 } from "@/lib/phone";
+import { checkRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
+import { isValidEmailShape } from "@/lib/email-address";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,22 +36,45 @@ const supabaseAdmin = createClient(
  */
 const AFFILIATE_CONTACT_TYPE = process.env.GHL_AFFILIATE_CONTACT_TYPE || "affiliate";
 
-// Build a URL-safe referral code from the name plus a short random suffix.
-function slugifyName(first: string, last: string): string {
-  const base = `${first}-${last}`
+/**
+ * Build a URL-safe referral code.
+ *
+ * FIRST NAME ONLY. The code appears in a public URL the affiliate posts on
+ * social media, and `/r/<code>` renders their first name to any visitor, so the
+ * previous `first-last-xxxx` shape published their full name to anyone who saw
+ * the link or guessed a code. A first name is enough for the link to feel
+ * personal and to stay memorable.
+ */
+function slugifyName(first: string): string {
+  const base = first
     .toLowerCase()
     .normalize("NFKD")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
-    .slice(0, 24);
+    .slice(0, 16);
   return base || "affiliate";
 }
 
+/**
+ * Random suffix, Crockford-style base32 over 30 bits (~1.07 billion values).
+ *
+ * The previous version rendered 3 random bytes as fixed 2-character base36 pairs
+ * and then sliced the result to 4 characters — which threw away the third byte
+ * entirely and constrained the first character of each surviving pair to 0-7.
+ * The real keyspace was 2^16, not 36^4, making a code guessable in about 65k
+ * unmetered requests against a public endpoint that confirms hits by name.
+ *
+ * The alphabet omits I, L, O and U: no digit/letter confusion when someone reads
+ * a link aloud or types it off a slide, and no accidental words.
+ */
+const CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
 function randomSuffix(): string {
-  // 4-char base36 suffix (crypto for uniqueness; avoids Math.random collisions).
-  const bytes = new Uint8Array(3);
+  const bytes = new Uint8Array(6);
   crypto.getRandomValues(bytes);
-  return Array.from(bytes, (b) => b.toString(36).padStart(2, "0")).join("").slice(0, 4);
+  return Array.from(bytes, (b) => CODE_ALPHABET[b % CODE_ALPHABET.length])
+    .join("")
+    .toLowerCase();
 }
 
 /**
@@ -57,6 +82,17 @@ function randomSuffix(): string {
  */
 export async function POST(req: NextRequest) {
   try {
+    // Public, invite-free and unverified: each accepted request mints a
+    // pre-confirmed auth user, a GHL contact and a welcome email. Metered before
+    // any of that happens.
+    const { allowed } = await checkRateLimit(req, RATE_LIMITS.affiliateSignup);
+    if (!allowed) {
+      return NextResponse.json(
+        { message: "Too many signup attempts. Please try again in a little while." },
+        { status: 429 }
+      );
+    }
+
     const body = await req.json();
     const { firstName, lastName, email, phone, password, contactOptIn } = body;
 
@@ -67,6 +103,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (!isValidEmailShape(email)) {
+      return NextResponse.json(
+        { message: "Please enter a valid email address" },
+        { status: 400 }
+      );
+    }
     // Public form — sanitize the phone before it is stored or pushed to GHL, so
     // the affiliate lines up with the CRM contact on the SMS side.
     if (!isValidUsPhone(phone)) {
@@ -85,9 +127,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (String(password).length < 6) {
+    // 8, matching /auth/set-password. This account is the front door to an
+    // affiliate's earnings and their referred leads' names, and it is created
+    // through a public form with no email verification behind it.
+    if (String(password).length < 8) {
       return NextResponse.json(
-        { message: "Password must be at least 6 characters" },
+        { message: "Password must be at least 8 characters" },
         { status: 400 }
       );
     }
@@ -113,13 +158,51 @@ export async function POST(req: NextRequest) {
 
     if (createError) {
       // Most common: email already registered.
+      //
+      // Do NOT echo Supabase's message. It says "A user with this email address
+      // has already been registered", and this endpoint is public and unmetered
+      // by identity — that turns it into a membership oracle for EVERY account
+      // in the vault, clients and staff included, not just affiliates. The
+      // generic reply below still tells a real person what to do.
+      console.warn(
+        `[post-signup-affiliate] createUser refused for ${cleanEmail}: ${createError.message}`
+      );
       return NextResponse.json(
-        { message: createError.message || "Could not create account" },
+        {
+          message:
+            "We couldn't create that account. If you already have one, log in instead or reset your password.",
+        },
         { status: 400 }
       );
     }
 
     const userId = userData.user.id;
+
+    /**
+     * Undo the auth user if provisioning fails after it exists.
+     *
+     * Steps 2 and 3 are what make this account USABLE — the role row that routes
+     * them and the affiliates row that owns their referral code. Without the
+     * rollback, a failure in either left a confirmed auth user with no role and
+     * no profile: they could log in, land nowhere, and — because the address was
+     * now taken — never successfully sign up again. Failing all the way back is
+     * the only state a public form can recover from on its own.
+     *
+     * Everything AFTER step 3 (GHL, consent stamp, welcome email) is
+     * deliberately best-effort and must NOT trigger this: the account works by
+     * then, and a CRM or mail hiccup is not a reason to delete it.
+     */
+    const rollbackAuthUser = async (why: string) => {
+      console.error(`[post-signup-affiliate] rolling back auth user ${userId}: ${why}`);
+      try {
+        await supabaseAdmin.auth.admin.deleteUser(userId);
+      } catch (delErr) {
+        console.error(
+          `[post-signup-affiliate] ROLLBACK FAILED — orphaned auth user ${userId} (${cleanEmail}) needs manual cleanup:`,
+          delErr
+        );
+      }
+    };
 
     // Step 2: Upsert public.users with role='affiliate'.
     const { error: dbError } = await supabaseAdmin
@@ -135,11 +218,14 @@ export async function POST(req: NextRequest) {
         { onConflict: "id" }
       );
 
-    if (dbError) throw dbError;
+    if (dbError) {
+      await rollbackAuthUser(`users upsert failed: ${dbError.message}`);
+      throw dbError;
+    }
 
     // Step 3: Provision the affiliate profile with a unique referral_code.
     //         Retry on the (rare) UNIQUE collision with a fresh suffix.
-    const slug = slugifyName(cleanFirst, cleanLast);
+    const slug = slugifyName(cleanFirst);
     let referralCode = "";
     let inserted = false;
     for (let attempt = 0; attempt < 6 && !inserted; attempt++) {
@@ -155,17 +241,29 @@ export async function POST(req: NextRequest) {
       if (!affErr) {
         inserted = true;
       } else if (affErr.code === "23505") {
-        // Unique violation. If it's the user_id (affiliate already exists), stop.
+        // Unique violation. If it's the user_id, this affiliate already has a
+        // profile (a partially-failed earlier attempt) — stop retrying AND adopt
+        // the code that is actually stored. The old branch kept the freshly
+        // generated `referralCode`, which was never inserted, so the welcome
+        // email and the GHL custom field both advertised a /r/ link that 404s.
         if (affErr.message?.includes("user_id")) {
+          const { data: existing } = await supabaseAdmin
+            .from("affiliates")
+            .select("referral_code")
+            .eq("user_id", userId)
+            .maybeSingle();
+          if (existing?.referral_code) referralCode = existing.referral_code;
           inserted = true;
         }
         // else: referral_code collision — loop retries with a new suffix.
       } else {
+        await rollbackAuthUser(`affiliates insert failed: ${affErr.message}`);
         throw affErr;
       }
     }
 
     if (!inserted) {
+      await rollbackAuthUser("could not generate a unique referral code");
       throw new Error("Could not generate a unique referral code");
     }
 

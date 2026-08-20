@@ -1,14 +1,14 @@
 // src/app/api/lender-assignments/[id]/submit/route.ts
 //
 // PATCH /api/lender-assignments/[id]/submit
-//   Marks an admin-approved lender assignment as submitted to the lender —
+//   Marks a lender assignment as submitted to the lender —
 //   the signal that UW has physically pushed the deal out and we're now
 //   waiting on the lender's approval.
 //
 // Transition: status='pending' → status='submitted'. Refused if:
 //   • the row doesn't exist
 //   • decision is not 'approved' (matcher rejected the lender)
-//   • admin_review is not 'approved' (admin hasn't cleared it for outreach)
+//   • admin_review is 'rejected' (the lender was removed from the file)
 //   • status is not 'pending' (already submitted, or beyond)
 //
 // AuthZ: admin OR underwriting (see require-staff).
@@ -57,9 +57,16 @@ export async function PATCH(
         { status: 409 }
       );
     }
-    if (existing.admin_review !== 'approved') {
+    // Only an explicitly REMOVED lender is refused. This used to require
+    // admin_review === 'approved', which made the column an approval gate: every
+    // legacy row still sitting at 'pending' — they were never backfilled — was
+    // permanently unsubmittable, and the admin had to clear each new lender
+    // before UW could act. Admins no longer approve lenders, they are informed
+    // of them, so 'pending' now means exactly what it says: nobody has removed
+    // this one.
+    if (existing.admin_review === 'rejected') {
       return NextResponse.json(
-        { error: 'Admin has not approved this lender for outreach yet.' },
+        { error: 'This lender was removed from the file.' },
         { status: 409 }
       );
     }
@@ -103,7 +110,7 @@ export async function PATCH(
       }
     });
 
-    // Trigger #2: if EVERY admin-approved lender for this client is now out the
+    // Trigger #2: if EVERY lender still on this file is now out the
     // door (status submitted / approved_by_lender / funded), post a Slack
     // summary into the deal channel. Fire-and-forget, only if a channel exists.
     try {
@@ -113,7 +120,7 @@ export async function PATCH(
           .from('client_lender_assignments')
           .select('lender_name, status')
           .eq('client_id', client_id)
-          .eq('admin_review', 'approved');
+          .neq('admin_review', 'rejected');
 
         const rows = all_approved ?? [];
         const OUT = new Set(['submitted', 'approved_by_lender', 'funded']);
@@ -130,7 +137,7 @@ export async function PATCH(
           if (channel_id) {
             const lender_list = rows.map((r: any) => `• ${r.lender_name}`).join('\n');
             const text =
-              `✅ This file has been submitted to all approved lenders` +
+              `✅ This file has been submitted to every lender on it` +
               `${(vault as any)?.company_name ? ` for ${(vault as any).company_name}` : ''}.\n${lender_list}`;
             await slackPostMessage(channel_id, text);
           }

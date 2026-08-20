@@ -6,6 +6,7 @@ import {
   retryAffiliatePayout,
   markPayoutDelivered,
   cancelAffiliatePayout,
+  reopenAffiliatePayout,
   revealPayoutClaimLink,
 } from "../actions";
 
@@ -61,8 +62,33 @@ export function PayoutActions({
     );
   }
 
+  // Cancelling used to be the end of the road: processAffiliatePayout refuses a
+  // canceled row even for an admin, and UNIQUE(client_vault_id) stops the funded
+  // hook ever creating a replacement. A deal cancelled by mistake, or genuinely
+  // re-funded after the fact, needed a hand-written DB edit. Reopening puts it
+  // back in the queue with a fresh 24h gate.
   if (status === "canceled") {
-    return <span className="text-xs font-bold text-emerald-900/30">No action</span>;
+    const reopen = () => {
+      if (
+        !window.confirm(
+          "Reopen this canceled payout? It re-enters the queue and sends in 24h if the deal still verifies as funded."
+        )
+      )
+        return;
+      startTransition(async () => { await reopenAffiliatePayout(payoutId); });
+    };
+
+    return (
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={isPending}
+        onClick={reopen}
+        className="border-amber-200 text-amber-800 font-bold rounded-xl"
+      >
+        {isPending ? "Reopening…" : "Reopen"}
+      </Button>
+    );
   }
 
   // Still inside the 24h gate: the worker will send it on its own, so the

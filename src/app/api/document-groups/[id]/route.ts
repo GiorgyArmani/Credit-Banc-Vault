@@ -139,7 +139,7 @@ export async function PATCH(
     if (label_fields_changed) {
       const { data: attached } = await supabase
         .from("user_documents")
-        .select("id, user_id, doc_code, category, metadata")
+        .select("id, user_id, doc_code, category, metadata, custom_label, document_group_id")
         .eq("document_group_id", id);
 
       if (attached && attached.length > 0) {
@@ -154,12 +154,17 @@ export async function PATCH(
           .maybeSingle();
 
         // Re-apply the SAME group — the row already carries the new name, so
-        // this rebuilds each label against it.
+        // this rebuilds each label against it. `current_groups` gets the group
+        // as it was BEFORE the rename: the files still carry the OLD name in
+        // their labels, and that is what has to be recognised as ours. Passing
+        // the new row would make every label look hand-typed and freeze the
+        // typo the rename was meant to fix.
         const result = await applyDocumentGroup(supabase, {
           documents: attached as any[],
           group: data as DocumentGroup,
           label_by_code,
           client_name: vault?.client_name ?? null,
+          current_groups: [current as DocumentGroup],
         });
         relabelled = result.updated;
 
@@ -215,7 +220,7 @@ export async function DELETE(
     // counted) because the force path has to relabel each row.
     const { data: attached, error: attached_error } = await supabase
       .from("user_documents")
-      .select("id, user_id, doc_code, category, metadata")
+      .select("id, user_id, doc_code, category, metadata, custom_label, document_group_id")
       .eq("document_group_id", id);
 
     if (attached_error) {
@@ -255,11 +260,24 @@ export async function DELETE(
         .eq("user_id", owner_user_id)
         .maybeSingle();
 
+      // The group as it stands, so the labels it produced are recognised as
+      // ours and cleared out; a hand-typed name survives the delete.
+      const { data: group_row } = await supabase
+        .from("document_groups")
+        .select(
+          "id, client_vault_id, business_profile_id, doc_code, name, identifier, subtype, nickname, is_active"
+        )
+        .eq("id", id)
+        .maybeSingle();
+
       const result = await applyDocumentGroup(supabase, {
         documents: (attached ?? []) as any[],
         group: null,
         label_by_code,
         client_name: vault?.client_name ?? null,
+        // Every one of these is filed under the group being deleted, so this is
+        // what their current labels were built from.
+        current_groups: group_row ? [group_row as DocumentGroup] : [],
       });
 
       // Refuse to delete the group while any of its files still point at it —

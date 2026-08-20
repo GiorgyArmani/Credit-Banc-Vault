@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { recordPipelineTransition } from "@/lib/pipeline-core";
+import { canRecordFunded, isStaffRole } from "@/lib/auth/roles";
 import { revalidatePath } from "next/cache";
 
 export type LoanStatus =
@@ -77,35 +78,20 @@ export async function getBulkLatestStatus(
 }
 
 /**
- * Roles allowed to move a deal through the pipeline. Everyone else — clients
- * (role='free') and affiliates — has NO write access to the funding process at
- * all; they only ever read the step their own file is on.
+ * Both role gates below come from @/lib/auth/roles rather than local sets.
  *
- * partner_advisor is included: they do the advisor job on their own files. The
- * per-file boundary is RLS (`is_assigned_advisor_for`), not this list — the same
- * as for a staff advisor, who is likewise not restricted here to their own book.
- */
-const STAFF_ROLES = new Set([
-  "admin",
-  "underwriting",
-  "advisor",
-  "setter",
-  "partner_advisor",
-]);
-
-/**
- * Roles allowed to record `funded`. Narrower than STAFF_ROLES because this
- * transition pays an affiliate a real gift card downstream — setters never touch
- * the pipeline, so they are excluded. See [[affiliate_program]].
+ * isStaffRole — may move a deal through the pipeline at all. Everyone else,
+ * clients (role='free') and affiliates included, has NO write access to the
+ * funding process; they only ever read the step their own file is on.
+ * partner_advisor is in: they do the advisor job on their own files, and the
+ * per-file boundary is RLS (`is_assigned_advisor_for`), not this list.
  *
- * partner_advisor IS allowed, for parity with an advisor. Know what that means:
- * `funded` also writes the partner's own commission row via
- * createPartnerCommissionForFundedVault, so a partner marking their own deal
- * funded self-initiates their payout. The row lands `status: 'pending'` and
- * releasing it stays an admin action, so the approval gate is downstream rather
- * than here. Drop "partner_advisor" from this set to make `funded` staff-only.
+ * canRecordFunded — the narrower set allowed to record `funded`. It is shared
+ * because the affiliate payout path re-verifies the SAME rule before it spends
+ * money, and the two copies had already drifted: this file allowed
+ * partner_advisor and the payout path did not, so a partner-funded deal silently
+ * never paid the affiliate. One list, imported twice.
  */
-const FUNDED_ROLES = new Set(["admin", "underwriting", "advisor", "partner_advisor"]);
 
 /** Resolve the caller's role with the service role, so RLS can't mask it. */
 async function resolveActor(): Promise<{ userId: string; role: string } | null> {
@@ -145,14 +131,14 @@ export async function updateLoanStatus(
   const actor = await resolveActor();
   if (!actor) return { success: false, error: "Unauthenticated" };
 
-  if (!STAFF_ROLES.has(actor.role)) {
+  if (!isStaffRole(actor.role)) {
     console.warn(
       `[pipeline] BLOCKED "${newStatus}" on ${clientVaultId} by non-staff ${actor.role} ${actor.userId}`
     );
     return { success: false, error: "Forbidden" };
   }
 
-  if (newStatus === "funded" && !FUNDED_ROLES.has(actor.role)) {
+  if (newStatus === "funded" && !canRecordFunded(actor.role)) {
     console.warn(
       `[pipeline] BLOCKED funded transition on ${clientVaultId} by ${actor.role} ${actor.userId}`
     );

@@ -35,6 +35,7 @@
 // See [[affiliate_program]], [[ghl_integration_contract]].
 
 import { NextResponse } from "next/server";
+import { secretsMatch } from "@/lib/secret-compare";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -72,7 +73,7 @@ export async function POST(request: Request) {
       console.error("[ghl-appointment] GHL_WEBHOOK_SECRET is not configured");
       return NextResponse.json({ error: "Configuration Error" }, { status: 500 });
     }
-    if (clean(payload?.secret) !== webhookSecret) {
+    if (!secretsMatch(clean(payload?.secret), webhookSecret)) {
       console.error("[ghl-appointment] unauthorized: secret mismatch");
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

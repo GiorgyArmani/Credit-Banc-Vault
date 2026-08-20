@@ -97,8 +97,11 @@ export function UwAddLenderButton({
         toast.error(data?.error || "Failed to add lender");
         return;
       }
-      toast.success(`Added ${lender.lender_name}`);
-      set_open(false);
+      toast.success(`Added ${lender.lender_name} — ready to submit`);
+      // Picker stays OPEN. A file usually goes to several lenders, and closing
+      // after each pick made adding three of them three trips through the
+      // popover. onAdded refetches, which drops the one just added from the
+      // list via assignedLenderNames.
       onAdded();
     } catch (err) {
       console.error("uw add lender error:", err);

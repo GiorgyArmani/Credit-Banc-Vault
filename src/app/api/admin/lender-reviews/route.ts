@@ -1,20 +1,25 @@
 // src/app/api/admin/lender-reviews/route.ts
 //
-// Admin records per-lender review decisions on a client's lender-match results.
-// PATCH accepts a batch of { assignment_id, decision, notes } so the admin can
-// mark several lenders in one round-trip from the in-profile review panel.
-// POST inserts a manually-chosen lender (source='admin_manual') — used when
-// the admin wants to add a lender the matching algorithm didn't surface.
+// Admin writes to a client's lender list. There is no admin approval step any
+// more — admins are informed of the lenders, not asked to clear them — so what
+// these two verbs mean now is:
+//   PATCH  { assignment_id, decision: 'rejected' } — REMOVE a lender from the
+//          file. ('approved' still restores one, and legacy batches still work.)
+//          A removal is posted to the deal's Slack channel so UW can't submit a
+//          lender that was just pulled.
+//   POST   adds a lender the admin already knows this file is going to —
+//          inserted ready to submit, no match run and no bank analysis needed.
 //
 // AuthZ: caller must be authenticated AND have role = 'admin' in public.users.
 // We resolve the reviewer's advisor_id from session and stamp it on every row
 // so we know who made each call (admin_reviewed_by). admin_reviewed_at is
 // stamped at write time.
 
-import { NextResponse } from 'next/server';
+import { NextResponse, after } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { requireAdmin } from '@/lib/auth/require-admin';
 import { send_lender_review_approved_notification } from '@/lib/email';
+import { slackPostMessage } from '@/lib/slack-api';
 
 const supabase_admin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -213,6 +218,40 @@ export async function PATCH(request: Request) {
       ),
     ).catch((err) => console.error('UW notification dispatch failed (non-fatal):', err));
 
+    // A REMOVED lender has to reach the deal channel. The admin card is now
+    // informational — nothing about it makes UW look before submitting — so
+    // without this, UW can push out a lender the admin pulled thirty seconds
+    // earlier. One line, no @-mentions: it's a correction, not an alarm.
+    after(async () => {
+      try {
+        const removed_by_client = new Map<string, string[]>();
+        for (const item of items) {
+          if (item.decision !== 'rejected') continue;
+          const prior = prior_by_id.get(item.assignment_id);
+          if (!prior || prior.admin_review === 'rejected') continue; // no transition
+          const list = removed_by_client.get(prior.client_id) ?? [];
+          list.push(prior.lender_name);
+          removed_by_client.set(prior.client_id, list);
+        }
+
+        for (const [client_id, lender_names] of removed_by_client) {
+          const { data: vault } = await supabase_admin
+            .from('client_data_vault')
+            .select('slack_channel_id')
+            .eq('id', client_id)
+            .maybeSingle();
+          const channel_id = (vault as any)?.slack_channel_id as string | null;
+          if (!channel_id) continue;
+          await slackPostMessage(
+            channel_id,
+            `🚫 Removed from this file — do not submit: ${lender_names.map((n) => `*${n}*`).join(', ')}`
+          );
+        }
+      } catch (err) {
+        console.error('lender removal Slack post failed (non-fatal):', err);
+      }
+    });
+
     return NextResponse.json({
       success: true,
       updated: updates.map((u) => u.data),
@@ -258,23 +297,50 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Lender not found.' }, { status: 404 });
     }
 
-    // Refuse duplicates — one (client, lender) assignment at a time. If the
-    // admin is re-adding a previously rejected one, they can reverse the
-    // existing row's admin_review via the PATCH flow instead.
+    // One (client, lender) assignment at a time. A row that was REMOVED is
+    // restored rather than refused: removal is now a one-click list operation,
+    // so undoing a misclick has to be possible — and the old 409 made it
+    // permanent, since the removed row also hides the lender from the picker.
+    // Any other existing row is a genuine duplicate and still refused.
     const { data: existing } = await supabase_admin
       .from('client_lender_assignments')
-      .select('id')
+      .select('id, admin_review, status')
       .eq('client_id', client_id)
       .eq('lender_name', guideline.lender_name)
       .maybeSingle();
+
+    const now = new Date().toISOString();
+
+    if (existing && existing.admin_review === 'rejected') {
+      const { data: restored, error: restore_error } = await supabase_admin
+        .from('client_lender_assignments')
+        .update({
+          admin_review: 'approved',
+          admin_review_notes: notes ?? null,
+          admin_reviewed_by: advisor_id,
+          admin_reviewed_at: now,
+          updated_at: now,
+        })
+        .eq('id', existing.id)
+        .select('*')
+        .single();
+
+      if (restore_error) {
+        console.error('admin lender restore error:', restore_error);
+        return NextResponse.json(
+          { error: restore_error.message || 'Failed to restore lender.' },
+          { status: 500 }
+        );
+      }
+      return NextResponse.json({ success: true, assignment: restored, restored: true });
+    }
+
     if (existing) {
       return NextResponse.json(
         { error: `${guideline.lender_name} is already assigned to this client.` },
         { status: 409 }
       );
     }
-
-    const now = new Date().toISOString();
 
     // Manual-adds land CLEARED — admin_review='approved' — so UW can submit
     // immediately. An admin adding a lender by hand IS the decision; making

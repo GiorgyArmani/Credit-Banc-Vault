@@ -65,6 +65,29 @@ export const STAFF_ROLES = [
 ] as const;
 
 /**
+ * Allowed to record the `funded` pipeline transition. Narrower than STAFF_ROLES
+ * because this transition pays real money downstream — it queues the affiliate's
+ * gift card and writes a partner commission row — so setters are excluded.
+ *
+ * partner_advisor IS included, for parity with an advisor. Know what that means:
+ * a partner marking their own deal funded self-initiates their own commission.
+ * That row lands `status: 'pending'` and releasing it stays an admin action, so
+ * the approval gate is downstream rather than here.
+ *
+ * THIS LIST IS LOAD-BEARING IN TWO PLACES AND THEY MUST NOT DRIFT: the pipeline
+ * gate that decides who may record `funded`, and the affiliate payout path that
+ * re-verifies "a staff member recorded this" before spending. When those two
+ * disagreed, a partner_advisor could fund a deal that then silently never paid
+ * the affiliate — no payout row, no admin surface, just a console warning. Use
+ * canRecordFunded() in both rather than re-listing the roles.
+ */
+export const FUNDED_ROLES = ["admin", "underwriting", "advisor", "partner_advisor"] as const;
+
+export function canRecordFunded(role: string | null | undefined): boolean {
+  return !!role && (FUNDED_ROLES as readonly string[]).includes(role);
+}
+
+/**
  * Internal employees only. The complement of STAFF_ROLES that keeps external
  * partners out of surfaces that expose OTHER people's business: the affiliate
  * lead queue, the staff directory, lender guidelines, admin leaderboards,

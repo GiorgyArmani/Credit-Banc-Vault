@@ -107,9 +107,10 @@ export async function slackCreateChannel(opts: {
   description?: string;
   isPrivate?: boolean;
 }): Promise<string> {
-  // NEXT_PUBLIC_SLACK_TEAM_ID is the fallback so the workspace id can be defined
-  // once and still be readable by the client component that builds the
-  // "Open Slack Channel" deep link (which needs ?team= to resolve on Grid).
+  // SLACK_TEAM_ID is the real variable. NEXT_PUBLIC_SLACK_TEAM_ID is kept only
+  // as a fallback for environments that still define the old name — nothing
+  // client-side reads it any more; the deep link gets the workspace id from
+  // GET /api/slack/workspace, so it never reaches the JS bundle.
   const teamId = process.env.SLACK_TEAM_ID || process.env.NEXT_PUBLIC_SLACK_TEAM_ID;
   if (!teamId) throw new Error("Missing SLACK_TEAM_ID env");
 

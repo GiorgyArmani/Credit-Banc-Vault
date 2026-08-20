@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { secretsMatch } from "@/lib/secret-compare";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { syncOutstandingDocuments } from "@/lib/outstanding-documents";
 import { isClientScopedDoc } from "@/lib/document-scope";
@@ -53,7 +54,7 @@ export async function POST(request: Request) {
             );
         }
 
-        if (secret !== webhookSecret) {
+        if (!secretsMatch(secret, webhookSecret)) {
             console.error("❌ Webhook Unauthorized: Secret mismatch", {
                 received: secret ? "PRESENT" : "MISSING"
             });
