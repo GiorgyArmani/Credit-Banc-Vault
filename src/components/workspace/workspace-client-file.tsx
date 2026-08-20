@@ -66,6 +66,7 @@ import {
 import { fetchInternalNotes, addInternalNote } from "@/app/actions/internal-notes";
 import { fetchFileNotes, addFileNote } from "@/app/actions/client-file-notes";
 import { toast } from "@/lib/toast";
+import { copy_to_clipboard } from "@/lib/clipboard";
 import clsx from "clsx";
 import { format, differenceInDays } from "date-fns";
 import { Textarea } from "@/components/ui/textarea";
@@ -1164,8 +1165,14 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
         try {
             const result = await generateMagicLink(client_id);
             if (result.success && result.link) {
-                await navigator.clipboard.writeText(result.link);
-                toast.success("Magic link copied to clipboard!");
+                // The link arrives after a server round-trip, so the window may
+                // no longer be focused and a raw clipboard write would reject.
+                const copied = await copy_to_clipboard(result.link);
+                if (copied) {
+                    toast.success("Magic link copied to clipboard!");
+                } else {
+                    toast.error("Link generated, but the copy was blocked — click this window and try again.");
+                }
             } else {
                 toast.error(result.error || "Failed to generate magic link.");
             }
