@@ -175,12 +175,15 @@ export async function notifyAdminsOfLenderPipelineEvent(
   // ── Slack: post into the deal channel (if one exists). ────────────────────
   try {
     if (slack_channel_id) {
-      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://vault.creditbanc.io';
+      // No vault link on these posts. A file goes out to several lenders at
+      // once, so the verdict posts stack up and every one repeating the same
+      // client URL spammed the channel. The link now rides only on the
+      // note-recorded follow-up (decline reasons / offer + stips) below --
+      // the post someone actually opens the file from.
       const mentions = formatMentions([...getApproverUserIds(), resolveAdvisorSlackId(advisor_email)]);
       const text =
         `${mentions ? mentions + ' ' : ''}${copy.slack(lender_label, company_name)}` +
-        `${formatNoteBlock(NOTE_LABEL[event], assignment.response_notes)}\n` +
-        `${baseUrl}/admin/clients/${client_id}`;
+        `${formatNoteBlock(NOTE_LABEL[event], assignment.response_notes)}`;
       await slackPostMessage(slack_channel_id, text);
     }
   } catch (err) {
