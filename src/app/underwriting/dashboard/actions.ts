@@ -2,7 +2,7 @@
 "use server";
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { send_advisor_document_notification, send_loan_funded_notification } from "@/lib/email";
+import { send_advisor_document_notification, send_loan_funded_notification, send_client_funded_email } from "@/lib/email";
 import { createClient } from "@/lib/supabase/server";
 import { ghlUpdateContact, ghlAddTags } from "@/lib/ghl-api";
 import { updateLoanStatus } from "@/app/actions/pipeline";
@@ -209,12 +209,15 @@ export async function fundLoanAction(clientId: string, data: {
         const { data: client, error: clientError } = await supabaseAdmin
             .from("client_data_vault")
             .select(`
-                ghl_contact_id, 
+                ghl_contact_id,
                 client_name,
+                client_email,
                 advisors (
                     first_name,
                     last_name,
-                    email
+                    email,
+                    phone,
+                    profile_pic_url
                 )
             `)
             .eq("id", clientId)
@@ -357,6 +360,31 @@ export async function fundLoanAction(clientId: string, data: {
         } catch (emailError) {
             console.error("fundLoanAction Error: Failed to send email:", emailError);
             // Non-fatal, let it succeed
+        }
+
+        // 5.5 Send the "Approved. Funded. Done." email to the CLIENT.
+        //
+        //     Separate try/catch from the advisor send above on purpose: these
+        //     are two different recipients and one failing must not swallow the
+        //     other. Both are best-effort — the funding is the thing being
+        //     recorded here, and no mail failure may undo it.
+        try {
+            const advisor = client.advisors as any;
+            if (client.client_email) {
+                await send_client_funded_email({
+                    client_name: client.client_name,
+                    client_email: client.client_email,
+                    advisor_name: advisor ? `${advisor.first_name} ${advisor.last_name || ""}`.trim() : null,
+                    advisor_phone: advisor?.phone ?? null,
+                    advisor_photo_url: advisor?.profile_pic_url ?? null,
+                });
+                console.log("fundLoanAction: Funded email sent to client.");
+            } else {
+                console.warn("fundLoanAction Warning: No client email on the vault; funded email skipped.");
+            }
+        } catch (clientEmailError) {
+            console.error("fundLoanAction Error: Failed to send client funded email:", clientEmailError);
+            // Non-fatal
         }
 
         // 6. Persist the funded figures onto the active business's funding_deal.
