@@ -31,6 +31,18 @@ const STATUS_META: Record<string, { label: string; cls: string }> = {
 // appointment. See [[affiliate_lead_qualified_is_not_booked]].
 const BOOKED_META = { label: "Booked", cls: "bg-emerald-50 text-emerald-600" };
 
+// Also not a `status` value. affiliate_leads.status has a CHECK constraint that
+// stops at 'converted' — there is no 'funded' lead status and adding one would
+// duplicate a fact the payout row already owns. So funding is derived: a lead
+// with a non-canceled affiliate_payouts row IS funded, by the same rule the
+// "N funded" counter on the rewards card uses.
+//
+// Without this the affiliate watched their reward go out while the referral
+// that earned it still read "In progress" — the deal is done, and the row has
+// to say so. Solid mint on navy: the terminal, celebratory state, and the one
+// pill on the table that isn't a tint.
+const FUNDED_META = { label: "Funded", cls: "bg-cb-mint text-cb-navy" };
+
 // Payout status → affiliate-facing label (`failed` shown as the softer
 // "Processing" so partners never see a raw failure) + pill colors.
 // The affiliate never needs to see our internal review machinery — a queued,
@@ -103,11 +115,13 @@ export default async function AffiliateDashboardPage() {
     business_name: string | null;
     status: string;
     created_at: string;
+    /** Matched against affiliate_payouts.client_vault_id to derive Funded. */
+    converted_vault_id: string | null;
     /** Absent until migration 20260814 is applied. */
     booked_at?: string | null;
   };
 
-  const leadColumns = "id, first_name, last_name, business_name, status, created_at";
+  const leadColumns = "id, first_name, last_name, business_name, status, created_at, converted_vault_id";
   const selectLeads = (columns: string) =>
     db
       .from("affiliate_leads")
@@ -128,7 +142,7 @@ export default async function AffiliateDashboardPage() {
     })(),
     db
       .from("affiliate_payouts")
-      .select("id, commission_amount, status, created_at")
+      .select("id, commission_amount, status, created_at, affiliate_lead_id, client_vault_id")
       .eq("affiliate_id", affiliate.id)
       .order("created_at", { ascending: false }),
   ]);
@@ -140,7 +154,16 @@ export default async function AffiliateDashboardPage() {
 
   const totalReferrals = leadRows.length;
   // A canceled payout is a deal that didn't hold up — don't count it as funded.
-  const fundedCount = payoutRows.filter((p) => p.status !== "canceled").length;
+  const fundedPayouts = payoutRows.filter((p) => p.status !== "canceled");
+  const fundedCount = fundedPayouts.length;
+
+  // Which referrals actually funded, for the Funded pill in the table below.
+  // Two ways in on purpose: affiliate_lead_id is the direct link, but a payout
+  // created from a vault whose lead was matched later can carry only the vault
+  // id — and both point at the same funded deal. Matching on either keeps a
+  // real funding from silently reading as "In progress".
+  const fundedLeadIds = new Set(fundedPayouts.map((p) => p.affiliate_lead_id).filter(Boolean));
+  const fundedVaultIds = new Set(fundedPayouts.map((p) => p.client_vault_id).filter(Boolean));
   const earned = payoutRows
     .filter((p) => p.status === "sent" || p.status === "delivered")
     .reduce((sum, p) => sum + Number(p.commission_amount || 0), 0);
@@ -241,8 +264,16 @@ export default async function AffiliateDashboardPage() {
                   // who merely passed the pre-qual and closed the tab at the
                   // calendar — and "Qualified" reads as the same thing for both.
                   // `converted` outranks it: they already have a vault.
-                  const meta =
-                    l.booked_at && l.status !== "converted"
+                  //
+                  // Funded outranks everything: it's the end of the road, and
+                  // the lead's own status column never advances past
+                  // 'converted' to say so.
+                  const isFunded =
+                    fundedLeadIds.has(l.id) ||
+                    (!!l.converted_vault_id && fundedVaultIds.has(l.converted_vault_id));
+                  const meta = isFunded
+                    ? FUNDED_META
+                    : l.booked_at && l.status !== "converted"
                       ? BOOKED_META
                       : STATUS_META[l.status] ?? { label: l.status, cls: "bg-cb-gray/10 text-cb-gray" };
                   return (
