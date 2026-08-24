@@ -294,3 +294,17 @@ body {
   scrollbar-width: thin;
   scrollbar-color: rgba(15, 23, 42, 0.2) rgba(15, 23, 42, 0.04);
 }
+
+
+/* Gift-card strips behind the /affiliate hero. Each track holds its row twice
+   and slides exactly one copy; duration, delay and direction are set per
+   instance from inline style, which Tailwind arbitrary values cannot express.
+   The global prefers-reduced-motion rule above already stops it. */
+@keyframes cb-marquee {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(-50%, 0, 0);
+  }
+}

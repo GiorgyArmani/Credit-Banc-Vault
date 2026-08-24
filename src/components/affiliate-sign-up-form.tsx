@@ -8,7 +8,7 @@ import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import Link from "next/link";
 import { useState } from "react";
-import { Gift, ArrowRight, Lock, CheckCircle } from "lucide-react";
+import { Gift, ArrowRight, Lock, CheckCircle, Mail } from "lucide-react";
 import { formatPhoneInput, isValidUsPhone } from "@/lib/phone";
 
 // Public affiliate self-signup form. Embedded on the marketing landing page.
@@ -100,9 +100,27 @@ export function AffiliateSignUpForm({
             <CheckCircle className="h-8 w-8 text-cb-mint" />
           </div>
           <h3 className="font-manrope text-3xl font-extrabold tracking-tight mb-3 text-cb-ink">You're in!</h3>
-          <p className="text-cb-ink/50 mb-8">
+          <p className="text-cb-ink/50 mb-6">
             Your affiliate account is ready. Log in to grab your referral link and start earning.
           </p>
+
+          {/* The welcome email carries their referral link, and it is a
+              marketing-shaped send — Gmail files it under Promotions often
+              enough that people report "I never got it". Say so up front. */}
+          <div className="mb-8 flex items-start gap-3 rounded-xl bg-cb-mint/5 px-4 py-3.5 text-left ring-1 ring-cb-mint/20">
+            <Mail className="mt-0.5 h-4 w-4 shrink-0 text-cb-mint" />
+            <p className="text-[13px] leading-relaxed text-cb-ink/60">
+              Check your inbox for{" "}
+              <span className="font-semibold text-cb-ink">
+                &ldquo;You&rsquo;re In. Go Know Someone.&rdquo;
+              </span>{" "}
+              &mdash; it has your referral link. If it isn&rsquo;t there, look in
+              your <span className="font-semibold text-cb-ink">Promotions</span>{" "}
+              tab or spam folder and drag it into your inbox so the next one
+              lands where you&rsquo;ll see it.
+            </p>
+          </div>
+
           <Button
             asChild
             className="h-14 px-8 bg-cb-mint hover:bg-cb-mint/90 text-cb-navy font-bold rounded-xl shadow-lg shadow-cb-mint/25 text-lg transition-all hover:scale-[1.02] active:scale-95"
