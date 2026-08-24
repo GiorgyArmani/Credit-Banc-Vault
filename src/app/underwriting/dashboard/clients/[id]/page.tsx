@@ -37,7 +37,9 @@ import {
     Slack,
     Send,
     Search,
-    Archive
+    Archive,
+    MoreHorizontal,
+    RotateCcw
 } from "lucide-react";
 import {
     AlertDialog,
@@ -72,6 +74,12 @@ import { fetchInternalNotes, addInternalNote } from "@/app/actions/internal-note
 import { toast } from "@/lib/toast";
 import clsx from "clsx";
 import { format } from "date-fns";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { LoanFundedDialog } from "@/components/loan-funded-dialog";
 import { ShareWithLenderButton } from "@/components/share/share-with-lender-button";
 import { FundingRoundsCard } from "@/components/funding/funding-rounds-card";
@@ -79,7 +87,7 @@ import { LenderResponsePanel } from "@/components/lender/lender-response-panel";
 import { UwAddLenderButton } from "@/components/lender/uw-add-lender-button";
 import { requestDocuments, approveDocumentCategory } from "@/app/advisor/dashboard/clients/[id]/actions";
 import { getClientPipelineHistory, updateLoanStatus, type LoanStatus, type PipelineStatusEntry } from "@/app/actions/pipeline";
-import { LoanPipelineFull, LoanPipelineBadge, PIPELINE_STEPS } from "@/components/loan-pipeline-status";
+import { ClientCommandBar } from "@/components/workspace/client-command-bar";
 import { getBulkClientActivity } from "@/app/actions/advisor";
 import { ActivityAgeBadge } from "@/components/advisor/activity-age-badge";
 import { differenceInDays } from "date-fns";
@@ -266,6 +274,21 @@ interface InternalNote {
 // matchesActiveBusiness is shared with the advisor page + vault.tsx — see
 // @/lib/document-scope. Don't re-declare it here.
 
+/**
+ * Action recipes for the navy profile hero. One height, one radius, one type
+ * scale for every control in that cluster — those buttons were authored inline
+ * one at a time, which is how they drifted into a ragged staircase of four
+ * differently-sized pills. Exactly ONE emerald primary lives in the hero (mark
+ * funded); everything else is a ghost, and the destructive channel action sits
+ * in an overflow menu instead of competing with the daily ones.
+ */
+const HERO_ACTION = {
+    base: "inline-flex h-10 items-center justify-center gap-2 rounded-xl px-3.5 text-[10px] font-black uppercase tracking-widest transition-colors disabled:opacity-40 disabled:cursor-not-allowed",
+    primary: "bg-emerald-500 text-white hover:bg-emerald-600 shadow-lg shadow-emerald-500/25",
+    ghost: "border border-white/15 bg-white/10 text-white hover:bg-white/[0.18]",
+    quiet: "border border-white/10 bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white",
+};
+
 export default function UnderwritingClientDetailsPage() {
     const supabase = createClient();
     const router = useRouter();
@@ -316,6 +339,20 @@ export default function UnderwritingClientDetailsPage() {
     const [lender_assignments, set_lender_assignments] = useState<LenderAssignment[]>([]);
     const [is_loading_assignments, set_is_loading_assignments] = useState(false);
     const [submitting_assignment_id, set_submitting_assignment_id] = useState<string | null>(null);
+    /**
+     * Re-submit dialog: sending a deal back to a lender that already answered,
+     * with whatever that lender asked for. Held as the target row rather than a
+     * bare boolean so the dialog can name the lender it is about.
+     */
+    const [resubmit_target, set_resubmit_target] = useState<{ id: string; lender_name: string; status: string } | null>(null);
+    const [resubmit_note, set_resubmit_note] = useState("");
+    /**
+     * Bumped per assignment when a re-submission clears that row's response.
+     * Feeds the response panel's key so it remounts and reloads its (now empty)
+     * note. Keyed on this rather than on status so an ordinary dropdown change
+     * doesn't throw away a note UW is halfway through typing.
+     */
+    const [response_panel_epoch, set_response_panel_epoch] = useState<Record<string, number>>({});
 
     async function mark_assignment_submitted(assignment_id: string) {
         set_submitting_assignment_id(assignment_id);
@@ -364,6 +401,48 @@ export default function UnderwritingClientDetailsPage() {
             await fetch_lender_assignments();
         } catch (err: any) {
             console.error('mark_assignment_status error:', err);
+            toast.error('An unexpected error occurred');
+        } finally {
+            set_submitting_assignment_id(null);
+        }
+    }
+
+    /**
+     * Send the deal back to a lender that already answered.
+     *
+     * A decline is not the end of the conversation here — the lender usually
+     * says what it would need, we go and get it, and the same file goes back.
+     * That is a different act from the dropdown correcting a misclick, which is
+     * why it is its own button and its own flag: only this path retires the
+     * previous response, filing it to the internal notes and clearing the panel
+     * so the new round is recorded fresh rather than edited over the old one.
+     */
+    async function resubmit_assignment() {
+        if (!resubmit_target) return;
+        const { id: assignment_id, lender_name } = resubmit_target;
+        set_submitting_assignment_id(assignment_id);
+        try {
+            const res = await fetch(`/api/lender-assignments/${assignment_id}/response`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    status: 'submitted',
+                    resubmission: true,
+                    resubmit_note: resubmit_note.trim() || undefined,
+                }),
+            });
+            const result = await res.json();
+            if (!res.ok || !result?.success) {
+                toast.error(result?.error || 'Failed to re-submit');
+                return;
+            }
+            toast.success(`Re-submitted to ${lender_name}`);
+            set_resubmit_target(null);
+            set_resubmit_note("");
+            set_response_panel_epoch(prev => ({ ...prev, [assignment_id]: (prev[assignment_id] ?? 0) + 1 }));
+            await fetch_lender_assignments();
+        } catch (err: any) {
+            console.error('resubmit_assignment error:', err);
             toast.error('An unexpected error occurred');
         } finally {
             set_submitting_assignment_id(null);
@@ -2560,6 +2639,25 @@ export default function UnderwritingClientDetailsPage() {
                                                 )}
                                             </Button>
                                         )}
+                                        {/* A lender that has answered can be worked again: get what it
+                                            asked for, send the same file back. Separate from the status
+                                            dropdown on purpose — the dropdown is for correcting a
+                                            misclick, and only this button retires the recorded response. */}
+                                        {(row_state === 'approved_by_lender' || row_state === 'declined_by_lender') && (
+                                            <Button
+                                                size="sm"
+                                                variant="outline"
+                                                disabled={is_submitting_this}
+                                                onClick={() => {
+                                                    set_resubmit_note("");
+                                                    set_resubmit_target({ id: assign.id, lender_name: assign.lender_name, status: assign.status });
+                                                }}
+                                                className="h-8 rounded-lg text-[10px] font-black uppercase tracking-widest border-slate-200 text-slate-600 hover:text-emerald-600 hover:border-emerald-300"
+                                            >
+                                                <RotateCcw className="h-3 w-3 mr-1" />
+                                                Re-submit
+                                            </Button>
+                                        )}
                                         <div className="text-right flex flex-col items-end">
                                             {is_lifecycle_row ? (
                                                 // Submitted-lifecycle rows: the status pill is a dropdown so
@@ -2599,7 +2697,11 @@ export default function UnderwritingClientDetailsPage() {
                                     </div>
                                   </div>
                                   {is_lifecycle_row && (
-                                    <LenderResponsePanel assignmentId={assign.id} status={assign.status} />
+                                    <LenderResponsePanel
+                                        key={`${assign.id}:${response_panel_epoch[assign.id] ?? 0}`}
+                                        assignmentId={assign.id}
+                                        status={assign.status}
+                                    />
                                   )}
                                 </div>
                             );
@@ -2643,44 +2745,57 @@ export default function UnderwritingClientDetailsPage() {
 
     return (
         <div className="space-y-8">
-            {/* Header / Actions */}
-            <div className="flex items-center justify-between">
-                <div className="inline-flex items-center bg-white rounded-2xl border border-slate-200 shadow-sm p-1.5 gap-1">
-                    <button
-                        onClick={() => prev_client_id && router.push(`${client_base_path}/${prev_client_id}`)}
-                        disabled={!prev_client_id}
-                        title="Previous client"
-                        className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 hover:text-slate-900 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                    >
-                        <ChevronLeft className="w-4 h-4" />
-                        Prev
-                    </button>
-                    <div className="w-px h-5 bg-slate-200" />
-                    <button
-                        onClick={() => router.push(queue_path)}
-                        className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50 hover:text-slate-900 transition-colors"
-                    >
-                        <ArrowLeft className="w-4 h-4" />
-                        Back to Queue
-                        {current_nav_index >= 0 && navigable_client_ids.length > 0 && (
-                            <span className="text-[10px] font-black tracking-wide bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-md">
-                                {current_nav_index + 1} / {navigable_client_ids.length}
-                            </span>
-                        )}
-                    </button>
-                    <div className="w-px h-5 bg-slate-200" />
-                    <button
-                        onClick={() => next_client_id && router.push(`${client_base_path}/${next_client_id}`)}
-                        disabled={!next_client_id}
-                        title="Next client"
-                        className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 hover:text-slate-900 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                    >
-                        Next
-                        <ChevronRight className="w-4 h-4" />
-                    </button>
-                </div>
+            {/* One bar: queue nav + pipeline + stage actions + fold controls.
+                Chips (activity age, stale-upload alert) ride inside it, so the
+                file opens on content instead of four stacked control strips. */}
+            {(() => {
+                const last_upload = documents.length > 0
+                    ? documents.reduce((a, b) => new Date(a.upload_date) > new Date(b.upload_date) ? a : b).upload_date
+                    : null;
+                const upload_baseline = last_upload ?? client_profile.created_at;
+                const days_since_last_upload = differenceInDays(new Date(), new Date(upload_baseline));
+                const show_upload_alert = days_since_last_upload >= 5 && completion_pct < 100;
+                return (
+                    <ClientCommandBar
+                        back_label="Back to Queue"
+                        on_back={() => router.push(queue_path)}
+                        on_prev={prev_client_id ? () => router.push(`${client_base_path}/${prev_client_id}`) : undefined}
+                        on_next={next_client_id ? () => router.push(`${client_base_path}/${next_client_id}`) : undefined}
+                        nav_index={current_nav_index >= 0 ? current_nav_index + 1 : undefined}
+                        nav_total={navigable_client_ids.length}
+                        current_status={current_pipeline_status}
+                        pipeline_history={pipeline_history}
+                        on_status_change={handleAdvanceStatus}
+                        on_decline={() => handleAdvanceStatus("declined")}
+                        is_advancing={is_advancing_status}
+                        on_expand_all={() => broadcast_toggle_all(true)}
+                        on_collapse_all={() => broadcast_toggle_all(false)}
+                        chips={
+                            <>
+                                <ActivityAgeBadge
+                                    created_at={client_profile.created_at}
+                                    last_activity_at={last_activity_at}
+                                    reassigned_to_catch_all_at={client_profile.reassigned_to_catch_all_at}
+                                />
+                                {show_upload_alert && (
+                                    <span
+                                        className="inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-red-700"
+                                        title={last_upload
+                                            ? `Last upload was ${days_since_last_upload} day${days_since_last_upload === 1 ? "" : "s"} ago`
+                                            : `No client uploads since vault was created ${days_since_last_upload} day${days_since_last_upload === 1 ? "" : "s"} ago`}
+                                    >
+                                        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" />
+                                        {last_upload ? `No uploads · ${days_since_last_upload}d` : `No uploads yet · ${days_since_last_upload}d`}
+                                    </span>
+                                )}
+                            </>
+                        }
+                    />
+                );
+            })()}
 
-
+            {/* Modals that used to hang off the old header row. */}
+            <div>
                 <Dialog open={is_notify_modal_open} onOpenChange={set_is_notify_modal_open}>
                     <DialogContent className="sm:max-w-md rounded-[3rem] p-8">
                         <DialogHeader>
@@ -2759,25 +2874,65 @@ export default function UnderwritingClientDetailsPage() {
                         </DialogFooter>
                     </DialogContent>
                 </Dialog>
-            </div>
 
-            {/* Section folding controls — same pattern as the advisor page so
-                UW + admin can blow open or collapse everything in one click. */}
-            <div className="flex items-center justify-end gap-2">
-                <button
-                    type="button"
-                    onClick={() => broadcast_toggle_all(true)}
-                    className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 hover:text-emerald-600 transition-colors px-3 py-1.5 rounded-lg border border-slate-200 bg-white shadow-sm"
+                {/* Re-submit to a lender that already answered. */}
+                <Dialog
+                    open={!!resubmit_target}
+                    onOpenChange={(open) => { if (!open) set_resubmit_target(null); }}
                 >
-                    Expand all
-                </button>
-                <button
-                    type="button"
-                    onClick={() => broadcast_toggle_all(false)}
-                    className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 hover:text-emerald-600 transition-colors px-3 py-1.5 rounded-lg border border-slate-200 bg-white shadow-sm"
-                >
-                    Collapse all
-                </button>
+                    <DialogContent className="sm:max-w-md rounded-[3rem] p-8">
+                        <DialogHeader>
+                            <DialogTitle className="text-2xl font-black text-slate-900 uppercase tracking-tighter">
+                                Re-submit to {resubmit_target?.lender_name}
+                            </DialogTitle>
+                            <DialogDescription className="text-slate-500 font-bold">
+                                {resubmit_target?.status === 'declined_by_lender'
+                                    ? 'This lender declined. Send the file back with what they asked for.'
+                                    : 'Send this file back to the lender for another look.'}
+                            </DialogDescription>
+                        </DialogHeader>
+                        <div className="py-4 space-y-4">
+                            <div className="space-y-2">
+                                <label className="text-xs font-black uppercase tracking-widest text-slate-400">
+                                    What changed this round
+                                </label>
+                                <Textarea
+                                    placeholder="New bank statements, corrected application, updated financials…"
+                                    className="min-h-[100px] rounded-2xl border-slate-200 focus:ring-emerald-500"
+                                    value={resubmit_note}
+                                    onChange={(e) => set_resubmit_note(e.target.value)}
+                                    maxLength={2000}
+                                />
+                            </div>
+                            {/* Say what the button does before it does it. The response is
+                                not deleted — it moves to the internal notes — but the panel
+                                going blank is surprising if nobody warned you. */}
+                            <p className="text-[11px] font-bold text-slate-400 leading-relaxed">
+                                The lender&apos;s previous response is filed to this file&apos;s internal notes and
+                                the response panel is cleared, so this round is recorded on its own.
+                                Screenshots already attached stay put.
+                            </p>
+                        </div>
+                        <DialogFooter>
+                            <Button
+                                variant="outline"
+                                onClick={() => set_resubmit_target(null)}
+                                className="rounded-xl font-bold"
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                onClick={resubmit_assignment}
+                                disabled={!!resubmit_target && submitting_assignment_id === resubmit_target.id}
+                                className="bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-black shadow-lg shadow-emerald-500/20"
+                            >
+                                {!!resubmit_target && submitting_assignment_id === resubmit_target.id
+                                    ? 'Re-submitting…'
+                                    : 'Re-submit'}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
             </div>
 
             {/* Admin Quick Actions — only when an admin is viewing this page.
@@ -3170,38 +3325,6 @@ export default function UnderwritingClientDetailsPage() {
                 </Dialog>
             )}
 
-            {/* Status row — pipeline + activity at a glance */}
-            {(() => {
-                const last_upload = documents.length > 0
-                    ? documents.reduce((a, b) => new Date(a.upload_date) > new Date(b.upload_date) ? a : b).upload_date
-                    : null;
-                const upload_baseline = last_upload ?? client_profile.created_at;
-                const days_since_last_upload = differenceInDays(new Date(), new Date(upload_baseline));
-                const has_missing_docs = completion_pct < 100;
-                const show_upload_alert = days_since_last_upload >= 5 && has_missing_docs;
-                return (
-                    <div className="flex items-center gap-2 flex-wrap">
-                        <LoanPipelineBadge currentStatus={current_pipeline_status} />
-                        <ActivityAgeBadge
-                            created_at={client_profile.created_at}
-                            last_activity_at={last_activity_at}
-                            reassigned_to_catch_all_at={client_profile.reassigned_to_catch_all_at}
-                        />
-                        {show_upload_alert && (
-                            <span
-                                className="inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-red-700"
-                                title={last_upload
-                                    ? `Last upload was ${days_since_last_upload} day${days_since_last_upload === 1 ? "" : "s"} ago`
-                                    : `No client uploads since vault was created ${days_since_last_upload} day${days_since_last_upload === 1 ? "" : "s"} ago`}
-                            >
-                                <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
-                                {last_upload ? `No uploads · ${days_since_last_upload}d` : `No uploads yet · ${days_since_last_upload}d`}
-                            </span>
-                        )}
-                    </div>
-                );
-            })()}
-
             {/* Business tab strip — surface per-business doc reviews. The
                 "+ Add Business" CTA is intentionally omitted on the UW side;
                 creating new businesses lives with advisors. Delete is also
@@ -3216,52 +3339,6 @@ export default function UnderwritingClientDetailsPage() {
 
             {/* Outstanding Documents Banner */}
             {render_outstanding_banner(scoped_required_docs)}
-
-            {/* Pipeline Status Card */}
-            <CollapsibleSection
-                clientId={client_id}
-                slug="uw-pipeline"
-                title="Funding Pipeline"
-                summary={current_pipeline_status.replace(/_/g, " ")}
-                accessory={
-                    <div className="flex flex-wrap gap-2">
-                        {(() => {
-                            const currentIdx = PIPELINE_STEPS.findIndex((s: { status: LoanStatus }) => s.status === current_pipeline_status);
-                            const nextStep = currentIdx >= 0 && currentIdx < PIPELINE_STEPS.length - 1 ? PIPELINE_STEPS[currentIdx + 1] : null;
-                            return nextStep ? (
-                                <Button
-                                    size="sm"
-                                    className="h-8 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg font-black uppercase tracking-widest text-[9px] shadow-lg shadow-emerald-500/20"
-                                    onClick={() => handleAdvanceStatus(nextStep.status)}
-                                    disabled={is_advancing_status}
-                                >
-                                    {is_advancing_status ? <Loader2 className="w-4 h-4 animate-spin" /> : `→ ${nextStep.shortLabel}`}
-                                </Button>
-                            ) : null;
-                        })()}
-                        {current_pipeline_status !== "declined" && current_pipeline_status !== "funded" && (
-                            <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-8 border-red-200 text-red-500 hover:bg-red-50 rounded-lg font-black uppercase tracking-widest text-[9px]"
-                                onClick={() => handleAdvanceStatus("declined")}
-                                disabled={is_advancing_status}
-                            >
-                                Decline
-                            </Button>
-                        )}
-                    </div>
-                }
-                defaultOpen
-            >
-            <div className="px-8 py-6">
-                <LoanPipelineFull
-                    currentStatus={current_pipeline_status}
-                    history={pipeline_history}
-                    onStatusChange={handleAdvanceStatus}
-                />
-            </div>
-            </CollapsibleSection>
 
             {/* Profile Hero */}
             <Card className="bg-slate-900 text-white border-slate-800 rounded-[3rem] shadow-2xl overflow-hidden relative">
@@ -3301,18 +3378,48 @@ export default function UnderwritingClientDetailsPage() {
                         })()}
                     </div>
 
-                    {/* Deal actions — notify advisor, mark funded, and (once docs
-                        are approved) the Slack channel — grouped in the card so
-                        they read like the advisor/admin profile header. */}
-                    <div className="flex flex-col items-center md:items-end gap-2 shrink-0">
-                        <div className="flex flex-wrap items-center justify-center md:justify-end gap-2">
+                    {/* Deal actions. One aligned cluster instead of a stair-step
+                        of pills: ghosts first, the single emerald primary last
+                        (where the eye lands), and the channel archive — rare and
+                        destructive — behind the overflow menu. */}
+                    <div className="flex w-full shrink-0 flex-col items-center gap-2 md:w-auto md:items-end">
+                        <div className="flex flex-wrap items-center justify-center gap-2 md:justify-end">
                             <Button
                                 onClick={() => set_is_notify_modal_open(true)}
-                                className="h-11 px-5 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/20 text-white font-black uppercase tracking-widest text-[10px] transition-all"
+                                className={clsx(HERO_ACTION.base, HERO_ACTION.ghost)}
                             >
-                                <Bell className="w-4 h-4 mr-2" />
+                                <Bell className="h-4 w-4" />
                                 Notify Advisor
                             </Button>
+
+                            {SLACK_FEATURE_ENABLED && (
+                                slack_channel.id ? (
+                                    <a
+                                        href={slack_deep_link(slack_channel.id, slack_team_id)}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className={clsx(HERO_ACTION.base, HERO_ACTION.ghost)}
+                                    >
+                                        <Slack className="h-4 w-4 text-emerald-400" />
+                                        Open Slack
+                                        <ExternalLink className="h-3 w-3 opacity-60" />
+                                    </a>
+                                ) : (
+                                    <Button
+                                        onClick={create_slack_channel}
+                                        disabled={!is_docs_approved || is_creating_slack_channel}
+                                        title={!is_docs_approved ? "Available once all documents are approved" : undefined}
+                                        className={clsx(HERO_ACTION.base, HERO_ACTION.ghost)}
+                                    >
+                                        {is_creating_slack_channel ? (
+                                            <><Loader2 className="h-4 w-4 animate-spin" /> Creating…</>
+                                        ) : (
+                                            <><Slack className="h-4 w-4 text-emerald-400" /> Create Channel</>
+                                        )}
+                                    </Button>
+                                )
+                            )}
+
                             {(() => {
                                 // Rescope the funded modal to the active business: the
                                 // requested amount, the lenders that actually reached
@@ -3338,68 +3445,58 @@ export default function UnderwritingClientDetailsPage() {
                                 // would overwrite a closed deal.
                                 const active_business = businesses.find((b) => b.id === active_business_id);
                                 const active_round_funded = !!active_business?.active_deal_funded_at;
+                                const advisor_name = [client_profile.advisor?.first_name, client_profile.advisor?.last_name]
+                                    .filter(Boolean)
+                                    .join(" ");
                                 return (
-                            <LoanFundedDialog
-                                clientId={client_id}
-                                clientName={client_profile.client_name}
-                                businessProfileId={active_business_id}
-                                amountRequested={requested}
-                                lenderOptions={lenderOptions}
-                                defaultSalesRep={`${client_profile.advisor?.first_name ?? ''} ${client_profile.advisor?.last_name ?? ''}`.trim()}
-                                defaultSlackChannel={slack_channel.name ?? ''}
-                                activeRoundFunded={active_round_funded}
-                                activeRoundLender={lender_assignments.find((a) => a.status === 'funded')?.lender_name ?? null}
-                                onSuccess={() => { fetch_client_details(); fetch_lender_assignments(); }}
-                                triggerClassName="h-11 px-5 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-black uppercase tracking-widest text-[10px] shadow-lg shadow-emerald-500/20"
-                            />
+                                    <LoanFundedDialog
+                                        clientId={client_id}
+                                        clientName={client_profile.client_name}
+                                        businessProfileId={active_business_id}
+                                        amountRequested={requested}
+                                        lenderOptions={lenderOptions}
+                                        defaultSalesRep={advisor_name}
+                                        defaultSlackChannel={slack_channel.name ?? ''}
+                                        activeRoundFunded={active_round_funded}
+                                        activeRoundLender={lender_assignments.find((a) => a.status === 'funded')?.lender_name ?? null}
+                                        onSuccess={() => { fetch_client_details(); fetch_lender_assignments(); }}
+                                        triggerClassName={clsx(HERO_ACTION.base, HERO_ACTION.primary)}
+                                    />
                                 );
                             })()}
+
+                            {SLACK_FEATURE_ENABLED && slack_channel.id && (
+                                <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                        <button
+                                            type="button"
+                                            aria-label="More deal actions"
+                                            className={clsx(HERO_ACTION.base, HERO_ACTION.quiet, "w-10 px-0")}
+                                        >
+                                            <MoreHorizontal className="h-4 w-4" />
+                                        </button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end" className="w-60">
+                                        <DropdownMenuItem
+                                            onClick={() => set_show_archive_slack_confirm(true)}
+                                            disabled={is_archiving_slack_channel}
+                                            className="text-red-600 focus:text-red-700"
+                                        >
+                                            {is_archiving_slack_channel ? (
+                                                <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Archiving…</>
+                                            ) : (
+                                                <><Archive className="mr-2 h-4 w-4" /> Archive Slack channel</>
+                                            )}
+                                        </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
+                            )}
                         </div>
-                        {SLACK_FEATURE_ENABLED && (
-                            slack_channel.id ? (
-                                <>
-                                    <a
-                                        href={slack_deep_link(slack_channel.id, slack_team_id)}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="inline-flex items-center gap-2 h-11 px-5 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/20 text-white font-black uppercase tracking-widest text-[10px] transition-all"
-                                    >
-                                        <Slack className="w-4 h-4 text-emerald-400" />
-                                        Open Slack Channel
-                                        <ExternalLink className="w-3 h-3 opacity-60" />
-                                    </a>
-                                    <Button
-                                        onClick={() => set_show_archive_slack_confirm(true)}
-                                        disabled={is_archiving_slack_channel}
-                                        className="h-11 px-5 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 font-black uppercase tracking-widest text-[10px] disabled:opacity-40 disabled:cursor-not-allowed"
-                                    >
-                                        {is_archiving_slack_channel ? (
-                                            <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Archiving…</>
-                                        ) : (
-                                            <><Archive className="w-4 h-4 mr-2" /> Archive Channel</>
-                                        )}
-                                    </Button>
-                                </>
-                            ) : (
-                                <>
-                                    <Button
-                                        onClick={create_slack_channel}
-                                        disabled={!is_docs_approved || is_creating_slack_channel}
-                                        className="h-11 px-5 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-black uppercase tracking-widest text-[10px] shadow-lg shadow-emerald-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
-                                    >
-                                        {is_creating_slack_channel ? (
-                                            <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Creating…</>
-                                        ) : (
-                                            <><Slack className="w-4 h-4 mr-2" /> Create Slack Channel</>
-                                        )}
-                                    </Button>
-                                    {!is_docs_approved && (
-                                        <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest max-w-[12rem] text-center md:text-right">
-                                            Available once all documents are approved
-                                        </p>
-                                    )}
-                                </>
-                            )
+
+                        {SLACK_FEATURE_ENABLED && !slack_channel.id && !is_docs_approved && (
+                            <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500">
+                                Channel unlocks when every document is approved
+                            </p>
                         )}
                     </div>
                 </CardContent>

@@ -73,7 +73,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { EditProfileModal } from "@/app/advisor/dashboard/clients/[id]/edit-profile-modal";
-import { PIPELINE_STEPS, LoanPipelineBadge } from "@/components/loan-pipeline-status";
 import { getClientPipelineHistory, updateLoanStatus, type LoanStatus, type PipelineStatusEntry } from "@/app/actions/pipeline";
 import { getBulkClientActivity } from "@/app/actions/advisor";
 import { ActivityAgeBadge } from "@/components/advisor/activity-age-badge";
@@ -83,7 +82,7 @@ import DocumentPreviewModal from "@/components/pdf/pdf-viewer";
 import { ClientProfileHeader } from "@/app/advisor/dashboard/clients/[id]/_components/client-profile-header";
 import { BusinessTabStrip, type BusinessTab } from "@/app/advisor/dashboard/clients/[id]/_components/business-tab-strip";
 import { AddBusinessModal } from "@/app/advisor/dashboard/clients/[id]/_components/add-business-modal";
-import { FundingPipelineCard, FundingPipelineAdvanceButton } from "@/app/advisor/dashboard/clients/[id]/_components/funding-pipeline-card";
+import { ClientCommandBar } from "@/components/workspace/client-command-bar";
 import { DocumentUploadStatus } from "@/app/advisor/dashboard/clients/[id]/_components/document-upload-status";
 import { InternalCommunication } from "@/app/advisor/dashboard/clients/[id]/_components/internal-communication";
 import { SubmitUnderwritingCTA } from "@/app/advisor/dashboard/clients/[id]/_components/submit-underwriting-cta";
@@ -2053,71 +2052,54 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
 
         return (
             <div className="space-y-6">
-                {/* Client navigation */}
-                <div className="inline-flex items-center bg-white rounded-2xl border border-slate-100 shadow-sm p-1.5 gap-1">
-                    <button
-                        onClick={() => prev_client_id && router.push(client_detail_path(prev_client_id))}
-                        disabled={!prev_client_id}
-                        title="Previous client"
-                        className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-50 hover:text-slate-900 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                    >
-                        <ChevronLeft className="h-4 w-4" />
-                        Prev
-                    </button>
-                    <div className="w-px h-5 bg-slate-200" />
-                    <button
-                        onClick={() => router.push(clients_list_path)}
-                        className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50 hover:text-slate-900 transition-colors"
-                    >
-                        <ArrowUp className="h-4 w-4" />
-                        {came_from_pipeline ? "Back to Pipeline" : "Back to Clients"}
-                        {current_nav_index >= 0 && navigable_client_ids.length > 0 && (
-                            <span className="text-[10px] font-black tracking-wide bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-md">
-                                {current_nav_index + 1} / {navigable_client_ids.length}
-                            </span>
-                        )}
-                    </button>
-                    <div className="w-px h-5 bg-slate-200" />
-                    <button
-                        onClick={() => next_client_id && router.push(client_detail_path(next_client_id))}
-                        disabled={!next_client_id}
-                        title="Next client"
-                        className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-50 hover:text-slate-900 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                    >
-                        Next
-                        <ChevronRight className="h-4 w-4" />
-                    </button>
-                </div>
-
-                {/* Status row — pipeline + activity at a glance, same signals shown on the listing cards */}
+                {/* One bar: queue nav + pipeline + stage actions + fold
+                    controls. Replaces the three stacked strips (nav, status
+                    chips, full pipeline card) that used to open every file. */}
                 {(() => {
                     const last_upload = documents.length > 0
                         ? documents.reduce((a, b) => new Date(a.upload_date) > new Date(b.upload_date) ? a : b).upload_date
                         : null;
                     const upload_baseline = last_upload ?? client_profile.created_at;
                     const days_since_last_upload = differenceInDays(new Date(), new Date(upload_baseline));
-                    const has_missing_docs = completion_percentage < 100;
-                    const show_upload_alert = days_since_last_upload >= 5 && has_missing_docs;
+                    const show_upload_alert = days_since_last_upload >= 5 && completion_percentage < 100;
                     return (
-                        <div className="flex items-center gap-2 flex-wrap">
-                            <LoanPipelineBadge currentStatus={current_pipeline_status} />
-                            <ActivityAgeBadge
-                                created_at={client_profile.created_at}
-                                last_activity_at={last_activity_at}
-                                reassigned_to_catch_all_at={client_profile.reassigned_to_catch_all_at}
-                            />
-                            {show_upload_alert && (
-                                <span
-                                    className="inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-red-700"
-                                    title={last_upload
-                                        ? `Last upload was ${days_since_last_upload} day${days_since_last_upload === 1 ? "" : "s"} ago`
-                                        : `No client uploads since vault was created ${days_since_last_upload} day${days_since_last_upload === 1 ? "" : "s"} ago`}
-                                >
-                                    <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
-                                    {last_upload ? `No uploads · ${days_since_last_upload}d` : `No uploads yet · ${days_since_last_upload}d`}
-                                </span>
-                            )}
-                        </div>
+                        <ClientCommandBar
+                            back_label={came_from_pipeline ? "Back to Pipeline" : "Back to Clients"}
+                            on_back={() => router.push(clients_list_path)}
+                            on_prev={prev_client_id ? () => router.push(client_detail_path(prev_client_id)) : undefined}
+                            on_next={next_client_id ? () => router.push(client_detail_path(next_client_id)) : undefined}
+                            nav_index={current_nav_index >= 0 ? current_nav_index + 1 : undefined}
+                            nav_total={navigable_client_ids.length}
+                            current_status={current_pipeline_status}
+                            pipeline_history={pipeline_history}
+                            on_status_change={(status) => handle_status_change(status, "Set by advisor")}
+                            // Advisors walk a file only as far as documents
+                            // received (index 3); underwriting takes it from
+                            // there. Same ceiling the old advance button had.
+                            advance_limit_index={3}
+                            on_expand_all={() => broadcast_toggle_all(true)}
+                            on_collapse_all={() => broadcast_toggle_all(false)}
+                            chips={
+                                <>
+                                    <ActivityAgeBadge
+                                        created_at={client_profile.created_at}
+                                        last_activity_at={last_activity_at}
+                                        reassigned_to_catch_all_at={client_profile.reassigned_to_catch_all_at}
+                                    />
+                                    {show_upload_alert && (
+                                        <span
+                                            className="inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-red-700"
+                                            title={last_upload
+                                                ? `Last upload was ${days_since_last_upload} day${days_since_last_upload === 1 ? "" : "s"} ago`
+                                                : `No client uploads since vault was created ${days_since_last_upload} day${days_since_last_upload === 1 ? "" : "s"} ago`}
+                                        >
+                                            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" />
+                                            {last_upload ? `No uploads · ${days_since_last_upload}d` : `No uploads yet · ${days_since_last_upload}d`}
+                                        </span>
+                                    )}
+                                </>
+                            }
+                        />
                     );
                 })()}
 
@@ -2244,26 +2226,6 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
                     );
                 })()}
 
-                {/* Section folding controls — broadcasts an event to every
-                    CollapsibleSection on the page so the user can blow open or
-                    collapse everything in one click. */}
-                <div className="flex items-center justify-end gap-2 -mt-2">
-                    <button
-                        type="button"
-                        onClick={() => broadcast_toggle_all(true)}
-                        className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 hover:text-emerald-600 transition-colors px-3 py-1.5 rounded-lg border border-slate-200 bg-white shadow-sm"
-                    >
-                        Expand all
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => broadcast_toggle_all(false)}
-                        className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 hover:text-emerald-600 transition-colors px-3 py-1.5 rounded-lg border border-slate-200 bg-white shadow-sm"
-                    >
-                        Collapse all
-                    </button>
-                </div>
-
                 {/* ── Client Notes (signup context + file notes) ────── */}
                 <CollapsibleSection
                     clientId={client_profile.id}
@@ -2285,29 +2247,6 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
                         on_new_file_note_change={set_new_file_note}
                         on_add_file_note={handle_add_file_note}
                         on_save_signup_notes={handle_save_signup_notes}
-                    />
-                </CollapsibleSection>
-
-                {/* ── Funding Pipeline ──────────────────────────────── */}
-                <CollapsibleSection
-                    clientId={client_profile.id}
-                    slug="pipeline"
-                    title="Funding Pipeline"
-                    summary={current_pipeline_status
-                        ? current_pipeline_status.replace(/_/g, " ")
-                        : undefined}
-                    accessory={
-                        <FundingPipelineAdvanceButton
-                            current_pipeline_status={current_pipeline_status}
-                            on_status_change={(status) => handle_status_change(status, "Set by advisor")}
-                        />
-                    }
-                    defaultOpen
-                >
-                    <FundingPipelineCard
-                        current_pipeline_status={current_pipeline_status}
-                        pipeline_history={pipeline_history}
-                        on_status_change={(status) => handle_status_change(status, "Set by advisor")}
                     />
                 </CollapsibleSection>
 

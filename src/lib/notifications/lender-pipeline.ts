@@ -42,14 +42,34 @@ const EVENT_COPY: Record<LenderPipelineEvent, { title: (lender: string) => strin
   },
 };
 
-// The note UW typed into the "Lender response" panel, labelled by event. Same
+/**
+ * Copy for a RE-submission: the file going back out to a lender that already
+ * gave a verdict, usually carrying the extra documents or corrections that
+ * lender asked for. Kept out of EVENT_COPY because it is not a pipeline status
+ * of its own — the row lands back on 'submitted' either way.
+ */
+function resubmitSlackCopy(lender: string, company?: string): string {
+  return `🔁 The file${company ? ` for ${company}` : ''} has been *re-submitted* to *${lender}* — awaiting a fresh decision.`;
+}
+
+// The note UW typed into the "Lender response" panel, labelled by verdict. Same
 // wording as note_label() in components/lender/lender-response-panel.tsx so the
 // Slack post and the UI call the same field the same thing.
-const NOTE_LABEL: Record<LenderPipelineEvent, string> = {
-  submitted: 'Lender response note',
+//
+// 'submitted' is deliberately absent. A response note on an outbound submission
+// is ALWAYS stale — nothing has come back from the lender this round yet, and
+// the only way the column is populated at that moment is a re-submission after
+// a previous verdict. Republishing last round's decline reasons under "awaiting
+// the lender's decision" read as though the lender had just said it again.
+const NOTE_LABEL: Record<'approved_by_lender' | 'declined_by_lender', string> = {
   approved_by_lender: 'Offer / stips / requested documents',
   declined_by_lender: 'Decline reasons',
 };
+
+/** The events whose Slack post carries the recorded lender response. */
+function isVerdict(event: LenderPipelineEvent): event is 'approved_by_lender' | 'declined_by_lender' {
+  return event === 'approved_by_lender' || event === 'declined_by_lender';
+}
 
 // The note column caps at 5000 chars; clip well below that so one verbose
 // decline can't bury the channel.
@@ -89,10 +109,22 @@ interface AssignmentRow {
  */
 export async function notifyAdminsOfLenderPipelineEvent(
   assignment: AssignmentRow,
-  event: LenderPipelineEvent
+  event: LenderPipelineEvent,
+  options?: {
+    /**
+     * True when this 'submitted' event is the file going BACK to a lender that
+     * already responded once. Changes the Slack copy and the in-app title so a
+     * reader can tell a second attempt from a first.
+     */
+    resubmission?: boolean;
+    /** What UW changed for this round — the one thing worth reading. */
+    resubmit_note?: string | null;
+  }
 ): Promise<{ notified: number; emailed: number }> {
   const { client_id, lender_name, specialty } = assignment;
   if (!client_id) return { notified: 0, emailed: 0 };
+
+  const is_resubmission = event === 'submitted' && options?.resubmission === true;
 
   let admin_users: { id: string; email: string }[] = [];
   let client_name = 'a client';
@@ -133,7 +165,7 @@ export async function notifyAdminsOfLenderPipelineEvent(
       const rows = admin_users.map((u) => ({
         user_id: u.id,
         client_id,
-        title: copy.title(lender_name),
+        title: is_resubmission ? `Re-submitted to ${lender_name}` : copy.title(lender_name),
         message: `${lender_label} — ${client_name}`,
         is_read: false,
       }));
@@ -157,6 +189,10 @@ export async function notifyAdminsOfLenderPipelineEvent(
 
     if (admin_emails.length > 0) {
       const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://vault.creditbanc.io';
+      // A re-submission reuses the 'submitted' template on purpose: the fact an
+      // admin needs from the email is that the file is out and awaiting a
+      // decision, which is identical either way. Slack is where the second
+      // attempt is distinguished, because that is where the team works it.
       await send_lender_pipeline_notification({
         admin_emails,
         event,
@@ -181,10 +217,21 @@ export async function notifyAdminsOfLenderPipelineEvent(
       // note-recorded follow-up (decline reasons / offer + stips) below --
       // the post someone actually opens the file from.
       const mentions = formatMentions([...getApproverUserIds(), resolveAdvisorSlackId(advisor_email)]);
-      const text =
-        `${mentions ? mentions + ' ' : ''}${copy.slack(lender_label, company_name)}` +
-        `${formatNoteBlock(NOTE_LABEL[event], assignment.response_notes)}`;
-      await slackPostMessage(slack_channel_id, text);
+
+      const headline = is_resubmission
+        ? resubmitSlackCopy(lender_label, company_name)
+        : copy.slack(lender_label, company_name);
+
+      // Only a verdict carries the recorded lender response. A re-submission
+      // carries what UW changed instead — the previous round's response is
+      // history by then, and repeating it here is the bug this replaced.
+      const note_block = is_resubmission
+        ? formatNoteBlock('What changed this round', options?.resubmit_note)
+        : isVerdict(event)
+          ? formatNoteBlock(NOTE_LABEL[event], assignment.response_notes)
+          : '';
+
+      await slackPostMessage(slack_channel_id, `${mentions ? mentions + ' ' : ''}${headline}${note_block}`);
     }
   } catch (err) {
     console.error('notifyAdminsOfLenderPipelineEvent Slack error (non-fatal):', err);

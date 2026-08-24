@@ -13,6 +13,7 @@ import { computeRenewalDates } from "@/lib/renewals";
 import { revalidatePath } from "next/cache";
 import { markLabelAsManual } from "@/lib/group-assignment";
 import { canRecordFunded } from "@/lib/auth/roles";
+import { slackPostMessage, resolveAdvisorSlackId, formatMentions } from "@/lib/slack-api";
 
 /**
  * Centralizes the cache-invalidation surface every mutation in this file
@@ -43,7 +44,9 @@ export async function notifyAdvisor(clientId: string, missingDocs: string[], add
             .select(`
                 user_id,
                 client_name,
+                company_name,
                 advisor_id,
+                slack_channel_id,
                 advisors (
                     first_name,
                     last_name,
@@ -66,6 +69,17 @@ export async function notifyAdvisor(clientId: string, missingDocs: string[], add
         // Normalize the advisor-facing note (may be empty)
         const advisorNote = customNote?.trim() || "";
 
+        // Underwriter's display name. Resolved once here because both the
+        // audit-trail note and the Slack post need it.
+        const { data: uwProfile } = await supabaseAdmin
+            .from("users")
+            .select("first_name, last_name")
+            .eq("id", currentUser.id)
+            .single();
+        const authorName = uwProfile
+            ? `${uwProfile.first_name} ${uwProfile.last_name || ''}`.trim()
+            : "Underwriter";
+
         // 2. Insert In-App Notification for the Advisor
         const docCount = requestedDocs.length;
         const notificationTitle = `Action Required: Documents for ${client.client_name}`;
@@ -81,15 +95,6 @@ export async function notifyAdvisor(clientId: string, missingDocs: string[], add
 
         // 3. Insert a clean internal note for the audit trail
         {
-            // Fetch underwriter profile to get name
-            const { data: profile } = await supabaseAdmin
-                .from("users")
-                .select("first_name, last_name")
-                .eq("id", currentUser.id)
-                .single();
-
-            const authorName = profile ? `${profile.first_name} ${profile.last_name || ''}`.trim() : "Underwriter";
-
             const sections: string[] = [];
             if (missingDocs.length > 0) {
                 sections.push(`Missing required items:\n${missingDocs.map(doc => `• ${doc}`).join("\n")}`);
@@ -136,6 +141,57 @@ export async function notifyAdvisor(clientId: string, missingDocs: string[], add
             custom_message: advisorNote || undefined,
             login_url: `${process.env.NEXT_PUBLIC_APP_URL || 'https://vault.creditbanc.io'}/auth/login`
         });
+
+        // 6. Slack: post the same ask into the deal channel and @-mention the
+        //    assigned advisor.
+        //
+        //    The email and the in-app bell both land somewhere an advisor may
+        //    not be looking for hours. The deal channel is the surface the team
+        //    actually watches, and the @-mention is what turns a document chase
+        //    into something picked up the same day.
+        //
+        //    Non-fatal on every path — no deal channel, an advisor missing from
+        //    SLACK_ADVISOR_USER_IDS, or Slack being down must not fail a
+        //    notification the advisor has already received by email.
+        try {
+            const channelId = (client as any).slack_channel_id as string | null;
+            if (channelId) {
+                const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://vault.creditbanc.io';
+                const advisorName = `${advisor.first_name} ${advisor.last_name || ''}`.trim();
+                const advisorSlackId = resolveAdvisorSlackId(advisor.email);
+                // An unmapped advisor still gets named, just not pinged —
+                // silently addressing nobody is the worse failure.
+                const advisorLabel = advisorSlackId
+                    ? formatMentions([advisorSlackId])
+                    : `*${advisorName}*`;
+
+                // Name the client even though the post lands in that client's
+                // own channel: people read these from the sidebar, out of
+                // context, and a bare document list is a puzzle.
+                const companyName = (client as any).company_name as string | null;
+                const clientLabel = companyName && companyName !== client.client_name
+                    ? `${companyName} (${client.client_name})`
+                    : client.client_name;
+
+                const blocks: string[] = [
+                    `${advisorLabel} — underwriting needs documents on *${clientLabel}*.`,
+                ];
+                if (missingDocs.length > 0) {
+                    blocks.push(`*Missing required items*\n${missingDocs.map(d => `• ${d}`).join("\n")}`);
+                }
+                if (additionalDocs.length > 0) {
+                    blocks.push(`*Additional documents requested*\n${additionalDocs.map(d => `• ${d}`).join("\n")}`);
+                }
+                if (advisorNote) {
+                    blocks.push(`_${advisorNote}_`);
+                }
+                blocks.push(`Requested by ${authorName}\n${baseUrl}/advisor/dashboard/clients/${clientId}`);
+
+                await slackPostMessage(channelId, blocks.join("\n\n"));
+            }
+        } catch (err) {
+            console.error("notifyAdvisor Slack post failed (non-fatal):", err);
+        }
 
         revalidateClientSurfaces(clientId);
         return { success: true };

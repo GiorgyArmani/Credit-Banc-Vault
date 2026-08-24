@@ -150,8 +150,11 @@ export function LoanFundedDialog({
     return (
         <Dialog open={isOpen} onOpenChange={setIsOpen}>
             <DialogTrigger asChild>
-                <Button className={triggerClassName ?? "h-12 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl shadow-xl shadow-emerald-500/10 px-6 font-black uppercase tracking-widest text-xs"}>
-                    <DollarSign className="w-4 h-4 mr-2" />
+                {/* Icon spacing comes from the button's own gap, so a host that
+                    passes triggerClassName gets the same gap as the buttons it
+                    sits beside instead of gap + margin. */}
+                <Button className={triggerClassName ?? "h-12 gap-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl shadow-xl shadow-emerald-500/10 px-6 font-black uppercase tracking-widest text-xs"}>
+                    <DollarSign className="w-4 h-4" />
                     Loan Funded
                 </Button>
             </DialogTrigger>
