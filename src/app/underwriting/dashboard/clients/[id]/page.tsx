@@ -115,7 +115,7 @@ import {
     UNGROUPED_LABEL,
     type DocumentGroup,
 } from "@/lib/document-groups";
-import { zipDocuments } from "@/lib/document-download";
+import { zipDocuments, downloadDocument } from "@/lib/document-download";
 import { DocumentGroupPicker } from "@/components/document-group-picker";
 import { useDocumentGroups } from "@/hooks/use-document-groups";
 
@@ -1173,42 +1173,13 @@ export default function UnderwritingClientDetailsPage() {
         }
     }
 
-    async function download_document(doc: UserDocument) {
-        try {
-            const { data, error } = await supabase.storage
-                .from("user-documents")
-                .download(doc.storage_path);
-            if (error) throw error;
-
-            const url = URL.createObjectURL(data);
-            const a = document.createElement("a");
-            a.href = url;
-            let downloadName = doc.name;
-            if (doc.custom_label) {
-                const extIndex = doc.name.lastIndexOf('.');
-                const extension = extIndex !== -1 ? doc.name.substring(extIndex) : '';
-                if (extension && !doc.custom_label.toLowerCase().endsWith(extension.toLowerCase())) {
-                    downloadName = doc.custom_label + extension;
-                } else {
-                    downloadName = doc.custom_label;
-                }
-            }
-            a.download = downloadName;
-            document.body.appendChild(a); a.click();
-            document.body.removeChild(a); URL.revokeObjectURL(url);
-
-            // Mark as viewed if not already
-            if (!doc.viewed_at) {
-                const res = await markDocumentAsViewed(doc.id);
-                if (res.success) {
-                    set_documents(prev => prev.map(d => 
-                        d.id === doc.id ? { ...d, viewed_at: new Date().toISOString() } : d
-                    ));
-                }
-            }
-        } catch (err) {
-            toast.error(`Error downloading ${doc.name}`);
-        }
+    /**
+     * Save one document. Authorised and named server-side by
+     * GET /api/documents/[id]/file?download=1 — the browser holds no storage
+     * credential of its own.
+     */
+    function download_document(doc: UserDocument) {
+        downloadDocument(doc.id);
     }
 
     /**
@@ -1246,7 +1217,7 @@ export default function UnderwritingClientDetailsPage() {
 
         set_is_zipping({ completed: 0, total: docs.length });
         try {
-            const result = await zipDocuments(supabase, docs, `${client_name} - Review Packet`, {
+            const result = await zipDocuments(docs, `${client_name} - Review Packet`, {
                 folderOf: (d) => {
                     const doc = d as UserDocument;
                     const code = doc.doc_code ?? doc.category ?? "";
@@ -1310,7 +1281,6 @@ export default function UnderwritingClientDetailsPage() {
         set_is_zipping({ completed: 0, total: docs.length });
         try {
             const result = await zipDocuments(
-                supabase,
                 docs,
                 `${client_name} - ${label}`,
                 {
@@ -3950,7 +3920,7 @@ export default function UnderwritingClientDetailsPage() {
                 isOpen={preview_modal.isOpen}
                 onClose={() => set_preview_modal({ isOpen: false, doc: null })}
                 docName={preview_modal.doc?.custom_label || preview_modal.doc?.name || ""}
-                storagePath={preview_modal.doc?.storage_path || ""}
+                documentId={preview_modal.doc?.id || ""}
                 fileType={preview_modal.doc?.type}
                 onRename={preview_modal.doc ? () => set_renaming_file({
                     id: preview_modal.doc!.id,

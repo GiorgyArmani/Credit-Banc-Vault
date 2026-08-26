@@ -134,8 +134,13 @@ export async function POST(request: Request) {
         const pdfBuffer = await blob.arrayBuffer();
         const filePath = `${user.id}/funding_application_${Date.now()}.pdf`;
 
-        // 3. Upload to Supabase Storage
-        const { error: storageError } = await supabase.storage
+        // 3. Upload to Supabase Storage.
+        //    Service role, NOT the request's cookie-scoped client: nothing but
+        //    the service role reaches the user-documents bucket any more, so an
+        //    upload on the user's own session would fail once the bucket's
+        //    storage policies were removed. Table writes below stay on
+        //    `supabase` — table RLS is untouched by that change.
+        const { error: storageError } = await createAdminClient().storage
             .from('user-documents')
             .upload(filePath, pdfBuffer, {
                 contentType: 'application/pdf',

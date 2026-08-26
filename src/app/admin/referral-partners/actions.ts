@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { signedPartnerDocUrl } from "@/lib/partner-onboarding";
 import { revalidatePath } from "next/cache";
 import {
   normalizePartnerSlug,
@@ -317,6 +318,29 @@ export async function updateReferralPartnerProfile(
     return { success: false, error: error.message };
   }
 
+  // A deal-desk partner has a mirrored `advisors` row, and THAT is the row the
+  // client portal reads for the "Your Advisor" contact card. applyDealDesk
+  // copies the contact details across at toggle time only, so without this an
+  // admin correcting a partner's number or address leaves clients dialling the
+  // snapshot taken whenever the desk was switched on. Scoped to this partner's
+  // own mirror row, and best-effort: a referrals-only partner has none, and the
+  // partner record itself is already saved.
+  const mirror: Record<string, unknown> = {};
+  if (patch.phone !== undefined) mirror.phone = patch.phone;
+  // advisors.email is NOT NULL and UNIQUE — clearing the partner's address must
+  // not try to null it out, and a collision would be somebody else's row.
+  if (typeof patch.email === "string" && patch.email) mirror.email = patch.email;
+  if (Object.keys(mirror).length > 0) {
+    mirror.updated_at = new Date().toISOString();
+    const { error: mirrorErr } = await db
+      .from("advisors")
+      .update(mirror)
+      .eq("referral_partner_id", id);
+    if (mirrorErr) {
+      console.error("[referral-partners] advisors contact mirror failed:", mirrorErr);
+    }
+  }
+
   revalidatePath("/admin/referral-partners");
   return { success: true, slug: patch.slug };
 }
@@ -334,11 +358,14 @@ export async function updateReferralPartnerProfile(
  * referral_partner would strip them of their own dashboard, and nothing about
  * this button suggests that's what it does.
  */
-export async function inviteReferralPartnerToPortal(id: string): Promise<ActionResult> {
+export async function inviteReferralPartnerToPortal(
+  id: string,
+  options?: { withDealDesk?: boolean }
+): Promise<ActionResult> {
   const admin = await requireAdminUser();
   if (!admin) return { success: false, error: "Forbidden" };
 
-  const result = await provisionPartnerPortal(id);
+  const result = await provisionPartnerPortal(id, options);
   revalidatePath("/admin/referral-partners");
   return result;
 }
@@ -351,12 +378,16 @@ export async function inviteReferralPartnerToPortal(id: string): Promise<ActionR
  *
  * Assumes the caller has already checked for admin.
  */
-async function provisionPartnerPortal(id: string): Promise<ActionResult> {
+async function provisionPartnerPortal(
+  id: string,
+  options?: { withDealDesk?: boolean }
+): Promise<ActionResult> {
   const db = createAdminClient();
+  const withDealDesk = options?.withDealDesk === true;
 
   const { data: partner, error: readErr } = await db
     .from("referral_partners")
-    .select("id, name, slug, email, user_id, portal_enabled")
+    .select("id, name, slug, email, phone, user_id, portal_enabled")
     .eq("id", id)
     .maybeSingle();
 
@@ -420,7 +451,10 @@ async function provisionPartnerPortal(id: string): Promise<ActionResult> {
       .select("role")
       .eq("id", userId)
       .maybeSingle();
-    const role = currentRole?.role === "partner_advisor" ? "partner_advisor" : "referral_partner";
+    const role =
+      withDealDesk || currentRole?.role === "partner_advisor"
+        ? "partner_advisor"
+        : "referral_partner";
 
     const { error: roleErr } = await db.from("users").upsert(
       {
@@ -444,6 +478,23 @@ async function provisionPartnerPortal(id: string): Promise<ActionResult> {
       })
       .eq("id", id);
     if (linkErr) return { success: false, error: linkErr.message };
+
+    // Inviting someone straight in as a DEAL DESK partner. We usually know from
+    // the first conversation which kind of partner this is — a CPA who will only
+    // ever share a link, or someone who intends to submit files — and making the
+    // admin invite first and toggle second meant the partner got a welcome email
+    // for a portal that did not yet have their desk in it.
+    //
+    // Runs before the email deliberately: the invite link lands them on the
+    // onboarding screen, and that screen only shows the W-9 and voided-check
+    // steps once deal_desk_enabled is true.
+    if (withDealDesk) {
+      const deskResult = await applyDealDesk(
+        { id, name: partner.name, email, phone: partner.phone ?? null, user_id: userId },
+        true
+      );
+      if (!deskResult.success) return deskResult;
+    }
 
     // Email the entry link. Best-effort: access is already provisioned, and the
     // admin can re-send — failing the whole invite over SMTP would leave the
@@ -546,7 +597,6 @@ export async function setPartnerDealDesk(
   if (!admin) return { success: false, error: "Forbidden" };
 
   const db = createAdminClient();
-  const now = new Date().toISOString();
 
   const { data: partner, error: readErr } = await db
     .from("referral_partners")
@@ -562,6 +612,35 @@ export async function setPartnerDealDesk(
       error: "Invite this partner to the portal first — the deal desk lives inside it.",
     };
   }
+
+  const result = await applyDealDesk(partner, enabled);
+  if (result.success) revalidatePath("/admin/referral-partners");
+  return result;
+}
+
+/**
+ * The role flip + advisors row, shared by the admin toggle and by an invite
+ * that provisions the deal desk up front.
+ *
+ * Extracted rather than duplicated: this is the code that decides whether
+ * somebody outside the company can open client files, and a second copy of it
+ * would drift out of review the first time either path changed.
+ *
+ * Assumes the caller has checked for admin AND that partner.user_id is set —
+ * both callers do, and a deal desk without a login is meaningless.
+ */
+async function applyDealDesk(
+  partner: {
+    id: string;
+    name: string | null;
+    email: string | null;
+    phone: string | null;
+    user_id: string | null;
+  },
+  enabled: boolean
+): Promise<ActionResult> {
+  const db = createAdminClient();
+  const now = new Date().toISOString();
 
   try {
     if (enabled) {
@@ -640,13 +719,12 @@ export async function setPartnerDealDesk(
     const { error: flagErr } = await db
       .from("referral_partners")
       .update({ deal_desk_enabled: enabled, updated_at: now })
-      .eq("id", id);
+      .eq("id", partner.id);
     if (flagErr) return { success: false, error: flagErr.message };
 
-    revalidatePath("/admin/referral-partners");
-    return { success: true, name: partner.name };
+    return { success: true, name: partner.name ?? undefined };
   } catch (err: any) {
-    console.error("[referral-partners] setPartnerDealDesk threw:", err);
+    console.error("[referral-partners] applyDealDesk threw:", err);
     return { success: false, error: err?.message || "Could not update the deal desk" };
   }
 }
@@ -806,7 +884,8 @@ export type BulkInviteResult = {
  * simultaneous sends is exactly the shape that trips rate limits.
  */
 export async function inviteReferralPartnersBulk(
-  ids: string[]
+  ids: string[],
+  options?: { withDealDesk?: boolean }
 ): Promise<BulkInviteResult> {
   const admin = await requireAdminUser();
   if (!admin) return { success: false, error: "Forbidden", sent: [], failed: [] };
@@ -832,7 +911,7 @@ export async function inviteReferralPartnersBulk(
 
   for (const id of ids) {
     const label = nameById.get(id) || id;
-    const res = await provisionPartnerPortal(id);
+    const res = await provisionPartnerPortal(id, options);
     if (res.success) {
       sent.push(label);
     } else {
@@ -984,4 +1063,38 @@ export async function deleteReferralPartner(id: string): Promise<ActionResult> {
 
   revalidatePath("/admin/referral-partners");
   return { success: true, name: partner.name };
+}
+
+/**
+ * Short-lived links to a deal-desk partner's compliance documents (admin only).
+ *
+ * Minted on demand rather than rendered into the page: both files live in the
+ * PRIVATE `vault` bucket, and a signed URL baked into server-rendered HTML is a
+ * credential sitting in a page that gets cached, screenshotted and shared. Ten
+ * minutes, fetched at click time.
+ */
+export async function getPartnerComplianceLinks(id: string): Promise<{
+  success: boolean;
+  error?: string;
+  w9_url?: string | null;
+  voided_check_url?: string | null;
+}> {
+  const admin = await requireAdminUser();
+  if (!admin) return { success: false, error: "Forbidden" };
+
+  const db = createAdminClient();
+  const { data, error } = await db
+    .from("referral_partners")
+    .select("w9_file_path, voided_check_path")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error || !data) return { success: false, error: "Partner not found" };
+
+  const [w9_url, voided_check_url] = await Promise.all([
+    signedPartnerDocUrl(data.w9_file_path),
+    signedPartnerDocUrl(data.voided_check_path),
+  ]);
+
+  return { success: true, w9_url, voided_check_url };
 }

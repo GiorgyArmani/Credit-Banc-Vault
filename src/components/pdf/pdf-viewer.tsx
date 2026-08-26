@@ -1,6 +1,5 @@
 'use client'
 
-import { useState, useEffect } from 'react'
 import {
     Dialog,
     DialogContent,
@@ -8,15 +7,20 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog"
 import { Button } from '@/components/ui/button'
-import { Download, FileText, Loader2, X, ExternalLink, Pencil } from 'lucide-react'
-import { createClient } from '@/lib/supabase/client'
+import { Download, FileText, X, ExternalLink, Pencil } from 'lucide-react'
+import { documentFileUrl, downloadDocument } from '@/lib/document-download'
 import { OfficeFileViewer, detectOfficeKind } from '@/components/office-file-viewer'
 
 interface DocumentPreviewModalProps {
     isOpen: boolean
     onClose: () => void
     docName: string
-    storagePath: string
+    /**
+     * The `user_documents` row id. The browser no longer resolves a storage
+     * path — GET /api/documents/[id]/file authorises the read server-side and
+     * redirects to a short-lived signed URL.
+     */
+    documentId: string
     fileType?: string
     /** When provided, renders a "Rename" button in the header that calls this. */
     onRename?: () => void
@@ -26,41 +30,15 @@ export default function DocumentPreviewModal({
     isOpen,
     onClose,
     docName,
-    storagePath,
+    documentId,
     fileType,
     onRename,
 }: DocumentPreviewModalProps) {
-    const [signedUrl, setSignedUrl] = useState<string | null>(null)
-    const [isLoading, setIsLoading] = useState(false)
-    const supabase = createClient()
-
-    useEffect(() => {
-        if (isOpen && storagePath) {
-            fetchSignedUrl()
-        } else if (!isOpen) {
-            // Reset URL when closing to ensure fresh one next time
-            setSignedUrl(null)
-        }
-    }, [isOpen, storagePath])
-
-    async function fetchSignedUrl() {
-        setIsLoading(true)
-        try {
-            // Sanitize: Supabase storage paths should not start with a leading slash
-            const sanitizedPath = storagePath.replace(/^\//, '')
-            
-            const { data, error } = await supabase.storage
-                .from('user-documents')
-                .createSignedUrl(sanitizedPath, 3600) // 1 hour
-
-            if (error) throw error
-            setSignedUrl(data.signedUrl)
-        } catch (err) {
-            console.error('Error fetching signed URL:', err)
-        } finally {
-            setIsLoading(false)
-        }
-    }
+    // There is nothing to mint client-side any more: the preview URL is a
+    // stable app route that authorises the caller and 302s to a short-lived
+    // signed URL. Keeping a fetch-then-setState here would only add a spinner
+    // in front of a string we already know.
+    const previewUrl = isOpen && documentId ? documentFileUrl(documentId) : null
 
     const isImage = fileType?.startsWith('image/') || 
                    docName.toLowerCase().endsWith('.png') || 
@@ -89,7 +67,7 @@ export default function DocumentPreviewModal({
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
-                        {signedUrl && (
+                        {previewUrl && (
                             <div className="flex items-center gap-2">
                                 {onRename && (
                                     <Button
@@ -106,27 +84,7 @@ export default function DocumentPreviewModal({
                                     size="sm"
                                     variant="outline"
                                     className="bg-emerald-600 border-emerald-500 text-white hover:bg-emerald-700 h-9 px-4 rounded-xl font-bold text-[10px] uppercase tracking-widest hidden sm:flex"
-                                    onClick={async () => {
-                                        try {
-                                            const sanitizedPath = storagePath.replace(/^\//, '')
-                                            const { data, error } = await supabase.storage
-                                                .from('user-documents')
-                                                .download(sanitizedPath)
-                                            
-                                            if (error) throw error
-                                            
-                                            const url = window.URL.createObjectURL(data)
-                                            const link = document.createElement('a')
-                                            link.href = url
-                                            link.setAttribute('download', docName)
-                                            document.body.appendChild(link)
-                                            link.click()
-                                            link.remove()
-                                            window.URL.revokeObjectURL(url)
-                                        } catch (err) {
-                                            console.error('Download failed:', err)
-                                        }
-                                    }}
+                                    onClick={() => downloadDocument(documentId)}
                                 >
                                     <Download className="h-3.5 w-3.5 mr-2" />
                                     Download
@@ -137,7 +95,7 @@ export default function DocumentPreviewModal({
                                     className="bg-white/5 border-white/10 text-white hover:bg-white/10 h-9 px-4 rounded-xl font-bold text-[10px] uppercase tracking-widest"
                                     asChild
                                 >
-                                    <a href={signedUrl} target="_blank" rel="noopener noreferrer">
+                                    <a href={previewUrl} target="_blank" rel="noopener noreferrer">
                                         <ExternalLink className="h-3.5 w-3.5 mr-2" />
                                         Open Original
                                     </a>
@@ -156,16 +114,11 @@ export default function DocumentPreviewModal({
                 </DialogHeader>
 
                 <div className="flex-1 bg-slate-900/50 relative flex items-center justify-center overflow-hidden">
-                    {isLoading ? (
-                        <div className="flex flex-col items-center gap-3">
-                            <Loader2 className="h-10 w-10 text-emerald-500 animate-spin" />
-                            <p className="text-slate-400 font-black text-[10px] uppercase tracking-widest">Generating secure preview...</p>
-                        </div>
-                    ) : signedUrl ? (
+                    {previewUrl ? (
                         isImage ? (
                             <div className="w-full h-full p-4 flex items-center justify-center overflow-auto">
                                 <img
-                                    src={signedUrl}
+                                    src={previewUrl}
                                     alt={docName}
                                     className="max-w-full max-h-full object-contain shadow-2xl rounded-lg"
                                 />
@@ -173,13 +126,13 @@ export default function DocumentPreviewModal({
                         ) : officeKind ? (
                             <OfficeFileViewer
                                 kind={officeKind}
-                                url={signedUrl}
+                                url={previewUrl}
                                 name={docName}
-                                downloadUrl={signedUrl}
+                                downloadUrl={documentFileUrl(documentId, { download: true })}
                             />
                         ) : (
                             <iframe
-                                src={`${signedUrl}#toolbar=0`}
+                                src={`${previewUrl}#toolbar=0`}
                                 className="w-full h-full border-none"
                                 title={docName}
                             />

@@ -229,3 +229,119 @@ export function LoanPipelineBadge({ currentStatus, className }: LoanPipelineBadg
     </div>
   );
 }
+
+// ─── Vertical rail (client portal sidebar) ────────────────────────────────────
+//
+// The horizontal LoanPipelineFull needs the full width of a page to breathe —
+// eight labels across a 320px rail collapse into unreadable stubs. This is the
+// same data as a vertical list, where a narrow column is the natural shape and
+// each step gets a full line for its label and date.
+//
+// Read-only by construction: there is no onStatusChange. Clients have no
+// pipeline write access, and the rail is the one place a client sees this.
+
+interface LoanPipelineRailProps {
+  currentStatus: LoanStatus;
+  history: PipelineStatusEntry[];
+  className?: string;
+}
+
+export function LoanPipelineRail({ currentStatus, history, className }: LoanPipelineRailProps) {
+  // Same filtering as the client-facing horizontal bar: created/onboarding are
+  // behind them by the time they can log in, and consulting only exists for the
+  // clients actually in it.
+  const inConsulting =
+    currentStatus === "consulting_program" ||
+    history.some((h) => h.status === "consulting_program");
+
+  const steps = PIPELINE_STEPS.filter(
+    (s) =>
+      s.status !== "created" &&
+      s.status !== "onboarding" &&
+      (s.status !== "consulting_program" || inConsulting)
+  );
+
+  const isDeclined = currentStatus === DECLINED_STATUS;
+  const currentIndex = isDeclined ? -1 : steps.findIndex((s) => s.status === currentStatus);
+
+  const historyMap = new Map<LoanStatus, PipelineStatusEntry>();
+  for (const entry of [...history].sort(
+    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+  )) {
+    historyMap.set(entry.status as LoanStatus, entry);
+  }
+
+  if (isDeclined) {
+    return (
+      <div className={cn("rounded-2xl border border-red-200 bg-red-50 p-4", className)}>
+        <p className="text-sm font-bold text-red-700">Application declined</p>
+        {historyMap.get(DECLINED_STATUS) && (
+          <p className="mt-1 text-xs text-red-500">
+            {formatDate(historyMap.get(DECLINED_STATUS)!.created_at)}
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <ol className={cn("relative space-y-0", className)}>
+      {steps.map((step, i) => {
+        const done = currentIndex >= 0 && i < currentIndex;
+        const active = i === currentIndex;
+        const entry = historyMap.get(step.status);
+        const isLast = i === steps.length - 1;
+
+        return (
+          <li key={step.status} className="relative flex gap-3 pb-4 last:pb-0">
+            {/* Connector, drawn behind the dot and stopped on the last row so
+                the line never dangles past the final step. */}
+            {!isLast && (
+              <span
+                aria-hidden
+                className={cn(
+                  "absolute left-[7px] top-4 w-px",
+                  "h-[calc(100%-0.5rem)]",
+                  done ? "bg-cb-mint" : "bg-black/10"
+                )}
+              />
+            )}
+
+            <span
+              className={cn(
+                "relative mt-1 h-[15px] w-[15px] shrink-0 rounded-full border-2 transition-colors",
+                done
+                  ? "border-cb-mint bg-cb-mint"
+                  : active
+                    ? "border-cb-mint bg-white ring-4 ring-cb-mint/20"
+                    : "border-black/15 bg-white"
+              )}
+            >
+              {done && <CheckCircle2 className="h-full w-full text-white" strokeWidth={3} />}
+            </span>
+
+            <div className="min-w-0 flex-1 -mt-0.5">
+              <p
+                className={cn(
+                  "text-sm leading-tight",
+                  active
+                    ? "font-bold text-cb-ink"
+                    : done
+                      ? "font-medium text-cb-ink/70"
+                      : "font-medium text-cb-ink/35"
+                )}
+              >
+                {step.label}
+              </p>
+              {entry && (
+                <p className="mt-0.5 text-[11px] text-cb-ink/40">
+                  {formatDate(entry.created_at)}
+                </p>
+              )}
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}

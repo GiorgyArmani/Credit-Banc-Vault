@@ -30,9 +30,29 @@ type AdvisorInfo = {
 };
 
 /**
+ * How the card is being placed.
+ *
+ * "full" is the original full-bleed card — a 256px portrait, stacked contact
+ * rows, two full-width buttons. It needs most of a page to itself.
+ *
+ * "rail" is the client portal's sidebar version: same data, sized for a ~320px
+ * column so it can sit permanently beside the work instead of costing a full
+ * screen of scroll above it. One component either way, because the fetch and
+ * the four load states are the fiddly part and duplicating them into a second
+ * file would mean two places to fix the next time the advisor lookup changes.
+ */
+type AdvisorVariant = "full" | "rail";
+
+/**
  * AdvisorDisplay Component
  */
-export default function AdvisorDisplay({ onLoad }: { onLoad?: () => void }): React.ReactElement {
+export default function AdvisorDisplay({
+  onLoad,
+  variant = "full",
+}: {
+  onLoad?: () => void;
+  variant?: AdvisorVariant;
+}): React.ReactElement {
   const supabase = createClient();
   const [component_state, set_component_state] = useState<ComponentState>(
     ComponentState.LOADING
@@ -281,6 +301,110 @@ export default function AdvisorDisplay({ onLoad }: { onLoad?: () => void }): Rea
       </Card>
     );
   };
+
+  // ── Rail variant ──────────────────────────────────────────────────────────
+  //
+  // The tour anchor lives on the shell rather than the success state so
+  // #tour-advisor resolves even while the advisor is still loading — the tour
+  // auto-runs on first visit and would otherwise skip a step on a slow fetch.
+  const render_rail_shell = (children: React.ReactNode): React.ReactElement => (
+    <section
+      id="tour-advisor"
+      className="rounded-2xl border border-black/5 bg-white p-5 shadow-sm"
+    >
+      <p className="mb-4 text-[10px] font-bold uppercase tracking-[0.18em] text-cb-gray">
+        Your advisor
+      </p>
+      {children}
+    </section>
+  );
+
+  const render_rail = (): React.ReactElement => {
+    if (component_state === ComponentState.LOADING) {
+      return render_rail_shell(
+        <div className="flex animate-pulse items-center gap-3">
+          <div className="h-12 w-12 rounded-full bg-black/5" />
+          <div className="flex-1 space-y-2">
+            <div className="h-3 w-24 rounded bg-black/5" />
+            <div className="h-2.5 w-32 rounded bg-black/5" />
+          </div>
+        </div>
+      );
+    }
+
+    if (component_state !== ComponentState.SUCCESS || !advisor) {
+      return render_rail_shell(
+        <div className="flex items-start gap-3 rounded-xl bg-amber-50 p-3">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+          <p className="text-xs leading-relaxed text-amber-800">{error_message}</p>
+        </div>
+      );
+    }
+
+    return render_rail_shell(
+      <div className="space-y-4">
+        <div className="flex items-center gap-3">
+          <Avatar className="h-12 w-12 border border-black/5">
+            <AvatarImage
+              src={advisor.profile_pic_url || undefined}
+              alt={`${advisor.first_name} ${advisor.last_name}`}
+            />
+            <AvatarFallback className="bg-cb-mint/15 text-sm font-bold text-cb-ink">
+              {get_initials(advisor.first_name, advisor.last_name)}
+            </AvatarFallback>
+          </Avatar>
+          <div className="min-w-0">
+            <p className="font-manrope text-base font-extrabold leading-tight tracking-tight text-cb-ink">
+              {advisor.first_name} {advisor.last_name}
+            </p>
+            <p className="text-[11px] font-semibold text-cb-ink/45">
+              Business Funding Advisor
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-1.5 border-t border-black/5 pt-4">
+          <a
+            href={`mailto:${advisor.email}`}
+            className="flex items-center gap-2.5 text-[13px] text-cb-ink/70 transition-colors hover:text-cb-ink"
+          >
+            <Mail className="h-3.5 w-3.5 shrink-0 text-cb-mint" />
+            <span className="truncate">{advisor.email}</span>
+          </a>
+          {advisor.phone && (
+            <a
+              href={`tel:${advisor.phone}`}
+              className="flex items-center gap-2.5 text-[13px] text-cb-ink/70 transition-colors hover:text-cb-ink"
+            >
+              <Phone className="h-3.5 w-3.5 shrink-0 text-cb-mint" />
+              <span>{advisor.phone}</span>
+            </a>
+          )}
+        </div>
+
+        <div className="flex gap-2">
+          <a
+            href={`mailto:${advisor.email}`}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-cb-ink px-3 py-2.5 text-xs font-semibold text-cb-mint transition-colors hover:bg-cb-ink/90"
+          >
+            <Mail className="h-3.5 w-3.5" />
+            Email
+          </a>
+          {advisor.phone && (
+            <a
+              href={`tel:${advisor.phone}`}
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-black/10 px-3 py-2.5 text-xs font-semibold text-cb-ink transition-colors hover:bg-cb-cream"
+            >
+              <Phone className="h-3.5 w-3.5" />
+              Call
+            </a>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  if (variant === "rail") return render_rail();
 
   switch (component_state) {
     case ComponentState.LOADING: return render_loading_state();

@@ -17,6 +17,7 @@ import {
   ChevronRight,
   Trash2,
   Briefcase,
+  FileCheck2,
 } from "lucide-react";
 import { BulkOnboarding } from "./bulk-onboarding";
 import {
@@ -24,6 +25,7 @@ import {
   renameReferralPartner,
   setReferralPartnerActive,
   updateReferralPartnerProfile,
+  getPartnerComplianceLinks,
   inviteReferralPartnerToPortal,
   revokeReferralPartnerPortal,
   setPartnerDealDesk,
@@ -45,6 +47,13 @@ export interface PartnerRow {
   /** This partner works their own deals through the advisor tooling in the
    *  partner portal (role partner_advisor + an advisors row). */
   deal_desk_enabled: boolean;
+  /** Deal-desk compliance. All null for a referrals-only partner, who has no
+   *  paperwork: a partner_advisor signs a W-9 and uploads a voided check before
+   *  their desk unlocks. `onboarding_completed_at` is the gate itself. */
+  w9_signed_at: string | null;
+  voided_check_uploaded_at: string | null;
+  voided_check_filename: string | null;
+  onboarding_completed_at: string | null;
   has_login: boolean;
   invited_at: string | null;
   /** NULL while they've been invited but haven't chosen a password yet. */
@@ -155,8 +164,14 @@ export function ReferralPartnersManager({
    * name + email, mint the slug, provision the login and send the set-password
    * link. Without it, onboarding one partner is add → find the row → expand →
    * type email → save → invite.
+   *
+   * `withDealDesk` decides WHICH KIND of partner is being invited, at the moment
+   * of invite. We almost always know from the first conversation — a CPA who
+   * will only ever pass a link, or someone who intends to submit files — and
+   * invite-then-toggle meant the second kind got a welcome email for a portal
+   * that did not yet have their desk in it, and no compliance steps to do.
    */
-  function handleAdd(andInvite = false) {
+  function handleAdd(andInvite = false, withDealDesk = false) {
     const name = newName.replace(/\s+/g, " ").trim();
     const email = newEmail.trim().toLowerCase();
     if (!name) return;
@@ -181,10 +196,14 @@ export function ReferralPartnersManager({
       // rather than flickering from "no portal" to "invited".
       let invited = false;
       if (andInvite && id) {
-        const inv = await inviteReferralPartnerToPortal(id);
+        const inv = await inviteReferralPartnerToPortal(id, { withDealDesk });
         if (inv.success) {
           invited = true;
-          setNotice(`${stored} created and invited — sign-in link sent to ${email}.`);
+          setNotice(
+            withDealDesk
+              ? `${stored} created and invited as a deal desk partner — they'll sign a W-9 and add a voided check before the desk opens.`
+              : `${stored} created and invited — sign-in link sent to ${email}.`
+          );
         } else {
           setError(
             `${stored} was created, but the invite failed: ${inv.error ?? "unknown error"}`
@@ -233,9 +252,14 @@ export function ReferralPartnersManager({
             commission_type: null,
             commission_value: null,
             portal_enabled: invited,
-            // A brand-new partner is referrals-only. The deal desk is a separate,
-            // deliberate decision an admin makes on the expanded row.
-            deal_desk_enabled: false,
+            // Referrals-only unless this was an explicit "invite as deal desk"
+            // — which is still a deliberate decision, just made a step earlier.
+            deal_desk_enabled: invited && withDealDesk,
+            // A partner invited to the desk owes the paperwork from minute one.
+            w9_signed_at: null,
+            voided_check_uploaded_at: null,
+            voided_check_filename: null,
+            onboarding_completed_at: null,
             has_login: invited,
             invited_at: invited ? now : null,
             password_set_at: null,
@@ -286,11 +310,11 @@ export function ReferralPartnersManager({
     });
   }
 
-  function handleInvite(r: PartnerRow) {
+  function handleInvite(r: PartnerRow, withDealDesk = false) {
     setError(null);
     setNotice(null);
     startTransition(async () => {
-      const res = await inviteReferralPartnerToPortal(r.id);
+      const res = await inviteReferralPartnerToPortal(r.id, { withDealDesk });
       if (!res.success) {
         setError(res.error || "Could not invite");
         return;
@@ -299,8 +323,13 @@ export function ReferralPartnersManager({
         portal_enabled: true,
         has_login: true,
         invited_at: new Date().toISOString(),
+        deal_desk_enabled: withDealDesk || r.deal_desk_enabled,
       });
-      setNotice(`Invite sent to ${r.email}.`);
+      setNotice(
+        withDealDesk
+          ? `${r.name} invited as a deal desk partner — they'll sign a W-9 and add a voided check before the desk opens.`
+          : `Invite sent to ${r.email}.`
+      );
     });
   }
 
@@ -439,6 +468,29 @@ export function ReferralPartnersManager({
               <Mail className="h-4 w-4" />
             )}
             Add &amp; invite
+          </button>
+
+          {/* The same thing, for the partner we already know will submit deals.
+              Separate button rather than a checkbox: it is a different KIND of
+              partner, it grants client access, and it should read as its own
+              decision rather than a modifier on the safe one. */}
+          <button
+            type="button"
+            onClick={() => handleAdd(true, true)}
+            disabled={isPending || !newName.trim() || !newEmail.trim()}
+            title={
+              newEmail.trim()
+                ? "Create, invite, and open the deal desk — they sign a W-9 and add a voided check before it unlocks"
+                : "Add an email to invite"
+            }
+            className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold rounded-xl transition-colors disabled:opacity-50"
+          >
+            {isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Briefcase className="h-4 w-4" />
+            )}
+            Add &amp; invite as deal desk
           </button>
 
           <span className="text-[11px] text-slate-400">
@@ -684,6 +736,7 @@ export function ReferralPartnersManager({
                   onError={setError}
                   onNotice={setNotice}
                   onInvite={() => handleInvite(r)}
+                  onInviteWithDealDesk={() => handleInvite(r, true)}
                   onRevoke={() => handleRevoke(r.id)}
                   onDealDesk={(enabled) => handleDealDesk(r, enabled)}
                   startTransition={startTransition}
@@ -719,6 +772,7 @@ function PartnerDetail({
   onError,
   onNotice,
   onInvite,
+  onInviteWithDealDesk,
   onRevoke,
   onDealDesk,
   startTransition,
@@ -730,6 +784,7 @@ function PartnerDetail({
   onError: (msg: string | null) => void;
   onNotice: (msg: string | null) => void;
   onInvite: () => void;
+  onInviteWithDealDesk: () => void;
   onRevoke: () => void;
   onDealDesk: (enabled: boolean) => void;
   startTransition: (cb: () => void) => void;
@@ -891,15 +946,32 @@ function PartnerDetail({
             </button>
           </>
         ) : (
-          <button
-            onClick={onInvite}
-            disabled={isPending || !row.email}
-            className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg disabled:opacity-50"
-            title={row.email ? "Create the login and email a sign-in link" : "Add an email first"}
-          >
-            <Mail className="h-4 w-4" />
-            Invite to portal
-          </button>
+          <>
+            <button
+              onClick={onInvite}
+              disabled={isPending || !row.email}
+              className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg disabled:opacity-50"
+              title={row.email ? "Create the login and email a sign-in link" : "Add an email first"}
+            >
+              <Mail className="h-4 w-4" />
+              Invite to portal
+            </button>
+            {/* Skips the invite → toggle two-step for a partner we already know
+                will be submitting files. Same provisioning, one click earlier. */}
+            <button
+              onClick={onInviteWithDealDesk}
+              disabled={isPending || !row.email}
+              className="inline-flex items-center gap-1.5 px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold rounded-lg disabled:opacity-50"
+              title={
+                row.email
+                  ? "Invite and open the deal desk — they sign a W-9 and add a voided check before it unlocks"
+                  : "Add an email first"
+              }
+            >
+              <Briefcase className="h-4 w-4" />
+              Invite as deal desk
+            </button>
+          </>
         )}
 
         {!row.slug && (
@@ -963,6 +1035,12 @@ function PartnerDetail({
             {row.deal_desk_enabled ? "Turn off deal desk" : "Enable deal desk"}
           </button>
         </div>
+
+        {/* Compliance. Only meaningful once the desk is on — a referrals-only
+            partner has no paperwork to do. */}
+        {row.deal_desk_enabled && (
+          <PartnerCompliance row={row} />
+        )}
       </div>
 
       {row.invited_at && (
@@ -1076,5 +1154,119 @@ function Pager({
         <ChevronRight className="h-4 w-4" />
       </button>
     </nav>
+  );
+}
+
+/**
+ * Deal-desk compliance at a glance: W-9 signed, voided check on file, and
+ * whether the gate is open.
+ *
+ * The links are fetched on click, never rendered into the page. Both documents
+ * live in the private `vault` bucket and are reached by a 10-minute signed URL;
+ * baking one into server HTML would put a working credential into something
+ * that gets cached and screenshotted.
+ */
+function PartnerCompliance({ row }: { row: PartnerRow }) {
+  const [links, setLinks] = useState<{
+    w9_url?: string | null;
+    voided_check_url?: string | null;
+  } | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const w9Done = !!row.w9_signed_at;
+  const checkDone = !!row.voided_check_uploaded_at;
+  // Grandfathered partners (migration 20260825) are complete with neither
+  // document — they had the desk before the gate existed, and saying "complete"
+  // where there is nothing to open is what tells an admin to go chase it.
+  const grandfathered = !!row.onboarding_completed_at && !w9Done && !checkDone;
+
+  async function fetchLinks() {
+    setLoading(true);
+    try {
+      const res = await getPartnerComplianceLinks(row.id);
+      if (res.success) setLinks({ w9_url: res.w9_url, voided_check_url: res.voided_check_url });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="mt-4 border-t border-slate-200 pt-4">
+      <div className="flex items-center gap-2">
+        <FileCheck2 className="h-4 w-4 text-slate-400" />
+        <span className="text-xs font-bold uppercase tracking-wide text-slate-500">
+          Compliance
+        </span>
+        {row.onboarding_completed_at ? (
+          <span className="rounded-md bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-800">
+            {grandfathered ? "Grandfathered" : "Complete"}
+          </span>
+        ) : (
+          <span className="rounded-md bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800">
+            Desk locked
+          </span>
+        )}
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs text-slate-600">
+        <span className={w9Done ? "font-semibold text-slate-800" : "text-slate-400"}>
+          {w9Done
+            ? `W-9 signed ${new Date(row.w9_signed_at as string).toLocaleDateString()}`
+            : "W-9 not signed"}
+        </span>
+        <span className={checkDone ? "font-semibold text-slate-800" : "text-slate-400"}>
+          {checkDone
+            ? `Voided check ${new Date(row.voided_check_uploaded_at as string).toLocaleDateString()}`
+            : "No voided check"}
+        </span>
+      </div>
+
+      {(w9Done || checkDone) &&
+        (links ? (
+          <div className="mt-2 flex flex-wrap gap-4 text-xs font-bold">
+            {links.w9_url ? (
+              <a
+                href={links.w9_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-violet-700 underline underline-offset-4 hover:text-violet-900"
+              >
+                Open W-9
+              </a>
+            ) : (
+              w9Done && <span className="text-slate-400">W-9 file missing</span>
+            )}
+            {links.voided_check_url ? (
+              <a
+                href={links.voided_check_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-violet-700 underline underline-offset-4 hover:text-violet-900"
+              >
+                Open voided check
+              </a>
+            ) : (
+              checkDone && <span className="text-slate-400">Check file missing</span>
+            )}
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={fetchLinks}
+            disabled={loading}
+            className="mt-2 inline-flex items-center gap-1.5 text-xs font-bold text-violet-700 underline underline-offset-4 hover:text-violet-900 disabled:opacity-50"
+          >
+            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+            View documents
+          </button>
+        ))}
+
+      {grandfathered && (
+        <p className="mt-2 text-[11px] text-amber-600">
+          Had the desk before the paperwork gate existed — chase the W-9 and voided
+          check by hand.
+        </p>
+      )}
+    </div>
   );
 }

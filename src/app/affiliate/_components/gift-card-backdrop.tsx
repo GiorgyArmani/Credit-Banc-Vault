@@ -83,7 +83,12 @@ function CardStrip({
               <div
                 key={`${copy}-${card.src}`}
                 // 640x400 art, so the frame is a fixed 8:5 box the image fills.
-                className="relative aspect-[8/5] w-[172px] shrink-0 overflow-hidden rounded-xl bg-white opacity-90 shadow-[0_22px_44px_-26px_rgba(32,37,54,0.85)] ring-1 ring-on-secondary-fixed/10 xl:w-[196px]"
+                // No drop shadow on purpose. A downward shadow on every card
+                // merged into one continuous band across the strip, and the
+                // track's own `overflow-hidden` sliced that band off flat —
+                // a hard dark line running the width of each row. The hairline
+                // ring gives the card its edge without anything to clip.
+                className="relative aspect-[8/5] w-[172px] shrink-0 overflow-hidden rounded-xl bg-white opacity-90 ring-1 ring-on-secondary-fixed/10 xl:w-[196px]"
                 style={{ transform: `rotate(${TILTS[i % TILTS.length]})` }}
               >
                 <Image

@@ -1,6 +1,6 @@
 "use server";
 
-// Profile photo for advisors and admins.
+// Profile photo for advisors, admins and partner advisors.
 //
 // Why this matters beyond vanity: the client dashboard's "Your Advisor" card
 // (src/components/advisor-display.tsx) renders advisors.profile_pic_url. When an
@@ -9,16 +9,23 @@
 // that says a person is on the other end. Until now the ONLY chance to set it
 // was during signup, and it was optional, so it was skipped.
 //
-// Advisors and admins are handled by the same code path because they're the
-// same thing here: both are rows in `advisors`, both can own clients, and both
-// show up on that card. See require-admin.ts, which 403s an admin with no
-// advisors row.
+// Advisors, admins and partner_advisors are handled by the same code path
+// because they're the same thing here: all three are rows in `advisors`, all
+// three can own clients, and all three show up on that card. See
+// require-admin.ts, which 403s an admin with no advisors row.
+//
+// partner_advisor belongs here for the same reason they get asked for a phone
+// number during onboarding: a partner working their own deals IS the advisor of
+// record on those files, and their clients see them on that card. The button
+// has always been rendered for them by the shared workspace shell — this action
+// just used to answer "Forbidden".
 //
 // The upload goes through the service role, matching post-signup-advisor —
 // advisor-profiles is not writable by a normal session.
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { isExternalAdvisor } from "@/lib/auth/roles";
 import { revalidatePath } from "next/cache";
 
 const BUCKET = "advisor-profiles";
@@ -131,7 +138,7 @@ export async function updateStaffProfilePhoto(
     .eq("id", user.id)
     .maybeSingle();
 
-  if (me?.role !== "advisor" && me?.role !== "admin") {
+  if (me?.role !== "advisor" && me?.role !== "admin" && !isExternalAdvisor(me?.role)) {
     return { success: false, error: "Forbidden" };
   }
 
@@ -195,6 +202,8 @@ export async function updateStaffProfilePhoto(
   // The photo shows in the shell topbar and on every client's advisor card.
   revalidatePath("/advisor/dashboard");
   revalidatePath("/admin/dashboard");
+  revalidatePath("/partner/dashboard");
+  revalidatePath("/partner/deals");
   revalidatePath("/dashboard");
 
   return { success: true, url: publicUrl };

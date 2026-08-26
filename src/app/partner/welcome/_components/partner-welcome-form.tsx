@@ -12,10 +12,20 @@ import { completePartnerOnboarding } from "../actions";
  * for the first time on a link they got by email benefits far more from seeing
  * what they typed than from the confirm field being masked.
  *
- * router.refresh() before push: the dashboard reads password_set_at server-side
- * and would bounce straight back here off a stale cache otherwise.
+ * `onComplete` exists for the DEAL DESK partner, who has a W-9 and a voided
+ * check still to do: the wizard keeps them on the page and advances its own
+ * cursor. Without it the form does what it always did — refresh, then push to
+ * the dashboard. router.refresh() before push because the dashboard reads
+ * password_set_at server-side and would bounce straight back here off a stale
+ * cache otherwise.
  */
-export function PartnerWelcomeForm({ email }: { email: string }) {
+export function PartnerWelcomeForm({
+  email,
+  onComplete,
+}: {
+  email: string;
+  onComplete?: () => void;
+}) {
   const router = useRouter();
   const [pwd, setPwd] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -36,6 +46,10 @@ export function PartnerWelcomeForm({ email }: { email: string }) {
       const res = await completePartnerOnboarding(pwd);
       if (!res.success) {
         setError(res.error || "Could not set your password.");
+        return;
+      }
+      if (onComplete) {
+        onComplete();
         return;
       }
       router.refresh();
@@ -125,7 +139,8 @@ export function PartnerWelcomeForm({ email }: { email: string }) {
           </>
         ) : (
           <>
-            Go to my dashboard <ArrowRight className="h-4 w-4" />
+            {onComplete ? "Continue" : "Go to my dashboard"}{" "}
+            <ArrowRight className="h-4 w-4" />
           </>
         )}
       </button>

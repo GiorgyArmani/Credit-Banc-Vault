@@ -996,9 +996,20 @@ export async function POST(request: Request) {
       'Debt Schedule': 'debt_schedule'
     };
 
-    const requestedFromForm = (body.documents_requested || [])
-      .map((label: string) => LABEL_TO_CODE_MAP[label])
-      .filter(Boolean);
+    // The form now sends required_documents.code values directly, resolved from
+    // the product's base package plus the advisor's edits (see
+    // @/data/program-document-packages). LABEL_TO_CODE_MAP above stays for any
+    // older caller still posting display labels — it only ever knew eight
+    // documents, which is exactly why the codes path exists.
+    const requestedFromCodes: string[] = Array.isArray(body.document_codes)
+      ? body.document_codes.filter((c: unknown): c is string => typeof c === 'string' && !!c)
+      : [];
+
+    const requestedFromForm = requestedFromCodes.length > 0
+      ? requestedFromCodes
+      : (body.documents_requested || [])
+          .map((label: string) => LABEL_TO_CODE_MAP[label])
+          .filter(Boolean);
 
     const requestedDocTags = (body.ghl_tags || [])
       .filter((tag: string) => tag.startsWith('requested_'))

@@ -75,7 +75,12 @@ export class SignWell {
         // Use the correct endpoint for creating from a template
         const endpoint = `${this.baseUrl}/document_templates/documents/`;
 
-        const body = {
+        const templateFields = Object.entries(params.fields).map(([api_id, value]) => ({
+            api_id,
+            value: value || '' // Ensure empty strings for null/undefined
+        }));
+
+        const body: Record<string, unknown> = {
             template_id: params.templateId,
             test_mode: process.env.NODE_ENV === 'development',
             embedded_signing: true,
@@ -85,12 +90,15 @@ export class SignWell {
                 placeholder_name: p.name,
                 email: params.recipientEmail,
                 name: params.recipientName
-            })),
-            template_fields: Object.entries(params.fields).map(([api_id, value]) => ({
-                api_id,
-                value: value || '' // Ensure empty strings for null/undefined
             }))
         };
+
+        // SignWell rejects `template_fields: []` outright ("invalid key values"),
+        // so the key only goes on the wire when there is something to prefill.
+        // The W-9 deliberately prefills nothing.
+        if (templateFields.length > 0) {
+            body.template_fields = templateFields;
+        }
 
         console.log(`🚀 Sending Request to: ${endpoint}`);
         console.log('📝 Body:', JSON.stringify(body, null, 2));

@@ -57,7 +57,21 @@ type VaultData = {
  * 
  * @returns Profile information card based on current state
  */
-export default function ProfileDisplay({ onLoad }: { onLoad?: () => void }) {
+/**
+ * "full" is the original three-across card of big tiles; "rail" is the client
+ * portal sidebar version — the same six fields as a compact label/value list
+ * sized for a ~320px column. One component, because the vault fetch and its
+ * four load states are the part worth not duplicating.
+ */
+type ProfileVariant = "full" | "rail";
+
+export default function ProfileDisplay({
+  onLoad,
+  variant = "full",
+}: {
+  onLoad?: () => void;
+  variant?: ProfileVariant;
+}) {
   // ============================================
   // STATE MANAGEMENT
   // Using enum for better state control
@@ -370,6 +384,61 @@ export default function ProfileDisplay({ onLoad }: { onLoad?: () => void }) {
       </Card>
     );
   };
+
+  // ── Rail variant ──────────────────────────────────────────────────────────
+  //
+  // #tour-profile sits on the shell, not the success state, so the anchor
+  // resolves while the vault row is still loading — the tour auto-runs on a
+  // client's first visit and would otherwise skip a step on a slow fetch.
+  const render_rail = () => {
+    const fields = vault_data ? build_profile_fields(vault_data) : [];
+
+    return (
+      <section
+        id="tour-profile"
+        className="rounded-2xl border border-black/5 bg-white p-5 shadow-sm"
+      >
+        <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-cb-gray">
+          Your business
+        </p>
+
+        {component_state === ComponentState.LOADING && (
+          <div className="mt-4 animate-pulse space-y-2">
+            <div className="h-4 w-32 rounded bg-black/5" />
+            <div className="h-3 w-full rounded bg-black/5" />
+            <div className="h-3 w-4/5 rounded bg-black/5" />
+          </div>
+        )}
+
+        {component_state !== ComponentState.LOADING && !vault_data && (
+          <div className="mt-4 flex items-start gap-3 rounded-xl bg-amber-50 p-3">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+            <p className="text-xs leading-relaxed text-amber-800">{error_message}</p>
+          </div>
+        )}
+
+        {vault_data && (
+          <>
+            <h3 className="mt-2 font-manrope text-lg font-extrabold leading-tight tracking-tight text-cb-ink">
+              {vault_data.company_name || "Your business"}
+            </h3>
+            <dl className="mt-4 space-y-2.5 border-t border-black/5 pt-4">
+              {fields.map((field) => (
+                <div key={field.label} className="flex items-baseline justify-between gap-3">
+                  <dt className="text-[11px] font-medium text-cb-ink/45">{field.label}</dt>
+                  <dd className="text-right text-[13px] font-semibold text-cb-ink">
+                    {field.value}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </>
+        )}
+      </section>
+    );
+  };
+
+  if (variant === "rail") return render_rail();
 
   // ============================================
   // MAIN RENDER WITH SWITCH STATEMENT

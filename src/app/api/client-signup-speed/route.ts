@@ -129,17 +129,27 @@ function is_valid_positive_number(value: any): boolean {
   return !isNaN(num) && num > 0;
 }
 
-/** Valid doc codes the speed form may request — mirrors the full form's DOC_TAG_MAP. */
-const VALID_DOC_CODES = new Set([
-  'business_bank_statements',
-  'tax_returns',
-  'profit_loss',
-  'balance_sheets',
-  'debt_schedule',
-  'ar_report',
-  'drivers_license',
-  'voided_check',
-]);
+/**
+ * Doc codes the speed form may request.
+ *
+ * This used to be a hardcoded set of eight. That set was written before the
+ * per-product document packages existed, and it SILENTLY DROPPED everything
+ * else — an advisor picking "SBA Loan" posted fourteen codes and the client was
+ * asked for six, with nothing anywhere saying the other eight had been thrown
+ * away. The allowlist is now the document catalog itself, which is the only
+ * thing that can actually be requested, and anything unknown is logged rather
+ * than vanishing.
+ */
+async function load_valid_doc_codes(): Promise<Set<string>> {
+  const { data, error } = await supabase_admin
+    .from('required_documents')
+    .select('code');
+  if (error || !data) {
+    console.error('❌ client-signup-speed: could not load required_documents', error);
+    return new Set();
+  }
+  return new Set(data.map((d: { code: string }) => d.code));
+}
 
 export async function POST(request: Request) {
   try {
@@ -206,10 +216,26 @@ export async function POST(request: Request) {
 
     // Documents the client will owe after signing — held until then.
     // (Overridden to business bank statements only for setters, below.)
-    let pending_doc_codes: string[] = Array.from(new Set(
+    const valid_doc_codes = await load_valid_doc_codes();
+    const submitted_doc_codes: string[] = Array.from(new Set(
       (Array.isArray(body.documents_requested) ? body.documents_requested : [])
-        .filter((code: any) => typeof code === 'string' && VALID_DOC_CODES.has(code))
+        .filter((code: unknown): code is string => typeof code === 'string' && !!code)
     ));
+    let pending_doc_codes: string[] = submitted_doc_codes.filter(
+      (code) => valid_doc_codes.has(code)
+    );
+
+    // A code the catalog does not carry cannot be requested, but it must not
+    // disappear quietly either — that is exactly how the old allowlist hid a
+    // half-requested package.
+    const unknown_doc_codes = submitted_doc_codes.filter(
+      (code) => !valid_doc_codes.has(code)
+    );
+    if (unknown_doc_codes.length > 0) {
+      console.warn(
+        `⚠️ client-signup-speed: ${unknown_doc_codes.length} unknown doc code(s) ignored: ${unknown_doc_codes.join(', ')}`
+      );
+    }
 
     if (pending_doc_codes.length === 0) {
       return NextResponse.json(

@@ -6,6 +6,7 @@ import { toast } from "@/lib/toast";
 import { createClient } from "@/lib/supabase/client";
 import { CLIENT_SCOPED_DOC_CODES } from "@/lib/document-scope";
 import { FUNDING_OPTIONS } from "@/data/loan-types";
+import { packageForLoanTypes, FALLBACK_DOCUMENT_PACKAGE } from "@/data/program-document-packages";
 import { formatPhoneInput } from "@/lib/phone";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
@@ -65,6 +66,7 @@ export function AddBusinessModal({ client_vault_id, open, on_close, on_created }
     );
   };
 
+
   // Open positions
   const [open_positions, set_open_positions] = useState<OpenPosition[]>([]);
 
@@ -95,6 +97,43 @@ export function AddBusinessModal({ client_vault_id, open, on_close, on_created }
       set_requested_doc_codes(new Set(items.filter((d) => d.is_core).map((d) => d.code)));
     })();
   }, [open]);
+
+  /**
+   * Picking a funding product pre-selects that product's document package.
+   *
+   * The rule here is deliberately simpler than the one on the client creation
+   * form: changing the product selection RESETS the document selection to that
+   * product's package (or to the core docs when the product has none). Manual
+   * ticks made afterwards stand until the product selection changes again. On a
+   * modal this small, a reset the advisor can see beats edit-tracking they'd
+   * have to reason about.
+   *
+   * The package is intersected with the options actually on offer here —
+   * client-scoped documents (driver's licence, PFS, MyScoreIQ) describe the
+   * person, not the business, and are already collected on the primary
+   * business, so this modal never lists them.
+   *
+   * The no-package fallback used to be `is_core` documents. `is_core` is true
+   * on ZERO rows in prod, so picking "Other" (the one product with no package)
+   * selected NOTHING and added a business with an empty document request. It
+   * falls back to the shared baseline now.
+   */
+  useEffect(() => {
+    if (!open) return;
+    if (all_doc_options.length === 0) return;
+
+    const offered = new Set(all_doc_options.map((d) => d.code));
+    const { codes } = packageForLoanTypes(proposed_loan_types);
+    const from_package = codes.filter((c) => offered.has(c));
+
+    const fallback = FALLBACK_DOCUMENT_PACKAGE.codes.filter((c) => offered.has(c));
+    set_requested_doc_codes(
+      new Set(from_package.length > 0 ? from_package : fallback)
+    );
+    // Intentionally not depending on requested_doc_codes: this re-derives the
+    // default, it does not react to the advisor's own ticks.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, proposed_loan_types, all_doc_options]);
 
   if (!open) return null;
 

@@ -101,7 +101,7 @@ import { AdminLenderReviewCard } from "@/components/admin/admin-lender-review-ca
 import { CollapsibleSection, broadcast_toggle_all } from "@/app/advisor/dashboard/clients/[id]/_components/collapsible-section";
 import { isClientScopedDoc, matchesActiveBusiness, matchesActiveDeal, normalizeSupabaseJoin } from "@/lib/document-scope";
 import { offersGrouping, groupsForDocCode } from "@/lib/document-groups";
-import { zipDocuments } from "@/lib/document-download";
+import { zipDocuments, downloadDocument } from "@/lib/document-download";
 import { DocumentGroupPicker } from "@/components/document-group-picker";
 import { useDocumentGroups } from "@/hooks/use-document-groups";
 
@@ -1241,40 +1241,14 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
     }
 
     /**
-     * download-document: Downloads a document from Supabase storage
-     * Creates a temporary download link and triggers browser download
+     * download-document: saves one document to disk.
+     *
+     * Goes through GET /api/documents/[id]/file?download=1, which authorises
+     * the read and answers an attachment named by the server. The browser
+     * streams it, so a large statement never has to be held in a blob first.
      */
-    async function download_document(doc: UserDocument) {
-        try {
-            const { data, error } = await supabase.storage
-                .from("user-documents")
-                .download(doc.storage_path);
-
-            if (error) throw error;
-
-            // Create blob URL and trigger download
-            const url = URL.createObjectURL(data);
-            const a = document.createElement("a");
-            a.href = url;
-            let downloadName = doc.name;
-            if (doc.custom_label) {
-                const extIndex = doc.name.lastIndexOf('.');
-                const extension = extIndex !== -1 ? doc.name.substring(extIndex) : '';
-                if (extension && !doc.custom_label.toLowerCase().endsWith(extension.toLowerCase())) {
-                    downloadName = doc.custom_label + extension;
-                } else {
-                    downloadName = doc.custom_label;
-                }
-            }
-            a.download = downloadName;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-        } catch (err: any) {
-            console.error("❌ Download error:", err);
-            toast.error(`Error downloading ${doc.name}. Please try again.`);
-        }
+    function download_document(doc: UserDocument) {
+        downloadDocument(doc.id);
     }
 
     /**
@@ -1301,7 +1275,7 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
 
         set_is_zipping({ completed: 0, total: docs.length });
         try {
-            const result = await zipDocuments(supabase, docs, `${client_name} - Documents`, {
+            const result = await zipDocuments(docs, `${client_name} - Documents`, {
                 folderOf: (d) => {
                     const code = (d as any).doc_code ?? (d as any).category ?? "";
                     return label_by_code.get(code) || code || "Other";
@@ -1340,7 +1314,7 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
 
         set_is_zipping({ completed: 0, total: docs.length });
         try {
-            const result = await zipDocuments(supabase, docs, `${client_name} - ${label}`, {
+            const result = await zipDocuments(docs, `${client_name} - ${label}`, {
                 onProgress: (p) => set_is_zipping({ completed: p.completed, total: p.total }),
             });
 
@@ -2444,7 +2418,7 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
                     isOpen={preview_modal.isOpen}
                     onClose={() => set_preview_modal({ isOpen: false, doc: null })}
                     docName={preview_modal.doc?.custom_label || preview_modal.doc?.name || ""}
-                    storagePath={preview_modal.doc?.storage_path || ""}
+                    documentId={preview_modal.doc?.id || ""}
                     fileType={preview_modal.doc?.type}
                     onRename={preview_modal.doc ? () => set_renaming_file({
                         id: preview_modal.doc!.id,

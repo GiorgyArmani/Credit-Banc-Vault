@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import clsx from "clsx";
 import {
-  Upload, Trash2, Star, Download, FileText, Pencil, CheckCircle2, AlertCircle, X, ChevronDown, ChevronRight, Eye, MoreVertical
+  Upload, Trash2, Download, FileText, Pencil, CheckCircle2, AlertCircle, X, ChevronDown, ChevronRight, Eye
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter
@@ -13,7 +13,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { PremiumLoader } from "./ui/premium-loader";
-import { Send } from "lucide-react";
 import DocumentPreviewModal from "@/components/pdf/pdf-viewer";
 import { isClientScopedDoc, isCarryOverDoc, matchesActiveBusiness, matchesActiveDeal } from "@/lib/document-scope";
 import {
@@ -26,6 +25,7 @@ import {
 import { DocumentGroupPicker } from "@/components/document-group-picker";
 import { useDocumentGroups } from "@/hooks/use-document-groups";
 import { markLabelAsManual } from '@/lib/group-assignment';
+import { downloadDocument } from '@/lib/document-download';
 
 /**
  * DocumentType: Interface for documents requested for the user
@@ -89,6 +89,10 @@ interface DocumentCardProps {
   activeDealId?: string | null;
   /** Optional DOM id for the website tour to anchor on (set on the first card). */
   anchorId?: string;
+  /** Start expanded. The list opens ONE row on arrival — the next thing the
+   *  client actually has to do — so the page shows what to do without a wall of
+   *  fourteen open dropzones. A rejected row overrides this and always opens. */
+  defaultOpen?: boolean;
   /** Every group on the file; each card slices out its own field's. */
   documentGroups?: DocumentGroup[];
   /** Lifts a newly created group up to the shared list. */
@@ -112,6 +116,7 @@ function DocumentCard({
   activeBusinessId,
   activeDealId,
   anchorId,
+  defaultOpen = false,
   documentGroups = [],
   onGroupCreated,
 }: DocumentCardProps) {
@@ -145,7 +150,10 @@ function DocumentCard({
   const isComplete = hasDocuments && relevantDocs.length >= (docType.minFiles || 1);
   const isReadyForReview = isComplete && !isApproved && !isRejected;
 
-  const [isExpanded, setIsExpanded] = useState(!isApproved || isRejected || !isComplete);
+  // Closed by default, because in a list "open" is the exception. Rejected rows
+  // open regardless — the advisor's note is the whole reason the row is red and
+  // a client should never have to click to discover it.
+  const [isExpanded, setIsExpanded] = useState(defaultOpen || isRejected);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
@@ -208,12 +216,26 @@ function DocumentCard({
           group: selectedGroup,
           period: selectedGroup ? parseDocumentPeriod(file.name) : null,
         });
-        const normalized = `${docType.code}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.${ext}`;
-        const filePath = `${userId}/${normalized}`;
+        // The path and the upload credential both come from the server now:
+        // the browser holds no storage key, and the route builds the path from
+        // the caller's own auth id so it cannot be aimed at another vault.
+        const signRes = await fetch("/api/documents/upload/sign", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ doc_code: docType.code, file_name: file.name }),
+        });
+        const sign = await signRes.json().catch(() => null);
+        if (!signRes.ok || !sign?.success) {
+          throw new Error(sign?.error || `Could not start upload (${signRes.status})`);
+        }
+        const filePath: string = sign.file_path;
 
         const { error: upErr } = await supabase.storage
           .from("user-documents")
-          .upload(filePath, file, { upsert: true });
+          .uploadToSignedUrl(filePath, sign.token, file, {
+            contentType: file.type || "application/octet-stream",
+            upsert: true,
+          });
         if (upErr) throw upErr;
 
         const { data, error: dbErr } = await supabase
@@ -291,110 +313,106 @@ function DocumentCard({
     }
   };
 
+  // A row, not a card. Fourteen always-open cards in a two-column grid meant a
+  // client scrolled a full screen per document and could not see how many were
+  // left; the checklist is a LIST, and a list reads as one thing to work down.
+  // Everything below the header is the same upload flow as before — only the
+  // presentation changed.
+  const statusLabel = isApproved
+    ? "Approved"
+    : isRejected
+      ? "Action needed"
+      : isReadyForReview
+        ? "In review"
+        : "Upload";
+
   return (
-    <div id={anchorId} className={clsx(
-      "rounded-[2.5rem] border-2 transition-all duration-500 overflow-hidden shadow-sm group",
-      isApproved
-        ? "bg-emerald-50/30 border-emerald-100/50 hover:border-emerald-200"
-        : isRejected
-          ? "bg-rose-50/30 border-rose-100/50 hover:border-rose-200"
-          : isReadyForReview
-            ? "bg-amber-50/30 border-amber-100/50 hover:border-amber-200"
-            : "bg-white border-emerald-50 hover:border-emerald-100 hover:shadow-md"
-    )}>
-      <div
-        className="p-8 cursor-pointer flex items-center justify-between gap-4"
+    <div
+      id={anchorId}
+      className={clsx(
+        "overflow-hidden rounded-xl border transition-colors",
+        isRejected
+          ? "border-rose-200 bg-rose-50/40"
+          : isApproved
+            ? "border-cb-mint/30 bg-cb-mint/[0.04]"
+            : "border-black/[0.07] bg-white hover:border-black/15"
+      )}
+    >
+      <button
+        type="button"
         onClick={() => setIsExpanded(!isExpanded)}
+        aria-expanded={isExpanded}
+        className="flex w-full items-center gap-3 px-4 py-3 text-left"
       >
-        <div className="flex items-center gap-5">
-          <div className={clsx(
-            "w-14 h-14 rounded-2xl flex items-center justify-center shadow-inner transition-all duration-500",
+        <span
+          className={clsx(
+            "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg",
             isApproved
-              ? "bg-emerald-500 text-white scale-110"
+              ? "bg-cb-mint text-white"
               : isRejected
                 ? "bg-rose-500 text-white"
                 : isReadyForReview
-                  ? "bg-amber-500 text-white"
-                  : "bg-emerald-50 text-emerald-500 group-hover:scale-105"
-          )}>
-            {isApproved ? <CheckCircle2 className="h-7 w-7" /> :
-              isRejected ? <AlertCircle className="h-7 w-7" /> :
-                isReadyForReview ? <AlertCircle className="h-7 w-7" /> : <FileText className="h-7 w-7" />}
-          </div>
-          <div>
-            <h3 className="text-xl font-black text-emerald-950 tracking-tighter uppercase leading-none">
-              {docType.label}
-            </h3>
-            <div className="flex items-center gap-2 mt-2">
-              <span className={clsx(
-                "text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md border",
-                isApproved
-                  ? "bg-emerald-100 text-emerald-700 border-emerald-200"
-                  : isRejected
-                    ? "bg-rose-100 text-rose-700 border-rose-200"
-                    : isReadyForReview
-                      ? "bg-amber-100 text-amber-700 border-amber-200"
-                      : "bg-slate-100 text-slate-500 border-slate-200"
-              )}>
-                {isApproved ? "Approved" : 
-                 isRejected ? "Action Required" : 
-                 isReadyForReview ? "Ready for Review" : "Awaiting Upload"}
-              </span>
-              {/* Rejection reason moved to expanded area or more prominent block */}
-              {relevantDocs.length > 0 && (
-                <span className="text-[10px] font-bold text-emerald-900/40 uppercase tracking-widest flex items-center gap-1">
-                  <div className="w-1 h-1 rounded-full bg-emerald-900/20" />
-                  {relevantDocs.length} File{relevantDocs.length !== 1 ? 's' : ''}
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
+                  ? "bg-amber-400 text-white"
+                  : "bg-cb-cream text-cb-ink/35"
+          )}
+        >
+          {isApproved ? (
+            <CheckCircle2 className="h-4 w-4" />
+          ) : isRejected ? (
+            <AlertCircle className="h-4 w-4" />
+          ) : (
+            <FileText className="h-4 w-4" />
+          )}
+        </span>
 
-        <div className="flex items-center gap-2">
-          {!isExpanded && (isApproved || isRejected || isReadyForReview) && (
-            <span className={clsx(
-              "hidden md:flex text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full border",
-              isApproved 
-                ? "bg-emerald-100 text-emerald-700 border-emerald-200"
-                : isRejected
-                  ? "bg-rose-100 text-rose-700 border-rose-200"
-                  : "bg-amber-100 text-amber-700 border-amber-200"
-            )}>
-              {isApproved ? "Approved" : isRejected ? "Action Req." : "Reviewing"}
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-semibold text-cb-ink">
+            {docType.label}
+          </span>
+          {relevantDocs.length > 0 && (
+            <span className="mt-0.5 block text-[11px] text-cb-ink/40">
+              {relevantDocs.length} file{relevantDocs.length !== 1 ? "s" : ""} uploaded
             </span>
           )}
-          <div className={clsx(
-            "w-8 h-8 rounded-full flex items-center justify-center transition-all",
-            isExpanded ? "bg-emerald-100 text-emerald-600 rotate-180" : "bg-slate-50 text-slate-400"
-          )}>
-            <ChevronDown className="h-4 w-4" />
-          </div>
-        </div>
-      </div>
+        </span>
+
+        <span
+          className={clsx(
+            "hidden shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] sm:inline-block",
+            isApproved
+              ? "bg-cb-mint/15 text-emerald-700"
+              : isRejected
+                ? "bg-rose-100 text-rose-700"
+                : isReadyForReview
+                  ? "bg-amber-100 text-amber-700"
+                  : "bg-black/[0.04] text-cb-ink/45"
+          )}
+        >
+          {statusLabel}
+        </span>
+
+        <ChevronDown
+          className={clsx(
+            "h-4 w-4 shrink-0 text-cb-ink/30 transition-transform",
+            isExpanded && "rotate-180"
+          )}
+        />
+      </button>
 
       {isExpanded && (
-        <div className="px-8 pb-8 space-y-6 animate-in slide-in-from-top-2 duration-300">
-          {/* Prominent Rejection Feedback */}
+        <div className="space-y-4 border-t border-black/5 px-4 pb-4 pt-4">
           {isRejected && rejectionReason && (
-            <div className="bg-rose-50 border border-rose-200 rounded-2xl p-6 relative overflow-hidden group/feedback animate-pulse">
-              <div className="absolute top-0 left-0 w-1 h-full bg-rose-500" />
-              <div className="flex items-start gap-4">
-                <div className="mt-1 bg-rose-100 p-2 rounded-xl text-rose-600">
-                  <AlertCircle className="h-5 w-5" />
-                </div>
-                <div className="flex-1">
-                  <h4 className="text-sm font-bold text-rose-900 mb-1">Action Required: Advisor Feedback</h4>
-                  <p className="text-sm text-rose-700 leading-relaxed">
-                    "{rejectionReason}"
-                  </p>
-                  <p className="mt-4 text-[11px] font-medium text-rose-500/80 uppercase tracking-wider">
-                    Please upload a replacement file below to resolve this.
-                  </p>
-                </div>
-              </div>
+            <div className="rounded-xl border border-rose-200 bg-white p-4">
+              <p className="flex items-center gap-2 text-xs font-bold text-rose-700">
+                <AlertCircle className="h-3.5 w-3.5" />
+                Your advisor asked for a new file
+              </p>
+              <p className="mt-2 text-sm leading-relaxed text-cb-ink/70">
+                &ldquo;{rejectionReason}&rdquo;
+              </p>
             </div>
           )}
+
           {/* Which group these files belong to. Above the dropzone on purpose:
               picked BEFORE the files, so a batch drop of twelve months lands
               already sorted. Applies to every file in this upload — one group
@@ -414,49 +432,109 @@ function DocumentCard({
           )}
 
           {(selectedFiles.length === 0 || docType.multiple) && (
-            <div className="pt-2">
-              <label className={clsx(
-                "flex flex-col items-center justify-center border-2 border-dashed rounded-[1.5rem] p-8 cursor-pointer transition-all group/upload",
-                isComplete ? "border-emerald-200 bg-white" : "border-emerald-100 bg-emerald-50/10"
-              )}>
-                <Upload className="h-6 w-6 text-emerald-500 mb-2" />
-                <span className="text-sm font-bold text-emerald-950">Click to upload</span>
-                <span className="text-xs text-emerald-900/50 mt-1 text-center">Choose a file from your device. A clear photo or PDF of the document is fine.</span>
-                <input type="file" onChange={handleFileSelect} className="hidden" multiple={docType.multiple} />
-              </label>
-            </div>
+            <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-dashed border-black/15 bg-cb-cream/40 px-4 py-3 transition-colors hover:border-cb-mint hover:bg-cb-mint/5">
+              <Upload className="h-4 w-4 shrink-0 text-cb-mint" />
+              <span className="min-w-0">
+                <span className="block text-sm font-semibold text-cb-ink">
+                  Choose a file
+                </span>
+                <span className="block text-[11px] text-cb-ink/45">
+                  PDF, or a clear photo or screenshot. From your phone is fine.
+                </span>
+              </span>
+              <input
+                type="file"
+                onChange={handleFileSelect}
+                className="hidden"
+                multiple={docType.multiple}
+              />
+            </label>
           )}
 
           {selectedFiles.length > 0 && (
-            <div className="bg-white border border-emerald-100 rounded-xl p-4">
-              <div className="space-y-2 mb-4">
+            <div className="rounded-xl border border-black/[0.07] bg-white p-3">
+              <div className="mb-3 space-y-1.5">
                 {selectedFiles.map((file, idx) => (
-                  <div key={idx} className="flex items-center justify-between bg-emerald-50/50 p-2 rounded-lg text-xs">
-                    <span className="truncate flex-1 pr-2">{file.name}</span>
-                    <button onClick={() => removeSelectedFile(idx)}><X className="h-3 w-3" /></button>
+                  <div
+                    key={idx}
+                    className="flex items-center justify-between gap-2 rounded-lg bg-cb-cream/60 px-3 py-2"
+                  >
+                    <span className="truncate text-xs text-cb-ink/70">{file.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeSelectedFile(idx)}
+                      aria-label={`Remove ${file.name}`}
+                      className="shrink-0 text-cb-ink/30 hover:text-cb-ink"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
                   </div>
                 ))}
               </div>
-              <Button onClick={handleUpload} disabled={uploading} className="w-full bg-emerald-500 text-white rounded-full">
-                {uploading ? "Uploading..." : "Start Upload"}
+              <Button
+                onClick={handleUpload}
+                disabled={uploading}
+                className="w-full rounded-lg bg-cb-ink py-5 text-sm font-semibold text-cb-mint hover:bg-cb-ink/90"
+              >
+                {uploading ? "Uploading…" : "Upload"}
               </Button>
             </div>
           )}
 
           {relevantDocs.length > 0 && (
-            <div className="space-y-2 pt-4 border-t border-emerald-100/50">
-              <h4 className="text-[10px] font-black uppercase tracking-widest text-emerald-900/40">Uploaded Files</h4>
+            <div className="space-y-1.5">
               {relevantDocs.map(doc => (
-                <div key={doc.id} className="bg-white border border-emerald-100 rounded-xl p-3 flex items-center justify-between">
+                <div
+                  key={doc.id}
+                  className="flex items-center gap-2 rounded-xl border border-black/[0.07] bg-white px-3 py-2"
+                >
+                  <FileText className="h-3.5 w-3.5 shrink-0 text-cb-ink/25" />
                   <div className="min-w-0 flex-1">
-                    <p className="text-xs font-bold truncate">{doc.custom_label || doc.name}</p>
-                    <p className="text-[9px] text-gray-400">{(doc.size/1024).toFixed(0)} KB • {new Date(doc.upload_date).toLocaleDateString()}</p>
+                    <p className="truncate text-xs font-semibold text-cb-ink">
+                      {doc.custom_label || doc.name}
+                    </p>
+                    <p className="text-[10px] text-cb-ink/40">
+                      {(doc.size / 1024).toFixed(0)} KB ·{" "}
+                      {new Date(doc.upload_date).toLocaleDateString()}
+                    </p>
                   </div>
-                  <div className="flex items-center gap-1">
-                    <Button variant="ghost" size="sm" onClick={() => onPreview(doc)} className="h-7 px-2 text-[10px]">View</Button>
-                    <Button variant="ghost" size="sm" onClick={() => onEdit(doc)} className="h-7 px-2 text-[10px]">Rename</Button>
-                    <Button variant="ghost" size="sm" onClick={() => onDownload(doc)} className="h-7 px-2 text-[10px]">Download</Button>
-                    <Button variant="ghost" size="sm" onClick={() => onDelete(doc)} className="h-7 px-2 text-[10px] text-rose-500">Delete</Button>
+                  <div className="flex shrink-0 items-center">
+                    <button
+                      type="button"
+                      onClick={() => onPreview(doc)}
+                      aria-label="View"
+                      title="View"
+                      className="rounded-md p-1.5 text-cb-ink/40 hover:bg-cb-cream hover:text-cb-ink"
+                    >
+                      <Eye className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onEdit(doc)}
+                      aria-label="Rename"
+                      title="Rename"
+                      className="rounded-md p-1.5 text-cb-ink/40 hover:bg-cb-cream hover:text-cb-ink"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onDownload(doc)}
+                      aria-label="Download"
+                      title="Download"
+                      className="rounded-md p-1.5 text-cb-ink/40 hover:bg-cb-cream hover:text-cb-ink"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onDelete(doc)}
+                      aria-label="Delete"
+                      title="Delete"
+                      className="rounded-md p-1.5 text-cb-ink/40 hover:bg-rose-50 hover:text-rose-600"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
                   </div>
                 </div>
               ))}
@@ -497,8 +575,6 @@ export default function Vault({
   const [submitting, setSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [dynamicDocs, setDynamicDocs] = useState<DocumentType[]>([]);
-  const [expandedCore, setExpandedCore] = useState(true);
-  const [expandedAdditional, setExpandedAdditional] = useState(true);
   const [preview_modal, set_preview_modal] = useState<{ isOpen: boolean; doc: UserDocument | null }>({
     isOpen: false,
     doc: null
@@ -610,29 +686,21 @@ export default function Vault({
   };
 
   const handleDelete = async (doc: UserDocument) => {
-    await supabase.storage.from("user-documents").remove([doc.storage_path]);
-    await supabase.from("user_documents").delete().eq("id", doc.id);
+    // Storage object and row are removed together server-side; the browser has
+    // no delete credential on the bucket any more.
+    const res = await fetch(`/api/documents/${doc.id}`, { method: "DELETE" });
+    if (!res.ok) {
+      console.error("Delete failed:", await res.text().catch(() => res.status));
+      return;
+    }
     setDocuments(prev => prev.filter(d => d.id !== doc.id));
   };
 
-  const handleDownload = async (doc: UserDocument) => {
-    const { data } = await supabase.storage.from("user-documents").download(doc.storage_path);
-    if (!data) return;
-    const url = URL.createObjectURL(data);
-    const a = document.createElement("a");
-    a.href = url;
-    let downloadName = doc.name;
-    if (doc.custom_label) {
-      const extIndex = doc.name.lastIndexOf('.');
-      const extension = extIndex !== -1 ? doc.name.substring(extIndex) : '';
-      if (extension && !doc.custom_label.toLowerCase().endsWith(extension.toLowerCase())) {
-        downloadName = doc.custom_label + extension;
-      } else {
-        downloadName = doc.custom_label;
-      }
-    }
-    a.download = downloadName;
-    a.click();
+  // The route names the file (resolveServedFileName) and streams it, so the
+  // whole blob-and-object-URL dance the browser used to do is gone along with
+  // its direct storage access.
+  const handleDownload = (doc: UserDocument) => {
+    downloadDocument(doc.id);
   };
 
   const handleRenameSubmit = async (newLabel: string) => {
@@ -705,7 +773,7 @@ export default function Vault({
         const docNames = rejectedItems.map(item => item.label).join(", ");
         toast({
           title: "Action Required",
-          description: `Your advisor requested updates for: ${docNames}. Please check the cards with red badges for feedback.`,
+          description: `Your advisor requested updates for: ${docNames}. The rows in red are already open with their feedback.`,
           variant: "destructive"
         });
       }
@@ -730,139 +798,141 @@ export default function Vault({
   const coreDocs = checklist.filter(d => d.isCore);
   const addDocs = checklist.filter(d => !d.isCore);
 
+  // The first row the client still has to act on. It is the one row that opens
+  // on arrival, so the page answers "what do I do now?" without them clicking.
+  // Rejected first — a file the advisor sent back outranks one never uploaded.
+  const firstOpenCode =
+    [...coreDocs, ...addDocs].find(d => d.isRejected)?.code ??
+    [...coreDocs, ...addDocs].find(d => !d.isApproved && !d.isRejected)?.code ??
+    null;
+
+  const totalDocs = coreDocs.length + addDocs.length;
+  const remaining = [...coreDocs, ...addDocs].filter(d => !d.isApproved).length;
+
+  const renderSection = (label: string, docs: typeof coreDocs, tourFirst: boolean) => (
+    <section className="space-y-2">
+      <div className="flex items-baseline justify-between px-1">
+        <h3 className="text-[11px] font-bold uppercase tracking-[0.16em] text-cb-gray">
+          {label}
+        </h3>
+        <span className="text-[11px] font-medium text-cb-ink/35">{docs.length}</span>
+      </div>
+      <div className="space-y-2">
+        {docs.map((d, idx) => (
+          <DocumentCard
+            key={d.code}
+            anchorId={tourFirst && idx === 0 ? 'tour-upload' : undefined}
+            defaultOpen={d.code === firstOpenCode}
+            docType={d}
+            documents={documents}
+            userId={userId || ""}
+            clientName={clientName}
+            activeBusinessId={activeBusinessId}
+            activeDealId={activeDealId}
+            onUploadComplete={() => fetchDocuments(userId || "", true)}
+            onDelete={handleDelete}
+            onEdit={d => set_renaming_file({ id: d.id, label: d.custom_label || d.name })}
+            onToggleFavorite={() => {}}
+            onDownload={handleDownload}
+            onPreview={d => set_preview_modal({ isOpen: true, doc: d })}
+            isApproved={d.isApproved}
+            isRejected={d.isRejected}
+            rejectionReason={d.rejectionReason}
+            documentGroups={documentGroups}
+            onGroupCreated={addDocumentGroup}
+          />
+        ))}
+      </div>
+    </section>
+  );
+
   return (
-    <div className="w-full space-y-8">
-      <div id="tour-checklist" className="bg-gradient-to-br from-emerald-50 to-blue-50 border border-emerald-200 rounded-xl p-6">
-        <div className="flex items-center justify-between mb-4">
+    <div className="w-full space-y-5">
+      {/* Progress header. Was a 300px gradient panel carrying a permanent
+          three-step tutorial; the tutorial is now a disclosure, because a
+          client who has uploaded once should not have to scroll past
+          instructions they no longer read. */}
+      <div id="tour-checklist" className="rounded-2xl border border-black/5 bg-white p-5 shadow-sm">
+        <div className="flex items-end justify-between gap-4">
           <div>
-            <h2 className="text-xl font-semibold text-gray-900">Document Checklist</h2>
-            <p className="text-sm text-gray-600 mt-1">Upload required documents to move forward with underwriting.</p>
+            <h2 className="font-manrope text-lg font-extrabold tracking-tight text-cb-ink">
+              {allComplete
+                ? "Everything is in"
+                : remaining === 1
+                  ? "1 document to go"
+                  : `${remaining} documents to go`}
+            </h2>
+            <p className="mt-0.5 text-[13px] text-cb-ink/50">
+              {allComplete
+                ? "Nothing else is needed from you right now."
+                : "Upload these and underwriting can move on your file."}
+            </p>
           </div>
-          <div className="text-right">
-            <div className="text-3xl font-bold text-emerald-600">{progressPct}%</div>
-            <div className="text-xs text-gray-500 uppercase font-bold tracking-widest">Progress</div>
+          <div className="shrink-0 text-right">
+            <div className="font-manrope text-2xl font-extrabold leading-none text-cb-ink">
+              {progressPct}%
+            </div>
+            <div className="mt-1 text-[10px] font-bold uppercase tracking-[0.14em] text-cb-gray">
+              {totalDocs - remaining}/{totalDocs}
+            </div>
           </div>
         </div>
-        <Progress value={progressPct} className="h-3" />
 
-        {/* Always-on "how to upload" guide. A tour is momentary; this stays on
-            screen so a confused client never has to remember the steps. Hidden
-            once everything is uploaded to avoid clutter. */}
+        <Progress value={progressPct} className="mt-4 h-1.5" />
+
         {!allComplete && (
-          <div className="mt-5 rounded-2xl bg-white/80 border border-emerald-100 p-5">
-            <p className="text-sm font-bold text-emerald-900 mb-3 flex items-center gap-2">
-              <Upload className="h-4 w-4 text-emerald-600" />
-              How to upload a document (about 30 seconds):
-            </p>
-            <ol className="space-y-2.5">
+          <details className="group mt-4 border-t border-black/5 pt-3">
+            <summary className="flex cursor-pointer list-none items-center gap-1.5 text-xs font-semibold text-cb-ink/50 hover:text-cb-ink">
+              <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" />
+              How do I upload a document?
+            </summary>
+            <ol className="mt-3 space-y-2 pl-5">
               {[
-                'Find a document in the list below and click it to open.',
-                'Tap “Click to upload” and choose the file from your device. A clear photo or screenshot of the page works too.',
-                'Press “Start Upload”. That’s it. Your advisor sees it right away, no email needed.',
-              ].map((step, i) => (
-                <li key={i} className="flex items-start gap-3 text-sm text-gray-700">
-                  <span className="flex-shrink-0 w-6 h-6 rounded-full bg-emerald-500 text-white text-xs font-bold flex items-center justify-center">
-                    {i + 1}
+                'Click a document in the list below to open it.',
+                'Choose the file from your device. A clear photo or screenshot of the page works too.',
+                'Press Upload. Your advisor sees it right away — no email needed.',
+              ].map((step, idx) => (
+                <li key={idx} className="flex gap-2.5 text-[13px] leading-relaxed text-cb-ink/60">
+                  <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-cb-mint/15 text-[10px] font-bold text-cb-ink">
+                    {idx + 1}
                   </span>
-                  <span className="leading-relaxed">{step}</span>
+                  {step}
                 </li>
               ))}
             </ol>
-            <p className="text-xs text-gray-500 mt-3 pl-9">
-              A card turned <span className="font-semibold text-rose-500">red</span>? Your advisor left a note. Open it, read the feedback, and upload a new file. Stuck on anything? Message your advisor above.
+            <p className="mt-3 pl-[26px] text-[12px] leading-relaxed text-cb-ink/40">
+              A row turned <span className="font-semibold text-rose-500">red</span>? Your
+              advisor left a note on it. Open it, read the feedback and upload a new file.
             </p>
-          </div>
+          </details>
         )}
 
         {allComplete && !isSubmitted && (
-          <div className="mt-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <p className="text-sm font-bold text-emerald-700 flex items-center gap-2">
-              <CheckCircle2 className="h-4 w-4" />
-              All documents are in! Tap “Submit Vault” to send everything to underwriting.
+          <div className="mt-4 flex flex-col gap-3 border-t border-black/5 pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="flex items-center gap-2 text-[13px] font-semibold text-cb-ink">
+              <CheckCircle2 className="h-4 w-4 text-cb-mint" />
+              Ready to send to underwriting.
             </p>
-            <Button onClick={handleSubmission} disabled={submitting} className="bg-emerald-600 text-white">
-              {submitting ? "Submitting..." : "Submit Vault"}
+            <Button
+              onClick={handleSubmission}
+              disabled={submitting}
+              className="rounded-lg bg-cb-ink px-5 py-5 text-sm font-semibold text-cb-mint hover:bg-cb-ink/90"
+            >
+              {submitting ? "Submitting…" : "Submit vault"}
             </Button>
           </div>
         )}
       </div>
 
-      <div className="space-y-8">
-        {coreDocs.length > 0 && (
-          <div className="space-y-4">
-            <div className="flex items-center gap-2 mb-4">
-              <div className="h-px flex-1 bg-emerald-100" />
-              <h3 className="text-xs font-black uppercase tracking-[0.2em] text-emerald-900/40">Core Requirements</h3>
-              <div className="h-px flex-1 bg-emerald-100" />
-            </div>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {coreDocs.map((d, idx) => (
-                <DocumentCard
-                  key={d.code}
-                  anchorId={idx === 0 ? 'tour-upload' : undefined}
-                  docType={d}
-                  documents={documents}
-                  userId={userId || ""}
-                  clientName={clientName}
-                  activeBusinessId={activeBusinessId}
-                  activeDealId={activeDealId}
-                  onUploadComplete={() => fetchDocuments(userId || "", true)}
-                  onDelete={handleDelete}
-                  onEdit={d => set_renaming_file({ id: d.id, label: d.custom_label || d.name })}
-                  onToggleFavorite={() => {}}
-                  onDownload={handleDownload}
-                  onPreview={d => set_preview_modal({ isOpen: true, doc: d })}
-                  isApproved={d.isApproved}
-                  isRejected={d.isRejected}
-                  rejectionReason={d.rejectionReason}
-                  documentGroups={documentGroups}
-                  onGroupCreated={addDocumentGroup}
-                />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {addDocs.length > 0 && (
-          <div className="space-y-4">
-            <div className="flex items-center gap-2 mb-4">
-              <div className="h-px flex-1 bg-blue-100" />
-              <h3 className="text-xs font-black uppercase tracking-[0.2em] text-blue-900/40">Additional Requests</h3>
-              <div className="h-px flex-1 bg-blue-100" />
-            </div>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {addDocs.map((d, idx) => (
-                <DocumentCard
-                  key={d.code}
-                  anchorId={coreDocs.length === 0 && idx === 0 ? 'tour-upload' : undefined}
-                  docType={d}
-                  documents={documents}
-                  userId={userId || ""}
-                  clientName={clientName}
-                  activeBusinessId={activeBusinessId}
-                  activeDealId={activeDealId}
-                  onUploadComplete={() => fetchDocuments(userId || "", true)}
-                  onDelete={handleDelete}
-                  onEdit={d => set_renaming_file({ id: d.id, label: d.custom_label || d.name })}
-                  onToggleFavorite={() => {}}
-                  onDownload={handleDownload}
-                  onPreview={d => set_preview_modal({ isOpen: true, doc: d })}
-                  isApproved={d.isApproved}
-                  isRejected={d.isRejected}
-                  documentGroups={documentGroups}
-                  onGroupCreated={addDocumentGroup}
-                />
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
+      {coreDocs.length > 0 && renderSection("Required", coreDocs, true)}
+      {addDocs.length > 0 &&
+        renderSection("Also requested", addDocs, coreDocs.length === 0)}
 
       <DocumentPreviewModal
         isOpen={preview_modal.isOpen}
         onClose={() => set_preview_modal({ isOpen: false, doc: null })}
         docName={preview_modal.doc?.custom_label || preview_modal.doc?.name || ""}
-        storagePath={preview_modal.doc?.storage_path || ""}
+        documentId={preview_modal.doc?.id || ""}
         fileType={preview_modal.doc?.type}
         onRename={preview_modal.doc ? () => set_renaming_file({
           id: preview_modal.doc!.id,

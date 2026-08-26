@@ -45,6 +45,42 @@ export default async function AdminReferralPartnersPage() {
     )
     .order("name", { ascending: true });
 
+  // Deal-desk compliance, read SEPARATELY and allowed to fail.
+  //
+  // These four columns arrive with migration 20260825. PostgREST rejects the
+  // WHOLE select if one column is unknown, so folding them into the query above
+  // would turn "the migration hasn't run yet" into "the partner list is empty"
+  // — a blank admin page with no clue why. Apart they degrade to "no paperwork
+  // recorded", which is exactly what is true before the migration runs.
+  const complianceById = new Map<
+    string,
+    {
+      w9_signed_at: string | null;
+      voided_check_uploaded_at: string | null;
+      voided_check_filename: string | null;
+      onboarding_completed_at: string | null;
+    }
+  >();
+  const { data: compliance, error: complianceErr } = await db
+    .from("referral_partners")
+    .select(
+      "id, w9_signed_at, voided_check_uploaded_at, voided_check_filename, onboarding_completed_at"
+    );
+  if (complianceErr) {
+    console.error(
+      "[referral-partners] compliance columns unavailable — run migration 20260825:",
+      complianceErr.message
+    );
+  }
+  for (const c of compliance ?? []) {
+    complianceById.set(c.id, {
+      w9_signed_at: c.w9_signed_at ?? null,
+      voided_check_uploaded_at: c.voided_check_uploaded_at ?? null,
+      voided_check_filename: c.voided_check_filename ?? null,
+      onboarding_completed_at: c.onboarding_completed_at ?? null,
+    });
+  }
+
   // Per-partner performance, computed here rather than per row: two reads for
   // the whole page instead of two per partner.
   const { data: attributed } = await db
@@ -98,6 +134,13 @@ export default async function AdminReferralPartnersPage() {
       invited_at: r.invited_at ?? null,
       password_set_at: r.password_set_at ?? null,
       last_login_at: r.last_login_at ?? null,
+      // Deal-desk compliance (migration 20260825). Null on every referrals-only
+      // partner — they have no paperwork to do — and null for everyone until
+      // the migration runs.
+      w9_signed_at: complianceById.get(r.id)?.w9_signed_at ?? null,
+      voided_check_uploaded_at: complianceById.get(r.id)?.voided_check_uploaded_at ?? null,
+      voided_check_filename: complianceById.get(r.id)?.voided_check_filename ?? null,
+      onboarding_completed_at: complianceById.get(r.id)?.onboarding_completed_at ?? null,
       referral_count: counts.total,
       funded_count: counts.funded,
     };

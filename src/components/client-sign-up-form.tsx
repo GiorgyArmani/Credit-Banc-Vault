@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -35,6 +35,7 @@ import { addManualFundingApplication } from "@/app/advisor/dashboard/clients/[id
 import { useErrorDialog } from "@/components/error-dialog";
 import { FollowersPicker } from "@/components/followers-picker";
 import { FUNDING_OPTIONS, LOAN_TYPES } from "@/data/loan-types";
+import { packageForLoanTypes, FALLBACK_DOCUMENT_PACKAGE } from "@/data/program-document-packages";
 
 
 // Estados de EE.UU.
@@ -75,17 +76,6 @@ const FUNDING_URGENCY = [
 // Document options for tracking requested documents
 // Each document will generate a GHL tag: "requested_{doc_name}"
 // When uploaded, tag changes to: "submitted_{doc_name}"
-const DOC_OPTIONS = [
-  "Business Bank Statements",
-  "Business/Personal Tax Returns",
-  "Profit & Loss Statement",
-  "Balance Sheet",
-  "Debt Schedule",
-  "A/R Report",
-  "Driver's License",
-  "Voided Check",
-] as const;
-
 // Types
 type Advisor = {
   id: string;
@@ -173,14 +163,6 @@ export default function ClientSignupForm() {
   const [avg_annual_revenue, set_avg_annual_revenue] = useState("");
 
 
-
-  // Helper function to toggle document selection
-  // Adds or removes documents from the requested list
-  const toggle_document = (doc: string) => {
-    set_documents_requested((prev) =>
-      prev.includes(doc) ? prev.filter((d) => d !== doc) : [...prev, doc]
-    );
-  };
 
   // Helper to toggle a loan type in the multi-select
   const toggle_loan_type = (type: string) => {
@@ -364,12 +346,39 @@ export default function ClientSignupForm() {
     set_follower_advisor_ids(prev => prev.filter(id => id !== advisor_id));
   }, [advisor_id]);
 
-  // ===== Documents Requested =====
-  // Tracks which documents are requested from the client
-  // Each selected document will generate a "requested_{doc}" tag in GHL
-  const [documents_requested, set_documents_requested] = useState<string[]>([]);
-  // Bank statements only: how many months to request (others ignore it).
-  const [statement_months, set_statement_months] = useState(12);
+  /**
+   * DOCUMENTS ARE DECIDED, NOT PICKED.
+   *
+   * The funding products chosen in step 3 ARE the document request — see
+   * @/data/program-document-packages. There is no document picker on this form
+   * any more, and no per-document state to carry: what a client gets asked for
+   * must not depend on who filled the form in, which is the entire reason the
+   * packages exist. Anything extra is requested later from the client's vault,
+   * where staff are looking at the real file instead of guessing up front.
+   *
+   * "Other" is the one product with no package of its own; on its own it falls
+   * back to the baseline rather than creating a vault with an EMPTY request.
+   */
+  const program_package = useMemo(
+    () => packageForLoanTypes(proposed_loan_types),
+    [proposed_loan_types]
+  );
+
+  const document_codes = useMemo(
+    () =>
+      program_package.codes.length > 0
+        ? program_package.codes
+        : [...FALLBACK_DOCUMENT_PACKAGE.codes],
+    [program_package]
+  );
+
+  /**
+   * Months of bank statements to request. Comes from the product package (12
+   * for nearly every product) rather than from a control on the form — one
+   * fewer decision, and it cannot disagree with the package it belongs to.
+   */
+  const statement_months =
+    program_package.statementMonths ?? FALLBACK_DOCUMENT_PACKAGE.statementMonths ?? 12;
 
   // ===== Advisor Context & Success State =====
   // Detects if form is being used by an advisor (vs public client signup)
@@ -484,18 +493,6 @@ export default function ClientSignupForm() {
     return Math.abs(total - 100) < 0.01;
   };
 
-  // Mapping of document labels to their internal codes (must match vault.tsx)
-  const DOC_TAG_MAP: Record<string, string> = {
-    "Business Bank Statements": "business_bank_statements",
-    "Business/Personal Tax Returns": "tax_returns",
-    "Profit & Loss Statement": "profit_loss",
-    "Balance Sheet": "balance_sheets",
-    "Debt Schedule": "debt_schedule",
-    "A/R Report": "ar_report",
-    "Driver's License": "drivers_license",
-    "Voided Check": "voided_check",
-  };
-
   // Helper function to generate GHL (Go High Level) tags based on application flags
   // These tags help categorize and flag risk factors in the CRM
   const generate_ghl_tags = () => {
@@ -533,18 +530,12 @@ export default function ClientSignupForm() {
     // Each requested document gets a "requested_{doc_code}" tag
     // When the document is uploaded, the tag should be changed to "submitted_{doc_code}"
     // and the "requested_" tag should be removed
-    documents_requested.forEach((doc) => {
-      const doc_code = DOC_TAG_MAP[doc];
-      if (doc_code) {
-        tags.push(`requested_${doc_code}`);
-      } else {
-        // Fallback for unknown documents (shouldn't happen if map is complete)
-        const tag_name = doc
-          .toLowerCase()
-          .replace(/[^a-z0-9\s]/g, '')
-          .replace(/\s+/g, '_');
-        tags.push(`requested_${tag_name}`);
-      }
+    //
+    // Straight off the codes now. The old label->code map only knew the eight
+    // documents the hardcoded picker offered, so anything outside it fell to a
+    // slugify fallback that invented tags GHL had never heard of.
+    document_codes.forEach((code) => {
+      tags.push(`requested_${code}`);
     });
 
     return tags;
@@ -592,11 +583,12 @@ export default function ClientSignupForm() {
         throw new Error("Enter a valid 10-digit US phone number.");
       }
 
-      // Require at least one requested document. Creating a vault with an empty
-      // request leaves the client with nothing to upload and produces the
-      // "empty doc request" clients — block it at the source.
-      if (documents_requested.length === 0) {
-        throw new Error("Select at least one document to request before creating the client.");
+      // A vault with an empty document request leaves the client nothing to
+      // upload. That can no longer happen from the form — the product package
+      // decides the list and falls back to the baseline — but the check stays
+      // as the last guard before a client is created.
+      if (document_codes.length === 0) {
+        throw new Error("No document package resolved for the selected products — pick a funding product.");
       }
 
       // Validar ownership percentages
@@ -709,8 +701,10 @@ export default function ClientSignupForm() {
         referral_partner,
 
         // ===== Documents Requested =====
-        // List of documents that need to be collected from the client
-        documents_requested,
+        // required_documents.code values, resolved from the product package
+        // plus the advisor's edits. Codes rather than labels: the route no
+        // longer has to guess which document a display string meant.
+        document_codes,
         // Months of bank statements to request (only applies to that doc).
         statement_months,
 
@@ -1133,10 +1127,23 @@ export default function ClientSignupForm() {
                           );
                         })}
                       </div>
+                      {/* What the product choice already decided. Read-only on
+                          purpose — the packages exist so nobody assembles a
+                          document list by hand. Extras are requested from the
+                          client's vault once staff can see the real file. */}
                       {proposed_loan_types.length > 0 && (
-                        <p className="mt-2 text-xs font-bold text-emerald-600">
-                          Selected: {proposed_loan_types.join(" · ")}
-                        </p>
+                        <div className="mt-3 flex items-start gap-3 rounded-2xl border border-emerald-100 bg-white px-5 py-4">
+                          <FileText className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
+                          <p className="text-xs font-bold leading-relaxed text-emerald-900/60">
+                            <span className="font-black uppercase tracking-widest text-emerald-700">
+                              {document_codes.length} document{document_codes.length !== 1 ? "s" : ""} will be requested
+                            </span>{" "}
+                            — the standard package for {proposed_loan_types.join(" + ")}
+                            {statement_months ? `, with ${statement_months} months of bank statements` : ""}.
+                            Need anything else? Request it from the client&apos;s vault after the file is
+                            created.
+                          </p>
+                        </div>
                       )}
                     </div>
 
@@ -2008,70 +2015,6 @@ export default function ClientSignupForm() {
                       )}
                     </div>
                   )}
-
-                  {/* Documents Requested Section */}
-                  {/* This section tracks which documents need to be collected from the client */}
-                  {/* Each selected document will generate a "requested_{doc_name}" tag in GHL */}
-                  <div className="space-y-4">
-                    <div className="bg-emerald-50/50 rounded-3xl p-8 mb-4">
-                      <h3 className="text-xl font-black text-emerald-950 uppercase tracking-tighter mb-2">Documents Requested</h3>
-                      <p className="text-emerald-900/40 font-bold">
-                        Select all documents that need to be collected from this client.
-                      </p>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 bg-white/50 p-6 md:p-8 rounded-[2.5rem] border border-emerald-50">
-                      {DOC_OPTIONS.map((doc) => (
-                        <div
-                          key={doc}
-                          className="flex items-start space-x-3 p-3 hover:bg-white rounded-lg transition-colors border border-transparent hover:border-blue-200"
-                        >
-                          <Checkbox
-                            id={`doc-${doc}`}
-                            checked={documents_requested.includes(doc)}
-                            onCheckedChange={() => toggle_document(doc)}
-                            className="mt-1"
-                          />
-                          <div className="flex-1">
-                            <Label
-                              htmlFor={`doc-${doc}`}
-                              className="text-sm text-emerald-950 cursor-pointer leading-tight font-bold"
-                            >
-                              {doc}
-                            </Label>
-                            {doc === "Business Bank Statements" && documents_requested.includes(doc) && (
-                              <select
-                                value={statement_months}
-                                onChange={(e) => set_statement_months(parseInt(e.target.value))}
-                                className="mt-2 block text-xs font-bold border border-emerald-100 rounded-md px-2 py-1 bg-white text-emerald-950"
-                              >
-                                {[6, 12, 18, 24].map((m) => (
-                                  <option key={m} value={m}>{m} months</option>
-                                ))}
-                              </select>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* Selected count, or a required-warning when none are picked.
-                        At least one document is mandatory — handle_submit blocks
-                        creation otherwise, so surface the requirement here too. */}
-                    {documents_requested.length > 0 ? (
-                      <div className="bg-emerald-500 rounded-2xl p-4 text-center">
-                        <p className="text-sm font-black uppercase tracking-widest text-white">
-                          {documents_requested.length} document{documents_requested.length !== 1 ? 's' : ''} requested
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="bg-red-50 border border-red-200 rounded-2xl p-4 text-center">
-                        <p className="text-sm font-black uppercase tracking-widest text-red-900">
-                          Select at least one document — required to create the client
-                        </p>
-                      </div>
-                    )}
-                  </div>
 
                   {/* Advisor Selection - Only show if NOT an advisor (advisors are auto-assigned) */}
                   {!is_advisor_context && (

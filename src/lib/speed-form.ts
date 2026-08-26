@@ -22,6 +22,7 @@ import { ghlAddTags } from '@/lib/ghl-api';
 import { generateDocUploadMagicLink } from '@/lib/magic-link';
 import { syncOutstandingDocuments } from '@/lib/outstanding-documents';
 import { send_speed_doc_request_email } from '@/lib/email';
+import { packageForLoanTypes } from '@/data/program-document-packages';
 
 export async function releaseSpeedFormDocs(
   supabase: SupabaseClient,
@@ -78,6 +79,20 @@ export async function releaseSpeedFormDocs(
   }
 
   // 3. Seed the dynamic document requests (same shape as /api/client-signup).
+  //
+  // The bank-statement period comes from the product package rather than from a
+  // field on the speed form. The speed form deliberately has no month picker —
+  // it is filled in on a call — and the products already state their own period
+  // (12 months for nearly all of them). Deriving it here from the loan type the
+  // advisor picked keeps the request consistent with the package they saw,
+  // without parking a second value in the vault until the signature lands.
+  const statementMonths = packageForLoanTypes(
+    String(vault.proposed_loan_type || '')
+      .split(',')
+      .map(t => t.trim())
+      .filter(Boolean)
+  ).statementMonths;
+
   const dynamicDocRecords = docDefinitions.map(doc => ({
     user_id: vault.user_id,
     document_id: doc.id,
@@ -85,6 +100,8 @@ export async function releaseSpeedFormDocs(
     is_active: true,
     requested_via: 'speed_form_signature',
     requested_at: new Date().toISOString(),
+    // Bank statements carry a per-request month count; other docs ignore it.
+    statement_months: doc.code === 'business_bank_statements' ? statementMonths : null,
   }));
 
   const { error: insertErr } = await supabase

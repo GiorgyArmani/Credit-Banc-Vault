@@ -1,18 +1,27 @@
 // src/app/partner/welcome/page.tsx
 //
-// Step 2 of referral-partner onboarding: magic link → CHOOSE A PASSWORD → portal.
+// The invite link's landing page, for both kinds of referral partner.
 //
-// The partner already has a session by the time they get here (the invite link
-// signed them in), so this page isn't an auth gate — it's the one-time step that
-// turns a link-only account into one they can log into normally at /auth/login.
+//   referral_partner  — magic link → choose a password → portal. Same as it
+//                       always was: they share a link, there is no paperwork.
+//   partner_advisor   — magic link → password → CONTACT NUMBER → SIGN A W-9 →
+//                       UPLOAD A VOIDED CHECK → deal desk. They submit deals and
+//                       get paid on funded files, so we need a W-9 on file and
+//                       somewhere to send the money before the desk opens — and
+//                       their clients see them as their advisor, so we need a
+//                       number to put on the client's contact card.
 //
-// Deliberately forwards straight to the dashboard if they've already done it, so
-// the invite link keeps working as a plain sign-in link on every later click.
+// A gated partner_advisor is intercepted by /partner/layout.tsx and never
+// reaches this component — the layout renders the same screen as a takeover on
+// every /partner/* URL, so there is nowhere to click around it. This page is
+// what a referrals-only partner lands on, and what a finished partner bounces
+// off when they reuse their invite link as a sign-in link.
 
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
-import { PartnerWelcomeForm } from "./_components/partner-welcome-form";
+import { getPartnerOnboardingState, syncPartnerW9 } from "@/lib/partner-onboarding";
+import { isValidUsPhone } from "@/lib/phone";
+import { PartnerOnboardingScreen } from "./_components/partner-onboarding-screen";
 
 export const dynamic = "force-dynamic";
 
@@ -24,55 +33,43 @@ export default async function PartnerWelcomePage() {
 
   if (!user) redirect("/auth/login");
 
-  const db = createAdminClient();
-  const { data: partner } = await db
-    .from("referral_partners")
-    .select("id, name, password_set_at, portal_enabled")
-    .eq("user_id", user.id)
-    .maybeSingle();
+  const partner = await getPartnerOnboardingState(user.id);
 
   // Not a partner (an admin poking around, or a login that was never linked).
   // The dashboard renders its own explanation for that case.
   if (!partner) redirect("/partner/dashboard");
-  if (partner.password_set_at) redirect("/partner/dashboard");
+
+  const isDealDesk = partner.deal_desk_enabled === true;
+
+  // Referrals-only partners are done the moment they have a password.
+  if (!isDealDesk && partner.password_set_at) redirect("/partner/dashboard");
+  // Deal-desk partners are done when the compliance gate says so.
+  if (isDealDesk && partner.onboarding_completed_at) redirect("/partner/deals");
+
+  // Catch the partner who signed in SignWell and then closed the tab: there is
+  // no webhook for the W-9, so a page load is what notices. Cheap — it no-ops
+  // unless a document exists and is still unsigned.
+  let w9Signed = !!partner.w9_signed_at;
+  if (isDealDesk && !w9Signed && partner.w9_document_id) {
+    const { signed } = await syncPartnerW9(partner);
+    w9Signed = signed;
+  }
 
   const firstName = (partner.name || "").trim().split(/\s+/)[0] || "there";
 
   return (
-    <div className="max-w-xl mx-auto px-4 py-14 md:py-20">
-      <div className="rounded-3xl border border-black/5 bg-white p-8 md:p-10 shadow-sm">
-        <p className="text-xs font-bold uppercase tracking-[0.2em] text-cb-mint mb-3">
-          Referral Partner Program
-        </p>
-        <h1 className="font-manrope text-3xl font-extrabold tracking-tight text-cb-ink">
-          Welcome, {firstName}.
-        </h1>
-        <p className="mt-3 text-[15px] leading-relaxed text-cb-ink/60">
-          One thing before you go in: choose a password. After this you can sign in
-          any time at{" "}
-          <span className="font-semibold text-cb-ink/80">vault.creditbanc.io</span>{" "}
-          without waiting on an email link.
-        </p>
-
-        <div className="mt-8">
-          <PartnerWelcomeForm email={user.email ?? ""} />
-        </div>
-
-        <ul className="mt-9 space-y-2.5 border-t border-black/5 pt-7 text-sm text-cb-ink/55">
-          <li className="flex gap-2.5">
-            <span className="text-cb-mint font-bold">1.</span>
-            Share your personal referral link.
-          </li>
-          <li className="flex gap-2.5">
-            <span className="text-cb-mint font-bold">2.</span>
-            We take it from there — paperwork, lenders, follow-up.
-          </li>
-          <li className="flex gap-2.5">
-            <span className="text-cb-mint font-bold">3.</span>
-            Track every referral&apos;s progress from your dashboard.
-          </li>
-        </ul>
-      </div>
-    </div>
+    <PartnerOnboardingScreen
+      email={user.email ?? ""}
+      firstName={firstName}
+      isDealDesk={isDealDesk}
+      passwordSet={!!partner.password_set_at}
+      phone={partner.phone}
+      // A number already on the record satisfies the step, but only if it is a
+      // number we would actually print on a client's contact card. A partial
+      // one typed into the CRM is worse than none — the client dials it.
+      phoneSet={isValidUsPhone(partner.phone)}
+      w9Signed={w9Signed}
+      voidedCheckFilename={partner.voided_check_filename}
+    />
   );
 }

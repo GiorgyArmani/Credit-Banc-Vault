@@ -16,7 +16,7 @@
 // The full 7-step form (client-sign-up-form.tsx) is untouched and remains the
 // standard flow.
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -40,6 +40,7 @@ import {
 } from "lucide-react";
 import { useErrorDialog } from "@/components/error-dialog";
 import { FUNDING_OPTIONS } from "@/data/loan-types";
+import { packageForLoanTypes, FALLBACK_DOCUMENT_PACKAGE } from "@/data/program-document-packages";
 import { ReferralPartnerSelect } from "@/components/referral-partner-select";
 
 // FICO buckets MUST match the "Approximate Credit Score" checkboxes on the
@@ -61,22 +62,12 @@ const US_STATES = [
   'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY',
 ];
 
-// label → required_documents.code (the API receives codes)
-const DOC_OPTIONS: { code: string; label: string }[] = [
-  { code: 'business_bank_statements', label: 'Business Bank Statements' },
-  { code: 'tax_returns', label: 'Business/Personal Tax Returns' },
-  { code: 'profit_loss', label: 'Profit & Loss Statement' },
-  { code: 'balance_sheets', label: 'Balance Sheet' },
-  { code: 'debt_schedule', label: 'Debt Schedule' },
-  { code: 'ar_report', label: 'A/R Report' },
-  { code: 'drivers_license', label: "Driver's License" },
-  { code: 'voided_check', label: 'Voided Check' },
-];
-
+// Two steps, and no document step by design. The documents are decided by the
+// funding products picked in step 2 (@/data/program-document-packages), not by
+// anyone ticking boxes on a call — see the note on `documents_requested`.
 const STEPS = [
   { num: 1, label: "Business", icon: Building2 },
   { num: 2, label: "Funding", icon: DollarSign },
-  { num: 3, label: "Documents", icon: FileText },
 ];
 
 const inputClass = "h-12 rounded-xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-5";
@@ -91,11 +82,11 @@ export default function SpeedClientSignUpForm({ isSetter = false }: { isSetter?:
   // client-sign-up-form.tsx. This form lives at "<base>/clients/new/speed", so
   // splitting on "/clients/new" yields the base for every portal that mounts it.
   const portal_base = pathname?.split("/clients/new")[0] || "/advisor/dashboard";
-  // Setters get a trimmed 2-step form: no document picker and no loan-type
-  // picker. Documents auto-set to business bank statements and the proposed
-  // loan type to "other" — the assigned advisor refines the client afterward.
-  // (Also enforced server-side in /api/client-signup-speed for role=setter.)
-  const steps = isSetter ? STEPS.slice(0, 2) : STEPS;
+  // Setters get the same two steps minus the loan-type picker: the proposed
+  // loan type is auto-set to "other" and the documents to business bank
+  // statements, and the assigned advisor refines the file afterward. (Also
+  // enforced server-side in /api/client-signup-speed for role=setter.)
+  const steps = STEPS;
   const [step, set_step] = useState(1);
   const [submitting, set_submitting] = useState(false);
   const { showError } = useErrorDialog();
@@ -124,11 +115,13 @@ export default function SpeedClientSignUpForm({ isSetter = false }: { isSetter?:
   // Internal referral partner — who referred this deal (optional).
   const [referral_partner, set_referral_partner] = useState<string | null>(null);
 
-  // ===== Step 3 — Documents Requested (released only after the client signs) =====
-  // Setters skip this step; default to business bank statements only.
-  const [documents_requested, set_documents_requested] = useState<string[]>(
-    isSetter ? ["business_bank_statements"] : []
-  );
+  // ===== Documents — decided, not picked =====
+  // There is no document step. The funding products chosen above ARE the
+  // document request (@/data/program-document-packages), which is the whole
+  // reason the packages exist: on a call nobody should be reading fifty
+  // checkboxes, and what a client got asked for should not depend on who filled
+  // the form in. Anything extra is requested later from the client's vault,
+  // where the advisor is looking at the actual file instead of guessing.
 
   // ===== Success state =====
   const [show_success, set_show_success] = useState(false);
@@ -137,11 +130,26 @@ export default function SpeedClientSignUpForm({ isSetter = false }: { isSetter?:
   const [created_magic_link, set_created_magic_link] = useState("");
   const [link_copied, set_link_copied] = useState(false);
 
-  const toggle_document = (code: string) => {
-    set_documents_requested((prev) =>
-      prev.includes(code) ? prev.filter((d) => d !== code) : [...prev, code]
-    );
-  };
+  /**
+   * What the client will be asked for: the union of the selected products'
+   * packages. No manual add/remove state, because there is nothing to edit —
+   * see the note above.
+   *
+   * Setters do not pick a product, so their file opens with bank statements
+   * only. A product with no package of its own ("Other") falls back to the
+   * baseline rather than creating a client with an EMPTY request.
+   */
+  const program_package = useMemo(
+    () => packageForLoanTypes(proposed_loan_types),
+    [proposed_loan_types]
+  );
+
+  const documents_requested = useMemo(() => {
+    if (isSetter) return ["business_bank_statements"];
+    return program_package.codes.length > 0
+      ? program_package.codes
+      : [...FALLBACK_DOCUMENT_PACKAGE.codes];
+  }, [isSetter, program_package]);
 
   const toggle_loan_type = (type: string) => {
     set_proposed_loan_types((prev) =>
@@ -192,9 +200,6 @@ export default function SpeedClientSignUpForm({ isSetter = false }: { isSetter?:
       if (missing.length > 0) return `Please complete: ${missing.join(", ")}`;
       // Setters don't pick a loan type — it's auto-set to "other".
       if (!isSetter && proposed_loan_types.length === 0) return "Select at least one proposed loan type.";
-    }
-    if (n === 3) {
-      if (documents_requested.length === 0) return "Select at least one document to request.";
     }
     return null;
   };
@@ -582,86 +587,27 @@ export default function SpeedClientSignUpForm({ isSetter = false }: { isSetter?:
                           );
                         })}
                       </div>
+
+                      {/* What the product choice already decided. Read-only on
+                          purpose — the packages exist so nobody picks documents
+                          on a call. Extras are requested from the client's vault
+                          once the advisor is looking at the real file. */}
+                      {proposed_loan_types.length > 0 && (
+                        <div className="mt-4 flex items-start gap-3 rounded-2xl border border-emerald-100 bg-white px-5 py-4">
+                          <FileText className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
+                          <p className="text-xs font-bold leading-relaxed text-emerald-900/60">
+                            <span className="font-black uppercase tracking-widest text-emerald-700">
+                              {documents_requested.length} document{documents_requested.length !== 1 ? "s" : ""} will be requested
+                            </span>{" "}
+                            automatically once the client signs — the standard package for{" "}
+                            {proposed_loan_types.join(" + ")}. Need anything else? Request it from the
+                            client&apos;s vault after the file is created.
+                          </p>
+                        </div>
+                      )}
                     </div>
                     )}
                   </div>
-
-                  <div className="flex justify-between pt-8">
-                    <Button
-                      onClick={go_back}
-                      variant="outline"
-                      className="border-2 border-emerald-100 text-emerald-950 font-black rounded-2xl px-10 py-6 hover:bg-emerald-50 transition-all active:scale-95"
-                    >
-                      <ChevronLeft className="mr-2 w-5 h-5" />
-                      Back
-                    </Button>
-                    {isSetter ? (
-                      // Setter form ends at step 2 — submit here (no documents step).
-                      <Button
-                        onClick={handle_submit}
-                        disabled={submitting}
-                        className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black rounded-2xl px-12 py-6 text-lg shadow-xl shadow-emerald-500/20 transition-all active:scale-95 disabled:opacity-60"
-                      >
-                        {submitting ? (
-                          "Creating Client..."
-                        ) : (
-                          <span className="flex items-center gap-2">
-                            <Zap className="w-5 h-5" />
-                            Create Client &amp; Get Link
-                          </span>
-                        )}
-                      </Button>
-                    ) : (
-                      <Button
-                        onClick={go_next}
-                        className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black rounded-2xl px-10 py-6 shadow-xl shadow-emerald-500/20 transition-all active:scale-95"
-                      >
-                        Next: Documents
-                        <ChevronRight className="ml-2 w-5 h-5" />
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* ===== STEP 3: DOCUMENTS NEEDED ===== */}
-              {step === 3 && (
-                <div className="space-y-6 animate-fade-in">
-                  <div className="bg-emerald-50/50 rounded-2xl p-5 mb-6">
-                    <h3 className="text-xl font-black text-emerald-950 uppercase tracking-tighter mb-2">Documents Needed</h3>
-                    <p className="text-emerald-900/40 font-bold">Requested automatically AFTER the client signs the application.</p>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {DOC_OPTIONS.map((doc) => {
-                      const selected = documents_requested.includes(doc.code);
-                      return (
-                        <button
-                          key={doc.code}
-                          type="button"
-                          onClick={() => toggle_document(doc.code)}
-                          className={`flex items-center gap-2 px-4 py-3 rounded-2xl border text-sm font-black transition-all duration-200 ${selected
-                            ? "bg-emerald-500 border-emerald-500 text-white shadow-lg shadow-emerald-500/20"
-                            : "bg-white border-emerald-100 text-emerald-950 hover:border-emerald-300"
-                            }`}
-                        >
-                          <span className={`w-4 h-4 rounded-md border-2 flex items-center justify-center shrink-0 transition-colors ${selected ? "bg-white border-white" : "border-emerald-200"}`}>
-                            {selected && (
-                              <svg className="w-2.5 h-2.5 text-emerald-500" viewBox="0 0 10 8" fill="none">
-                                <path d="M1 4l3 3 5-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                              </svg>
-                            )}
-                          </span>
-                          {doc.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <p className="text-xs font-bold text-emerald-900/40 flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4 shrink-0" />
-                    The document request email (including the proposed loan type and funding amount) is sent
-                    automatically once the client signs — nothing goes out before that.
-                  </p>
 
                   <div className="flex justify-between pt-8">
                     <Button
@@ -689,6 +635,7 @@ export default function SpeedClientSignUpForm({ isSetter = false }: { isSetter?:
                   </div>
                 </div>
               )}
+
               </div>
             </div>
           </CardContent>

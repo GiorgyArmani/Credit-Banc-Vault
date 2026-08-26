@@ -1,4 +1,27 @@
 // src/app/dashboard/page.tsx
+//
+// The client portal home.
+//
+// LAYOUT: one work column plus a context rail. The client is here to do exactly
+// one thing — hand over documents — so the checklist is the page, and it starts
+// at the top where it can be seen without scrolling. Everything the client only
+// needs to REFERENCE (who their advisor is, where the file is in the pipeline,
+// what we have on record about their business) lives in a sticky rail beside
+// the work rather than stacked above it.
+//
+// This replaced four `CollapsibleSection` wrappers, each of which wrapped a
+// `Card` that repeated the same title — a section header, a card header, and a
+// chevron for every one of four blocks, with Expand-all / Collapse-all controls
+// on top to manage the mess. The document vault, the only part a client came
+// for, was below all of it. Collapsing is gone entirely: nothing here is long
+// enough to need folding away now that the advisor card is a rail card instead
+// of a full-height portrait.
+//
+// The tour anchors (#tour-welcome, #tour-advisor, #tour-profile, #tour-progress,
+// #tour-vault, and #tour-checklist / #tour-upload inside the vault) all still
+// resolve — website-tour.tsx targets them by id and silently skips a step whose
+// element is missing.
+
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
@@ -9,18 +32,14 @@ import { MyScoreIQCarousel } from "@/components/myscoreiq-carousel";
 import ProfileDisplay from "@/components/profile-display";
 import Vault from '@/components/vault';
 import TemplatesView from '@/components/templates-view';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Shield, Clock, Sparkles } from 'lucide-react';
 import { useOnboardingStatus } from '@/components/onboarding/use-onboarding-status';
 import WebsiteTour from '@/components/tour/website-tour';
-import { Button } from '@/components/ui/button';
-import { LoanPipelineFull } from '@/components/loan-pipeline-status';
+import { LoanPipelineRail, PIPELINE_STEPS } from '@/components/loan-pipeline-status';
 // Read-only: the client dashboard shows the step the file is on. Clients have no
 // pipeline write access, so the staff-only updateLoanStatus is not imported here.
 import { getClientPipelineHistory, PipelineStatusEntry, LoanStatus } from '@/app/actions/pipeline';
 import { BusinessTabStrip, type BusinessTab } from '@/app/advisor/dashboard/clients/[id]/_components/business-tab-strip';
-import { CollapsibleSection, broadcast_toggle_all } from '@/app/advisor/dashboard/clients/[id]/_components/collapsible-section';
 import { PendingContractsBanner } from '@/components/onboarding/pending-contracts-banner';
 import { PendingContractsModal } from '@/components/onboarding/pending-contracts-modal';
 
@@ -28,16 +47,16 @@ import { Suspense } from 'react';
 
 /**
  * DashboardPage Component
- * 
+ *
  * Main entry point for the dashboard, wrapped in Suspense for search params compliance.
  */
 export default function DashboardPage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+      <div className="flex min-h-screen items-center justify-center bg-cb-cream">
         <div className="flex flex-col items-center gap-4">
-          <div className="h-12 w-12 rounded-full border-4 border-emerald-500 border-t-transparent animate-spin" />
-          <p className="text-slate-600 animate-pulse">Initializing Dashboard...</p>
+          <div className="h-10 w-10 animate-spin rounded-full border-[3px] border-cb-mint border-t-transparent" />
+          <p className="text-sm text-cb-ink/50">Loading your portal…</p>
         </div>
       </div>
     }>
@@ -192,52 +211,67 @@ function DashboardContent() {
     return () => clearTimeout(timer);
   }, [searchParams, allComponentsReady]);
 
-  return (
-    <div className="min-h-screen bg-cb-cream relative overflow-hidden">
-      {/* subtle mint glow */}
-      <div className="absolute top-0 right-0 w-[50%] h-[50%] bg-emerald-50/50 blur-[120px] rounded-full pointer-events-none" />
-      <div className="absolute bottom-0 left-0 w-[40%] h-[40%] bg-blue-50/30 blur-[120px] rounded-full pointer-events-none" />
+  const greetingName = clientName || userEmail || null;
+  const statusLabel =
+    PIPELINE_STEPS.find((s) => s.status === currentStatus)?.shortLabel ??
+    currentStatus.replace(/_/g, ' ');
 
+  return (
+    <div className="min-h-screen bg-cb-cream">
       <WebsiteTour />
 
-      {/* MAIN CONTENT SECTION */}
-      <div className="container mx-auto px-4 py-8 space-y-8 animate-in fade-in-50 duration-500">
+      <div className="mx-auto max-w-[1400px] px-4 py-8 md:px-8 md:py-10">
 
-        {/* WELCOME & ACTIONS HEADER */}
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 border-b border-emerald-50 pb-8">
-          <div id="tour-welcome">
-            <h2 className="text-4xl md:text-5xl font-black text-emerald-950 mb-3 tracking-tighter uppercase">
-              Welcome{clientName ? `, ${clientName}` : (userEmail ? `, ${userEmail}` : '')}!
-            </h2>
-            <p className="text-emerald-900/60 text-lg font-bold">
-              This is your home base. Manage documents, access templates, and keep everything in one place until underwriting is complete.
+        {/* ── Header ────────────────────────────────────────────────────────
+            One line, not a hero. The old 5xl uppercase block plus a paragraph
+            of explanation pushed the actual work below the fold on a laptop. */}
+        <header
+          id="tour-welcome"
+          className="flex flex-col gap-4 pb-6 sm:flex-row sm:items-center sm:justify-between"
+        >
+          {/* Tab-aware. The status chip, the SLA and the tour describe the
+              application, not the app, so they belong to the vault tab only —
+              on Templates they were answering a question nobody had asked. */}
+          <div className="min-w-0">
+            <h1 className="font-manrope text-2xl font-extrabold tracking-tight text-cb-ink md:text-3xl">
+              {activeTab === 'templates'
+                ? 'Document templates'
+                : greetingName
+                  ? `Welcome, ${greetingName}`
+                  : 'Welcome'}
+            </h1>
+            <p className="mt-1 text-sm text-cb-ink/50">
+              {activeTab === 'templates'
+                ? 'Download a blank, fill it in, then upload it back in your vault.'
+                : "Upload what underwriting asked for and we'll take it from there."}
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2">
-              
-              <div className="hidden xl:flex items-center text-slate-600 text-sm gap-3">
-                <span className="inline-flex items-center gap-1">
-                  <Shield className="h-4 w-4" /> Secure
-                </span>
-                <span className="inline-flex items-center gap-1">
-                  <Clock className="h-4 w-4" /> 24–48h underwriting
-                </span>
-              </div>
-            </div>
-
-            <Button
-              variant="outline"
-              size="sm"
+          <div
+            className={`flex shrink-0 flex-wrap items-center gap-2 ${
+              activeTab === 'templates' ? 'hidden' : ''
+            }`}
+          >
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-cb-mint/15 px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-emerald-700">
+              <span className="h-1.5 w-1.5 rounded-full bg-cb-mint" />
+              {statusLabel}
+            </span>
+            <span className="hidden items-center gap-1.5 rounded-full border border-black/5 bg-white px-3 py-1.5 text-[11px] font-semibold text-cb-ink/50 lg:inline-flex">
+              <Shield className="h-3.5 w-3.5" /> Secure
+            </span>
+            <span className="hidden items-center gap-1.5 rounded-full border border-black/5 bg-white px-3 py-1.5 text-[11px] font-semibold text-cb-ink/50 lg:inline-flex">
+              <Clock className="h-3.5 w-3.5" /> 24–48h underwriting
+            </span>
+            <button
+              type="button"
               onClick={() => (window as any).startWebsiteTour?.()}
-              className="bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 flex items-center gap-2 font-bold rounded-full px-5"
+              className="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-white px-3 py-1.5 text-[11px] font-semibold text-cb-ink transition-colors hover:bg-cb-cream"
             >
-              <Sparkles className="h-4 w-4" />
-              Website Tour
-            </Button>
+              <Sparkles className="h-3.5 w-3.5 text-cb-mint" />
+              Take the tour
+            </button>
           </div>
-        </div>
+        </header>
 
         {/* Auto-opening contract-signing modal. Fires on dashboard mount
             when the advisor has added a business with a pending Signwell
@@ -245,125 +279,62 @@ function DashboardContent() {
             client can still complete signing later from the same screen. */}
         <PendingContractsModal clientVaultId={vaultId} />
 
-        {/* CONTENT AREA */}
         {activeTab === 'dashboard' && (
-          <div className="space-y-4">
+          <>
             {/* Pending-contract banner — fallback for when the modal has
                 been dismissed. Same source of truth (usePendingContracts)
                 so the banner reflects the modal's state automatically. */}
             <PendingContractsBanner clientVaultId={vaultId} />
 
-            {/* Section folding controls — broadcasts an event to every
-                CollapsibleSection on the page so the client can blow open or
-                collapse everything in one click. */}
-            <div className="flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => broadcast_toggle_all(true)}
-                className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 hover:text-emerald-600 transition-colors px-3 py-1.5 rounded-lg border border-slate-200 bg-white shadow-sm"
-              >
-                Expand all
-              </button>
-              <button
-                type="button"
-                onClick={() => broadcast_toggle_all(false)}
-                className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 hover:text-emerald-600 transition-colors px-3 py-1.5 rounded-lg border border-slate-200 bg-white shadow-sm"
-              >
-                Collapse all
-              </button>
+            <div className="mt-2 grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+
+              {/* ── Work column ─────────────────────────────────────────── */}
+              <main id="tour-vault" className="min-w-0 space-y-4">
+                {/* Business tabs — only render when the client has multiple
+                    businesses. No "Add" button on the client side (advisor-only). */}
+                <BusinessTabStrip
+                  businesses={businesses}
+                  active_business_id={activeBusinessId}
+                  on_select={setActiveBusinessId}
+                  show_when_single={false}
+                />
+
+                <Vault
+                  clientName={clientName}
+                  onLoad={onVaultLoad}
+                  onChecklist={handleChecklist}
+                  activeBusinessId={activeBusinessId}
+                  activeDealId={businesses.find((b) => b.id === activeBusinessId)?.active_deal_id ?? null}
+                />
+
+                {isVaultSubmitted && <MyScoreIQCarousel />}
+              </main>
+
+              {/* ── Context rail ────────────────────────────────────────────
+                  Sticky on desktop so the advisor's number stays reachable
+                  however far down the checklist the client has scrolled. On
+                  mobile it simply stacks underneath the work, which is the
+                  right order there too. */}
+              <aside className="space-y-4 lg:sticky lg:top-6">
+                <AdvisorDisplay onLoad={onAdvisorLoad} variant="rail" />
+
+                <section
+                  id="tour-progress"
+                  className="rounded-2xl border border-black/5 bg-white p-5 shadow-sm"
+                >
+                  <p className="mb-4 text-[10px] font-bold uppercase tracking-[0.18em] text-cb-gray">
+                    Your application
+                  </p>
+                  <LoanPipelineRail currentStatus={currentStatus} history={pipelineHistory} />
+                </section>
+
+                <ProfileDisplay onLoad={onProfileLoad} variant="rail" />
+              </aside>
             </div>
-
-            <CollapsibleSection
-              clientId={vaultId || 'self'}
-              slug="advisor"
-              title="Your Advisor"
-              defaultOpen
-            >
-              <AdvisorDisplay onLoad={onAdvisorLoad} />
-            </CollapsibleSection>
-
-            <CollapsibleSection
-              clientId={vaultId || 'self'}
-              slug="profile"
-              title="Business Profile"
-              defaultOpen
-            >
-              <ProfileDisplay onLoad={onProfileLoad} />
-            </CollapsibleSection>
-
-            {/* id="tour-progress" anchors the website tour to the pipeline.
-                Wrapped in a plain div (not the CollapsibleSection) so the anchor
-                survives even when the client collapses the section. */}
-            <div id="tour-progress">
-            <CollapsibleSection
-              clientId={vaultId || 'self'}
-              slug="pipeline"
-              title="Application Status"
-              summary={currentStatus ? currentStatus.replace(/_/g, ' ') : undefined}
-              defaultOpen
-            >
-              <Card className="bg-white border-emerald-50 overflow-hidden rounded-[2.5rem] shadow-sm">
-                <CardHeader className="pb-4 pt-10 px-10">
-                  <CardTitle className="text-2xl font-black text-emerald-950 tracking-tighter uppercase">Application Status</CardTitle>
-                  <p className="text-emerald-900/60 font-bold">Track your application progress through our underwriting pipeline.</p>
-                </CardHeader>
-                <CardContent className="px-10 pb-10">
-                  <LoanPipelineFull
-                    currentStatus={currentStatus}
-                    history={pipelineHistory}
-                    showAllSteps={false}
-                  />
-                </CardContent>
-              </Card>
-            </CollapsibleSection>
-            </div>
-
-            {/* id="tour-vault" anchors the tour to the document vault. */}
-            <div id="tour-vault">
-            <CollapsibleSection
-              clientId={vaultId || 'self'}
-              slug="vault"
-              title="Document Vault"
-              defaultOpen
-            >
-              <Card className="bg-white border-emerald-50 overflow-hidden rounded-[2.5rem] shadow-sm">
-                <CardHeader className="pb-0 pt-10 px-10">
-                  <CardTitle className="text-2xl font-black text-emerald-950 tracking-tighter uppercase">DOCUMENT VAULT</CardTitle>
-                </CardHeader>
-                <CardContent className="p-10 pt-6">
-                  {/* Business tabs — only render when the client has multiple
-                      businesses. No "Add" button on the client side (advisor-only). */}
-                  <BusinessTabStrip
-                    businesses={businesses}
-                    active_business_id={activeBusinessId}
-                    on_select={setActiveBusinessId}
-                    show_when_single={false}
-                  />
-                  <Vault
-                    clientName={clientName}
-                    onLoad={onVaultLoad}
-                    onChecklist={handleChecklist}
-                    activeBusinessId={activeBusinessId}
-                    activeDealId={businesses.find((b) => b.id === activeBusinessId)?.active_deal_id ?? null}
-                  />
-                </CardContent>
-              </Card>
-            </CollapsibleSection>
-            </div>
-
-            {isVaultSubmitted && <MyScoreIQCarousel />}
-          </div>
+          </>
         )}
 
-        {activeTab === 'templates' && (
-          <div className="space-y-8 animate-in slide-in-from-bottom-4 duration-500">
-            <div className="border-b border-emerald-50 pb-6">
-              <h3 className="text-3xl font-black text-emerald-950 uppercase tracking-tighter">Document Templates</h3>
-              <p className="text-emerald-900/60 font-bold mt-2">Download the templates you need to complete your application.</p>
-            </div>
-            <TemplatesView />
-          </div>
-        )}
+        {activeTab === 'templates' && <TemplatesView />}
 
       </div>
     </div>
