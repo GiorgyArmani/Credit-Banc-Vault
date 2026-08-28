@@ -1,7 +1,7 @@
 // src/lib/slack-api.ts
 //
 // Slack integration for UW deal channels. One token: SLACK_BOT_TOKEN (xoxb,
-// scopes channels:manage + chat:write + chat:write.public). The bot creates the
+// scopes channels:manage + chat:write + chat:write.public + files:write). The bot creates the
 // channel, so it is already a member and can post without being invited.
 //
 // This deliberately avoids the admin.conversations.* API. Those methods require
@@ -189,19 +189,71 @@ export async function slackPostMessage(channelId: string, text: string): Promise
 }
 
 /**
- * Uploads a file to a channel and posts it with `comment` as the message body,
- * so the summary text and the PDF land as ONE Slack post (not two).
+ * Uploads one or more files to a channel and posts them with `comment` as the
+ * message body, so the summary text and the files land as ONE Slack post (not
+ * one post per file).
  *
  * Uses the current 3-step external upload flow. `files.upload` is deprecated and
  * stopped accepting new apps in 2025 — do not switch back to it:
- *   1. files.getUploadURLExternal → a one-shot presigned URL + file id
+ *   1. files.getUploadURLExternal → a one-shot presigned URL + file id (per file)
  *   2. POST the raw bytes to that URL (this is NOT a Slack API host, so it takes
  *      no auth header and returns plain text, not the { ok } envelope)
- *   3. files.completeUploadExternal → attaches the file to the channel
+ *   3. files.completeUploadExternal → attaches every file to the channel in one
+ *      call, which is what collapses them into a single message
  *
  * Requires the `files:write` bot scope on top of the existing chat:write.
  * Throws on failure — the caller decides whether that's fatal.
  */
+export async function slackUploadFiles(opts: {
+  channelId: string;
+  files: { filename: string; bytes: Buffer; title?: string }[];
+  comment?: string;
+}): Promise<{ fileIds: string[] }> {
+  const token = botToken();
+  if (opts.files.length === 0) throw new Error("slackUploadFiles called with no files");
+
+  const uploaded: { id: string; title: string }[] = [];
+
+  for (const file of opts.files) {
+    // Step 1 — reserve an upload slot. `length` must be the exact byte count or
+    // Slack rejects the completion call.
+    const reserved = await slackPostForm("files.getUploadURLExternal", token, {
+      filename: file.filename,
+      length: String(file.bytes.byteLength),
+    });
+    const uploadUrl: string = reserved.upload_url;
+    const fileId: string = reserved.file_id;
+    if (!uploadUrl || !fileId) {
+      throw new Error("files.getUploadURLExternal returned no upload_url/file_id");
+    }
+
+    // Step 2 — push the bytes. Plain POST body; a non-2xx here is fatal because
+    // step 3 would then complete an empty file.
+    const putRes = await fetch(uploadUrl, {
+      method: "POST",
+      body: new Uint8Array(file.bytes),
+      headers: { "Content-Type": "application/octet-stream" },
+    });
+    if (!putRes.ok) {
+      const detail = await putRes.text().catch(() => "");
+      throw new Error(`Slack file upload failed: ${putRes.status} ${putRes.statusText} :: ${detail.slice(0, 200)}`);
+    }
+
+    uploaded.push({ id: fileId, title: file.title || file.filename });
+  }
+
+  // Step 3 — attach every file to the channel in ONE call. initial_comment is
+  // what makes the text and the files a single post.
+  await slackPost("files.completeUploadExternal", token, {
+    files: uploaded,
+    channel_id: opts.channelId,
+    ...(opts.comment ? { initial_comment: opts.comment } : {}),
+  });
+
+  return { fileIds: uploaded.map(f => f.id) };
+}
+
+/** Single-file convenience wrapper over {@link slackUploadFiles}. */
 export async function slackUploadFile(opts: {
   channelId: string;
   filename: string;
@@ -209,41 +261,12 @@ export async function slackUploadFile(opts: {
   title?: string;
   comment?: string;
 }): Promise<{ fileId: string }> {
-  const token = botToken();
-
-  // Step 1 — reserve an upload slot. `length` must be the exact byte count or
-  // Slack rejects the completion call.
-  const reserved = await slackPostForm("files.getUploadURLExternal", token, {
-    filename: opts.filename,
-    length: String(opts.bytes.byteLength),
+  const { fileIds } = await slackUploadFiles({
+    channelId: opts.channelId,
+    files: [{ filename: opts.filename, bytes: opts.bytes, title: opts.title }],
+    comment: opts.comment,
   });
-  const uploadUrl: string = reserved.upload_url;
-  const fileId: string = reserved.file_id;
-  if (!uploadUrl || !fileId) {
-    throw new Error("files.getUploadURLExternal returned no upload_url/file_id");
-  }
-
-  // Step 2 — push the bytes. Plain POST body; a non-2xx here is fatal because
-  // step 3 would then complete an empty file.
-  const putRes = await fetch(uploadUrl, {
-    method: "POST",
-    body: new Uint8Array(opts.bytes),
-    headers: { "Content-Type": "application/octet-stream" },
-  });
-  if (!putRes.ok) {
-    const detail = await putRes.text().catch(() => "");
-    throw new Error(`Slack file upload failed: ${putRes.status} ${putRes.statusText} :: ${detail.slice(0, 200)}`);
-  }
-
-  // Step 3 — attach to the channel. initial_comment is what makes the text and
-  // the PDF a single post.
-  await slackPost("files.completeUploadExternal", token, {
-    files: [{ id: fileId, title: opts.title || opts.filename }],
-    channel_id: opts.channelId,
-    ...(opts.comment ? { initial_comment: opts.comment } : {}),
-  });
-
-  return { fileId };
+  return { fileId: fileIds[0] };
 }
 
 // ---------------------------------------------------------------------------

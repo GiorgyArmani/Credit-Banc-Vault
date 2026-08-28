@@ -17,6 +17,8 @@ import {
   ChevronDown,
   ChevronUp,
   Save,
+  Send,
+  Check,
 } from "lucide-react";
 import clsx from "clsx";
 import { FilePreviewModal } from "@/components/file-preview-modal";
@@ -28,6 +30,8 @@ interface Attachment {
   file_size: number | null;
   created_at: string;
   view_url: string;
+  /** NULL until the image has been posted into the deal's Slack channel. */
+  slack_posted_at: string | null;
 }
 
 interface Props {
@@ -66,6 +70,7 @@ export function LenderResponsePanel({ assignmentId, status }: Props) {
   const [attachments, set_attachments] = useState<Attachment[]>([]);
   const [uploading, set_uploading] = useState(false);
   const [deleting_id, set_deleting_id] = useState<string | null>(null);
+  const [sending, set_sending] = useState(false);
   const [preview, set_preview] = useState<Attachment | null>(null);
 
   const { title, placeholder } = note_label(status);
@@ -197,6 +202,35 @@ export function LenderResponsePanel({ assignmentId, status }: Props) {
     }
   }
 
+  // Screenshots normally reach Slack on their own: they ride out with the
+  // verdict post, or with the note post when UW saves the note afterwards. This
+  // is for evidence that lands later than both — nothing else would carry it.
+  async function send_to_slack() {
+    set_sending(true);
+    try {
+      const res = await fetch(
+        `/api/lender-assignments/${assignmentId}/attachments/slack`,
+        { method: "POST" }
+      );
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        toast.error(data?.error || "Couldn't send to Slack");
+        return;
+      }
+      set_attachments(data.attachments ?? []);
+      toast.success(
+        data.sent === 1 ? "Screenshot sent to Slack" : `${data.sent} screenshots sent to Slack`
+      );
+    } catch (err) {
+      console.error("send attachments to slack error:", err);
+      toast.error("An unexpected error occurred");
+    } finally {
+      set_sending(false);
+    }
+  }
+
+  const unsent_count = attachments.filter((a) => !a.slack_posted_at).length;
+
   const summary_count =
     (saved_notes.trim() ? 1 : 0) + attachments.length; // hint shown on the toggle
 
@@ -261,6 +295,23 @@ export function LenderResponsePanel({ assignmentId, status }: Props) {
                   <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
                     Screenshots
                   </label>
+                  <div className="flex items-center gap-3">
+                  {unsent_count > 0 && (
+                    <button
+                      type="button"
+                      onClick={send_to_slack}
+                      disabled={sending}
+                      title="Post these screenshots into the deal's Slack channel"
+                      className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-slate-500 hover:text-emerald-600 transition-colors disabled:opacity-50"
+                    >
+                      {sending ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Send className="h-3 w-3" />
+                      )}
+                      Send to Slack
+                    </button>
+                  )}
                   <label className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-emerald-600 hover:text-emerald-700 cursor-pointer">
                     {uploading ? (
                       <Loader2 className="h-3 w-3 animate-spin" />
@@ -276,6 +327,7 @@ export function LenderResponsePanel({ assignmentId, status }: Props) {
                       onChange={on_file}
                     />
                   </label>
+                  </div>
                 </div>
                 {attachments.length === 0 ? (
                   <p className="text-[11px] text-slate-400">No screenshots yet.</p>
@@ -307,6 +359,15 @@ export function LenderResponsePanel({ assignmentId, status }: Props) {
                               </div>
                             )}
                           </button>
+                          {a.slack_posted_at && (
+                            <span
+                              title="Already in the Slack channel"
+                              className="absolute bottom-1 left-1 inline-flex items-center gap-0.5 rounded bg-white/90 px-1 py-0.5 text-[9px] font-black uppercase tracking-wider text-emerald-600 shadow-sm"
+                            >
+                              <Check className="h-2.5 w-2.5" />
+                              Slack
+                            </span>
+                          )}
                           <button
                             onClick={() => remove(a.id)}
                             disabled={deleting_id === a.id}

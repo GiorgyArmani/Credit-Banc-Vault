@@ -16,7 +16,8 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { send_lender_pipeline_notification, type LenderPipelineEvent } from '@/lib/email';
-import { slackPostMessage, getApproverUserIds, resolveAdvisorSlackId, formatMentions } from '@/lib/slack-api';
+import { slackPostMessage, slackUploadFiles, getApproverUserIds, resolveAdvisorSlackId, formatMentions } from '@/lib/slack-api';
+import { claimUnpostedLenderAttachments, releaseLenderAttachments } from '@/lib/lender-attachments';
 
 const supabase_admin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -88,6 +89,53 @@ function formatNoteBlock(label: string, notes: string | null | undefined): strin
     .map((line) => (line.trim() ? `> ${line}` : '>'))
     .join('\n');
   return `\n*${label}:*\n${quoted}`;
+}
+
+/**
+ * Posts `text` into the deal channel WITH the lender-response screenshots UW has
+ * pinned to this assignment but not yet sent — the decline notice, the approval
+ * email, the offer terms. Text and images land as one Slack post, so the
+ * evidence sits under the words it evidences instead of arriving as a second
+ * naked message.
+ *
+ * Attachments are claimed atomically (see claimUnpostedLenderAttachments), so a
+ * screenshot reaches the channel exactly once no matter how many response posts
+ * follow it. If Slack refuses the upload the claim is handed back and the text
+ * still goes out on its own — a failed image must never cost the channel the
+ * decline reasons.
+ *
+ * Returns how many images rode along. Never throws.
+ */
+async function postResponseWithAttachments(
+  channel_id: string,
+  assignment_id: string,
+  text: string
+): Promise<number> {
+  let claimed: Awaited<ReturnType<typeof claimUnpostedLenderAttachments>> = [];
+  try {
+    claimed = await claimUnpostedLenderAttachments(assignment_id);
+  } catch (err) {
+    console.error('postResponseWithAttachments claim error (posting text only):', err);
+  }
+
+  if (claimed.length === 0) {
+    await slackPostMessage(channel_id, text);
+    return 0;
+  }
+
+  try {
+    await slackUploadFiles({
+      channelId: channel_id,
+      files: claimed.map((a) => ({ filename: a.file_name, bytes: a.bytes, title: a.file_name })),
+      comment: text,
+    });
+    return claimed.length;
+  } catch (err) {
+    console.error('postResponseWithAttachments upload failed (falling back to text):', err);
+    await releaseLenderAttachments(claimed.map((a) => a.id));
+    await slackPostMessage(channel_id, text);
+    return 0;
+  }
 }
 
 interface AssignmentRow {
@@ -231,7 +279,16 @@ export async function notifyAdminsOfLenderPipelineEvent(
           ? formatNoteBlock(NOTE_LABEL[event], assignment.response_notes)
           : '';
 
-      await slackPostMessage(slack_channel_id, `${mentions ? mentions + ' ' : ''}${headline}${note_block}`);
+      const body = `${mentions ? mentions + ' ' : ''}${headline}${note_block}`;
+      // Only a verdict post carries the screenshots. A submission/re-submission
+      // announces the file going OUT — nothing has come back to evidence yet,
+      // and pinning last round's decline notice under it would read as though
+      // the lender had answered again.
+      if (isVerdict(event)) {
+        await postResponseWithAttachments(slack_channel_id, assignment.id, body);
+      } else {
+        await slackPostMessage(slack_channel_id, body);
+      }
     }
   } catch (err) {
     console.error('notifyAdminsOfLenderPipelineEvent Slack error (non-fatal):', err);
@@ -289,8 +346,9 @@ export async function notifyLenderResponseNoteRecorded(
         ? `📝 Decline reasons recorded for *${lender_label}*${company_name ? ` — ${company_name}` : ''}.`
         : `📝 Offer / stips recorded for *${lender_label}*${company_name ? ` — ${company_name}` : ''}.`;
 
-    await slackPostMessage(
+    await postResponseWithAttachments(
       channel_id,
+      assignment_id,
       `${headline}${formatNoteBlock(NOTE_LABEL[status], body)}\n${baseUrl}/admin/clients/${client_id}`
     );
   } catch (err) {
@@ -365,5 +423,114 @@ export async function notifyDealFundedToSlack(
     );
   } catch (err) {
     console.error('notifyDealFundedToSlack error (non-fatal):', err);
+  }
+}
+
+/**
+ * Sends the screenshots UW has added to a lender assignment but not yet posted
+ * into the deal's Slack channel, on their own, as one post.
+ *
+ * This is the after-the-fact path. The common order — flip the verdict, type the
+ * note, hit save — already carries the screenshots out with the note post, so
+ * nothing here fires. But evidence often arrives later (the lender emails the
+ * approval an hour after the phone call), and without an explicit send those
+ * images would sit in the vault forever: the note post only fires the FIRST time
+ * a note is recorded, and the verdict already went out.
+ *
+ * Called from a UW-triggered route, so it reports back rather than swallowing:
+ * `reason` is what to tell the person who pressed the button.
+ */
+export async function sendLenderAttachmentsToSlack(
+  assignment_id: string,
+  options?: {
+    /**
+     * Auto-flushes pass true: a screenshot on a row still awaiting the lender is
+     * UW scratch work, exactly as a note on one is, and the channel does not want
+     * it. An explicit button press is not gated — a person asking for it has a
+     * reason the status column doesn't know about.
+     */
+    only_after_verdict?: boolean;
+  }
+): Promise<{ sent: number; reason?: string }> {
+  try {
+    const { data: assignment } = await supabase_admin
+      .from('client_lender_assignments')
+      .select('client_id, lender_name, specialty, status')
+      .eq('id', assignment_id)
+      .maybeSingle<{
+        client_id: string | null;
+        lender_name: string | null;
+        specialty: string | null;
+        status: string | null;
+      }>();
+
+    const client_id = assignment?.client_id;
+    if (!client_id) return { sent: 0, reason: 'Assignment not found.' };
+
+    if (
+      options?.only_after_verdict &&
+      assignment.status !== 'approved_by_lender' &&
+      assignment.status !== 'declined_by_lender'
+    ) {
+      return { sent: 0, reason: 'Lender has not responded yet.' };
+    }
+
+    const { data: client_row } = await supabase_admin
+      .from('client_data_vault')
+      .select('company_name, slack_channel_id')
+      .eq('id', client_id)
+      .maybeSingle<{ company_name: string | null; slack_channel_id: string | null }>();
+
+    const channel_id = client_row?.slack_channel_id ?? null;
+    if (!channel_id) return { sent: 0, reason: 'This deal has no Slack channel.' };
+
+    const company_name = client_row?.company_name ?? undefined;
+    const lender_label = `${assignment.lender_name ?? 'the lender'}${
+      assignment.specialty ? ` (${assignment.specialty})` : ''
+    }`;
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://vault.creditbanc.io';
+    const headline = `📎 Lender response evidence for *${lender_label}*${
+      company_name ? ` — ${company_name}` : ''
+    }.`;
+
+    // Deliberately reuses the same once-only claim the automatic posts use, so a
+    // button press cannot duplicate what the note post already sent.
+    const sent = await postAttachmentsOnly(
+      channel_id,
+      assignment_id,
+      `${headline}
+${baseUrl}/admin/clients/${client_id}`
+    );
+    if (sent === 0) return { sent: 0, reason: 'Nothing new to send — these are already in Slack.' };
+    return { sent };
+  } catch (err) {
+    console.error('sendLenderAttachmentsToSlack error:', err);
+    return { sent: 0, reason: 'Slack rejected the upload.' };
+  }
+}
+
+/**
+ * Like {@link postResponseWithAttachments} but posts NOTHING when there are no
+ * images to send — the caption exists to introduce the screenshots, so on its
+ * own it would be a message about an empty attachment.
+ */
+async function postAttachmentsOnly(
+  channel_id: string,
+  assignment_id: string,
+  caption: string
+): Promise<number> {
+  const claimed = await claimUnpostedLenderAttachments(assignment_id);
+  if (claimed.length === 0) return 0;
+  try {
+    await slackUploadFiles({
+      channelId: channel_id,
+      files: claimed.map((a) => ({ filename: a.file_name, bytes: a.bytes, title: a.file_name })),
+      comment: caption,
+    });
+    return claimed.length;
+  } catch (err) {
+    console.error('postAttachmentsOnly upload failed:', err);
+    await releaseLenderAttachments(claimed.map((a) => a.id));
+    throw err;
   }
 }

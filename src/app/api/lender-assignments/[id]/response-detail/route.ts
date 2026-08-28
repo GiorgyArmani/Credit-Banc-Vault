@@ -16,7 +16,10 @@ import {
   saveLenderResponseNotes,
   assignmentExists,
 } from "@/lib/lender-attachments";
-import { notifyLenderResponseNoteRecorded } from "@/lib/notifications/lender-pipeline";
+import {
+  notifyLenderResponseNoteRecorded,
+  sendLenderAttachmentsToSlack,
+} from "@/lib/notifications/lender-pipeline";
 
 export async function GET(
   _request: Request,
@@ -76,8 +79,20 @@ export async function PATCH(
     // already posted the bare verdict to the deal channel, so post the reasons
     // here — otherwise the note never reaches Slack. Deferred with after() so
     // the save stays snappy and a Slack outage can't fail it.
+    //
+    // Saving is also what pushes the screenshots out. The first note carries
+    // them in its own post (notifyLenderResponseNoteRecorded uploads whatever is
+    // unsent alongside the text); every later save flushes anything added since,
+    // so the images UW pinned are in the channel the moment they hit save — no
+    // second action, and no waiting on the "Send to Slack" button, which stays
+    // only for screenshots that arrive after the last save.
+    //
+    // Both paths claim rows atomically, so a screenshot is posted exactly once
+    // however many times the note is saved.
     if (!prior && response_notes) {
       after(() => notifyLenderResponseNoteRecorded(id, response_notes));
+    } else {
+      after(() => sendLenderAttachmentsToSlack(id, { only_after_verdict: true }));
     }
 
     return NextResponse.json({ success: true, response_notes });
