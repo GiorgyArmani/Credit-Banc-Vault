@@ -34,6 +34,30 @@ interface Attachment {
   slack_posted_at: string | null;
 }
 
+/** One trip out to this lender and the answer that came back. */
+interface ResponseAttempt {
+  id: string;
+  attempt_no: number;
+  status: "approved_by_lender" | "declined_by_lender" | "funded" | null;
+  response_notes: string | null;
+  resubmit_reason: string | null;
+  submitted_at: string | null;
+  responded_at: string | null;
+  recorded_by_name: string | null;
+  created_at: string;
+}
+
+const ATTEMPT_VERDICT: Record<string, { label: string; className: string }> = {
+  approved_by_lender: { label: "Approved", className: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  declined_by_lender: { label: "Declined", className: "bg-amber-50 text-amber-800 border-amber-200" },
+  funded: { label: "Funded", className: "bg-emerald-600 text-white border-emerald-600" },
+};
+
+function attempt_date(iso: string | null): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
 interface Props {
   assignmentId: string;
   /** Drives the note label: approved → offer/stips, declined → decline reasons. */
@@ -72,6 +96,9 @@ export function LenderResponsePanel({ assignmentId, status }: Props) {
   const [deleting_id, set_deleting_id] = useState<string | null>(null);
   const [sending, set_sending] = useState(false);
   const [preview, set_preview] = useState<Attachment | null>(null);
+  // Past trips out to this lender. Empty on a lender worked only once, which is
+  // most of them — the section hides itself rather than saying "1 attempt".
+  const [history, set_history] = useState<ResponseAttempt[]>([]);
 
   const { title, placeholder } = note_label(status);
   const dirty = notes.trim() !== saved_notes.trim();
@@ -85,6 +112,7 @@ export function LenderResponsePanel({ assignmentId, status }: Props) {
         set_notes(data.response_notes ?? "");
         set_saved_notes(data.response_notes ?? "");
         set_attachments(data.attachments ?? []);
+        set_history(data.history ?? []);
         set_loaded(true);
       }
     } catch (err) {
@@ -289,6 +317,21 @@ export function LenderResponsePanel({ assignmentId, status }: Props) {
                 </div>
               </div>
 
+              {/* Context for the trip currently in flight. resubmit_reason is
+                  stamped on the attempt it OPENED, so it belongs here with the
+                  live note rather than down in the history list — where it would
+                  only appear after a third submission. */}
+              {history[0]?.resubmit_reason && (
+                <div className="rounded-lg border border-sky-100 bg-sky-50/70 px-3 py-2">
+                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-sky-700">
+                    Re-submitted · attempt {history[0].attempt_no}
+                  </p>
+                  <p className="mt-1 text-[12px] leading-relaxed text-slate-700">
+                    {history[0].resubmit_reason}
+                  </p>
+                </div>
+              )}
+
               {/* Screenshots */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
@@ -386,6 +429,74 @@ export function LenderResponsePanel({ assignmentId, status }: Props) {
                   </div>
                 )}
               </div>
+
+              {/* Past trips out to this lender.
+                  Shown only once there is more than one attempt — on a lender
+                  worked a single time the ledger just restates the panel above
+                  it. The CURRENT attempt is excluded for the same reason: it is
+                  the note being edited two inches up. What is left is the thing
+                  that used to be destroyed on re-submission. */}
+              {history.length > 1 && (
+                <div className="mt-5 border-t border-slate-100 pt-4">
+                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">
+                    Previous submissions
+                  </p>
+                  <ol className="mt-2.5 space-y-2">
+                    {history
+                      .filter((h) => h.attempt_no < history[0].attempt_no)
+                      .map((h) => {
+                        const verdict = h.status ? ATTEMPT_VERDICT[h.status] : null;
+                        return (
+                          <li
+                            key={h.id}
+                            className="rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2.5"
+                          >
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-[11px] font-black uppercase tracking-widest text-slate-400">
+                                Attempt {h.attempt_no}
+                              </span>
+                              <span
+                                className={clsx(
+                                  "rounded-full border px-2 py-0.5 text-[9px] font-black uppercase tracking-widest",
+                                  verdict
+                                    ? verdict.className
+                                    : "bg-sky-50 text-sky-700 border-sky-200"
+                                )}
+                              >
+                                {verdict ? verdict.label : "No answer recorded"}
+                              </span>
+                              <span className="text-[10px] text-slate-400">
+                                {h.submitted_at ? `sent ${attempt_date(h.submitted_at)}` : ""}
+                                {h.responded_at ? ` · answered ${attempt_date(h.responded_at)}` : ""}
+                              </span>
+                            </div>
+
+                            {h.response_notes && (
+                              <p className="mt-1.5 whitespace-pre-wrap text-[12px] leading-relaxed text-slate-700">
+                                {h.response_notes}
+                              </p>
+                            )}
+
+                            {/* Why we went back — the half that explains why the
+                                same lender was asked twice. */}
+                            {h.resubmit_reason && (
+                              <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">
+                                <span className="font-bold text-slate-600">What changed: </span>
+                                {h.resubmit_reason}
+                              </p>
+                            )}
+
+                            {h.recorded_by_name && (
+                              <p className="mt-1 text-[10px] text-slate-400">
+                                recorded by {h.recorded_by_name}
+                              </p>
+                            )}
+                          </li>
+                        );
+                      })}
+                  </ol>
+                </div>
+              )}
             </>
           )}
         </div>

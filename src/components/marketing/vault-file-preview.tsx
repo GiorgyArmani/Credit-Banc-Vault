@@ -9,23 +9,31 @@
 // site's circle motif, and it says what the product does without a paragraph.
 //
 // Plays once when it comes into view, then rests complete. It is a depiction of
-// the real checklist, not a live one: the requirement names are the same four
-// the page lists below as what you need to start.
+// the real checklist, not a live one — six requirements, which is what a typical
+// file runs to (the median across live vaults is seven). The section below
+// explains why the exact list depends on the funding product, so this panel
+// should stay a plausible file rather than mirror any fixed list.
 
 import { useEffect, useRef, useState } from "react";
 import { motion, useInView, useReducedMotion } from "framer-motion";
 import { Check, FileText, ShieldCheck } from "lucide-react";
 import { EASE } from "@/lib/motion";
 
+// Short labels on purpose: the row truncates at mobile widths, and "Business
+// debt schedule" clipped to "Business debt …" reads as a different document.
+// The detail line underneath carries the specificity instead.
 const REQUIREMENTS = [
-  { label: "Business bank statements", detail: "6 months" },
+  { label: "Bank statements", detail: "12 months" },
   { label: "Driver's license", detail: "Front and back" },
-  { label: "Voided business check", detail: "Business account" },
+  { label: "Tax returns", detail: "Most recent years" },
+  { label: "Voided check", detail: "Business account" },
+  { label: "Profit & loss", detail: "Year to date" },
   { label: "Debt schedule", detail: "If applicable" },
 ];
 
-/** ms between one requirement landing and the next. */
-const STEP_MS = 620;
+/** ms between one requirement landing and the next. Six items at this pace
+    finish in ~2.6s, which is about as long as a hero flourish should run. */
+const STEP_MS = 440;
 
 const RING_CIRCUMFERENCE = 2 * Math.PI * 52;
 

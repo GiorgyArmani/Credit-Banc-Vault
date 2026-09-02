@@ -43,13 +43,33 @@ export default async function AdminTeamPage() {
 
   const db = createAdminClient();
 
-  const [{ data: invites }, { data: members }] = await Promise.all([
-    db
+  // `cleared_at` trails the code until migration 20260902_2 is applied, and a
+  // PostgREST select naming a column that does not exist fails the WHOLE query.
+  // The error is destructured away below, so without this fallback an unapplied
+  // migration would render an EMPTY invitation list — no error, no clue, just an
+  // admin concluding their invites vanished. Fall back to the old column set.
+  const INVITE_COLUMNS_BASE =
+    "id, email, role, first_name, last_name, note, expires_at, invited_by_email, send_count, last_sent_at, accepted_at, revoked_at, created_at";
+
+  async function readInvites() {
+    const withCleared = await db
       .from("staff_invitations")
-      .select(
-        "id, email, role, first_name, last_name, note, expires_at, invited_by_email, send_count, last_sent_at, accepted_at, revoked_at, created_at"
-      )
-      .order("created_at", { ascending: false }),
+      .select(`${INVITE_COLUMNS_BASE}, cleared_at`)
+      .order("created_at", { ascending: false });
+    if (!withCleared.error) return withCleared;
+
+    console.warn(
+      "admin/team: cleared_at unavailable, falling back (apply 20260902_2_staff_invitation_clearing):",
+      withCleared.error.message
+    );
+    return db
+      .from("staff_invitations")
+      .select(INVITE_COLUMNS_BASE)
+      .order("created_at", { ascending: false });
+  }
+
+  const [{ data: invites }, { data: members }] = await Promise.all([
+    readInvites(),
     // The existing team, shown alongside so "invite" isn't the only thing on
     // this page — the question an admin actually arrives with is "who has
     // access", and an invitation list alone answers half of it.
@@ -78,6 +98,11 @@ export default async function AdminTeamPage() {
       expires_at: r.expires_at,
     }),
     accepted_at: r.accepted_at ?? null,
+    // Orthogonal to `state` on purpose — a cleared row is still *accepted*.
+    // Cleared rows are fetched, not filtered out server-side: the chips filter
+    // client-side, so excluding them here would make the Cleared chip empty.
+    // Optional-chained for the pre-migration fallback above, where it is absent.
+    cleared_at: (r as { cleared_at?: string | null }).cleared_at ?? null,
   }));
 
   const memberRows: MemberRow[] = (members ?? []).map((r) => ({

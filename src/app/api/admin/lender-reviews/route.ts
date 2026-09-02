@@ -21,6 +21,8 @@ import { requireAdmin } from '@/lib/auth/require-admin';
 import { send_lender_review_approved_notification } from '@/lib/email';
 import { slackPostMessage } from '@/lib/slack-api';
 
+import { getActiveDealForClient } from '@/lib/funding-deals';
+
 const supabase_admin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
@@ -297,17 +299,31 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Lender not found.' }, { status: 404 });
     }
 
-    // One (client, lender) assignment at a time. A row that was REMOVED is
+    // The round this lender is joining. The admin surface has no business tab,
+    // so it resolves the client's primary business the same way the client
+    // pages pick their default tab.
+    const { businessProfileId, deal: active_deal } = await getActiveDealForClient(
+      supabase_admin,
+      client_id
+    );
+    const funding_deal_id = active_deal?.id ?? null;
+
+    // One (client, lender) assignment PER ROUND. A row that was REMOVED is
     // restored rather than refused: removal is now a one-click list operation,
     // so undoing a misclick has to be possible — and the old 409 made it
     // permanent, since the removed row also hides the lender from the picker.
-    // Any other existing row is a genuine duplicate and still refused.
-    const { data: existing } = await supabase_admin
+    // Any other existing row ON THIS ROUND is a genuine duplicate and still
+    // refused; the same lender on an EARLIER round is history, not a duplicate,
+    // and must not block a repeat client from going back to them.
+    let dup_q = supabase_admin
       .from('client_lender_assignments')
       .select('id, admin_review, status')
       .eq('client_id', client_id)
-      .eq('lender_name', guideline.lender_name)
-      .maybeSingle();
+      .eq('lender_name', guideline.lender_name);
+    dup_q = funding_deal_id
+      ? dup_q.or(`funding_deal_id.eq.${funding_deal_id},funding_deal_id.is.null`)
+      : dup_q.is('funding_deal_id', null);
+    const { data: existing } = await dup_q.maybeSingle();
 
     const now = new Date().toISOString();
 
@@ -337,7 +353,7 @@ export async function POST(request: Request) {
 
     if (existing) {
       return NextResponse.json(
-        { error: `${guideline.lender_name} is already assigned to this client.` },
+        { error: `${guideline.lender_name} is already on this funding round.` },
         { status: 409 }
       );
     }
@@ -357,6 +373,8 @@ export async function POST(request: Request) {
       .from('client_lender_assignments')
       .insert({
         client_id,
+        business_profile_id: businessProfileId,
+        funding_deal_id,
         lender_name: guideline.lender_name,
         specialty: guideline.specialty,
         tier_label: guideline.tier_label,

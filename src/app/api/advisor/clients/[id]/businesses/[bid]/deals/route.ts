@@ -198,8 +198,14 @@ async function authorize(clientVaultId: string, businessProfileId: string) {
   return { ok: true as const, admin, client, business, user, role };
 }
 
-// GET — every funding round for this business, newest first. Drives the rounds
-// card on the client detail pages.
+// GET — every funding round for this business, newest first, each with the
+// lenders it was shopped to and what they said. Drives the rounds card on the
+// client detail pages.
+//
+// The lender rows ride along on this response rather than getting their own
+// endpoint: they are meaningless without the rounds to hang them on (the round
+// NUMBER is derived from position in this same ordered list), and two requests
+// racing each other could render lenders against a stale set of rounds.
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string; bid: string }> }
@@ -210,7 +216,27 @@ export async function GET(
   if (!gate.ok) return gate.response;
 
   const deals = await getDealsForBusiness(gate.admin, businessProfileId);
-  return NextResponse.json({ success: true, deals });
+
+  // Scoped by client, then narrowed to this business OR unattributed. Legacy
+  // rows carry neither a business nor a round (see the retire note in POST);
+  // dropping them would hide most of the history that exists today.
+  const { data: lenders, error: lenderErr } = await gate.admin
+    .from("client_lender_assignments")
+    .select(
+      "id, lender_name, specialty, tier_label, status, response_notes, funding_deal_id, business_profile_id, assigned_at, submitted_at, responded_at, admin_review"
+    )
+    .eq("client_id", clientVaultId)
+    .or(`business_profile_id.eq.${businessProfileId},business_profile_id.is.null`)
+    .order("assigned_at", { ascending: false });
+
+  if (lenderErr) {
+    // Never fail the rounds list over the lender panel — the card's primary
+    // job is the round history, and an empty lender list degrades to the
+    // pre-existing behaviour rather than a broken page.
+    console.error("deals GET: lender assignments read failed:", lenderErr);
+  }
+
+  return NextResponse.json({ success: true, deals, lenders: lenders ?? [] });
 }
 
 export async function POST(
@@ -311,6 +337,31 @@ export async function POST(
       if (apprErr) {
         console.error("startNewRound: failed to retire approvals:", apprErr);
       }
+    }
+
+    // Lender submissions retire the same way, and this is the one that makes
+    // the deal track work: every lender we went to, and everything they said,
+    // gets pinned to the round it happened in at the moment the next one opens.
+    //
+    // Unlike documents there is no carry-over list — a lender response belongs
+    // to the file it was given on, always. Rows written since 20260902 already
+    // carry their own funding_deal_id and are skipped by the NULL filter.
+    //
+    // business_profile_id is NULL on older rows (8 in prod at the time of
+    // writing), so those are matched by client_id alone. That is only ambiguous
+    // for a client with more than one business — 3 vaults out of 179 — and the
+    // alternative is leaving them unattributed forever, which is worse: they
+    // would then show under every future round.
+    const { error: lenderErr, count: retiredLenders } = await admin
+      .from("client_lender_assignments")
+      .update({ funding_deal_id: closingDeal.id }, { count: "exact" })
+      .eq("client_id", clientVaultId)
+      .is("funding_deal_id", null)
+      .or(`business_profile_id.eq.${businessProfileId},business_profile_id.is.null`);
+    if (lenderErr) {
+      console.error("startNewRound: failed to retire lender assignments:", lenderErr);
+    } else if (retiredLenders) {
+      console.info(`startNewRound: retired ${retiredLenders} lender assignments to the closing round`);
     }
   }
 

@@ -199,11 +199,17 @@ export async function POST(request: Request) {
         // 5. Deactivate any client_dynamic_documents not in current tag list
         // This handles tag removal in GHL
         if (documentIds.length > 0) {
+            // PostgREST needs `in` values as a parenthesised list. Passing the
+            // raw JS array made this filter ERROR on every call, so step 5 has
+            // never actually deactivated anything — which is why a contact's
+            // stale requested_* tags left their document rows sitting active on
+            // the vault forever. Verified against prod: the array form returns
+            // an error, the parenthesised form matches.
             const { error: deactivateError } = await supabase
                 .from("client_dynamic_documents")
                 .update({ is_active: false })
                 .eq("user_id", userId)
-                .not("document_id", "in", documentIds)
+                .not("document_id", "in", `(${documentIds.join(",")})`)
                 .eq("is_active", true);
 
             if (deactivateError) {

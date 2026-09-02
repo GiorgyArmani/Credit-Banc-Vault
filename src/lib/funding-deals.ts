@@ -185,6 +185,36 @@ export async function startNewFundingRound(
 }
 
 /**
+ * The round being worked for a CLIENT, when the caller has a vault id and no
+ * business in hand (the admin lender-review path).
+ *
+ * Resolves the primary business first, falling back to the oldest — the same
+ * order the client pages use to pick a default tab, so a lender added from the
+ * admin surface lands on the round the rest of the app calls active. Returns
+ * nulls rather than throwing: attributing a lender row to a round is an
+ * improvement on NULL, never a reason to fail the add.
+ */
+export async function getActiveDealForClient(
+  db: SupabaseClient,
+  clientVaultId: string
+): Promise<{ businessProfileId: string | null; deal: FundingDeal | null }> {
+  const { data: businesses, error } = await db
+    .from("business_profiles")
+    .select("id, is_primary, created_at")
+    .eq("client_vault_id", clientVaultId)
+    .order("is_primary", { ascending: false })
+    .order("created_at", { ascending: true });
+
+  if (error || !businesses?.length) {
+    if (error) console.error("getActiveDealForClient business lookup:", error);
+    return { businessProfileId: null, deal: null };
+  }
+
+  const businessProfileId = businesses[0].id as string;
+  return { businessProfileId, deal: await getActiveDeal(db, businessProfileId) };
+}
+
+/**
  * Human label for a round — "Round 3" — derived from position in the ordered
  * list rather than stored, so it stays correct if a round is ever deleted.
  */

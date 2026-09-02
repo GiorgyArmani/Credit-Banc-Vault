@@ -299,7 +299,82 @@ export async function deleteStaffInvite(id: string): Promise<InviteActionResult>
     };
   }
 
-  const { error } = await db.from("staff_invitations").delete().eq("id", id);
+  // The accepted_at check is repeated as a filter on the DELETE, not just on the
+  // read above: a signup accepting in the gap between the two would otherwise
+  // have its invitation hard-deleted mid-flight, and releaseStaffInvite would
+  // then silently no-op against a row that no longer exists. Same belt-and-
+  // braces revokeStaffInvite already uses on its update.
+  const { data: deleted, error } = await db
+    .from("staff_invitations")
+    .delete()
+    .eq("id", id)
+    .is("accepted_at", null)
+    .select("id");
+  if (error) return { success: false, error: error.message };
+  if (!deleted?.length) {
+    return {
+      success: false,
+      error: "This invitation was just used to create an account — it stays as the record of that.",
+    };
+  }
+
+  revalidatePath("/admin/team");
+  return { success: true };
+}
+
+/**
+ * Clear an ACCEPTED invitation out of the Team Access list.
+ *
+ * The counterpart to deleteStaffInvite, for the rows it refuses. An accepted
+ * invitation is the only record anywhere of who granted a person staff access —
+ * no FK points at it and there is no audit table — so it must not be deleted.
+ * But it also renders no actions at all, which left the list growing forever.
+ * Clearing hides it; the "Cleared" chip brings it back.
+ *
+ * Filtered on accepted_at NOT NULL so this can never be used as a back door to
+ * hide a live pending invite: those are cancelled (which burns the token), not
+ * tidied away.
+ */
+export async function clearStaffInvite(id: string): Promise<InviteActionResult> {
+  const admin = await requireAdminUser();
+  if (!admin) return { success: false, error: "Forbidden" };
+
+  const db = createAdminClient();
+  const { data: cleared, error } = await db
+    .from("staff_invitations")
+    .update({
+      cleared_at: new Date().toISOString(),
+      cleared_by: admin.id,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .not("accepted_at", "is", null)
+    .is("cleared_at", null)
+    .select("id");
+
+  if (error) return { success: false, error: error.message };
+  if (!cleared?.length) {
+    return {
+      success: false,
+      error: "Only an accepted invitation can be cleared. Cancel a pending one instead.",
+    };
+  }
+
+  revalidatePath("/admin/team");
+  return { success: true };
+}
+
+/** Put a cleared invitation back on the list. Clearing is a view, not a door. */
+export async function unclearStaffInvite(id: string): Promise<InviteActionResult> {
+  const admin = await requireAdminUser();
+  if (!admin) return { success: false, error: "Forbidden" };
+
+  const db = createAdminClient();
+  const { error } = await db
+    .from("staff_invitations")
+    .update({ cleared_at: null, cleared_by: null, updated_at: new Date().toISOString() })
+    .eq("id", id);
+
   if (error) return { success: false, error: error.message };
 
   revalidatePath("/admin/team");

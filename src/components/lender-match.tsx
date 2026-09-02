@@ -8,6 +8,12 @@ import { LOAN_TYPES } from "@/data/loan-types";
 import { NaicsCombobox } from "@/components/ui/naics-combobox";
 import { matchNaics } from "@/data/naics";
 import { createClient } from "@/lib/supabase/client";
+import {
+  buildPriorOutcomes,
+  describeOutcome,
+  type LenderAssignmentRow,
+  type PriorOutcome,
+} from "@/lib/lender-history";
 import { notifyAdminsOfLenderMatchSaved } from "@/app/actions/lender-match-notifications";
 import { toast } from "@/lib/toast";
 
@@ -491,6 +497,15 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
   });
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
 
+  // The round being matched for. Resolved in loadClientResults alongside the
+  // deal criteria, and stamped onto every row saved — without it the
+  // assignments cannot be told apart once a second round opens.
+  const [activeDealId, setActiveDealId] = useState<string | null>(null);
+  const [activeBusinessId, setActiveBusinessId] = useState<string | null>(null);
+  // What earlier rounds' lenders said, keyed by lender name. Drives the inline
+  // warning — UW is never blocked, only told before they pick.
+  const [priorOutcomes, setPriorOutcomes] = useState<Map<string, PriorOutcome>>(new Map());
+
   // Change 2: Approve / Reject decisions
   const [decisions, setDecisions] = useState<Record<string, LenderDecision>>({});
   const [isSaving, setIsSaving] = useState(false);
@@ -598,21 +613,59 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
     setSaveSuccess(false);
   }
 
-  const loadDecisions = useCallback(async (clientId: string) => {
-    if (!clientId) return;
-    const supabase = createClient();
-    const { data } = await supabase
-      .from("client_lender_assignments")
-      .select("lender_name, specialty, tier_label, decision")
-      .eq("client_id", clientId);
-    if (data) {
+  // Two different things come out of one read.
+  //
+  //   `decisions` — what UW picked LAST TIME on this round, to re-hydrate the
+  //   checkboxes. Keyed on the name/specialty/tier composite, because that is
+  //   what a checkbox is.
+  //
+  //   `priorOutcomes` — what lenders on EARLIER rounds actually said. Keyed on
+  //   lender name only (see lender-history.ts) and deliberately not used to
+  //   filter or disable anything: a decline goes stale, revenue grows, an MCA
+  //   gets paid off. UW is told, then decides.
+  const loadDecisions = useCallback(
+    async (clientId: string, dealId: string | null, businessId: string | null) => {
+      if (!clientId) return;
+      const supabase = createClient();
+      const { data } = await supabase
+        .from("client_lender_assignments")
+        .select(
+          "id, lender_name, specialty, tier_label, decision, status, response_notes, funding_deal_id, business_profile_id, assigned_at, admin_review"
+        )
+        .eq("client_id", clientId);
+      if (!data) return;
+
+      const rows = data as unknown as (LenderAssignmentRow & {
+        decision: LenderDecision;
+      })[];
+
       const map: Record<string, LenderDecision> = {};
-      data.forEach((row: any) => {
-        map[`${row.lender_name}-${row.specialty ?? ""}-${row.tier_label ?? ""}`] = row.decision;
+      rows.forEach((row) => {
+        // Only this round's picks pre-tick the grid. A prior round's approvals
+        // are history, not a starting position for the round being built.
+        const sameRound = !dealId || !row.funding_deal_id || row.funding_deal_id === dealId;
+        if (sameRound) {
+          map[`${row.lender_name}-${row.specialty ?? ""}-${row.tier_label ?? ""}`] = row.decision;
+        }
       });
       setDecisions(map);
-    }
-  }, []);
+
+      // Rounds for this business, newest first — needed to label an outcome
+      // "R1" rather than just "earlier". Best-effort: no rounds, no labels.
+      let deals: { id: string }[] = [];
+      if (businessId) {
+        const { data: dealRows } = await supabase
+          .from("funding_deals")
+          .select("id")
+          .eq("business_profile_id", businessId)
+          .order("display_order", { ascending: false })
+          .order("created_at", { ascending: false });
+        deals = dealRows ?? [];
+      }
+      setPriorOutcomes(buildPriorOutcomes(rows, deals, dealId));
+    },
+    []
+  );
 
   // The client profile is the base deal; a saved bank analysis refines it.
   //
@@ -660,6 +713,7 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
     // no row, or no read access, falls back to the profile ask.
     const businessId = primaryBusiness(client)?.id;
     let activeDeal: {
+      id?: string;
       capital_requested?: number | null;
       proposed_loan_type?: string | null;
       loan_purpose?: string | null;
@@ -667,7 +721,7 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
     if (businessId) {
       const { data: dealRow } = await supabase
         .from("funding_deals")
-        .select("capital_requested, proposed_loan_type, loan_purpose")
+        .select("id, capital_requested, proposed_loan_type, loan_purpose")
         .eq("business_profile_id", businessId)
         .order("display_order", { ascending: false })
         .order("created_at", { ascending: false })
@@ -675,6 +729,10 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
         .maybeSingle();
       activeDeal = dealRow ?? null;
     }
+    // Held in state so saveAssignments stamps the same round the criteria came
+    // from, rather than re-resolving it and racing a round opened meanwhile.
+    setActiveBusinessId(businessId ?? null);
+    setActiveDealId(activeDeal?.id ?? null);
 
     const profileDeal = buildProfileDeal(client, openPositions);
     if (activeDeal) {
@@ -693,7 +751,8 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
     setFilterState(newDeal.state || "");
     setFilterIndustry(newDeal.industry || "");
     setDecisions({});
-    await loadDecisions(clientId);
+    setPriorOutcomes(new Map());
+    await loadDecisions(clientId, activeDeal?.id ?? null, businessId ?? null);
     setIsLoadingClient(false);
   }
 
@@ -823,21 +882,37 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
     setSaveSuccess(false);
     const supabase = createClient();
 
-    // Re-running the match wipes prior matches AND any admin reviews on them.
-    // Only rows from the matching tool are cleared — admin-added manual lenders
-    // (source = 'admin_manual') are preserved so the admin doesn't lose their
-    // additions when UW re-runs the engine.
+    // Re-running the match clears the previous SUGGESTIONS. Two limits on what
+    // that is allowed to touch, both learned the hard way:
     //
-    // A row already flipped to 'funded' is NOT a match any more, it's the record
-    // of who funded the deal. Re-matching a repeat client for their next round
-    // used to delete it, erasing the only structured trace of the previous
-    // round's funder. Those rows survive every re-run.
-    await supabase
-      .from("client_lender_assignments")
-      .delete()
-      .eq("client_id", selectedClientId)
-      .eq("source", "match_tool")
-      .neq("status", "funded");
+    //   1. Only `status = 'pending'` rows. A row that has been submitted, or
+    //      that has come back approved / declined / funded, is no longer a
+    //      match suggestion — it is the record of what happened, and its
+    //      `response_notes` is the decline reason underwriting needs on the
+    //      next round. The old rule deleted everything except 'funded', which
+    //      quietly destroyed those notes on every re-run. Six declined rows
+    //      with written reasons were live in prod under that rule.
+    //
+    //   2. Only THIS round. Scoped by funding_deal_id so a repeat client's
+    //      earlier rounds are untouchable from here. Legacy rows (NULL, written
+    //      before per-round tracking) are treated as this round's while the
+    //      client has only one — the round-open endpoint retires them onto the
+    //      closing deal the moment a second round starts, after which they stop
+    //      matching this filter.
+    //
+    // admin_manual rows are still preserved: the source filter has not moved.
+    {
+      let del = supabase
+        .from("client_lender_assignments")
+        .delete()
+        .eq("client_id", selectedClientId)
+        .eq("source", "match_tool")
+        .eq("status", "pending");
+      del = activeDealId
+        ? del.or(`funding_deal_id.eq.${activeDealId},funding_deal_id.is.null`)
+        : del.is("funding_deal_id", null);
+      await del;
+    }
 
     // Only insert lenders UW recommended (decision === "approved").
     // Skipped/unselected matches are simply not stored — admin sees a clean
@@ -877,6 +952,11 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
         source: "match_tool",
         admin_review: "approved" as const,
         admin_reviewed_at: assignedAt,
+        // The round this match belongs to. Null only when the client has no
+        // funding_deals row at all, which is the pre-rounds shape; everything
+        // downstream reads null as "legacy, oldest round".
+        business_profile_id: activeBusinessId,
+        funding_deal_id: activeDealId,
       }));
 
     if (rows.length > 0) {
@@ -1354,6 +1434,10 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
   function renderLenderCard(result: MatchResult, key: string, isIncomplete = false) {
     const dKey = decisionKey(result.lender);
     const decision = decisions[dKey] ?? null;
+    // What this lender said on an earlier round, if anything. Advisory only —
+    // it never disables the checkbox. A decline can be months stale and the
+    // file may have changed underneath it; UW is told and decides.
+    const prior = priorOutcomes.get(result.lender.lender_name) ?? null;
     const isExpanded = expandedKey === key;
     const specColor = SPECIALTY_COLORS[result.lender.specialty ?? ""] ?? "bg-slate-100 text-gray-400 border-slate-200";
     const minF = typeof result.lender.min_funding === "number" ? result.lender.min_funding : null;
@@ -1422,7 +1506,38 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
                   RECOMMENDED
                 </span>
               )}
+              {prior && (
+                <span
+                  title={describeOutcome(prior)}
+                  className={`text-[10px] font-mono font-bold uppercase tracking-wider border rounded px-1.5 py-0.5 ${
+                    prior.status === "funded"
+                      ? "bg-emerald-50 text-emerald-700 border-emerald-300"
+                      : prior.is_warning
+                        ? "bg-amber-50 text-amber-800 border-amber-300"
+                        : "bg-slate-100 text-slate-600 border-slate-300"
+                  }`}
+                >
+                  {prior.round_no ? `R${prior.round_no} ` : ""}
+                  {prior.status === "funded"
+                    ? "funded"
+                    : prior.status === "declined_by_lender"
+                      ? "declined"
+                      : prior.status === "approved_by_lender"
+                        ? "approved"
+                        : "submitted"}
+                </span>
+              )}
             </div>
+            {/* The reason, spelled out. The badge alone says "they passed";
+                what UW actually acts on is WHY, and whether it still holds. */}
+            {prior?.note && (
+              <div
+                className={`text-xs mt-1 ${prior.is_warning ? "text-amber-700" : "text-slate-500"}`}
+              >
+                {prior.is_warning ? "⚠ " : ""}
+                {describeOutcome(prior)}
+              </div>
+            )}
             {!isIncomplete && result.passed && result.warnings.length === 0 && (
               <div className="text-xs text-green-600 mt-0.5">✓ Meets all entered criteria</div>
             )}

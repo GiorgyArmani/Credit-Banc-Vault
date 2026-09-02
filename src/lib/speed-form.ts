@@ -18,7 +18,7 @@
 // can't double-send the email.
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { ghlAddTags } from '@/lib/ghl-api';
+import { ghlSyncRequestedDocTags } from '@/lib/ghl-api';
 import { generateDocUploadMagicLink } from '@/lib/magic-link';
 import { syncOutstandingDocuments } from '@/lib/outstanding-documents';
 import { send_speed_doc_request_email } from '@/lib/email';
@@ -64,6 +64,20 @@ export async function releaseSpeedFormDocs(
   if (docLookupErr || !docDefinitions || docDefinitions.length === 0) {
     console.error('❌ releaseSpeedFormDocs: doc definitions lookup failed', docLookupErr);
     return { released: false, reason: 'doc_lookup_failed' };
+  }
+
+  // A parked code that resolves to nothing is dropped from the client's list
+  // with no other trace. An SBA client shipped on 2026-09-02 with 13 of its 14
+  // package documents — `pfs` was simply absent, and because nothing compared
+  // the parked list against the seeded one, the gap was invisible until someone
+  // counted by hand. Never silently seed a subset again.
+  if (docDefinitions.length !== pendingCodes.length) {
+    const resolved = new Set(docDefinitions.map(d => d.code));
+    const dropped = pendingCodes.filter(c => !resolved.has(c));
+    console.error(
+      `❌ releaseSpeedFormDocs: ${dropped.length} parked doc code(s) did not resolve and will NOT be requested ` +
+        `for vault ${vault.id}: ${dropped.join(', ')}. Parked ${pendingCodes.length}, resolved ${docDefinitions.length}.`
+    );
   }
 
   const { data: primaryBusiness } = await supabase
@@ -112,7 +126,10 @@ export async function releaseSpeedFormDocs(
     console.error('❌ releaseSpeedFormDocs: failed to seed dynamic documents', insertErr);
     return { released: false, reason: 'doc_seed_failed' };
   }
-  console.log(`✅ Seeded ${dynamicDocRecords.length} document request(s) for vault ${vault.id}`);
+  console.log(
+    `✅ Seeded ${dynamicDocRecords.length} document request(s) for vault ${vault.id}` +
+      ` (parked ${pendingCodes.length})`
+  );
 
   // 4. Clear the pending list immediately — a duplicate webhook now no-ops at
   //    the guard above instead of re-tagging / re-emailing.
@@ -132,10 +149,18 @@ export async function releaseSpeedFormDocs(
   if (vault.ghl_contact_id) {
     const requestTags = docDefinitions.map(doc => doc.ghl_tag || `requested_${doc.code}`);
     try {
-      await ghlAddTags(vault.ghl_contact_id, requestTags);
-      console.log(`✅ Applied ${requestTags.length} requested_* tag(s) to GHL contact ${vault.ghl_contact_id}`);
+      // SYNC, not add. A reused GHL contact carries every requested_* tag it has
+      // ever been given, and the tag webhook rebuilds the vault's requirements
+      // from all of them — which is how an SBA file ended up asking for a
+      // closing statement and valuation comparables. This deal's package is the
+      // authority; anything else is retired. See ghlSyncRequestedDocTags.
+      const result = await ghlSyncRequestedDocTags(vault.ghl_contact_id, requestTags);
+      console.log(
+        `✅ Synced ${requestTags.length} requested_* tag(s) to GHL contact ${vault.ghl_contact_id}` +
+          (result?.removed ? ` (retired ${result.removed} stale)` : '')
+      );
     } catch (tagErr) {
-      console.error('⚠️ releaseSpeedFormDocs: GHL tag apply failed (non-fatal)', tagErr);
+      console.error('⚠️ releaseSpeedFormDocs: GHL tag sync failed (non-fatal)', tagErr);
     }
 
     if (process.env.GHL_TOKEN) {

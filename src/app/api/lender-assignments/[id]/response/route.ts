@@ -31,6 +31,12 @@
 import { NextResponse, after } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { requireStaff } from '@/lib/auth/require-staff';
+import {
+  closeAttempt,
+  openAttempt,
+  resolveRecorderName,
+  type AttemptStatus,
+} from '@/lib/lender-response-history';
 import { notifyAdminsOfLenderPipelineEvent } from '@/lib/notifications/lender-pipeline';
 import type { LenderPipelineEvent } from '@/lib/email';
 
@@ -173,6 +179,18 @@ export async function PATCH(
     const update_payload: Record<string, string | null> = { status: next_status, updated_at: now };
     if (is_resubmission) update_payload.response_notes = null;
 
+    // When the lender actually came back. Only a real verdict sets it —
+    // moving a row back to 'submitted' is either a misclick correction or a
+    // genuine re-submission, and in both cases there is no outstanding answer,
+    // so the clock restarts rather than keeping a stale response date.
+    if (next_status === 'approved_by_lender' || next_status === 'declined_by_lender') {
+      update_payload.responded_at = now;
+    } else if (next_status === 'submitted') {
+      update_payload.responded_at = null;
+      // A genuine re-submission is a fresh send; a misclick correction is not.
+      if (is_resubmission) update_payload.submitted_at = now;
+    }
+
     const { data: updated, error: update_error } = await supabase_admin
       .from('client_lender_assignments')
       .update(update_payload)
@@ -183,6 +201,43 @@ export async function PATCH(
     if (update_error) {
       console.error('lender-assignment response update error:', update_error);
       return NextResponse.json({ error: update_error.message }, { status: 500 });
+    }
+
+    // ── Response ledger ────────────────────────────────────────────────────
+    // The half of this route that makes a re-submission legible later. All
+    // best-effort: the assignment row above is already committed and is the
+    // source of truth for current state, so a ledger failure must not turn a
+    // recorded verdict into a 500.
+    {
+      const recorder_name = await resolveRecorderName(supabase_admin, gate.user.id);
+
+      if (is_resubmission) {
+        // A genuine second trip. The previous attempt keeps its verdict and its
+        // response_notes — which is exactly what the assignment row is about to
+        // lose — and `resubmit_reason` records why we went back.
+        await openAttempt(supabase_admin, {
+          assignmentId: id,
+          submittedAt: now,
+          resubmitReason: resubmit_note || null,
+          recordedBy: gate.user.id,
+          recordedByName: recorder_name,
+        });
+      } else if (next_status === 'approved_by_lender' || next_status === 'declined_by_lender') {
+        // A verdict — closes the attempt in play. Correcting a misclicked
+        // verdict revises that same attempt rather than inventing a second trip.
+        // The note is not passed: it is typed afterwards via response-detail,
+        // and passing undefined leaves whatever is already recorded intact.
+        await closeAttempt(supabase_admin, {
+          assignmentId: id,
+          status: next_status as AttemptStatus,
+          respondedAt: now,
+          recordedBy: gate.user.id,
+          recordedByName: recorder_name,
+        });
+      }
+      // A plain move back to 'submitted' (a misclick correction, not a
+      // re-submission) deliberately writes nothing: no new trip happened, and
+      // the attempt it belongs to is already open.
     }
 
     // Notify admins (in-app + email + Slack) so the admin portal status stays

@@ -16,6 +16,7 @@
 import { NextResponse, after } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { requireStaff } from '@/lib/auth/require-staff';
+import { openAttempt, resolveRecorderName } from '@/lib/lender-response-history';
 import { slackPostMessage } from '@/lib/slack-api';
 import { notifyAdminsOfLenderPipelineEvent } from '@/lib/notifications/lender-pipeline';
 
@@ -78,9 +79,12 @@ export async function PATCH(
     }
 
     const now = new Date().toISOString();
+    // submitted_at, not just updated_at: the verdict write later overwrites
+    // updated_at, so without its own column "out 6 days, still silent" — the
+    // single thing the daily spreadsheet was tracking — is not derivable.
     const { data: updated, error: update_error } = await supabase_admin
       .from('client_lender_assignments')
-      .update({ status: 'submitted', updated_at: now })
+      .update({ status: 'submitted', submitted_at: now, updated_at: now })
       .eq('id', id)
       .select('*')
       .single();
@@ -89,6 +93,17 @@ export async function PATCH(
       console.error('lender-assignment submit update error:', update_error);
       return NextResponse.json({ error: update_error.message }, { status: 500 });
     }
+
+    // Open attempt 1 in the response ledger. Best-effort by design — see the
+    // note at the top of lender-response-history: losing a ledger row is a gap
+    // in the story, failing this request is a submission that never got
+    // recorded.
+    await openAttempt(supabase_admin, {
+      assignmentId: id,
+      submittedAt: now,
+      recordedBy: gate.user.id,
+      recordedByName: await resolveRecorderName(supabase_admin, gate.user.id),
+    });
 
     // Trigger #1: notify admins that this specific lender was just submitted
     // (in-app + email + Slack). Deferred with after() so it survives the

@@ -21,10 +21,10 @@ import { motion } from "framer-motion";
 import { Reveal } from "@/components/ui/reveal";
 import { BrandFooter } from "@/components/marketing/brand-chrome";
 import { VaultFilePreview } from "@/components/marketing/vault-file-preview";
+import { ProgramDocuments } from "@/components/marketing/program-documents";
 import { EASE } from "@/lib/motion";
 import {
   ArrowRight,
-  Check,
   Gift,
   Lock,
   Menu,
@@ -40,7 +40,7 @@ const GREEN_BAND = "linear-gradient(135deg, #1f6b4e 0%, #2ea878 50%, #34b07d 100
 // long it takes. No invented volume metrics.
 const FACTS = [
   { value: "24–48h", label: ["From complete file", "to underwriting"] },
-  { value: "4", label: ["Documents", "to get started"] },
+  { value: "6–8", label: ["Documents in", "a typical file"] },
   { value: "1", label: ["Place everything", "lives"] },
   { value: "0", label: ["Files lost in", "email threads"] },
 ];
@@ -58,13 +58,6 @@ const STEPS = [
     title: "Submit",
     body: "When the file is complete, submit once. It goes straight to underwriting with everything attached.",
   },
-];
-
-const DOCUMENTS = [
-  { label: "6 months of business bank statements", detail: "Every business account" },
-  { label: "Driver's license", detail: "Front and back" },
-  { label: "Voided business check", detail: "Matching the business account" },
-  { label: "Debt schedule", detail: "Only if you carry business debt" },
 ];
 
 const NAV_LINKS = [
@@ -307,44 +300,39 @@ export function LandingPage() {
         </div>
       </section>
 
-      {/* ── What you need. Navy band — the checklist reads best in mint on
-             dark, and it breaks the cream before the affiliate block. ───── */}
+      {/* ── What you need. Navy band — mint on dark carries the three cards,
+             and it breaks the cream before the affiliate block. ────────── */}
       <section id="documents" className="relative overflow-hidden bg-cb-navy px-6 py-20 sm:px-8 sm:py-28 md:py-32">
         <div aria-hidden className="absolute -right-40 -top-40 h-[32rem] w-[32rem] rounded-full bg-cb-mint/10 blur-[130px]" />
         <div aria-hidden className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cb-mint/30 to-transparent" />
 
-        <div className="relative mx-auto grid max-w-7xl gap-14 lg:grid-cols-2 lg:gap-20">
+        <div className="relative mx-auto max-w-7xl">
           <Reveal>
             <Eyebrow tone="light">What you need</Eyebrow>
-            <h2 className="mt-4 font-headline text-4xl font-extrabold leading-[1.02] tracking-tighter text-white sm:text-5xl md:text-6xl">
-              Four documents.
-              <br />
-              <span className="text-cb-mint">That&rsquo;s the ask.</span>
-            </h2>
-            <p className="mt-6 max-w-lg text-lg leading-relaxed text-white/60">
-              Gather these and your file is ready to move. If underwriting needs
-              anything else, it appears in your checklist with a note explaining
-              why &mdash; never as a surprise phone call.
-            </p>
+            {/* Headline and body sit side by side and share a baseline: the
+                section runs full width for the card row below, and a lone
+                max-w-3xl heading would leave half the band empty. */}
+            <div className="mt-4 grid gap-6 lg:grid-cols-[1.05fr_1fr] lg:items-end lg:gap-16">
+              <h2 className="font-headline text-4xl font-extrabold leading-[1.02] tracking-tighter text-white sm:text-5xl md:text-6xl">
+                No standard list.
+                <br />
+                <span className="text-cb-mint">Just yours.</span>
+              </h2>
+              <p className="max-w-xl text-lg leading-relaxed text-white/60 lg:pb-2">
+                Every file is different. Two businesses asking for the same amount
+                rarely need the same paperwork, so there is no packet to download
+                and nothing to guess at. Your advisor requests exactly the
+                documents your file needs, they land in your checklist as they
+                come up, and you upload them once.
+              </p>
+            </div>
           </Reveal>
 
-          <Reveal delay={0.12} direction="left" distance={24}>
-            <ul className="space-y-3">
-              {DOCUMENTS.map((doc) => (
-                <li
-                  key={doc.label}
-                  className="flex items-start gap-4 rounded-2xl border border-white/10 bg-white/5 p-5 transition-colors hover:border-cb-mint/30"
-                >
-                  <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-cb-mint/15">
-                    <Check className="h-4 w-4 text-cb-mint" strokeWidth={3} />
-                  </span>
-                  <span>
-                    <span className="block font-bold text-white">{doc.label}</span>
-                    <span className="mt-0.5 block text-sm text-white/50">{doc.detail}</span>
-                  </span>
-                </li>
-              ))}
-            </ul>
+          {/* Three beats restating the rule the prose just gave. Deliberately
+              not a document list — see marketing/program-documents for why the
+              per-product checklist was pulled. */}
+          <Reveal delay={0.12} className="mt-12">
+            <ProgramDocuments />
           </Reveal>
         </div>
 

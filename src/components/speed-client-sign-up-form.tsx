@@ -42,6 +42,7 @@ import { useErrorDialog } from "@/components/error-dialog";
 import { FUNDING_OPTIONS } from "@/data/loan-types";
 import { packageForLoanTypes, FALLBACK_DOCUMENT_PACKAGE } from "@/data/program-document-packages";
 import { ReferralPartnerSelect } from "@/components/referral-partner-select";
+import { isExternalAdvisor } from "@/lib/auth/roles";
 
 // FICO buckets MUST match the "Approximate Credit Score" checkboxes on the
 // SignWell FUNDING APPLICATION template (400-500 / 500-600 / 600-700 / 700+).
@@ -112,8 +113,11 @@ export default function SpeedClientSignUpForm({ isSetter = false }: { isSetter?:
   // Setters collect call notes here (in place of "Use of Funds") so the
   // assigned advisor opens the file with context already on it.
   const [additional_notes, set_additional_notes] = useState("");
-  // Internal referral partner — who referred this deal (optional).
+  // Internal referral partner — who referred this deal (optional). Staff only:
+  // an external partner advisor IS the referral partner, so the picker is
+  // hidden from them and this stays null. See the render guard below.
   const [referral_partner, set_referral_partner] = useState<string | null>(null);
+  const [is_partner_advisor, set_is_partner_advisor] = useState(false);
 
   // ===== Documents — decided, not picked =====
   // There is no document step. The funding products chosen above ARE the
@@ -159,10 +163,21 @@ export default function SpeedClientSignUpForm({ isSetter = false }: { isSetter?:
 
   // The speed form is advisor/admin-only (the route is already middleware
   // protected); we only check the session exists so submit doesn't 401 late.
+  // The role comes back with it so the referral-partner picker can be hidden
+  // from external partner advisors — same rule as the full form.
   useEffect(() => {
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) router.push("/auth/login");
+      if (!user) {
+        router.push("/auth/login");
+        return;
+      }
+      const { data: user_data } = await supabase
+        .from("users")
+        .select("role")
+        .eq("id", user.id)
+        .maybeSingle();
+      set_is_partner_advisor(isExternalAdvisor(user_data?.role));
     })();
   }, [supabase, router]);
 
@@ -551,12 +566,20 @@ export default function SpeedClientSignUpForm({ isSetter = false }: { isSetter?:
                         <Textarea id="loan_purpose" value={loan_purpose} onChange={(e) => set_loan_purpose(e.target.value)} className="rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold p-6" placeholder="Equipment purchase, inventory, expansion, etc." rows={2} required />
                       </div>
                     )}
-                    <div className="md:col-span-2">
-                      <ReferralPartnerSelect
-                        value={referral_partner}
-                        onChange={set_referral_partner}
-                      />
-                    </div>
+                    {/* Hidden from external partner advisors: they ARE the
+                        referral partner, /api/client-signup-speed stamps the
+                        attribution from their own advisors row, and the picker
+                        would otherwise hand them every other partner's name —
+                        /api/referral-partners returns the roster to any
+                        authenticated user. Mirrors client-sign-up-form.tsx. */}
+                    {!is_partner_advisor && (
+                      <div className="md:col-span-2">
+                        <ReferralPartnerSelect
+                          value={referral_partner}
+                          onChange={set_referral_partner}
+                        />
+                      </div>
+                    )}
                     {!isSetter && (
                     <div className="md:col-span-2">
                       <Label className={`${labelClass} mb-3`}>

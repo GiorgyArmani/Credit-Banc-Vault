@@ -7,6 +7,7 @@
 // table is RLS-locked with no policies, so it is reached only here.
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { latestAttempt, recordAttemptNotes } from "@/lib/lender-response-history";
 
 export const LENDER_ATTACH_BUCKET = "user-documents";
 export const LENDER_ATTACH_PREFIX = "lender-responses";
@@ -65,10 +66,16 @@ export async function registerLenderAttachment(params: {
   uploaded_by: string | null;
 }): Promise<LenderAttachmentRow | null> {
   const supabase = createAdminClient();
+  // Stamp the trip this evidence belongs to. A decline screenshot documents the
+  // decline it arrived with; without this, re-submitting leaves the previous
+  // attempt's screenshots sitting under the new response as though the new
+  // answer produced them. NULL means "uploaded before attempts were tracked".
+  const attempt = await latestAttempt(supabase, params.assignment_id);
   const { data, error } = await supabase
     .from("lender_assignment_attachments")
     .insert({
       assignment_id: params.assignment_id,
+      attempt_no: attempt?.attempt_no ?? null,
       storage_path: params.storage_path,
       file_name: params.file_name,
       file_type: params.file_type,
@@ -143,7 +150,13 @@ export async function deleteLenderAttachment(
   return true;
 }
 
-/** Save the typed response note (offer/stips or decline reasons). */
+/**
+ * Save the typed response note (offer/stips or decline reasons).
+ *
+ * Written twice on purpose: onto the assignment, which is the current state
+ * every existing surface reads, and onto the attempt in play, which is what
+ * survives the next re-submission blanking the column.
+ */
 export async function saveLenderResponseNotes(
   assignment_id: string,
   response_notes: string | null
@@ -157,6 +170,8 @@ export async function saveLenderResponseNotes(
     console.error("saveLenderResponseNotes error:", error);
     return false;
   }
+  // Best-effort: the note is already safely on the assignment row.
+  await recordAttemptNotes(supabase, assignment_id, response_notes);
   return true;
 }
 

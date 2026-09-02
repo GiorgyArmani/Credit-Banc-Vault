@@ -89,6 +89,8 @@ export async function ghlGetContact(
   assignedTo?: string | null;
   email?: string | null;
   phone?: string | null;
+  /** Every tag on the contact. Needed to retire stale requested_* tags. */
+  tags?: string[];
   customFields?: Array<{ id: string; value?: any; fieldValue?: any }>;
 } | null> {
   const res = await fetch(`${BASE}/contacts/${contactId}`, {
@@ -104,6 +106,7 @@ export async function ghlGetContact(
     assignedTo: contact.assignedTo ?? null,
     email: contact.email ?? null,
     phone: contact.phone ?? null,
+    tags: Array.isArray(contact.tags) ? contact.tags : [],
     customFields: Array.isArray(contact.customFields) ? contact.customFields : [],
   };
 }
@@ -184,6 +187,59 @@ export async function ghlRemoveTags(contactId: string, tags: string[]) {
     body: JSON.stringify({ tags }),
   });
   return handle(res);
+}
+
+/**
+ * Make a contact's `requested_*` tags EXACTLY the given set.
+ *
+ * WHY THIS EXISTS. Document requests round-trip through GHL: we tag the contact,
+ * GHL fires its tag webhook back, and /api/webhooks/ghl-tags rebuilds the vault's
+ * requirements from whatever tags it finds. Tag writes were add-only — nothing in
+ * the codebase ever called ghlRemoveTags — so a contact accumulated every
+ * `requested_*` tag it had ever been given and the webhook faithfully requested
+ * all of them.
+ *
+ * Observed in prod: a contact created for a Real Estate test on 2026-08-20 was
+ * reused for an SBA client on 2026-09-02. It carried 20 `requested_*` tags, and
+ * the SBA client's vault came back asking for mortgage statements, a closing
+ * statement, valuation comparables and prior projects — none of which an SBA
+ * file needs. Any real client whose phone or email matches an existing GHL
+ * contact inherits that contact's whole request history.
+ *
+ * So the deal's package is authoritative: tags it does not name are retired.
+ * Only `requested_*` tags are touched — lifecycle tags (`vault-user`,
+ * `send-magic-link`, the disqualification tags) are none of this function's
+ * business.
+ *
+ * Best-effort and non-throwing: the vault has already recorded the requests, and
+ * a CRM tag failing to clear must never fail a signup.
+ */
+export async function ghlSyncRequestedDocTags(
+  contactId: string,
+  desiredTags: string[]
+): Promise<{ added: number; removed: number } | null> {
+  try {
+    const desired = Array.from(new Set(desiredTags.filter(Boolean)));
+    const contact = await ghlGetContact(contactId);
+    const current = contact?.tags ?? [];
+
+    const stale = current.filter(
+      (t) => typeof t === "string" && t.startsWith("requested_") && !desired.includes(t)
+    );
+
+    if (stale.length) {
+      await ghlRemoveTags(contactId, stale);
+      console.log(
+        `🧹 Retired ${stale.length} stale requested_* tag(s) on ${contactId}: ${stale.join(", ")}`
+      );
+    }
+    if (desired.length) await ghlAddTags(contactId, desired);
+
+    return { added: desired.length, removed: stale.length };
+  } catch (err) {
+    console.error("ghlSyncRequestedDocTags failed (non-fatal):", err);
+    return null;
+  }
 }
 
 export async function ghlAddContactFollowers(contactId: string, followers: string[]) {

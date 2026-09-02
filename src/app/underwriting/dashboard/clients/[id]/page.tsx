@@ -587,6 +587,27 @@ export default function UnderwritingClientDetailsPage() {
         [businesses, active_business_id]
     );
 
+    /**
+     * The lenders belonging to the round being WORKED.
+     *
+     * `lender_assignments` is every lender this client has ever been sent to,
+     * across every round — that flat list is what underwriting was reading, and
+     * once a repeat client has two rounds it silently mixes last round's
+     * declines into this round's queue with nothing on screen to tell them
+     * apart. The per-round history now lives in FundingRoundsCard; this page's
+     * working list shows the current round only.
+     *
+     * matchesActiveDeal keeps legacy NULL rows visible, so on every file that
+     * exists today this is the same list it has always been.
+     */
+    const active_round_assignments = useMemo(
+        () =>
+            lender_assignments.filter((a) =>
+                matchesActiveDeal((a as { funding_deal_id?: string | null }).funding_deal_id ?? null, active_deal_id)
+            ),
+        [lender_assignments, active_deal_id]
+    );
+
     const approvals = useMemo<Set<string>>(() => {
         return new Set(
             approvals_raw
@@ -2463,8 +2484,8 @@ export default function UnderwritingClientDetailsPage() {
      * where that starts, so it has to be on screen.
      */
     function render_lender_assignments() {
-        const ready_count = lender_assignments.filter(a => derive_lender_row_state(a) === 'ready_to_submit').length;
-        const submitted_count = lender_assignments.filter(a => derive_lender_row_state(a) === 'submitted').length;
+        const ready_count = active_round_assignments.filter(a => derive_lender_row_state(a) === 'ready_to_submit').length;
+        const submitted_count = active_round_assignments.filter(a => derive_lender_row_state(a) === 'submitted').length;
 
         const STATE_BADGE: Record<LenderRowState, { label: string; classes: string }> = {
             rejected_by_matcher: { label: 'Rejected (matcher)', classes: 'bg-rose-100 text-rose-700 hover:bg-rose-100' },
@@ -2484,7 +2505,7 @@ export default function UnderwritingClientDetailsPage() {
                             <Star className="h-4 w-4 text-emerald-600" />
                         </div>
                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                            {ready_count} Ready · {submitted_count} Submitted · {lender_assignments.length} Total
+                            {ready_count} Ready · {submitted_count} Submitted · {active_round_assignments.length} Total
                         </p>
                     </div>
                     <div className="flex items-center gap-2">
@@ -2513,20 +2534,20 @@ export default function UnderwritingClientDetailsPage() {
                         <UwAddLenderButton
                             clientId={client_id}
                             businessProfileId={active_business_id}
-                            assignedLenderNames={lender_assignments.map((a) => a.lender_name)}
+                            assignedLenderNames={active_round_assignments.map((a) => a.lender_name)}
                             onAdded={fetch_lender_assignments}
                         />
                         <ShareWithLenderButton
                             clientId={client_id}
                             businessProfileId={active_business_id}
                             triggerLabel="Share"
-                            lenderOptions={lender_assignments.map((a) => a.lender_name)}
+                            lenderOptions={active_round_assignments.map((a) => a.lender_name)}
                             className="h-8 rounded-xl text-[9px] font-black uppercase tracking-widest border border-slate-200 hover:bg-slate-50 text-slate-700 px-3"
                         />
                     </div>
                 </div>
                 <div>
-                    {lender_assignments.length === 0 && (
+                    {active_round_assignments.length === 0 && (
                         <div className="p-10 text-center">
                             <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">
                                 No lenders on this file yet
@@ -2538,7 +2559,7 @@ export default function UnderwritingClientDetailsPage() {
                         </div>
                     )}
                     <div className="divide-y divide-slate-100">
-                        {lender_assignments.map((assign) => {
+                        {active_round_assignments.map((assign) => {
                             const row_state = derive_lender_row_state(assign);
                             const badge = STATE_BADGE[row_state];
                             const is_submitting_this = submitting_assignment_id === assign.id;
@@ -3121,7 +3142,7 @@ export default function UnderwritingClientDetailsPage() {
                                     className="w-full h-10 rounded-xl border border-slate-200 px-3 text-sm font-medium bg-white"
                                 >
                                     <option value="">Not a lender stip</option>
-                                    {lender_assignments.map((a) => (
+                                    {active_round_assignments.map((a) => (
                                         <option key={a.id} value={a.lender_name}>{a.lender_name}</option>
                                     ))}
                                 </select>
@@ -3403,7 +3424,7 @@ export default function UnderwritingClientDetailsPage() {
                                     approved_by_lender: 'Approved by lender',
                                     funded: 'Funded',
                                 };
-                                const lenderOptions = lender_assignments
+                                const lenderOptions = active_round_assignments
                                     .filter((a) => ['submitted', 'approved_by_lender', 'funded'].includes(a.status))
                                     .map((a) => ({
                                         assignmentId: a.id,
@@ -3428,7 +3449,7 @@ export default function UnderwritingClientDetailsPage() {
                                         defaultSalesRep={advisor_name}
                                         defaultSlackChannel={slack_channel.name ?? ''}
                                         activeRoundFunded={active_round_funded}
-                                        activeRoundLender={lender_assignments.find((a) => a.status === 'funded')?.lender_name ?? null}
+                                        activeRoundLender={active_round_assignments.find((a) => a.status === 'funded')?.lender_name ?? null}
                                         onSuccess={() => { fetch_client_details(); fetch_lender_assignments(); }}
                                         triggerClassName={clsx(HERO_ACTION.base, HERO_ACTION.primary)}
                                     />
@@ -3878,7 +3899,7 @@ export default function UnderwritingClientDetailsPage() {
                                                         businessProfileId={active_business_id}
                                                         triggerLabel=""
                                                         ariaLabel="Share documents with a lender"
-                                                        lenderOptions={lender_assignments.map((a) => a.lender_name)}
+                                                        lenderOptions={active_round_assignments.map((a) => a.lender_name)}
                                                         className="h-8 w-9 rounded-lg text-slate-600 hover:bg-slate-100"
                                                     />
                                                 </span>

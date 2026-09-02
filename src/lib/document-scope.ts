@@ -72,23 +72,33 @@ export const DEFAULT_BANK_STATEMENT_MONTHS = 12;
 
 /**
  * formatRequirementLabel — single source of truth for the label a client sees.
- * For bank statements with a per-request month count, strips any "(last N
- * months)" baked into the static label and appends the precise requested
- * period. Every other doc (or a null month count) returns the base label
- * unchanged, so existing requests are unaffected.
+ *
+ * For bank statements the period is ALWAYS rendered from here: any "(last N
+ * months)" baked into the static label is stripped, and the requested period is
+ * appended. Every other doc returns its base label untouched.
+ *
+ * WHY A NULL MONTH COUNT STILL GETS A PERIOD. `statement_months` is only
+ * populated by requests made since the per-deal period landed; 117 of 177 live
+ * bank-statement requests are NULL. Returning the base label for those meant
+ * showing whatever the shared `required_documents.label` happened to say —
+ * "(last 6 months)" — to two-thirds of clients, while the actual default is 12
+ * and the doc packages ask for 12. Falling back to DEFAULT_BANK_STATEMENT_MONTHS
+ * makes the one number a client acts on come from one place. The label in the
+ * table is now plain "Bank Statements", so the strip below is a safety net
+ * rather than load-bearing.
  */
 export function formatRequirementLabel(
   code: string | null | undefined,
   baseLabel: string,
   statementMonths?: number | null,
 ): string {
-  if (
-    code === BANK_STATEMENTS_DOC_CODE &&
-    typeof statementMonths === "number" &&
-    statementMonths > 0
-  ) {
+  if (code === BANK_STATEMENTS_DOC_CODE) {
+    const months =
+      typeof statementMonths === "number" && statementMonths > 0
+        ? statementMonths
+        : DEFAULT_BANK_STATEMENT_MONTHS;
     const stripped = baseLabel.replace(/\s*\((?:last\s+)?\d+\s*months?\)\s*$/i, "").trim();
-    return `${stripped} (last ${statementMonths} months)`;
+    return `${stripped} (last ${months} months)`;
   }
   return baseLabel;
 }

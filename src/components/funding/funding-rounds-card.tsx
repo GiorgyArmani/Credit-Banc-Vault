@@ -23,10 +23,17 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, PlusCircle, RefreshCw, Trophy } from "lucide-react";
+import { ChevronDown, Loader2, PlusCircle, RefreshCw, Trophy } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { FUNDING_OPTIONS } from "@/data/loan-types";
 import clsx from "clsx";
+import {
+  LENDER_STATUS_LABEL,
+  groupByRound,
+  noteSnippet,
+  type LenderAssignmentRow,
+  type LenderStatus,
+} from "@/lib/lender-history";
 
 interface Deal {
   id: string;
@@ -54,6 +61,24 @@ function money(n: number | null): string {
   return `$${Math.round(n).toLocaleString("en-US")}`;
 }
 
+/** Verdict → pill colour. Declines are amber, not red: a decline is ordinary. */
+const LENDER_PILL: Record<LenderStatus, string> = {
+  pending: "bg-slate-100 text-slate-500",
+  submitted: "bg-sky-100 text-sky-700",
+  approved_by_lender: "bg-emerald-100 text-emerald-700",
+  declined_by_lender: "bg-amber-100 text-amber-800",
+  funded: "bg-emerald-600 text-white",
+};
+
+/** Whole days between two instants, or null when either end is missing. */
+function days_between(from: string | null | undefined, to: string | null | undefined): number | null {
+  if (!from) return null;
+  const start = new Date(from).getTime();
+  const end = to ? new Date(to).getTime() : Date.now();
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  return Math.max(0, Math.floor((end - start) / 86_400_000));
+}
+
 function short_date(iso: string | null): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("en-US", {
@@ -70,6 +95,10 @@ export function FundingRoundsCard({
   onRoundStarted,
 }: Props) {
   const [deals, set_deals] = useState<Deal[]>([]);
+  // Every lender this business was shopped to, across all rounds. Grouped
+  // client-side so the round number stays derived from one ordered list.
+  const [lenders, set_lenders] = useState<LenderAssignmentRow[]>([]);
+  const [expanded_round, set_expanded_round] = useState<string | null>(null);
   const [loading, set_loading] = useState(false);
   const [open, set_open] = useState(false);
   const [starting, set_starting] = useState(false);
@@ -95,7 +124,10 @@ export function FundingRoundsCard({
         `/api/advisor/clients/${clientId}/businesses/${businessProfileId}/deals`
       );
       const data = await res.json();
-      if (res.ok && data.success) set_deals((data.deals ?? []) as Deal[]);
+      if (res.ok && data.success) {
+        set_deals((data.deals ?? []) as Deal[]);
+        set_lenders((data.lenders ?? []) as LenderAssignmentRow[]);
+      }
     } catch (err) {
       console.error("load funding rounds error:", err);
     } finally {
@@ -112,9 +144,18 @@ export function FundingRoundsCard({
   const current_is_funded = !!current?.funded_at;
   const has_history = deals.length > 1 || current_is_funded;
 
-  // Nothing worth showing on a first-time file with an open round — the rest of
-  // the page already says everything this card would.
-  if (!businessProfileId || (!has_history && !loading)) return null;
+  // The card used to hide on a first-time file with an open round, because a
+  // single "Round 1 · in progress" line said nothing the page didn't already.
+  // It now also carries the lender track, so it earns its place as soon as
+  // there is a lender on the file — which is exactly when underwriting starts
+  // reaching for the spreadsheet.
+  const has_lenders = lenders.length > 0;
+  // Round id → its lenders. groupByRound owns the legacy-NULL rule so the card
+  // and the match tool cannot disagree about which round an old row belongs to.
+  const lender_groups = new Map(
+    groupByRound(lenders, deals).map((g) => [g.deal_id, g.rows])
+  );
+  if (!businessProfileId || (!has_history && !has_lenders && !loading)) return null;
 
   async function start_round() {
     if (!businessProfileId) return;
@@ -196,8 +237,14 @@ export function FundingRoundsCard({
               // deals are newest-first; round 1 is the last element.
               const round_no = deals.length - idx;
               const funded = !!d.funded_at;
+              const round_lenders = lender_groups.get(d.id) ?? [];
+              const is_open = expanded_round === d.id;
+              const declined_count = round_lenders.filter(
+                (l) => l.status === "declined_by_lender"
+              ).length;
               return (
-                <div key={d.id} className="px-5 py-3.5 flex items-start justify-between gap-3">
+                <div key={d.id}>
+                <div className="px-5 py-3.5 flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-bold text-slate-800">Round {round_no}</span>
@@ -240,6 +287,95 @@ export function FundingRoundsCard({
                       {funded ? "Funded" : "Requested"}
                     </p>
                   </div>
+                </div>
+
+                {/* The lender track for this round. Collapsed by default: on a
+                    file with four rounds the expanded lists would bury the
+                    round summaries that make the card scannable. */}
+                {round_lenders.length > 0 && (
+                  <div className="px-5 pb-3.5 -mt-1">
+                    <button
+                      type="button"
+                      onClick={() => set_expanded_round(is_open ? null : d.id)}
+                      aria-expanded={is_open}
+                      className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-emerald-700 transition-colors"
+                    >
+                      <ChevronDown
+                        className={clsx(
+                          "w-3 h-3 transition-transform",
+                          is_open && "rotate-180"
+                        )}
+                      />
+                      {round_lenders.length} lender{round_lenders.length === 1 ? "" : "s"}
+                      {declined_count > 0 ? ` · ${declined_count} declined` : ""}
+                    </button>
+
+                    {is_open && (
+                      <ul className="mt-2 space-y-1.5">
+                        {round_lenders.map((l) => {
+                          const status = l.status as LenderStatus;
+                          // Awaiting: how long it has been out. Answered: how
+                          // long it took. Both are what the spreadsheet's date
+                          // columns were actually for.
+                          const waiting =
+                            status === "submitted" ? days_between(l.submitted_at, null) : null;
+                          const turnaround =
+                            l.responded_at ? days_between(l.submitted_at, l.responded_at) : null;
+                          const note = noteSnippet(l.response_notes, 160);
+                          return (
+                            <li
+                              key={l.id}
+                              className={clsx(
+                                "rounded-lg border px-3 py-2",
+                                l.admin_review === "rejected"
+                                  ? "border-slate-200 bg-slate-50 opacity-60"
+                                  : "border-slate-100 bg-white"
+                              )}
+                            >
+                              <div className="flex items-center justify-between gap-2 flex-wrap">
+                                <span className="text-[12px] font-bold text-slate-800">
+                                  {l.lender_name}
+                                  {l.specialty ? (
+                                    <span className="font-medium text-slate-400">
+                                      {" · "}
+                                      {l.specialty}
+                                    </span>
+                                  ) : null}
+                                </span>
+                                <span
+                                  className={clsx(
+                                    "text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full",
+                                    LENDER_PILL[status] ?? "bg-slate-100 text-slate-500"
+                                  )}
+                                >
+                                  {l.admin_review === "rejected"
+                                    ? "Removed"
+                                    : LENDER_STATUS_LABEL[status] ?? status}
+                                </span>
+                              </div>
+                              {note && (
+                                <p className="mt-1 text-[11px] leading-relaxed text-slate-600">
+                                  {note}
+                                </p>
+                              )}
+                              <p className="mt-1 text-[10px] text-slate-400">
+                                {l.submitted_at
+                                  ? `Sent ${short_date(l.submitted_at)}`
+                                  : `Added ${short_date(l.assigned_at ?? null)}`}
+                                {waiting !== null ? ` · ${waiting}d waiting` : ""}
+                                {turnaround !== null
+                                  ? ` · answered in ${turnaround}d`
+                                  : l.responded_at
+                                    ? ` · answered ${short_date(l.responded_at)}`
+                                    : ""}
+                              </p>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </div>
+                )}
                 </div>
               );
             })}

@@ -5,7 +5,7 @@ import { createClient as createServerSupabaseClient } from '@/lib/supabase/serve
 import { send_client_welcome_email } from '@/lib/email';
 import { syncOutstandingDocuments } from '@/lib/outstanding-documents';
 import { syncUnifiedClientData, generateSecurePassword } from '@/lib/user-management';
-import { ghlSearchContacts, ghlUpdateContact, ghlAddContactFollowers, ghlAddTags, extractGhlDuplicateContactId } from '@/lib/ghl-api';
+import { ghlSearchContacts, ghlUpdateContact, ghlAddContactFollowers, ghlAddTags, ghlSyncRequestedDocTags, extractGhlDuplicateContactId } from '@/lib/ghl-api';
 import { formatPhoneUS, isValidUsPhone, phoneKey, toE164 } from '@/lib/phone';
 import { generateOnboardingMagicLink, pushMagicLinkToGhl } from '@/lib/magic-link';
 import { linkAffiliateLeadToVault } from '@/lib/affiliates';
@@ -1113,11 +1113,25 @@ export async function POST(request: Request) {
     console.log(`📋 Frontend tags received: ${frontend_tags.length > 0 ? frontend_tags.join(', ') : 'none'}`);
     console.log(`✅ Total tags to apply (${tags_to_apply.length}): ${tags_to_apply.join(', ')}`);
 
-    // Apply all tags to GHL contact (best-effort — the vault already exists)
+    // Apply all tags to GHL contact (best-effort — the vault already exists).
+    //
+    // Split in two on purpose. The lifecycle tags are add-only: they describe
+    // things that happened and nothing here may retract them. The `requested_*`
+    // tags are RECONCILED, because they round-trip — GHL fires its tag webhook
+    // back and /api/webhooks/ghl-tags rebuilds the vault's document list from
+    // whatever tags the contact carries. A contact reused from an earlier deal
+    // still holds that deal's requests, so add-only meant an SBA client
+    // inheriting a Real Estate file's documents. This deal's package wins.
     if (ghl_contact_id) {
+      const requested_tags = tags_to_apply.filter((t: string) => t.startsWith('requested_'));
+      const lifecycle_tags = tags_to_apply.filter((t: string) => !t.startsWith('requested_'));
       try {
-        await ghl_add_tags(ghl_contact_id, tags_to_apply);
-        console.log(`✅ Tags applied successfully to GHL contact: ${ghl_contact_id}`);
+        await ghl_add_tags(ghl_contact_id, lifecycle_tags);
+        const synced = await ghlSyncRequestedDocTags(ghl_contact_id, requested_tags);
+        console.log(
+          `✅ Tags applied to GHL contact ${ghl_contact_id}` +
+            (synced?.removed ? ` (retired ${synced.removed} stale requested_* tag(s))` : '')
+        );
       } catch (tag_err: any) {
         console.error('⚠️ GHL tag apply failed (non-fatal):', tag_err);
       }

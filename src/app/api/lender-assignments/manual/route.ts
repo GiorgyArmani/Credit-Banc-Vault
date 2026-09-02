@@ -14,6 +14,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { requireStaff } from "@/lib/auth/require-staff";
+import { getActiveDeal } from "@/lib/funding-deals";
 
 const supabase_admin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -56,16 +57,34 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Lender not found." }, { status: 404 });
     }
 
-    // One (client, lender) assignment at a time — same rule as the admin path.
-    const { data: existing } = await supabase_admin
+    // The round this lender is being added to. Without it the row cannot be
+    // told apart from a previous round's once the client comes back.
+    const active_deal = business_profile_id
+      ? await getActiveDeal(supabase_admin, business_profile_id)
+      : null;
+    const funding_deal_id = active_deal?.id ?? null;
+
+    // One (client, lender) assignment PER ROUND — not per client.
+    //
+    // The rule used to be per client, which meant a client who funded with
+    // Lender X in round 1 could never be submitted to Lender X again: the add
+    // returned 409 forever. That is the opposite of how repeat financing works,
+    // where going back to the incumbent is often the first call you make.
+    //
+    // Legacy rows (funding_deal_id NULL) still block within the current round
+    // while a client has only one round, which is the correct reading of them.
+    let dup_q = supabase_admin
       .from("client_lender_assignments")
       .select("id")
       .eq("client_id", client_id)
-      .eq("lender_name", guideline.lender_name)
-      .maybeSingle();
+      .eq("lender_name", guideline.lender_name);
+    dup_q = funding_deal_id
+      ? dup_q.or(`funding_deal_id.eq.${funding_deal_id},funding_deal_id.is.null`)
+      : dup_q.is("funding_deal_id", null);
+    const { data: existing } = await dup_q.maybeSingle();
     if (existing) {
       return NextResponse.json(
-        { error: `${guideline.lender_name} is already assigned to this client.` },
+        { error: `${guideline.lender_name} is already on this funding round.` },
         { status: 409 }
       );
     }
@@ -80,6 +99,7 @@ export async function POST(request: Request) {
       .insert({
         client_id,
         business_profile_id,
+        funding_deal_id,
         lender_name: guideline.lender_name,
         specialty: guideline.specialty,
         tier_label: guideline.tier_label,

@@ -9,6 +9,7 @@ import {
   Send,
   ShieldCheck,
   Trash2,
+  Undo2,
   UserPlus,
   X,
 } from "lucide-react";
@@ -23,6 +24,8 @@ import {
   resendStaffInvite,
   revokeStaffInvite,
   deleteStaffInvite,
+  clearStaffInvite,
+  unclearStaffInvite,
 } from "../actions";
 
 export interface InviteRow {
@@ -39,6 +42,11 @@ export interface InviteRow {
   created_at: string;
   state: InviteState;
   accepted_at: string | null;
+  /**
+   * Tidied out of the list by an admin. Orthogonal to `state` — a cleared row
+   * is still *accepted*; it is not a fifth state.
+   */
+  cleared_at: string | null;
 }
 
 export interface MemberRow {
@@ -109,7 +117,8 @@ export function TeamInvitationsManager({
   const [tab, setTab] = useState<Tab>("invitations");
   const [rows, setRows] = useState<InviteRow[]>(invites);
   const [query, setQuery] = useState("");
-  const [stateFilter, setStateFilter] = useState<InviteState | "all">("all");
+  // "cleared" is a view, not an InviteState — see the note on InviteRow.
+  const [stateFilter, setStateFilter] = useState<InviteState | "all" | "cleared">("all");
 
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<InvitableRole>("advisor");
@@ -135,11 +144,17 @@ export function TeamInvitationsManager({
       r.email.toLowerCase().includes(q) ||
       [r.first_name, r.last_name].filter(Boolean).join(" ").toLowerCase().includes(q);
     if (!matches) return false;
+    // "Cleared" is its own view; every other chip — All included — hides them,
+    // or clearing a row would have no visible effect.
+    if (stateFilter === "cleared") return !!r.cleared_at;
+    if (r.cleared_at) return false;
     if (stateFilter !== "all") return r.state === stateFilter;
     return true;
   });
 
-  const pendingCount = rows.filter((r) => r.state === "pending").length;
+  const clearedCount = rows.filter((r) => r.cleared_at).length;
+
+  const pendingCount = rows.filter((r) => r.state === "pending" && !r.cleared_at).length;
 
   function flash(msg: string) {
     setNotice(msg);
@@ -331,17 +346,24 @@ export function TeamInvitationsManager({
               />
             </div>
             <div className="flex flex-wrap gap-1.5">
-              {(["all", "pending", "accepted", "expired", "revoked"] as const).map((s) => (
+              {(["all", "pending", "accepted", "expired", "revoked", "cleared"] as const).map((s) => (
                 <button
                   key={s}
                   onClick={() => setStateFilter(s)}
+                  // The Cleared chip is hidden until something is cleared —
+                  // an empty view nobody has a use for is just noise.
+                  hidden={s === "cleared" && clearedCount === 0}
                   className={`rounded-lg px-3 py-2 text-xs font-bold uppercase tracking-wide transition-colors ${
                     stateFilter === s
                       ? "bg-slate-900 text-white"
                       : "bg-white text-slate-500 hover:text-slate-900 border border-slate-200"
                   }`}
                 >
-                  {s === "all" ? "All" : STATE_STYLES[s].label}
+                  {s === "all"
+                    ? "All"
+                    : s === "cleared"
+                      ? `Cleared (${clearedCount})`
+                      : STATE_STYLES[s].label}
                 </button>
               ))}
             </div>
@@ -442,34 +464,62 @@ export function TeamInvitationsManager({
                           </button>
                         )}
 
-                        {r.state !== "accepted" &&
-                          (confirmingDeleteId === r.id ? (
-                            <div className="flex items-center gap-1.5">
-                              <button
-                                disabled={busy}
-                                onClick={() =>
-                                  run(r.id, () => deleteStaffInvite(r.id), "Invitation deleted.")
-                                }
-                                className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-rose-700 disabled:opacity-50"
-                              >
-                                Delete
-                              </button>
-                              <button
-                                onClick={() => setConfirmingDeleteId(null)}
-                                className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-bold text-slate-500"
-                              >
-                                No
-                              </button>
-                            </div>
-                          ) : (
+                        {/* One gesture, two behaviours. An unused invitation
+                            (pending / expired / cancelled) is deleted outright —
+                            no account came of it, there is nothing to keep. An
+                            ACCEPTED one is only cleared from the list: it is the
+                            single record anywhere of who granted that person
+                            staff access, so it hides rather than dies. Same icon
+                            either way; the confirm word is the honest tell. */}
+                        {r.cleared_at ? (
+                          <button
+                            disabled={busy}
+                            onClick={() =>
+                              run(r.id, () => unclearStaffInvite(r.id), `Invitation for ${r.email} restored.`)
+                            }
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-900 disabled:opacity-50"
+                            title="Put this row back on the list"
+                          >
+                            {busy ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Undo2 className="h-3.5 w-3.5" />
+                            )}
+                            Restore
+                          </button>
+                        ) : confirmingDeleteId === r.id ? (
+                          <div className="flex items-center gap-1.5">
                             <button
-                              onClick={() => setConfirmingDeleteId(r.id)}
-                              className="rounded-lg p-1.5 text-slate-300 transition-colors hover:bg-slate-50 hover:text-rose-500"
-                              title="Remove this row entirely"
+                              disabled={busy}
+                              onClick={() =>
+                                r.state === "accepted"
+                                  ? run(r.id, () => clearStaffInvite(r.id), `Invitation for ${r.email} cleared.`)
+                                  : run(r.id, () => deleteStaffInvite(r.id), "Invitation deleted.")
+                              }
+                              className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-rose-700 disabled:opacity-50"
                             >
-                              <Trash2 className="h-4 w-4" />
+                              {r.state === "accepted" ? "Clear" : "Delete"}
                             </button>
-                          ))}
+                            <button
+                              onClick={() => setConfirmingDeleteId(null)}
+                              className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-bold text-slate-500"
+                            >
+                              No
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => setConfirmingDeleteId(r.id)}
+                            className="rounded-lg p-1.5 text-slate-300 transition-colors hover:bg-slate-50 hover:text-rose-500"
+                            title={
+                              r.state === "accepted"
+                                ? "Clear from this list — the record is kept"
+                                : "Remove this row entirely"
+                            }
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        )}
                       </div>
                     </li>
                   );

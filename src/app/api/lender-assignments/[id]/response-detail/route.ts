@@ -20,6 +20,8 @@ import {
   notifyLenderResponseNoteRecorded,
   sendLenderAttachmentsToSlack,
 } from "@/lib/notifications/lender-pipeline";
+import { listAttempts } from "@/lib/lender-response-history";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function GET(
   _request: Request,
@@ -32,11 +34,16 @@ export async function GET(
     const { id } = await params;
     if (!id) return NextResponse.json({ error: "Missing assignment id." }, { status: 400 });
 
-    const [notes, attachments] = await Promise.all([
+    // `history` is the ledger of past trips to this lender. It rides along on
+    // this response rather than getting its own endpoint: the panel opens it in
+    // the same click, and a separate fetch would let the "current note" and the
+    // "past attempts" render from two different reads of the same row.
+    const [notes, attachments, history] = await Promise.all([
       getLenderResponseNotes(id),
       listLenderAttachments(id),
+      listAttempts(createAdminClient(), id),
     ]);
-    return NextResponse.json({ success: true, response_notes: notes, attachments });
+    return NextResponse.json({ success: true, response_notes: notes, attachments, history });
   } catch (err: any) {
     console.error("response-detail GET error:", err);
     return NextResponse.json({ error: err?.message || "Server error" }, { status: 500 });
