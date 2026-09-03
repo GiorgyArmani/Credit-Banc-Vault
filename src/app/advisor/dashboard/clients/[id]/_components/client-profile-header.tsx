@@ -42,6 +42,13 @@ interface ClientProfileHeaderProps {
     is_generating_magic_link: boolean;
     is_sending_password_reset: boolean;
     is_saving_referral_partner: boolean;
+    /**
+     * Whether to render the referral-partner picker. Internal staff (admin /
+     * advisor) see + edit it; a referral partner viewing their own deal in
+     * /partner would only ever see themselves, so the row is noise there.
+     * Defaults to true.
+     */
+    show_referral_partner?: boolean;
     on_edit: () => void;
     on_delete_vault: () => void;
     on_resend: () => void;
@@ -99,6 +106,7 @@ export function ClientProfileHeader({
     is_generating_magic_link,
     is_sending_password_reset,
     is_saving_referral_partner,
+    show_referral_partner = true,
     on_edit,
     on_delete_vault,
     on_resend,
@@ -230,14 +238,16 @@ export function ClientProfileHeader({
                     </div>
                 </div>
 
-                {/* Referral partner picker */}
-                <div className="mt-6 pt-6 border-t border-slate-100">
-                    <ReferralPartnerPicker
-                        value={client_profile.referral_partner ?? null}
-                        is_saving={is_saving_referral_partner}
-                        on_change={on_referral_partner_change}
-                    />
-                </div>
+                {/* Referral partner picker — hidden in the partner portal */}
+                {show_referral_partner && (
+                    <div className="mt-6 pt-6 border-t border-slate-100">
+                        <ReferralPartnerPicker
+                            value={client_profile.referral_partner ?? null}
+                            is_saving={is_saving_referral_partner}
+                            on_change={on_referral_partner_change}
+                        />
+                    </div>
+                )}
 
                 {/* Divider + 4-column info strip */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 mt-8 pt-8 border-t border-slate-100">
