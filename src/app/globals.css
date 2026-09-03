@@ -187,14 +187,19 @@ body {
 
 
 /* SignWell Modal Z-Index Override */
-/* Ensure SignWell modals appear above everything else including dialogs (z-50) */
+/* Ensure SignWell modals appear above everything else including dialogs (z-50).
+   SignWell's embed mounts `#SignWell-Modal-Embedded` as position:fixed with NO
+   z-index, and attribute selectors are case-sensitive — the `i` flag is what
+   makes these actually match (without it the onboarding card, `relative z-10`,
+   painted over the W-9). */
 #wistia_chrome_23,
 .w-css-reset,
 .w-vulcan-v2-button,
 [id^="wistia_"],
 [class*="wistia"],
-[id*="signwell"],
-[class*="signwell"],
+#SignWell-Modal-Embedded,
+[id*="signwell" i],
+[class*="signwell" i],
 .signwell-modal,
 .signwell-embed,
 [data-signwell],
