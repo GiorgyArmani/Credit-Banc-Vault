@@ -118,12 +118,16 @@ export async function proxy(request: NextRequest) {
    * the link and then chooses a password), /auth/signout, /auth/confirm and
    * /auth/magic. Sweeping the whole prefix in here would break passwordless
    * onboarding. See [[magic_link_onboarding]].
+   *
+   * /auth/advisor-signup is also deliberately absent: the account step signs
+   * the new advisor in and the W-9 / voided-check steps run on the SAME page
+   * (server actions POST to it), so bouncing an authenticated user would break
+   * the wizard mid-way. The page decides for itself what a signed-in visitor
+   * sees, the way /partner/welcome does.
    */
   const authPagesForAnonymousOnly = [
     "/auth/login",
     "/auth/join",
-    "/auth/advisor-signup",
-    "/auth/advisor-signup-success",
     "/auth/underwriting-signup",
     "/auth/underwriting-signup-success",
     "/auth/setter-signup",

@@ -1,6 +1,9 @@
-// The internal-advisor onboarding card. Rendered by /advisor/layout.tsx as a
-// TAKEOVER: while a staff advisor still owes a W-9 or a voided check, every
-// /advisor/* URL shows this instead of the workspace. There is no separate
+// The internal-advisor onboarding card, as the BACKSTOP. The paperwork is
+// normally finished on /auth/advisor-signup right after the account is
+// created; this is for the advisor who closed that tab and signed in later.
+// Rendered by /advisor/layout.tsx as a TAKEOVER: while a staff advisor still
+// owes a W-9 or a voided check, every /advisor/* URL shows this instead of the
+// workspace. There is no separate
 // route for it and no redirect — a layout cannot read the pathname, so a
 // redirect would loop on its own target, and rendering in place also means
 // there is no half-open workspace to click into.
@@ -44,8 +47,8 @@ export function AdvisorOnboardingScreen({
               Welcome aboard, {firstName}.
             </h1>
             <p className="mt-3 text-[15px] leading-relaxed text-cb-ink/60">
-              Two things before your workspace opens — your W-9, and where to send your
-              payouts.
+              Two things left before your workspace opens — your W-9, and where to send
+              your payouts.
             </p>
 
             <div className="mt-8">

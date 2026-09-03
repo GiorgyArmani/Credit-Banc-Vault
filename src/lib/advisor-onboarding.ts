@@ -3,17 +3,19 @@
 // Compliance onboarding for INTERNAL advisors — the people invited from
 // /admin/team who sign up through /auth/join.
 //
-// The invite → signup flow already collects everything else (name, phone,
-// photo, password). What it never collected is the paperwork finance needs to
-// pay an advisor on a funded file: a signed W-9 and a voided check. Those are
-// the same two documents the partner deal desk gates on, so the mechanics —
-// SignWell embed, PDF retry, webhook, private storage, admin preview — live
-// once in compliance-onboarding.ts. This module owns the advisor-specific
-// parts: finding the row for a login, and what "finished" means.
+// The invite link lands on /auth/advisor-signup, which is one wizard: create
+// the account (name, phone, photo, password), then — signed in on the spot,
+// same screen — the paperwork finance needs to pay an advisor on a funded
+// file: a signed W-9 and a voided check. Those are the same two documents the
+// partner deal desk gates on, so the mechanics — SignWell embed, PDF retry,
+// webhook, private storage, admin preview — live once in
+// compliance-onboarding.ts. This module owns the advisor-specific parts:
+// finding the row for a login, and what "finished" means.
 //
-// Enforced in src/app/advisor/layout.tsx as a TAKEOVER (the workspace is not
-// rendered until both documents are in), never a redirect — a layout cannot
-// read the pathname, so a redirect would loop on its own target.
+// Backstop in src/app/advisor/layout.tsx for anyone who closed the tab
+// mid-way and signed in later: a TAKEOVER (the workspace is not rendered until
+// both documents are in), never a redirect — a layout cannot read the
+// pathname, so a redirect would loop on its own target.
 //
 // Who is gated: rows with referral_partner_id NULL (staff), and only those with
 // onboarding_completed_at NULL. Migration 20260903 stamps every advisor who

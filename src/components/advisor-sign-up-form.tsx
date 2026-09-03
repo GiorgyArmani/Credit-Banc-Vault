@@ -2,11 +2,11 @@
 
 import { cn } from "@/lib/utils";
 import { formatPhoneInput } from "@/lib/phone";
-import { BrandCard, Eyebrow, CTA, FIELD } from "@/components/marketing/brand-chrome";
+import { CTA, FIELD } from "@/components/marketing/brand-chrome";
+import { createClient } from "@/lib/supabase/client";
 import { Input } from "@/components/ui/input";
 import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useRef } from "react";
 import { Camera, User, ArrowRight, Lock } from "lucide-react";
@@ -23,9 +23,19 @@ export type InviteContext = {
 
 export function AdvisorSignUpForm({
   invite,
+  onComplete,
   className,
   ...props
-}: React.ComponentPropsWithoutRef<"div"> & { invite: InviteContext }) {
+}: React.ComponentPropsWithoutRef<"div"> & {
+  invite: InviteContext;
+  /**
+   * Fires once the account exists AND the advisor is signed in. The wizard
+   * that mounts this form continues straight into the W-9 step — the same
+   * screen, no login in between — which is why this form never navigates on
+   * success by itself.
+   */
+  onComplete: (created: { firstName: string }) => void;
+}) {
   // Form state management. Names are seeded from the invitation but stay
   // editable — an admin typing a colleague's name into an invite box is not
   // authoritative about how they spell it.
@@ -143,10 +153,26 @@ export function AdvisorSignUpForm({
         throw new Error(message || "Failed advisor signup flow");
       }
 
-      // Step 6: Redirect to success page
-      router.push("/auth/advisor-signup-success");
-    } catch (err: any) {
-      setError(err?.message || "An error occurred during signup");
+      // Step 4: Sign in with the password just chosen. The route created the
+      // account server-side (auto-confirmed) and left the browser without a
+      // session; this is what makes the W-9 and voided-check steps that follow
+      // possible without a trip through the login page.
+      const supabase = createClient();
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: email.trim().toLowerCase(),
+        password,
+      });
+      if (signInError) {
+        // The account exists either way. Sending them through the login page
+        // lands them on the same paperwork via the /advisor layout takeover.
+        console.error("post-signup sign-in failed:", signInError);
+        router.push("/auth/login");
+        return;
+      }
+
+      onComplete({ firstName: firstName.trim() });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "An error occurred during signup");
     } finally {
       setIsLoading(false);
     }
@@ -154,18 +180,7 @@ export function AdvisorSignUpForm({
 
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
-      <BrandCard>
-        <div className="text-center">
-          <Eyebrow className="mb-3">Advisor access</Eyebrow>
-          <h1 className="font-headline text-4xl font-extrabold leading-tight tracking-tight text-cb-ink">
-            Create your <span className="text-cb-mint">account</span>
-          </h1>
-          <p className="mt-3 text-[15px] leading-relaxed text-cb-ink/70">
-            Everything you need to manage applications, in one place.
-          </p>
-        </div>
-
-        <form onSubmit={handleAdvisorSignUp} className="mt-10">
+        <form onSubmit={handleAdvisorSignUp}>
             <div className="flex flex-col gap-8">
 
               {/* Profile Picture Upload Space */}
@@ -306,15 +321,7 @@ export function AdvisorSignUpForm({
                 )}
               </button>
             </div>
-
-            <p className="mt-8 text-center text-sm text-cb-ink/50">
-              Joined before?{" "}
-              <Link href="/auth/login" className="font-bold text-cb-mint hover:underline">
-                Sign in
-              </Link>
-            </p>
           </form>
-      </BrandCard>
     </div>
   );
 }
