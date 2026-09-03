@@ -30,6 +30,12 @@ export default function AdminPipelinePage() {
   // Activity-decay state filter (Fresh/Watch/Alert/Urgent/Stale) — same
   // classification the card badges + the reassign-stale-files cron use.
   const [activityFilter, setActivityFilter] = useState<ActivityState | "">("");
+  // Referral-partner attribution (client_data_vault.referral_partner), which
+  // is a different axis from the advisor filter: partner advisors are kept
+  // OUT of the advisor list on purpose, and a partner-referred deal is
+  // usually worked by an internal advisor anyway. "" = all, __any__ /
+  // __none__ = has / lacks an attribution, otherwise an exact partner name.
+  const [partnerFilter, setPartnerFilter] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState("");
 
   const fetchAll = async () => {
@@ -48,7 +54,7 @@ export default function AdminPipelinePage() {
       const [{ data: clients, error }, { data: advisorRows }] = await Promise.all([
         supabase
           .from("client_data_vault")
-          .select("id, user_id, advisor_id, client_name, client_email, client_phone, company_name, capital_requested, created_at, reassigned_to_catch_all_at, reassignment_paused_until"),
+          .select("id, user_id, advisor_id, client_name, client_email, client_phone, company_name, capital_requested, created_at, reassigned_to_catch_all_at, reassignment_paused_until, referral_partner"),
         // Internal staff only. No is_active filter here by design (inactive
         // advisors still own historic deals), so referral_partner_id is the only
         // thing excluding external partner advisors from the filter.
@@ -97,6 +103,17 @@ export default function AdminPipelinePage() {
     localStorage.setItem("admin-pipeline-scope", next);
   };
 
+  // Only partners that actually have a deal on the board — an empty filter
+  // option is noise, and the full registry lives on /admin/referral-partners.
+  const partnerOptions = useMemo(() => {
+    const names = new Set<string>();
+    deals.forEach(d => {
+      const name = (d.referral_partner || "").trim();
+      if (name) names.add(name);
+    });
+    return Array.from(names).sort((a, b) => a.localeCompare(b));
+  }, [deals]);
+
   const filteredDeals = useMemo(() => {
     let out = deals;
     if (scope === "mine") {
@@ -108,6 +125,15 @@ export default function AdminPipelinePage() {
         out = out.filter(d => !d.advisor_id);
       } else {
         out = out.filter(d => d.advisor_id === advisorFilter);
+      }
+    }
+    if (partnerFilter) {
+      if (partnerFilter === "__any__") {
+        out = out.filter(d => !!(d.referral_partner || "").trim());
+      } else if (partnerFilter === "__none__") {
+        out = out.filter(d => !(d.referral_partner || "").trim());
+      } else {
+        out = out.filter(d => (d.referral_partner || "").trim() === partnerFilter);
       }
     }
     if (activityFilter) {
@@ -122,7 +148,7 @@ export default function AdminPipelinePage() {
       );
     }
     return out;
-  }, [deals, scope, advisorFilter, activityFilter, searchQuery, myAdvisorId]);
+  }, [deals, scope, advisorFilter, partnerFilter, activityFilter, searchQuery, myAdvisorId]);
 
   const handleDrop = async (dealId: string, newStatus: LoanStatus) => {
     const old = [...deals];
@@ -191,6 +217,24 @@ export default function AdminPipelinePage() {
           <SelectItem value="__unassigned__">Unassigned</SelectItem>
           {advisors.map(a => (
             <SelectItem key={a.id} value={a.id}>{a.label}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
+      {/* Referral-partner filter (attribution, see partnerFilter above) */}
+      <Select
+        value={partnerFilter === "" ? "__all__" : partnerFilter}
+        onValueChange={(v) => setPartnerFilter(v === "__all__" ? "" : v)}
+      >
+        <SelectTrigger className="h-9 md:h-10 w-[170px] rounded-xl border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-[12px] font-bold text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-emerald-500/30">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent className="rounded-xl">
+          <SelectItem value="__all__">All partners</SelectItem>
+          <SelectItem value="__any__">Any referral partner</SelectItem>
+          <SelectItem value="__none__">No referral partner</SelectItem>
+          {partnerOptions.map(name => (
+            <SelectItem key={name} value={name}>{name}</SelectItem>
           ))}
         </SelectContent>
       </Select>

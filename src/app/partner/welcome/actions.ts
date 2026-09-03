@@ -4,14 +4,11 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
 import {
-  PARTNER_DOC_BUCKET,
-  PARTNER_DOC_PREFIX,
-  VOIDED_CHECK_MAX_BYTES,
-  VOIDED_CHECK_MIME_TYPES,
   completePartnerOnboardingIfReady,
   ensurePartnerW9Document,
   getPartnerOnboardingState,
   savePartnerPhone,
+  storePartnerVoidedCheck,
   syncPartnerW9,
 } from "@/lib/partner-onboarding";
 import type { PartnerOnboardingState } from "@/lib/partner-onboarding";
@@ -175,8 +172,8 @@ export async function startPartnerW9(): Promise<{
  * Step 3 — ask SignWell whether it's signed yet, and record it if so.
  *
  * Called when the embed reports completion AND on every load of the onboarding
- * screen, which is what covers the partner who signed and then closed the tab.
- * There is no webhook for this document; this poll is the whole backstop.
+ * screen. The SignWell webhook (/api/webhooks/signwell) usually records the
+ * signature first; this is the backstop for a dropped delivery.
  */
 export async function checkPartnerW9(): Promise<{
   success: boolean;
@@ -206,54 +203,13 @@ export async function uploadPartnerVoidedCheck(
 ): Promise<{ success: boolean; error?: string }> {
   const resolved = await requireDealDeskPartner();
   if ("error" in resolved) return { success: false, error: resolved.error };
-  const { partner } = resolved;
 
   const file = formData.get("file");
-  if (!(file instanceof File) || file.size === 0) {
-    return { success: false, error: "Choose a file to upload." };
-  }
-  if (file.size > VOIDED_CHECK_MAX_BYTES) {
-    return { success: false, error: "That file is larger than 15MB." };
-  }
-  if (!VOIDED_CHECK_MIME_TYPES.includes(file.type)) {
-    return { success: false, error: "Upload a PDF or a photo (JPG, PNG, HEIC, WEBP)." };
-  }
+  if (!(file instanceof File)) return { success: false, error: "Choose a file to upload." };
 
-  const safeName = (file.name || "voided-check")
-    .replace(/[^a-zA-Z0-9._-]/g, "_")
-    .slice(-80);
-  const path = `${PARTNER_DOC_PREFIX}/${partner.id}/voided-check_${Date.now()}_${safeName}`;
-
-  const db = createAdminClient();
-  const { error: uploadErr } = await db.storage
-    .from(PARTNER_DOC_BUCKET)
-    .upload(path, await file.arrayBuffer(), {
-      contentType: file.type,
-      upsert: false,
-    });
-
-  if (uploadErr) {
-    console.error("[partner-welcome] voided check upload failed:", uploadErr);
-    return { success: false, error: "Upload failed. Try again." };
-  }
-
-  const { error: stampErr } = await db
-    .from("referral_partners")
-    .update({
-      voided_check_path: path,
-      voided_check_filename: file.name || null,
-      voided_check_uploaded_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", partner.id);
-
-  if (stampErr) {
-    console.error("[partner-welcome] voided check stamp failed:", stampErr);
-    return { success: false, error: "Uploaded, but we couldn't record it. Try again." };
-  }
-
-  revalidatePath("/partner/welcome");
-  return { success: true };
+  const result = await storePartnerVoidedCheck(resolved.partner, file);
+  if (result.success) revalidatePath("/partner/welcome");
+  return result;
 }
 
 /**

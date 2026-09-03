@@ -17,51 +17,47 @@
 // and how to reach them. A deal desk with no number behind it hands the client
 // a contact card with a blank on it.
 //
-// Same shape as the client's own onboarding — a SignWell signing step, then a
-// document step — and the same Embed SDK, never an iframe
-// ([[signwell_embed_and_business_contract_sync]]).
+// Steps 2 and 3 are the SAME two documents internal advisors now owe
+// (advisor-onboarding.ts), so the SignWell / storage / webhook mechanics live
+// once in compliance-onboarding.ts, keyed by table. This module owns what is
+// partner-specific: finding the row for a login, the phone step, and what
+// "finished" means for a partner.
 //
 // EVERYTHING HERE IS SERVICE-ROLE. referral_partners is RLS-locked with zero
 // policies ([[referral_partners_db_backed]]), so the partner never selects
 // their own row; the server hands the screen exactly what it needs.
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { signWell } from "@/lib/signwell";
 import { formatPhoneUS, isValidUsPhone } from "@/lib/phone";
+import {
+  COMPLIANCE_COLUMNS,
+  COMPLIANCE_DOC_BUCKET,
+  COMPLIANCE_DOC_PREFIX,
+  COMPLIANCE_DOC_TTL_SECONDS,
+  ensureW9Document,
+  signedComplianceDocUrl,
+  storeVoidedCheck,
+  storeW9Pdf,
+  syncW9,
+  type ComplianceFields,
+  type ComplianceSubject,
+} from "@/lib/compliance-onboarding";
 
-/**
- * The PRIVATE bucket, deliberately not `user-documents`.
- *
- * `user-documents` is a PUBLIC bucket: anything in it is readable by anyone
- * holding the path, with no auth. A W-9 carries an SSN or EIN and a voided
- * check carries a routing and account number, so neither may live there. Reads
- * go through short-lived signed URLs minted below.
- */
-export const PARTNER_DOC_BUCKET = "vault";
-export const PARTNER_DOC_PREFIX = "partner-onboarding";
-/** Long enough to open and read, short enough that a copied URL is worthless. */
-export const PARTNER_DOC_TTL_SECONDS = 60 * 10;
-
-/** What the voided-check step will accept. Deliberately narrow. */
-export const VOIDED_CHECK_MIME_TYPES = [
-  "application/pdf",
-  "image/jpeg",
-  "image/png",
-  "image/heic",
-  "image/heif",
-  "image/webp",
-];
-export const VOIDED_CHECK_MAX_BYTES = 15 * 1024 * 1024; // 15MB
+// Kept under their historical names for existing importers.
+export { VOIDED_CHECK_MAX_BYTES, VOIDED_CHECK_MIME_TYPES } from "@/lib/compliance-onboarding";
+export const PARTNER_DOC_BUCKET = COMPLIANCE_DOC_BUCKET;
+export const PARTNER_DOC_PREFIX = COMPLIANCE_DOC_PREFIX.referral_partners;
+export const PARTNER_DOC_TTL_SECONDS = COMPLIANCE_DOC_TTL_SECONDS;
 
 /**
  * The partner row the onboarding screens work against.
  *
- * `requires_onboarding` is the one thing callers should branch on. It is true
- * only for a partner whose deal desk is on and whose paperwork is outstanding —
- * a plain referral_partner has no compliance onboarding at all, and a partner
- * who finished (or was grandfathered by migration 20260825) is done forever.
+ * `requires_onboarding` is the one derived flag: the gate is meaningful only for
+ * a partner whose deal desk is on and whose paperwork is outstanding — a plain
+ * referral_partner has no compliance onboarding at all, and a partner who
+ * finished (or was grandfathered by migration 20260825) is done forever.
  */
-export interface PartnerOnboardingState {
+export interface PartnerOnboardingState extends ComplianceFields {
   id: string;
   name: string;
   email: string | null;
@@ -71,21 +67,13 @@ export interface PartnerOnboardingState {
   portal_enabled: boolean;
   deal_desk_enabled: boolean;
   password_set_at: string | null;
-  w9_document_id: string | null;
-  w9_contract_url: string | null;
-  w9_signed_at: string | null;
-  voided_check_path: string | null;
-  voided_check_filename: string | null;
-  voided_check_uploaded_at: string | null;
-  onboarding_completed_at: string | null;
   /** deal desk on, and at least one onboarding step still outstanding. */
   requires_onboarding: boolean;
 }
 
 // One literal, not a concatenation: PostgREST's typings parse the select string
 // at compile time, and a built-up string degrades the result to an error union.
-const PARTNER_ONBOARDING_COLUMNS =
-  "id, name, email, phone, user_id, portal_enabled, deal_desk_enabled, password_set_at, w9_document_id, w9_contract_url, w9_signed_at, voided_check_path, voided_check_filename, voided_check_uploaded_at, onboarding_completed_at";
+const PARTNER_ONBOARDING_COLUMNS = `id, name, email, phone, user_id, portal_enabled, deal_desk_enabled, password_set_at, ${COMPLIANCE_COLUMNS}`;
 
 function decorate(row: Record<string, unknown>): PartnerOnboardingState {
   const partner = row as unknown as Omit<PartnerOnboardingState, "requires_onboarding">;
@@ -94,6 +82,10 @@ function decorate(row: Record<string, unknown>): PartnerOnboardingState {
     requires_onboarding:
       partner.deal_desk_enabled === true && !partner.onboarding_completed_at,
   };
+}
+
+function toSubject(partner: PartnerOnboardingState): ComplianceSubject {
+  return { ...partner, table: "referral_partners" };
 }
 
 /** The partner row for a logged-in user, or null if this login isn't a partner. */
@@ -111,7 +103,7 @@ export async function getPartnerOnboardingState(
     console.error("[partner-onboarding] state read failed:", error);
     return null;
   }
-  return data ? decorate(data) : null;
+  return data ? decorate(data as Record<string, unknown>) : null;
 }
 
 /**
@@ -169,146 +161,34 @@ export async function savePartnerPhone(
   return { success: true, phone };
 }
 
-/**
- * Create (or resume) the partner's W-9 in SignWell.
- *
- * Resuming matters: `w9_document_id` is the idempotency key, so a partner who
- * reloads mid-signing lands back on the SAME document. Without it every reload
- * would mint another envelope, leaving orphans in the SignWell account and a
- * signed copy of whichever one they happened to finish.
- *
- * NOTHING IS PREFILLED, on purpose. The template's fields come back from the
- * API as bare positional ids (`TextField_1`… `CheckBox_8`) with empty labels —
- * there is no way to know which box is the TIN and which is the entity
- * classification without guessing at coordinates on a tax form. A wrong TIN or
- * a wrong entity checkbox on a W-9 is worse than an empty one, so the partner
- * fills their own.
- */
+/** Create (or resume) the partner's W-9 in SignWell. See ensureW9Document. */
 export async function ensurePartnerW9Document(
   partner: PartnerOnboardingState
 ): Promise<{ url: string } | { error: string }> {
-  if (partner.w9_contract_url) return { url: partner.w9_contract_url };
-
-  const templateId = process.env.SIGNWELL_W9_TEMPLATE_ID;
-  if (!templateId) {
-    console.error("[partner-onboarding] SIGNWELL_W9_TEMPLATE_ID is not set");
-    return { error: "W-9 signing isn't configured yet. Contact support." };
-  }
-
-  const email = (partner.email || "").trim().toLowerCase();
-  if (!email) {
-    return { error: "This partner has no email address on file." };
-  }
-
-  try {
-    const { signingUrl, embeddedSigningUrl, documentId } = await signWell.createDocument({
-      templateId,
-      recipientEmail: email,
-      recipientName: partner.name,
-      fields: {},
-    });
-
-    // Same `?doc_id=` convention as the client contract URL — it is what lets
-    // the browser hand the document id back on completion without a round trip.
-    const base = embeddedSigningUrl || signingUrl;
-    const url = `${base}${base.includes("?") ? "&" : "?"}doc_id=${documentId}`;
-
-    const db = createAdminClient();
-    const { error } = await db
-      .from("referral_partners")
-      .update({
-        w9_document_id: documentId,
-        w9_contract_url: url,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", partner.id);
-
-    if (error) {
-      // The document exists in SignWell either way. Returning the URL lets them
-      // sign now; the miss is that a reload mints a second envelope.
-      console.error("[partner-onboarding] could not persist W-9 url:", error);
-    }
-
-    return { url };
-  } catch (err) {
-    console.error("[partner-onboarding] SignWell W-9 creation failed:", err);
-    return { error: "Could not open the W-9 for signing. Try again in a moment." };
-  }
+  return ensureW9Document(toSubject(partner));
 }
 
-/**
- * Ask SignWell whether the W-9 is signed, and record it if so.
- *
- * Called on every load of the onboarding screen and again when the embed fires
- * `completed`. That is the whole backstop: no webhook is wired for this
- * document, because the partner is sitting in the browser when they sign, and a
- * partner who closed the tab mid-signature gets picked up by the next load.
- *
- * Storing the PDF is best-effort. SignWell holds the original regardless, and
- * blocking a partner from their portal because our copy failed to download
- * helps nobody — the signature is what the gate is about.
- */
+/** Pull our copy of the signed PDF into the vault bucket. See storeW9Pdf. */
+export async function storePartnerW9Pdf(
+  partner: Pick<PartnerOnboardingState, "id" | "w9_document_id" | "w9_file_path">,
+  opts: { attempts?: number; delayMs?: number } = {}
+): Promise<{ stored: boolean; path: string | null; error?: string }> {
+  return storeW9Pdf({ ...partner, table: "referral_partners" }, opts);
+}
+
+/** Ask SignWell whether the W-9 is signed, and record it if so. See syncW9. */
 export async function syncPartnerW9(
   partner: PartnerOnboardingState
 ): Promise<{ signed: boolean; error?: string }> {
-  if (partner.w9_signed_at) return { signed: true };
-  if (!partner.w9_document_id) return { signed: false };
+  return syncW9(toSubject(partner));
+}
 
-  const db = createAdminClient();
-
-  let status: string | undefined;
-  try {
-    const doc = await signWell.getDocument(partner.w9_document_id);
-    status = doc?.status;
-  } catch (err) {
-    console.error("[partner-onboarding] SignWell status check failed:", err);
-    return { signed: false, error: "Could not reach SignWell. Try again in a moment." };
-  }
-
-  // SignWell reports the DOCUMENT status title-cased ("Completed") while the
-  // per-recipient status is lower-case. Compare case-insensitively or a signed
-  // W-9 polls forever.
-  if (status?.toLowerCase() !== "completed") return { signed: false };
-
-  let filePath: string | null = null;
-  try {
-    const { blob } = await signWell.getCompletedPDF({
-      documentId: partner.w9_document_id,
-      urlOnly: false,
-    });
-    if (blob) {
-      const path = `${PARTNER_DOC_PREFIX}/${partner.id}/w9_${Date.now()}.pdf`;
-      const { error: uploadErr } = await db.storage
-        .from(PARTNER_DOC_BUCKET)
-        .upload(path, await blob.arrayBuffer(), {
-          contentType: "application/pdf",
-          upsert: true,
-        });
-      if (uploadErr) {
-        console.error("[partner-onboarding] W-9 PDF upload failed:", uploadErr);
-      } else {
-        filePath = path;
-      }
-    }
-  } catch (err) {
-    console.error("[partner-onboarding] W-9 PDF fetch failed (non-fatal):", err);
-  }
-
-  const { error } = await db
-    .from("referral_partners")
-    .update({
-      w9_signed_at: new Date().toISOString(),
-      ...(filePath ? { w9_file_path: filePath } : {}),
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", partner.id);
-
-  if (error) {
-    console.error("[partner-onboarding] could not stamp w9_signed_at:", error);
-    return { signed: false, error: "Signed, but we couldn't record it. Try again." };
-  }
-
-  return { signed: true };
+/** Store the voided check for a partner. See storeVoidedCheck. */
+export async function storePartnerVoidedCheck(
+  partner: Pick<PartnerOnboardingState, "id">,
+  file: File
+): Promise<{ success: boolean; error?: string }> {
+  return storeVoidedCheck({ id: partner.id, table: "referral_partners" }, file);
 }
 
 /**
@@ -357,15 +237,4 @@ export async function completePartnerOnboardingIfReady(
 }
 
 /** Short-lived URL for staff to view a partner's W-9 or voided check. */
-export async function signedPartnerDocUrl(path: string | null): Promise<string | null> {
-  if (!path) return null;
-  const db = createAdminClient();
-  const { data, error } = await db.storage
-    .from(PARTNER_DOC_BUCKET)
-    .createSignedUrl(path, PARTNER_DOC_TTL_SECONDS);
-  if (error) {
-    console.error("[partner-onboarding] signed URL failed:", error);
-    return null;
-  }
-  return data?.signedUrl ?? null;
-}
+export const signedPartnerDocUrl = signedComplianceDocUrl;

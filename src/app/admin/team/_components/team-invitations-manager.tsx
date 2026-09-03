@@ -26,7 +26,9 @@ import {
   deleteStaffInvite,
   clearStaffInvite,
   unclearStaffInvite,
+  getAdvisorComplianceLinks,
 } from "../actions";
+import { FilePreviewModal } from "@/components/file-preview-modal";
 
 export interface InviteRow {
   id: string;
@@ -55,6 +57,14 @@ export interface MemberRow {
   email: string;
   role: string;
   created_at: string;
+  /** Staff advisors only (migration 20260903); null when not applicable or unknown. */
+  compliance?: {
+    w9_signed_at: string | null;
+    w9_file: boolean;
+    voided_check_uploaded_at: string | null;
+    voided_check_filename: string | null;
+    onboarding_completed_at: string | null;
+  } | null;
 }
 
 type Tab = "invitations" | "members";
@@ -554,6 +564,7 @@ export function TeamInvitationsManager({
                     <div className="mt-1 text-xs text-slate-500">
                       {m.email} · joined {shortDate(m.created_at)}
                     </div>
+                    {m.compliance && <AdvisorCompliance member={m} />}
                   </div>
                 </li>
               ))}
@@ -570,6 +581,106 @@ export function TeamInvitationsManager({
           issues a new link and immediately invalidates the old one.
         </span>
       </p>
+    </div>
+  );
+}
+
+/**
+ * W-9 + voided-check status for a staff advisor, with in-app preview.
+ *
+ * Mirrors the partner card on /admin/referral-partners. "Grandfathered" is an
+ * advisor the migration stamped complete with neither document on file — the
+ * label is what tells an admin to go chase the paperwork by hand.
+ */
+function AdvisorCompliance({ member }: { member: MemberRow }) {
+  const c = member.compliance!;
+  const [links, setLinks] = useState<{ w9_url?: string | null; voided_check_url?: string | null } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [preview, setPreview] = useState<{ name: string; url: string } | null>(null);
+
+  const w9Done = !!c.w9_signed_at;
+  const checkDone = !!c.voided_check_uploaded_at;
+  const grandfathered = !!c.onboarding_completed_at && !w9Done && !checkDone;
+
+  async function fetchLinks() {
+    setLoading(true);
+    try {
+      const res = await getAdvisorComplianceLinks(member.id);
+      if (res.success) setLinks({ w9_url: res.w9_url, voided_check_url: res.voided_check_url });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
+      {c.onboarding_completed_at ? (
+        <span className="rounded-md bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-800">
+          {grandfathered ? "Grandfathered" : "Paperwork complete"}
+        </span>
+      ) : (
+        <span className="rounded-md bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800">
+          Workspace locked
+        </span>
+      )}
+      <span className={w9Done ? "font-semibold text-slate-700" : "text-slate-400"}>
+        {w9Done ? `W-9 signed ${shortDate(c.w9_signed_at as string)}` : "W-9 not signed"}
+      </span>
+      <span className={checkDone ? "font-semibold text-slate-700" : "text-slate-400"}>
+        {checkDone
+          ? `Voided check ${shortDate(c.voided_check_uploaded_at as string)}`
+          : "No voided check"}
+      </span>
+
+      {(w9Done || checkDone) &&
+        (links ? (
+          <span className="flex flex-wrap gap-3 font-bold">
+            {links.w9_url ? (
+              <button
+                type="button"
+                onClick={() => setPreview({ name: `W-9 — ${member.name}.pdf`, url: links.w9_url as string })}
+                className="text-emerald-700 underline underline-offset-4 hover:text-emerald-900"
+              >
+                Open W-9
+              </button>
+            ) : (
+              w9Done && <span className="font-normal text-slate-400">W-9 file pending</span>
+            )}
+            {links.voided_check_url ? (
+              <button
+                type="button"
+                onClick={() =>
+                  setPreview({
+                    name: c.voided_check_filename || "Voided check",
+                    url: links.voided_check_url as string,
+                  })
+                }
+                className="text-emerald-700 underline underline-offset-4 hover:text-emerald-900"
+              >
+                Open voided check
+              </button>
+            ) : (
+              checkDone && <span className="font-normal text-slate-400">Check file missing</span>
+            )}
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={fetchLinks}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 font-bold text-emerald-700 underline underline-offset-4 hover:text-emerald-900 disabled:opacity-50"
+          >
+            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+            View documents
+          </button>
+        ))}
+
+      <FilePreviewModal
+        isOpen={!!preview}
+        onClose={() => setPreview(null)}
+        name={preview?.name ?? ""}
+        url={preview?.url ?? null}
+      />
     </div>
   );
 }

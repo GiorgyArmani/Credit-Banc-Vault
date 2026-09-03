@@ -1,26 +1,31 @@
 "use client";
 
-// Partner voided-check step — where the commission lands.
+// Voided-check step — where the money lands. Shared by the partner deal-desk
+// onboarding and the internal advisor onboarding; the caller supplies the
+// upload server action.
 //
-// One file, straight to the PRIVATE `vault` bucket via a server action. The
-// file never touches a public URL and the browser never gets a storage token;
-// it posts the bytes to the action and the server does the write.
+// One file, straight to the PRIVATE `vault` bucket via that action. The file
+// never touches a public URL and the browser never gets a storage token; it
+// posts the bytes to the action and the server does the write.
 
 import { useRef, useState } from "react";
 import { CheckCircle2, Loader2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/lib/toast";
-import { uploadPartnerVoidedCheck } from "../actions";
 
 const ACCEPT = ".pdf,.jpg,.jpeg,.png,.heic,.heif,.webp";
 const MAX_BYTES = 15 * 1024 * 1024;
 
-export function PartnerVoidedCheckStep({
+export function VoidedCheckStep({
   existingFilename,
   onUploaded,
+  upload,
+  description = "This is where your commission gets deposited. A photo of a voided check is fine, or a bank letter with your account details. PDF or image, up to 15MB.",
 }: {
   existingFilename: string | null;
   onUploaded: () => void;
+  upload: (formData: FormData) => Promise<{ success: boolean; error?: string }>;
+  description?: string;
 }) {
   const [uploading, setUploading] = useState(false);
   const [uploaded, setUploaded] = useState(!!existingFilename);
@@ -39,7 +44,7 @@ export function PartnerVoidedCheckStep({
     try {
       const data = new FormData();
       data.append("file", file);
-      const res = await uploadPartnerVoidedCheck(data);
+      const res = await upload(data);
       if (!res.success) {
         toast.error(res.error ?? "Upload failed.");
         return;
@@ -59,11 +64,8 @@ export function PartnerVoidedCheckStep({
       <div className="flex items-start gap-4 rounded-2xl border border-black/5 bg-cb-cream/60 p-6">
         <Upload className="mt-0.5 h-6 w-6 shrink-0 text-cb-mint" />
         <div className="min-w-0">
-          <p className="font-semibold text-cb-ink">Upload a voided business check</p>
-          <p className="mt-1 text-sm leading-relaxed text-cb-ink/60">
-            This is where your commission gets deposited. A photo of a voided check is
-            fine, or a bank letter with your account details. PDF or image, up to 15MB.
-          </p>
+          <p className="font-semibold text-cb-ink">Upload a voided check</p>
+          <p className="mt-1 text-sm leading-relaxed text-cb-ink/60">{description}</p>
         </div>
       </div>
 
@@ -72,9 +74,7 @@ export function PartnerVoidedCheckStep({
           <CheckCircle2 className="mt-0.5 h-6 w-6 shrink-0 text-cb-mint" />
           <div className="min-w-0">
             <p className="font-semibold text-cb-ink">Voided check received.</p>
-            {filename && (
-              <p className="mt-1 truncate text-sm text-cb-ink/60">{filename}</p>
-            )}
+            {filename && <p className="mt-1 truncate text-sm text-cb-ink/60">{filename}</p>}
           </div>
         </div>
       )}

@@ -12,6 +12,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
+import { signedAdvisorDocUrl } from "@/lib/advisor-onboarding";
 import { send_staff_invite } from "@/lib/email";
 import {
   ROLE_LABEL,
@@ -418,4 +419,37 @@ async function deliver(args: {
     console.error("[staff-invite] send failed:", err);
     return err?.message || "SMTP error";
   }
+}
+
+/**
+ * Short-lived links to a staff advisor's compliance documents (admin only).
+ *
+ * Minted on demand rather than rendered into the page: both files live in the
+ * PRIVATE `vault` bucket, and a signed URL baked into server-rendered HTML is a
+ * credential sitting in a page that gets cached, screenshotted and shared. Ten
+ * minutes, fetched at click time. Keyed by the users.id the team list shows.
+ */
+export async function getAdvisorComplianceLinks(userId: string): Promise<{
+  success: boolean;
+  error?: string;
+  w9_url?: string | null;
+  voided_check_url?: string | null;
+}> {
+  const admin = await requireAdminUser();
+  if (!admin) return { success: false, error: "Forbidden" };
+
+  const db = createAdminClient();
+  const { data, error } = await db
+    .from("advisors")
+    .select("w9_file_path, voided_check_path")
+    .eq("user_id", userId)
+    .is("referral_partner_id", null)
+    .maybeSingle();
+  if (error || !data) return { success: false, error: "Advisor not found" };
+
+  const [w9_url, voided_check_url] = await Promise.all([
+    signedAdvisorDocUrl(data.w9_file_path),
+    signedAdvisorDocUrl(data.voided_check_path),
+  ]);
+  return { success: true, w9_url, voided_check_url };
 }

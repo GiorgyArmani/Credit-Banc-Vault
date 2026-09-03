@@ -1,11 +1,13 @@
 "use client";
 
-// Partner W-9 signing step.
+// W-9 signing step, shared by the partner deal-desk onboarding and the internal
+// advisor onboarding. The caller supplies the two server actions — one that
+// creates/resumes the SignWell document and returns the embedded signing URL,
+// one that asks the server whether it is signed — so the component knows
+// nothing about which table the row lives in.
 //
-// The partner-side twin of the client's ContractCheckStep: load the SignWell
-// Embed SDK, open the document inside it, and treat the SERVER's answer as the
-// truth about whether it's signed. The embed's `completed` event only tells us
-// to go ask.
+// The SERVER's answer is the truth about whether it's signed. The embed's
+// `completed` event only tells us to go ask.
 //
 // NEVER a raw <iframe src> — SignWell's hosted page sets X-Frame-Options, so
 // the SDK is the only thing that works ([[signwell_embed_and_business_contract_sync]]).
@@ -14,7 +16,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { CheckCircle2, ExternalLink, FileSignature, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/lib/toast";
-import { checkPartnerW9, startPartnerW9 } from "../actions";
 
 declare global {
   interface Window {
@@ -41,12 +42,23 @@ function loadSignwellScript(): Promise<void> {
   return signwellScriptPromise;
 }
 
-export function PartnerW9Step({
+export interface W9SignStepActions {
+  /** Create or resume the W-9; returns the embedded signing URL. */
+  start: () => Promise<{ success: boolean; url?: string; error?: string }>;
+  /** Ask the server whether SignWell reports it signed (and record it if so). */
+  check: () => Promise<{ success: boolean; signed: boolean; error?: string }>;
+}
+
+export function W9SignStep({
   alreadySigned,
   onSigned,
+  actions,
+  description = "We need it on file before we can pay you on a funded deal. It opens right here — fill in your own details, sign, and you're done.",
 }: {
   alreadySigned: boolean;
   onSigned: () => void;
+  actions: W9SignStepActions;
+  description?: string;
 }) {
   const [signed, setSigned] = useState(alreadySigned);
   const [opening, setOpening] = useState(false);
@@ -58,7 +70,7 @@ export function PartnerW9Step({
     async (opts?: { loud?: boolean }) => {
       setChecking(true);
       try {
-        const res = await checkPartnerW9();
+        const res = await actions.check();
         if (res.signed) {
           setSigned(true);
           toast.success("W-9 received.");
@@ -73,12 +85,11 @@ export function PartnerW9Step({
         setChecking(false);
       }
     },
-    [onSigned]
+    [actions, onSigned]
   );
 
-  // One check on mount. This is what picks up the partner who signed and then
-  // closed the tab before the embed could report it — there is no webhook for
-  // this document, so nothing else would ever notice.
+  // One check on mount: the webhook may already have recorded a signature made
+  // in a tab that was closed before the embed could report it.
   useEffect(() => {
     if (alreadySigned) return;
     void verify();
@@ -104,7 +115,7 @@ export function PartnerW9Step({
     try {
       let signingUrl = url;
       if (!signingUrl) {
-        const res = await startPartnerW9();
+        const res = await actions.start();
         if (!res.success || !res.url) {
           toast.error(res.error ?? "Could not open the W-9.");
           return;
@@ -182,10 +193,7 @@ export function PartnerW9Step({
         <FileSignature className="mt-0.5 h-6 w-6 shrink-0 text-cb-mint" />
         <div className="min-w-0">
           <p className="font-semibold text-cb-ink">Sign your W-9</p>
-          <p className="mt-1 text-sm leading-relaxed text-cb-ink/60">
-            We need it on file before we can pay you on a funded deal. It opens right
-            here — fill in your own details, sign, and you&apos;re done.
-          </p>
+          <p className="mt-1 text-sm leading-relaxed text-cb-ink/60">{description}</p>
         </div>
       </div>
 

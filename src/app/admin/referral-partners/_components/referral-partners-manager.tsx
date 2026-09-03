@@ -20,6 +20,7 @@ import {
   FileCheck2,
 } from "lucide-react";
 import { BulkOnboarding } from "./bulk-onboarding";
+import { FilePreviewModal } from "@/components/file-preview-modal";
 import {
   addReferralPartner,
   renameReferralPartner,
@@ -1172,6 +1173,10 @@ function PartnerCompliance({ row }: { row: PartnerRow }) {
     voided_check_url?: string | null;
   } | null>(null);
   const [loading, setLoading] = useState(false);
+  // Opens in the app's own previewer rather than a new tab: the signed URL is a
+  // ten-minute credential to a W-9 (SSN/EIN) or a voided check (routing +
+  // account number), and a tab of its own leaves it in browser history.
+  const [preview, setPreview] = useState<{ name: string; url: string } | null>(null);
 
   const w9Done = !!row.w9_signed_at;
   const checkDone = !!row.voided_check_uploaded_at;
@@ -1225,26 +1230,29 @@ function PartnerCompliance({ row }: { row: PartnerRow }) {
         (links ? (
           <div className="mt-2 flex flex-wrap gap-4 text-xs font-bold">
             {links.w9_url ? (
-              <a
-                href={links.w9_url}
-                target="_blank"
-                rel="noopener noreferrer"
+              <button
+                type="button"
+                onClick={() => setPreview({ name: `W-9 — ${row.name}.pdf`, url: links.w9_url as string })}
                 className="text-violet-700 underline underline-offset-4 hover:text-violet-900"
               >
                 Open W-9
-              </a>
+              </button>
             ) : (
               w9Done && <span className="text-slate-400">W-9 file missing</span>
             )}
             {links.voided_check_url ? (
-              <a
-                href={links.voided_check_url}
-                target="_blank"
-                rel="noopener noreferrer"
+              <button
+                type="button"
+                onClick={() =>
+                  setPreview({
+                    name: row.voided_check_filename || "Voided check",
+                    url: links.voided_check_url as string,
+                  })
+                }
                 className="text-violet-700 underline underline-offset-4 hover:text-violet-900"
               >
                 Open voided check
-              </a>
+              </button>
             ) : (
               checkDone && <span className="text-slate-400">Check file missing</span>
             )}
@@ -1267,6 +1275,13 @@ function PartnerCompliance({ row }: { row: PartnerRow }) {
           check by hand.
         </p>
       )}
+
+      <FilePreviewModal
+        isOpen={!!preview}
+        onClose={() => setPreview(null)}
+        name={preview?.name ?? ""}
+        url={preview?.url ?? null}
+      />
     </div>
   );
 }

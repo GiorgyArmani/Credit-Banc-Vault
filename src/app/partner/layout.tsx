@@ -75,8 +75,10 @@ export default async function PartnerLayout({ children }: { children: React.Reac
   if (role === 'partner_advisor') {
     const partner = await getPartnerOnboardingState(user.id)
     if (partner?.requires_onboarding) {
-      // Same catch-up sync the welcome page does: no webhook backs the W-9, so
-      // a page load is what notices a partner who signed and closed the tab.
+      // Same catch-up sync the welcome page does. The SignWell webhook
+      // normally records the signature first; a page load is the backstop
+      // for a dropped delivery, and it also fetches our PDF copy if the
+      // webhook ran while SignWell was still rendering it.
       let w9Signed = !!partner.w9_signed_at
       if (!w9Signed && partner.w9_document_id) {
         const { signed } = await syncPartnerW9(partner)

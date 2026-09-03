@@ -60,6 +60,8 @@ interface ClientInfo {
     capital_requested: number;
     created_at: string;
     reassigned_to_catch_all_at?: string | null;
+    /** Mirrored referral-partner name from client_data_vault (attribution, not ownership). */
+    referral_partner?: string | null;
     document_count: number;
     total_required_docs: number;
     pipeline_status?: LoanStatus;
@@ -86,6 +88,11 @@ export function WorkspaceProspects({ basePath }: { basePath: string }) {
     // book, or a specific advisor id. Drives scoped_clients below.
     const [advisors, set_advisors] = useState<{ id: string; name: string }[]>([]);
     const [selected_advisor_id, set_selected_advisor_id] = useState<string>("all");
+    // Admin-only referral-partner filter on the vault's attribution name.
+    // Separate axis from the advisor: partner advisors are excluded from the
+    // advisor list on purpose, and partner-referred deals are usually worked by
+    // internal staff. "all", "any", "none", or an exact partner name.
+    const [selected_partner, set_selected_partner] = useState<string>("all");
 
     useEffect(() => {
         fetch_prospects();
@@ -99,13 +106,32 @@ export function WorkspaceProspects({ basePath }: { basePath: string }) {
         return () => window.removeEventListener('search_updated', handleSearch);
     }, []);
 
+    const partner_options = useMemo(() => {
+        const names = new Set<string>();
+        clients.forEach(c => {
+            const name = (c.referral_partner || "").trim();
+            if (name) names.add(name);
+        });
+        return Array.from(names).sort((a, b) => a.localeCompare(b));
+    }, [clients]);
+
     const scoped_clients = useMemo(() => {
-        if (user_role !== "admin" || selected_advisor_id === "all") return clients;
+        if (user_role !== "admin") return clients;
+        let out = clients;
         if (selected_advisor_id === "mine") {
-            return my_advisor_id ? clients.filter(c => c.advisor_id === my_advisor_id) : [];
+            out = my_advisor_id ? out.filter(c => c.advisor_id === my_advisor_id) : [];
+        } else if (selected_advisor_id !== "all") {
+            out = out.filter(c => c.advisor_id === selected_advisor_id);
         }
-        return clients.filter(c => c.advisor_id === selected_advisor_id);
-    }, [clients, user_role, selected_advisor_id, my_advisor_id]);
+        if (selected_partner === "any") {
+            out = out.filter(c => !!(c.referral_partner || "").trim());
+        } else if (selected_partner === "none") {
+            out = out.filter(c => !(c.referral_partner || "").trim());
+        } else if (selected_partner !== "all") {
+            out = out.filter(c => (c.referral_partner || "").trim() === selected_partner);
+        }
+        return out;
+    }, [clients, user_role, selected_advisor_id, selected_partner, my_advisor_id]);
 
     const filtered_clients = useMemo(() => {
         if (search_query.trim() === "") return scoped_clients;
@@ -216,7 +242,7 @@ export function WorkspaceProspects({ basePath }: { basePath: string }) {
 
             let clientsQuery = supabase
                 .from('client_data_vault')
-                .select('id, user_id, advisor_id, client_name, client_email, client_phone, company_name, capital_requested, created_at, reassigned_to_catch_all_at')
+                .select('id, user_id, advisor_id, client_name, client_email, client_phone, company_name, capital_requested, created_at, reassigned_to_catch_all_at, referral_partner')
                 .order('created_at', { ascending: false });
 
             if (accessibleIds !== null) {
@@ -426,6 +452,27 @@ export function WorkspaceProspects({ basePath }: { basePath: string }) {
                                 {my_advisor_id && <option value="mine">My Prospects</option>}
                                 {advisors.map((a) => (
                                     <option key={a.id} value={a.id}>{a.name}</option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
+
+                    {/* Admin referral-partner filter — attribution, not ownership. */}
+                    {user_role === "admin" && (
+                        <div className="relative">
+                            <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-outline text-base">
+                                handshake
+                            </span>
+                            <select
+                                value={selected_partner}
+                                onChange={(e) => set_selected_partner(e.target.value)}
+                                className="bg-surface-container-low border border-outline-variant/30 rounded-xl pl-10 pr-4 py-2.5 text-xs font-bold text-on-surface shadow-inner cursor-pointer hover:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
+                            >
+                                <option value="all">All Partners</option>
+                                <option value="any">Any Referral Partner</option>
+                                <option value="none">No Referral Partner</option>
+                                {partner_options.map((name) => (
+                                    <option key={name} value={name}>{name}</option>
                                 ))}
                             </select>
                         </div>

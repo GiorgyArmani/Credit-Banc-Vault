@@ -26,9 +26,14 @@ import { Button } from "@/components/ui/button";
 import { toast } from "@/lib/toast";
 import { PartnerWelcomeForm } from "./partner-welcome-form";
 import { PartnerPhoneStep } from "./partner-phone-step";
-import { PartnerW9Step } from "./partner-w9-step";
-import { PartnerVoidedCheckStep } from "./partner-voided-check-step";
-import { finishPartnerAdvisorOnboarding } from "../actions";
+import { W9SignStep } from "@/components/onboarding/w9-sign-step";
+import { VoidedCheckStep } from "@/components/onboarding/voided-check-step";
+import {
+  checkPartnerW9,
+  finishPartnerAdvisorOnboarding,
+  startPartnerW9,
+  uploadPartnerVoidedCheck,
+} from "../actions";
 
 export interface PartnerOnboardingWizardProps {
   email: string;
@@ -184,13 +189,19 @@ export function PartnerOnboardingWizard({
       )}
 
       {current === "w9" && (
-        <PartnerW9Step alreadySigned={doneW9} onSigned={() => setDoneW9(true)} />
+        <W9SignStep
+          alreadySigned={doneW9}
+          onSigned={() => setDoneW9(true)}
+          actions={{ start: startPartnerW9, check: checkPartnerW9 }}
+        />
       )}
 
       {current === "check" && (
-        <PartnerVoidedCheckStep
+        <VoidedCheckStep
           existingFilename={voidedCheckFilename}
           onUploaded={() => setDoneCheck(true)}
+          upload={uploadPartnerVoidedCheck}
+          description="This is where your commission gets deposited. A photo of a voided business check is fine, or a bank letter with your account details. PDF or image, up to 15MB."
         />
       )}
 

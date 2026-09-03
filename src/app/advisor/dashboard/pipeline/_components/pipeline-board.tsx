@@ -32,6 +32,8 @@ export interface PipelineDeal {
   last_activity_at?: string;
   reassigned_to_catch_all_at?: string | null;
   reassignment_paused_until?: string | null;
+  /** Mirrored referral-partner name from client_data_vault (attribution, not ownership). */
+  referral_partner?: string | null;
 }
 
 export interface PipelineStage {

@@ -68,7 +68,40 @@ export default async function AdminTeamPage() {
       .order("created_at", { ascending: false });
   }
 
-  const [{ data: invites }, { data: members }] = await Promise.all([
+  // Compliance paperwork for staff advisors (migration 20260903). The columns
+  // trail the code until that migration is applied, and a select naming a
+  // missing column fails the whole query — so a failure here degrades to "no
+  // compliance info" rather than an empty team list.
+  async function readAdvisorCompliance(): Promise<
+    Map<string, { w9_signed_at: string | null; w9_file_path: string | null; voided_check_uploaded_at: string | null; voided_check_filename: string | null; onboarding_completed_at: string | null; created_at: string | null }>
+  > {
+    const { data, error } = await db
+      .from("advisors")
+      .select(
+        "user_id, w9_signed_at, w9_file_path, voided_check_uploaded_at, voided_check_filename, onboarding_completed_at, created_at"
+      )
+      .is("referral_partner_id", null)
+      .not("user_id", "is", null);
+    if (error) {
+      console.error("[admin/team] advisor compliance read failed (migration 20260903 applied?):", error.message);
+      return new Map();
+    }
+    return new Map(
+      (data ?? []).map((r) => [
+        r.user_id as string,
+        {
+          w9_signed_at: r.w9_signed_at ?? null,
+          w9_file_path: r.w9_file_path ?? null,
+          voided_check_uploaded_at: r.voided_check_uploaded_at ?? null,
+          voided_check_filename: r.voided_check_filename ?? null,
+          onboarding_completed_at: r.onboarding_completed_at ?? null,
+          created_at: r.created_at ?? null,
+        },
+      ])
+    );
+  }
+
+  const [{ data: invites }, { data: members }, compliance] = await Promise.all([
     readInvites(),
     // The existing team, shown alongside so "invite" isn't the only thing on
     // this page — the question an admin actually arrives with is "who has
@@ -78,6 +111,7 @@ export default async function AdminTeamPage() {
       .select("id, first_name, last_name, email, role, created_at")
       .in("role", STAFF_ROLES as unknown as string[])
       .order("created_at", { ascending: false }),
+    readAdvisorCompliance(),
   ]);
 
   const inviteRows: InviteRow[] = (invites ?? []).map((r) => ({
@@ -105,13 +139,25 @@ export default async function AdminTeamPage() {
     cleared_at: (r as { cleared_at?: string | null }).cleared_at ?? null,
   }));
 
-  const memberRows: MemberRow[] = (members ?? []).map((r) => ({
-    id: r.id,
-    name: [r.first_name, r.last_name].filter(Boolean).join(" ").trim() || r.email,
-    email: r.email,
-    role: r.role,
-    created_at: r.created_at,
-  }));
+  const memberRows: MemberRow[] = (members ?? []).map((r) => {
+    const c = r.role === "advisor" ? compliance.get(r.id) : undefined;
+    return {
+      id: r.id,
+      name: [r.first_name, r.last_name].filter(Boolean).join(" ").trim() || r.email,
+      email: r.email,
+      role: r.role,
+      created_at: r.created_at,
+      compliance: c
+        ? {
+            w9_signed_at: c.w9_signed_at,
+            w9_file: !!c.w9_file_path,
+            voided_check_uploaded_at: c.voided_check_uploaded_at,
+            voided_check_filename: c.voided_check_filename,
+            onboarding_completed_at: c.onboarding_completed_at,
+          }
+        : null,
+    };
+  });
 
   return (
     <div className="p-6 md:p-10">

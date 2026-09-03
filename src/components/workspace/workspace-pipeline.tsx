@@ -128,6 +128,7 @@ export async function enrichDeals(
     created_at: string;
     reassigned_to_catch_all_at?: string | null;
     reassignment_paused_until?: string | null;
+    referral_partner?: string | null;
   }>
 ): Promise<PipelineDeal[]> {
   const vaultIds = clients.map(c => c.id);
