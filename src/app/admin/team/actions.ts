@@ -12,7 +12,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
-import { signedAdvisorDocUrl } from "@/lib/advisor-onboarding";
+import { backfillAdvisorW9Pdf, signedAdvisorDocUrl } from "@/lib/advisor-onboarding";
 import { send_staff_invite } from "@/lib/email";
 import {
   ROLE_LABEL,
@@ -441,14 +441,23 @@ export async function getAdvisorComplianceLinks(userId: string): Promise<{
   const db = createAdminClient();
   const { data, error } = await db
     .from("advisors")
-    .select("w9_file_path, voided_check_path")
+    .select("id, w9_signed_at, w9_file_path, voided_check_path")
     .eq("user_id", userId)
     .is("referral_partner_id", null)
     .maybeSingle();
   if (error || !data) return { success: false, error: "Advisor not found" };
 
+  // Signed, but our copy never arrived: SignWell renders the PDF a few seconds
+  // after it flips the document to Completed, and every fetch during onboarding
+  // is best-effort. This click is the last chance to pick it up — after the
+  // gate opens, nothing else asks SignWell again.
+  let w9Path = data.w9_file_path as string | null;
+  if (!w9Path && data.w9_signed_at) {
+    w9Path = await backfillAdvisorW9Pdf(data.id as string);
+  }
+
   const [w9_url, voided_check_url] = await Promise.all([
-    signedAdvisorDocUrl(data.w9_file_path),
+    signedAdvisorDocUrl(w9Path),
     signedAdvisorDocUrl(data.voided_check_path),
   ]);
   return { success: true, w9_url, voided_check_url };

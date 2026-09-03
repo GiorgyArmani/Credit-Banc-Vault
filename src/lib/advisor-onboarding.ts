@@ -31,6 +31,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
+  backfillW9Pdf,
   COMPLIANCE_COLUMNS,
   ensureW9Document,
   signedComplianceDocUrl,
@@ -150,3 +151,8 @@ export async function completeAdvisorOnboardingIfReady(
 
 /** Short-lived URL for admins to view an advisor's W-9 or voided check. */
 export const signedAdvisorDocUrl = signedComplianceDocUrl;
+
+/** Fetch a W-9 PDF copy SignWell had not rendered yet when we last asked. */
+export async function backfillAdvisorW9Pdf(advisorId: string): Promise<string | null> {
+  return backfillW9Pdf("advisors", advisorId);
+}

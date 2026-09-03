@@ -160,16 +160,39 @@ export class SignWell {
 
         if (!response.ok) {
             const errorText = await response.text();
-            console.error('❌ SignWell PDF Error:', errorText);
+            console.error(`❌ SignWell PDF Error (${response.status}):`, errorText || '(empty body)');
 
             if (response.status === 404) {
-                // Try to get document status to see if it's just not completed yet
+                // A 404 here has two very different causes, so read the document
+                // status to tell them apart. Read it OUTSIDE the throw: the old
+                // version threw from inside its own try, so the catch swallowed
+                // its own message and reported "could not verify status" for a
+                // document whose status it had just read successfully.
+                let status: string | undefined;
+                let statusError: string | undefined;
                 try {
                     const doc = await this.getDocument(params.documentId);
-                    throw new Error(`Failed to get completed PDF: Document status is "${doc.status}". It must be "completed" to download the PDF.`);
-                } catch (statusError: any) {
-                    throw new Error(`Failed to get completed PDF: 404 Not Found (and could not verify status: ${statusError.message})`);
+                    status = doc?.status;
+                } catch (err) {
+                    statusError = err instanceof Error ? err.message : String(err);
                 }
+
+                // SignWell reports the DOCUMENT status title-cased ("Completed")
+                // while the per-recipient status is lower-case. Compare
+                // case-insensitively or a signed document reads as unsigned.
+                if (status && status.toLowerCase() === 'completed') {
+                    throw new Error(
+                        'Failed to get completed PDF: SignWell has not rendered the PDF yet. Retry in a few seconds.'
+                    );
+                }
+                if (status) {
+                    throw new Error(
+                        `Failed to get completed PDF: document status is "${status}", not completed.`
+                    );
+                }
+                throw new Error(
+                    `Failed to get completed PDF: 404 Not Found${statusError ? ` (status check failed: ${statusError})` : ''}`
+                );
             }
 
             throw new Error(`Failed to get completed PDF: ${response.status} ${response.statusText}`);

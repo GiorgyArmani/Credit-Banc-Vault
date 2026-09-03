@@ -400,6 +400,47 @@ export async function storeVoidedCheck(
   return { success: true };
 }
 
+/**
+ * Fetch a missing W-9 PDF copy, on demand, long after the fact.
+ *
+ * SignWell flips a document to "Completed" seconds BEFORE the signed PDF is
+ * downloadable, so the fetch can 404 on a document that is genuinely signed.
+ * Every fetch during onboarding is best-effort — the signature is what the gate
+ * is about — which leaves a real gap: once `onboarding_completed_at` is stamped
+ * nothing calls syncW9 again, so a copy that never landed would stay missing
+ * for good.
+ *
+ * This closes it at the only moment it matters, when an admin opens the
+ * document. Retries generously: nobody is waiting on a page render here.
+ * Returns the path, or null if SignWell still has nothing for us.
+ */
+export async function backfillW9Pdf(
+  table: ComplianceTable,
+  id: string
+): Promise<string | null> {
+  const db = createAdminClient();
+  const { data, error } = await db
+    .from(table)
+    .select("id, w9_document_id, w9_file_path")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  if (data.w9_file_path) return data.w9_file_path as string;
+  if (!data.w9_document_id) return null;
+
+  const { path } = await storeW9Pdf(
+    {
+      table,
+      id: data.id as string,
+      w9_document_id: data.w9_document_id as string,
+      w9_file_path: null,
+    },
+    { attempts: 3, delayMs: 2000 }
+  );
+  return path;
+}
+
 /** Short-lived URL for staff to view a W-9 or voided check. */
 export async function signedComplianceDocUrl(path: string | null): Promise<string | null> {
   if (!path) return null;

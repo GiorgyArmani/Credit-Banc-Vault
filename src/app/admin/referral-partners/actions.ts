@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { signedPartnerDocUrl } from "@/lib/partner-onboarding";
+import { backfillPartnerW9Pdf, signedPartnerDocUrl } from "@/lib/partner-onboarding";
 import { revalidatePath } from "next/cache";
 import {
   normalizePartnerSlug,
@@ -1085,14 +1085,22 @@ export async function getPartnerComplianceLinks(id: string): Promise<{
   const db = createAdminClient();
   const { data, error } = await db
     .from("referral_partners")
-    .select("w9_file_path, voided_check_path")
+    .select("id, w9_signed_at, w9_file_path, voided_check_path")
     .eq("id", id)
     .maybeSingle();
 
   if (error || !data) return { success: false, error: "Partner not found" };
 
+  // Same last-chance pickup as the advisor twin: SignWell renders the PDF a few
+  // seconds after it reports the document Completed, so a signature recorded in
+  // that window can leave us without a copy and nothing retries afterwards.
+  let w9Path = data.w9_file_path as string | null;
+  if (!w9Path && data.w9_signed_at) {
+    w9Path = await backfillPartnerW9Pdf(data.id as string);
+  }
+
   const [w9_url, voided_check_url] = await Promise.all([
-    signedPartnerDocUrl(data.w9_file_path),
+    signedPartnerDocUrl(w9Path),
     signedPartnerDocUrl(data.voided_check_path),
   ]);
 

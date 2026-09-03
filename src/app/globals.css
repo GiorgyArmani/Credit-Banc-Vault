@@ -189,17 +189,21 @@ body {
 /* SignWell Modal Z-Index Override */
 /* Ensure SignWell modals appear above everything else including dialogs (z-50).
    SignWell's embed mounts `#SignWell-Modal-Embedded` as position:fixed with NO
-   z-index, and attribute selectors are case-sensitive — the `i` flag is what
-   makes these actually match (without it the onboarding card, `relative z-10`,
-   painted over the W-9). */
+   z-index of its own, so anything positioned on the page (the onboarding card
+   is `relative z-10`) painted over the W-9. Lift the ROOT only: it becomes a
+   stacking context and everything inside keeps SignWell's own layering. A
+   blanket `[id*="signwell" i]` rule must NOT be used — it also lifts the
+   close-confirmation backdrop (a 20%-black layer at z-index 1) level with the
+   iframe container, which dims the whole signing window. */
+#SignWell-Modal-Embedded {
+  z-index: 9999 !important;
+}
+
 #wistia_chrome_23,
 .w-css-reset,
 .w-vulcan-v2-button,
 [id^="wistia_"],
 [class*="wistia"],
-#SignWell-Modal-Embedded,
-[id*="signwell" i],
-[class*="signwell" i],
 .signwell-modal,
 .signwell-embed,
 [data-signwell],

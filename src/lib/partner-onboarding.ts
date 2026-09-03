@@ -30,6 +30,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPhoneUS, isValidUsPhone } from "@/lib/phone";
 import {
+  backfillW9Pdf,
   COMPLIANCE_COLUMNS,
   COMPLIANCE_DOC_BUCKET,
   COMPLIANCE_DOC_PREFIX,
@@ -238,3 +239,8 @@ export async function completePartnerOnboardingIfReady(
 
 /** Short-lived URL for staff to view a partner's W-9 or voided check. */
 export const signedPartnerDocUrl = signedComplianceDocUrl;
+
+/** Fetch a W-9 PDF copy SignWell had not rendered yet when we last asked. */
+export async function backfillPartnerW9Pdf(partnerId: string): Promise<string | null> {
+  return backfillW9Pdf("referral_partners", partnerId);
+}
