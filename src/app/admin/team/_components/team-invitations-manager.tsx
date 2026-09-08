@@ -3,6 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
+  AlertTriangle,
   Loader2,
   Mail,
   Search,
@@ -10,6 +11,7 @@ import {
   ShieldCheck,
   Trash2,
   Undo2,
+  UserMinus,
   UserPlus,
   X,
 } from "lucide-react";
@@ -27,6 +29,9 @@ import {
   clearStaffInvite,
   unclearStaffInvite,
   getAdvisorComplianceLinks,
+  removeTeamMember,
+  restoreTeamMember,
+  type MemberHistory,
 } from "../actions";
 import { FilePreviewModal } from "@/components/file-preview-modal";
 
@@ -55,8 +60,17 @@ export interface MemberRow {
   id: string;
   name: string;
   email: string;
+  /** The role they hold — or, once removed, the role they HELD. Never 'free'. */
   role: string;
   created_at: string;
+  /** Set once an admin removed them. Their access is gone; the record is not. */
+  removed_at?: string | null;
+  /** advisors.id — what client vaults point at. Null for most underwriters. */
+  advisor_id?: string | null;
+  /** Holds the catch-all role the stale-file cron reassigns to. */
+  is_catch_all?: boolean;
+  /** Client vaults currently assigned to them. */
+  clients_owned?: number;
   /** Staff advisors only (migration 20260903); null when not applicable or unknown. */
   compliance?: {
     w9_signed_at: string | null;
@@ -65,6 +79,15 @@ export interface MemberRow {
     voided_check_filename: string | null;
     onboarding_completed_at: string | null;
   } | null;
+}
+
+/** An active internal advisor who can inherit clients or the catch-all role. */
+export interface HandoffTarget {
+  advisor_id: string;
+  user_id: string;
+  name: string;
+  clients_owned: number;
+  is_catch_all: boolean;
 }
 
 type Tab = "invitations" | "members";
@@ -119,9 +142,13 @@ function relativeDays(iso: string): string {
 export function TeamInvitationsManager({
   invites,
   members,
+  handoffTargets,
+  currentAdminId,
 }: {
   invites: InviteRow[];
   members: MemberRow[];
+  handoffTargets: HandoffTarget[];
+  currentAdminId: string;
 }) {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("invitations");
@@ -216,7 +243,10 @@ export function TeamInvitationsManager({
           {(
             [
               ["invitations", `Invitations${pendingCount ? ` (${pendingCount})` : ""}`],
-              ["members", `Team (${members.length})`],
+              // Removed members are listed on that tab but not counted here —
+              // the number answers "how many people have access", and someone
+              // who was removed is precisely who does not.
+              ["members", `Team (${members.filter((m) => !m.removed_at).length})`],
             ] as [Tab, string][]
           ).map(([key, label]) => (
             <button
@@ -541,36 +571,11 @@ export function TeamInvitationsManager({
       )}
 
       {tab === "members" && (
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-          {members.length === 0 ? (
-            <div className="px-6 py-14 text-center text-sm text-slate-400">
-              No staff accounts yet.
-            </div>
-          ) : (
-            <ul className="divide-y divide-slate-100">
-              {members.map((m) => (
-                <li key={m.id} className="flex flex-wrap items-center gap-3 px-5 py-4">
-                  <div className="min-w-[200px] flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm font-bold text-slate-900">{m.name}</span>
-                      <span
-                        className={`rounded-md px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide ${
-                          ROLE_BADGE[m.role] ?? "bg-slate-100 text-slate-700"
-                        }`}
-                      >
-                        {MEMBER_ROLE_LABEL[m.role] ?? m.role}
-                      </span>
-                    </div>
-                    <div className="mt-1 text-xs text-slate-500">
-                      {m.email} · joined {shortDate(m.created_at)}
-                    </div>
-                    {m.compliance && <AdvisorCompliance member={m} />}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+        <MemberList
+          members={members}
+          handoffTargets={handoffTargets}
+          currentAdminId={currentAdminId}
+        />
       )}
 
       <p className="flex items-start gap-2 text-xs leading-relaxed text-slate-400">
@@ -581,6 +586,401 @@ export function TeamInvitationsManager({
           issues a new link and immediately invalidates the old one.
         </span>
       </p>
+    </div>
+  );
+}
+
+/** Roles this page can remove — mirrors REMOVABLE_ROLES in actions.ts, which is
+ *  the real guard. Hiding the button is a courtesy, not the enforcement. */
+const REMOVABLE = new Set(["advisor", "underwriting", "setter"]);
+
+/**
+ * The team list: who has access now, and who used to.
+ *
+ * Removed members are kept visible in their own section rather than filtered
+ * away. A removal that leaves no trace is indistinguishable from a person who
+ * was never here, and the only way back from one is the Restore button below.
+ */
+function MemberList({
+  members,
+  handoffTargets,
+  currentAdminId,
+}: {
+  members: MemberRow[];
+  handoffTargets: HandoffTarget[];
+  currentAdminId: string;
+}) {
+  const router = useRouter();
+  const [removing, setRemoving] = useState<MemberRow | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ tone: "ok" | "bad"; text: string } | null>(null);
+
+  const active = members.filter((m) => !m.removed_at);
+  const removed = members.filter((m) => m.removed_at);
+
+  async function restore(m: MemberRow) {
+    setBusyId(m.id);
+    setNotice(null);
+    const res = await restoreTeamMember(m.id);
+    setBusyId(null);
+    if (!res.success) {
+      setNotice({ tone: "bad", text: res.error || "Could not restore that account." });
+      return;
+    }
+    setNotice({
+      tone: "ok",
+      text: res.warning || `${m.name} has their access back. Their old clients stayed where they are.`,
+    });
+    router.refresh();
+  }
+
+  return (
+    <div className="space-y-4">
+      {notice && (
+        <div
+          className={`rounded-xl border px-4 py-3 text-sm font-semibold ${
+            notice.tone === "ok"
+              ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+              : "border-red-200 bg-red-50 text-red-700"
+          }`}
+        >
+          {notice.text}
+        </div>
+      )}
+
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+        {active.length === 0 ? (
+          <div className="px-6 py-14 text-center text-sm text-slate-400">No staff accounts yet.</div>
+        ) : (
+          <ul className="divide-y divide-slate-100">
+            {active.map((m) => (
+              <li key={m.id} className="flex flex-wrap items-center gap-3 px-5 py-4">
+                <div className="min-w-[200px] flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-bold text-slate-900">{m.name}</span>
+                    <span
+                      className={`rounded-md px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide ${
+                        ROLE_BADGE[m.role] ?? "bg-slate-100 text-slate-700"
+                      }`}
+                    >
+                      {MEMBER_ROLE_LABEL[m.role] ?? m.role}
+                    </span>
+                    {m.is_catch_all && (
+                      <span
+                        className="rounded-md border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-sky-700"
+                        title="Stale files are automatically reassigned to this advisor"
+                      >
+                        Catch-all
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    {m.email} · joined {shortDate(m.created_at)}
+                    {(m.clients_owned ?? 0) > 0 && (
+                      <> · {m.clients_owned} client{m.clients_owned === 1 ? "" : "s"}</>
+                    )}
+                  </div>
+                  {m.compliance && <AdvisorCompliance member={m} />}
+                </div>
+
+                {REMOVABLE.has(m.role) && m.id !== currentAdminId && (
+                  <button
+                    onClick={() => {
+                      setNotice(null);
+                      setRemoving(m);
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-600 hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                  >
+                    <UserMinus className="h-3.5 w-3.5" />
+                    Remove
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {removed.length > 0 && (
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+          <p className="border-b border-slate-100 bg-slate-50 px-5 py-2.5 text-[11px] font-black uppercase tracking-widest text-slate-400">
+            Removed ({removed.length})
+          </p>
+          <ul className="divide-y divide-slate-100">
+            {removed.map((m) => (
+              <li key={m.id} className="flex flex-wrap items-center gap-3 px-5 py-4">
+                <div className="min-w-[200px] flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-bold text-slate-500 line-through">{m.name}</span>
+                    <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                      {MEMBER_ROLE_LABEL[m.role] ?? m.role}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-xs text-slate-400">
+                    {m.email} · removed {shortDate(m.removed_at ?? null)}
+                  </div>
+                </div>
+                <button
+                  onClick={() => restore(m)}
+                  disabled={busyId === m.id}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-600 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700 disabled:opacity-50"
+                >
+                  {busyId === m.id ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Undo2 className="h-3.5 w-3.5" />
+                  )}
+                  Restore access
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {removing && (
+        <RemoveMemberModal
+          member={removing}
+          targets={handoffTargets.filter((t) => t.user_id !== removing.id)}
+          onClose={() => setRemoving(null)}
+          onDone={(text) => {
+            setRemoving(null);
+            setNotice({ tone: "ok", text });
+            router.refresh();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * The removal dialog.
+ *
+ * Two questions, asked separately because they have different right answers:
+ * who takes their clients, and — if they hold it — who inherits the catch-all
+ * role. Neither is pre-filled. Defaulting the client handoff to the catch-all
+ * advisor would quietly turn "someone left" into "these files went stale",
+ * which is a different thing that already has its own automation.
+ */
+function RemoveMemberModal({
+  member,
+  targets,
+  onClose,
+  onDone,
+}: {
+  member: MemberRow;
+  targets: HandoffTarget[];
+  onClose: () => void;
+  onDone: (message: string) => void;
+}) {
+  const clients = member.clients_owned ?? 0;
+  const needsHandoff = !!member.advisor_id && clients > 0;
+
+  const [mode, setMode] = useState<"unassign" | "transfer">("unassign");
+  const [toAdvisorId, setToAdvisorId] = useState("");
+  const [successorId, setSuccessorId] = useState("");
+  const [kept, setKept] = useState<MemberHistory | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  function submit() {
+    setError(null);
+    if (mode === "transfer" && !toAdvisorId) {
+      setError("Choose the advisor taking their clients.");
+      return;
+    }
+    if (member.is_catch_all && !successorId) {
+      setError("Choose who takes over as catch-all advisor.");
+      return;
+    }
+
+    startTransition(async () => {
+      const res = await removeTeamMember({
+        memberId: member.id,
+        handoff: mode === "transfer" ? { mode: "transfer", toAdvisorId } : { mode: "unassign" },
+        catchAllSuccessorId: member.is_catch_all ? successorId : undefined,
+      });
+
+      if (!res.success) {
+        setError(res.error || "Could not remove that member.");
+        return;
+      }
+
+      // A refused delete is a SUCCESS with a different outcome, not a failure —
+      // but the admin asked for the account to be deleted, so saying "removed"
+      // and stopping there would be a quiet lie. Show what was kept and why,
+      // and make them dismiss it.
+      if (res.outcome === "revoked" && res.keptBecause && res.keptBecause.length > 0) {
+        setKept(res.keptBecause);
+        return;
+      }
+
+      const moved =
+        (res.clientsMoved ?? 0) > 0
+          ? ` ${res.clientsMoved} client${res.clientsMoved === 1 ? "" : "s"} ${
+              res.handoffLabel === "Unassigned"
+                ? "are now unassigned — find them under Unassigned in the pipeline."
+                : `moved to ${res.handoffLabel}.`
+            }`
+          : "";
+
+      onDone(
+        res.outcome === "deleted"
+          ? `${member.name}'s account was deleted.${moved}`
+          : `${member.name} no longer has access.${moved}`
+      );
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+      <div className="w-full max-w-lg rounded-2xl bg-white shadow-xl">
+        <div className="flex items-start justify-between border-b border-slate-100 px-5 py-4">
+          <div>
+            <h3 className="text-base font-black text-slate-900">
+              {kept ? "Access removed — account kept" : `Remove ${member.name}?`}
+            </h3>
+            <p className="mt-0.5 text-xs text-slate-500">
+              {MEMBER_ROLE_LABEL[member.role] ?? member.role} · {member.email}
+            </p>
+          </div>
+          <button onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {kept ? (
+          <div className="space-y-3 px-5 py-4">
+            <p className="text-sm leading-relaxed text-slate-600">
+              {member.name} can no longer sign in, but their account was kept rather than deleted —
+              deleting it would have erased work that is still referenced on live client files:
+            </p>
+            <ul className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+              {kept.map((h) => (
+                <li key={h.label}>
+                  {h.count} {h.label}
+                  {h.count === 1 ? "" : "s"}
+                </li>
+              ))}
+            </ul>
+            <p className="text-xs leading-relaxed text-slate-400">
+              Their name stays on that work. You can bring them back any time with Restore access.
+            </p>
+            <button
+              onClick={() => onDone(`${member.name} no longer has access.`)}
+              className="w-full rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-bold text-white hover:bg-slate-800"
+            >
+              Got it
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-4 px-5 py-4">
+            <p className="text-sm leading-relaxed text-slate-600">
+              They&apos;ll be signed out and locked out immediately. If they&apos;ve written notes or
+              approved documents, the account is kept so their name stays on that work; otherwise
+              it&apos;s deleted outright.
+            </p>
+
+            {needsHandoff && (
+              <div>
+                <p className="mb-2 text-[11px] font-black uppercase tracking-widest text-slate-400">
+                  Their {clients} client{clients === 1 ? "" : "s"}
+                </p>
+                <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-slate-200 px-3.5 py-2.5 hover:bg-slate-50">
+                  <input
+                    type="radio"
+                    checked={mode === "unassign"}
+                    onChange={() => setMode("unassign")}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <span className="block text-sm font-bold text-slate-800">Leave unassigned</span>
+                    <span className="block text-xs text-slate-500">
+                      They show up under Unassigned in the pipeline for you to hand out by hand.
+                    </span>
+                  </span>
+                </label>
+                <label className="mt-2 flex cursor-pointer items-start gap-2.5 rounded-xl border border-slate-200 px-3.5 py-2.5 hover:bg-slate-50">
+                  <input
+                    type="radio"
+                    checked={mode === "transfer"}
+                    onChange={() => setMode("transfer")}
+                    className="mt-0.5"
+                  />
+                  <span className="flex-1">
+                    <span className="block text-sm font-bold text-slate-800">Give them to</span>
+                    <select
+                      value={toAdvisorId}
+                      onChange={(e) => {
+                        setToAdvisorId(e.target.value);
+                        setMode("transfer");
+                      }}
+                      className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm"
+                    >
+                      <option value="">Choose an advisor…</option>
+                      {targets.map((t) => (
+                        <option key={t.advisor_id} value={t.advisor_id}>
+                          {t.name} ({t.clients_owned} client{t.clients_owned === 1 ? "" : "s"})
+                          {t.is_catch_all ? " · catch-all" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </span>
+                </label>
+              </div>
+            )}
+
+            {member.is_catch_all && (
+              <div className="rounded-xl border border-sky-200 bg-sky-50 px-3.5 py-3">
+                <p className="flex items-center gap-1.5 text-sm font-bold text-sky-900">
+                  <AlertTriangle className="h-4 w-4 shrink-0" />
+                  They&apos;re the catch-all advisor
+                </p>
+                <p className="mt-1 text-xs leading-relaxed text-sky-800">
+                  Stale files are automatically reassigned to them. Someone else has to take that
+                  over, or the reassignment job stops working.
+                </p>
+                <select
+                  value={successorId}
+                  onChange={(e) => setSuccessorId(e.target.value)}
+                  className="mt-2 w-full rounded-lg border border-sky-200 bg-white px-2.5 py-1.5 text-sm"
+                >
+                  <option value="">Choose the new catch-all advisor…</option>
+                  {targets.map((t) => (
+                    <option key={t.advisor_id} value={t.advisor_id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {error && <p className="text-sm font-semibold text-red-600">{error}</p>}
+
+            <div className="flex gap-2">
+              <button
+                onClick={onClose}
+                className="flex-1 rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submit}
+                disabled={isPending}
+                className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <UserMinus className="h-4 w-4" />
+                )}
+                Remove
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

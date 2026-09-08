@@ -17,6 +17,7 @@ import {
   TeamInvitationsManager,
   type InviteRow,
   type MemberRow,
+  type HandoffTarget,
 } from "./_components/team-invitations-manager";
 
 export const dynamic = "force-dynamic";
@@ -101,18 +102,88 @@ export default async function AdminTeamPage() {
     );
   }
 
-  const [{ data: invites }, { data: members }, compliance] = await Promise.all([
-    readInvites(),
-    // The existing team, shown alongside so "invite" isn't the only thing on
-    // this page — the question an admin actually arrives with is "who has
-    // access", and an invitation list alone answers half of it.
-    db
+  // The existing team, shown alongside so "invite" isn't the only thing on this
+  // page — the question an admin actually arrives with is "who has access", and
+  // an invitation list alone answers half of it.
+  //
+  // Removed members are pulled in by the same query. Removal sets role='free',
+  // so an `in(role, STAFF_ROLES)` filter alone would make them vanish the
+  // instant they were removed, taking the Restore button with them. Same
+  // column-fallback guard as readInvites: `removed_at` trails the code until
+  // migration 20260908 is applied, and naming a missing column in a filter
+  // fails the WHOLE query — which would render an empty team list.
+  const MEMBER_COLUMNS = "id, first_name, last_name, email, role, created_at";
+
+  async function readMembers() {
+    const withRemoved = await db
       .from("users")
-      .select("id, first_name, last_name, email, role, created_at")
+      .select(`${MEMBER_COLUMNS}, removed_at, removed_role`)
+      .or(`role.in.(${STAFF_ROLES.join(",")}),removed_at.not.is.null`)
+      .order("created_at", { ascending: false });
+    if (!withRemoved.error) return withRemoved;
+
+    console.warn(
+      "admin/team: removed_at unavailable, falling back (apply 20260908_team_member_removal):",
+      withRemoved.error.message
+    );
+    return db
+      .from("users")
+      .select(MEMBER_COLUMNS)
       .in("role", STAFF_ROLES as unknown as string[])
-      .order("created_at", { ascending: false }),
-    readAdvisorCompliance(),
-  ]);
+      .order("created_at", { ascending: false });
+  }
+
+  // Advisor identity per staff user: the id client vaults actually point at,
+  // plus who currently holds the catch-all. `is_catch_all` trails the code the
+  // same way, so it degrades to "nobody is marked" rather than to no advisors.
+  async function readAdvisorIdentities(): Promise<
+    Map<string, { advisor_id: string; is_active: boolean; is_catch_all: boolean }>
+  > {
+    const columns = "id, user_id, is_active, referral_partner_id";
+    let rows: { id: string; user_id: string | null; is_active: boolean | null; is_catch_all?: boolean }[] = [];
+
+    const withFlag = await db.from("advisors").select(`${columns}, is_catch_all`).is("referral_partner_id", null);
+    if (!withFlag.error) {
+      rows = withFlag.data ?? [];
+    } else {
+      console.warn(
+        "admin/team: is_catch_all unavailable, falling back (apply 20260908_team_member_removal):",
+        withFlag.error.message
+      );
+      const plain = await db.from("advisors").select(columns).is("referral_partner_id", null);
+      rows = plain.data ?? [];
+    }
+
+    return new Map(
+      rows
+        .filter((r) => r.user_id)
+        .map((r) => [
+          r.user_id as string,
+          {
+            advisor_id: r.id,
+            is_active: r.is_active !== false,
+            is_catch_all: r.is_catch_all === true,
+          },
+        ])
+    );
+  }
+
+  const [{ data: invites }, { data: members }, compliance, identities, { data: ownedVaults }] =
+    await Promise.all([
+      readInvites(),
+      readMembers(),
+      readAdvisorCompliance(),
+      readAdvisorIdentities(),
+      // Counted here rather than per row: the modal has to say "owns 20
+      // clients" BEFORE an admin commits, and a count fetched on click is a
+      // count fetched too late to change their mind.
+      db.from("client_data_vault").select("advisor_id").not("advisor_id", "is", null),
+    ]);
+
+  const ownedByAdvisor = new Map<string, number>();
+  for (const v of ownedVaults ?? []) {
+    if (v.advisor_id) ownedByAdvisor.set(v.advisor_id, (ownedByAdvisor.get(v.advisor_id) ?? 0) + 1);
+  }
 
   const inviteRows: InviteRow[] = (invites ?? []).map((r) => ({
     id: r.id,
@@ -140,13 +211,23 @@ export default async function AdminTeamPage() {
   }));
 
   const memberRows: MemberRow[] = (members ?? []).map((r) => {
-    const c = r.role === "advisor" ? compliance.get(r.id) : undefined;
+    const removed_at = (r as { removed_at?: string | null }).removed_at ?? null;
+    const removed_role = (r as { removed_role?: string | null }).removed_role ?? null;
+    // A removed member's badge should read the role they held, not the 'free'
+    // they were demoted to — that string means nothing to an admin.
+    const displayRole = removed_at ? (removed_role ?? r.role) : r.role;
+    const c = displayRole === "advisor" ? compliance.get(r.id) : undefined;
+    const identity = identities.get(r.id);
     return {
       id: r.id,
       name: [r.first_name, r.last_name].filter(Boolean).join(" ").trim() || r.email,
       email: r.email,
-      role: r.role,
+      role: displayRole,
       created_at: r.created_at,
+      removed_at,
+      advisor_id: identity?.advisor_id ?? null,
+      is_catch_all: identity?.is_catch_all ?? false,
+      clients_owned: identity ? (ownedByAdvisor.get(identity.advisor_id) ?? 0) : 0,
       compliance: c
         ? {
             w9_signed_at: c.w9_signed_at,
@@ -158,6 +239,20 @@ export default async function AdminTeamPage() {
         : null,
     };
   });
+
+  // Who can inherit a departing advisor's clients, or the catch-all role.
+  // Active internal advisors only — handing files to an inactive advisor is the
+  // silent-breakage this whole feature exists to prevent.
+  const handoffTargets: HandoffTarget[] = memberRows
+    .filter((m) => m.advisor_id && !m.removed_at && identities.get(m.id)?.is_active)
+    .map((m) => ({
+      advisor_id: m.advisor_id as string,
+      user_id: m.id,
+      name: m.name,
+      clients_owned: m.clients_owned ?? 0,
+      is_catch_all: m.is_catch_all ?? false,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   return (
     <div className="p-6 md:p-10">
@@ -175,7 +270,12 @@ export default async function AdminTeamPage() {
       </div>
 
       <div className="mt-6">
-        <TeamInvitationsManager invites={inviteRows} members={memberRows} />
+        <TeamInvitationsManager
+          invites={inviteRows}
+          members={memberRows}
+          handoffTargets={handoffTargets}
+          currentAdminId={user.id}
+        />
       </div>
     </div>
   );
