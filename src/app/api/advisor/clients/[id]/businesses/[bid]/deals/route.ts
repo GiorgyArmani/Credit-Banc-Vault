@@ -62,7 +62,7 @@ async function announceNewRound(args: {
 
   const { data: clientRow } = await admin
     .from("client_data_vault")
-    .select("client_name, slack_channel_id, advisors(email)")
+    .select("client_name, slack_channel_id, advisors!client_data_vault_advisor_id_fkey(email)")
     .eq("id", clientVaultId)
     .maybeSingle();
 

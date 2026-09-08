@@ -141,7 +141,7 @@ export async function recordPipelineTransition(args: {
     try {
       const { data: vaultData } = await db
         .from("client_data_vault")
-        .select("advisor_id, client_name, advisors(user_id)")
+        .select("advisor_id, client_name, advisors!client_data_vault_advisor_id_fkey(user_id)")
         .eq("id", clientVaultId)
         .maybeSingle();
 

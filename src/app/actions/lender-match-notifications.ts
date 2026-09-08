@@ -95,7 +95,7 @@ export async function notifyAdminsOfLenderMatchSaved(
         // Pull all admin users + the client name for the message body.
         const [{ data: admins }, { data: client_row }] = await Promise.all([
             supabase_admin.from("users").select("id, email").eq("role", "admin"),
-            supabase_admin.from("client_data_vault").select("client_name, company_name, slack_channel_id, advisors(email)").eq("id", clientId).maybeSingle(),
+            supabase_admin.from("client_data_vault").select("client_name, company_name, slack_channel_id, advisors!client_data_vault_advisor_id_fkey(email)").eq("id", clientId).maybeSingle(),
         ]);
 
         admin_users = (admins ?? []) as { id: string; email: string }[];

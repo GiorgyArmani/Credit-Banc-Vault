@@ -46,7 +46,7 @@ export async function POST(request: Request) {
       .select(`
         id, company_name, client_name, client_phone, client_email, advisor_name,
         slack_channel_id, slack_channel_name,
-        advisors ( first_name, last_name, email )
+        advisors!client_data_vault_advisor_id_fkey ( first_name, last_name, email )
       `)
       .eq('id', client_id)
       .maybeSingle();

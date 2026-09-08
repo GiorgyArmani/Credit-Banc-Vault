@@ -192,7 +192,7 @@ export async function releaseSpeedFormDocs(
     // Followers shadow the client — keep them CC'd like every other client email.
     const { data: followerRows } = await supabase
       .from('client_followers')
-      .select('advisor_id, advisors(email)')
+      .select('advisor_id, advisors!client_followers_advisor_id_fkey(email)')
       .eq('client_vault_id', vault.id);
     const followerEmails = (followerRows || [])
       .map((row: any) => row.advisors?.email)

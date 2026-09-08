@@ -1023,7 +1023,7 @@ export default function UnderwritingClientDetailsPage() {
                     owner_2_name, owner_2_ownership_pct, owner_3_name, owner_3_ownership_pct,
                     owner_4_name, owner_4_ownership_pct, owner_5_name, owner_5_ownership_pct,
                     slack_channel_id, slack_channel_name,
-                    advisors (
+                    advisors!client_data_vault_advisor_id_fkey (
                         first_name, last_name, email
                     )
                 `)

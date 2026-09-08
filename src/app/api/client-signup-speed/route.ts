@@ -661,6 +661,14 @@ export async function POST(request: Request) {
       user_id: user_id,
       advisor_name: advisor_name,
       advisor_id: advisor_id,
+      // Who ORIGINATED this file. advisor_id records who currently carries it,
+      // and the stale-file cron rewrites that — so without this column an
+      // advisor's production is unrecoverable once a file is reassigned. For
+      // setter-created files advisor_id resolves from the GHL contact owner,
+      // which is the correct originator here too. Same value as the `created`
+      // status event's changed_by written below, so the column and the audit
+      // trail cannot disagree.
+      created_by: advisor_id || null,
       ghl_contact_id: ghl_contact_id || null,
       ghl_last_sync_at: ghl_contact_id && !ghl_sync_error ? now_iso : null,
       ghl_sync_error: ghl_sync_error || (!ghl_contact_id ? 'GHL sync failed during signup' : null),

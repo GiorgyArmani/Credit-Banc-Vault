@@ -106,7 +106,7 @@ export default function UnderwritingDashboardPage() {
                     capital_requested,
                     created_at,
                     advisor_id,
-                    advisors (
+                    advisors!client_data_vault_advisor_id_fkey (
                         first_name,
                         last_name
                     )

@@ -185,7 +185,7 @@ export async function notifyAdminsOfLenderPipelineEvent(
       supabase_admin.from('users').select('id, email').eq('role', 'admin'),
       supabase_admin
         .from('client_data_vault')
-        .select('client_name, company_name, slack_channel_id, advisors(email)')
+        .select('client_name, company_name, slack_channel_id, advisors!client_data_vault_advisor_id_fkey(email)')
         .eq('id', client_id)
         .maybeSingle(),
     ]);
@@ -385,7 +385,7 @@ export async function notifyDealFundedToSlack(
   try {
     const { data: client_row } = await supabase_admin
       .from('client_data_vault')
-      .select('company_name, client_name, slack_channel_id, advisors(email)')
+      .select('company_name, client_name, slack_channel_id, advisors!client_data_vault_advisor_id_fkey(email)')
       .eq('id', client_id)
       .maybeSingle();
 

@@ -743,6 +743,12 @@ export async function POST(request: Request) {
       user_id: user_id,
       advisor_name: body.advisor_name,
       advisor_id: body.advisor_id,
+      // Who ORIGINATED this file. advisor_id records who currently carries it,
+      // and the stale-file cron rewrites that — so without this column an
+      // advisor's production is unrecoverable once a file is reassigned.
+      // Same value as the `created` status event's changed_by written below, so
+      // the column and the audit trail cannot disagree.
+      created_by: body.advisor_id || null,
       ghl_contact_id: ghl_contact_id || null, // Might be null if GHL failed
       ghl_last_sync_at: ghl_contact_id && !ghl_sync_error ? new Date().toISOString() : null,
       ghl_sync_error: ghl_sync_error || (!ghl_contact_id ? 'GHL sync failed during signup' : null),

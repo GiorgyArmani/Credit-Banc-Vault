@@ -47,7 +47,7 @@ export async function notifyAdvisor(clientId: string, missingDocs: string[], add
                 company_name,
                 advisor_id,
                 slack_channel_id,
-                advisors (
+                advisors!client_data_vault_advisor_id_fkey (
                     first_name,
                     last_name,
                     email,
@@ -268,7 +268,7 @@ export async function fundLoanAction(clientId: string, data: {
                 ghl_contact_id,
                 client_name,
                 client_email,
-                advisors (
+                advisors!client_data_vault_advisor_id_fkey (
                     first_name,
                     last_name,
                     email,

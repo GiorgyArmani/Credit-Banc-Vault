@@ -27,7 +27,7 @@ export async function POST() {
                 advisor_id, 
                 client_name, 
                 company_name,
-                advisors (
+                advisors!client_data_vault_advisor_id_fkey (
                     id, 
                     first_name,
                     last_name,
