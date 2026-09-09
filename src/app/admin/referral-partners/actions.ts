@@ -11,6 +11,7 @@ import {
 } from "@/lib/referral-partners";
 import { generatePartnerPortalMagicLink } from "@/lib/magic-link";
 import { send_referral_partner_invite } from "@/lib/email";
+import { syncReferralPartnerToGhl } from "@/lib/referral-partner-ghl";
 
 async function requireAdminUser() {
   const supabase = await createClient();
@@ -387,7 +388,7 @@ async function provisionPartnerPortal(
 
   const { data: partner, error: readErr } = await db
     .from("referral_partners")
-    .select("id, name, slug, email, phone, user_id, portal_enabled")
+    .select("id, name, slug, email, phone, company, user_id, portal_enabled")
     .eq("id", id)
     .maybeSingle();
 
@@ -496,6 +497,48 @@ async function provisionPartnerPortal(
       if (!deskResult.success) return deskResult;
     }
 
+    // Mirror the partner into GHL so the CRM can run partner-side automations,
+    // merging {{contact.referral_partner_link}} and
+    // {{contact.referral_dashboard_link}}. The upsert matches on email, so a
+    // partner already migrated in from the main GHL account is found and
+    // filled rather than duplicated.
+    //
+    // Runs BEFORE the email on purpose: the mail block below returns early on
+    // an SMTP failure, and the CRM contact is wanted either way.
+    //
+    // Best-effort throughout — syncReferralPartnerToGhl never throws, and
+    // portal access is already live by this point.
+    const ghlResult = await syncReferralPartnerToGhl({
+      id: partner.id,
+      name: partner.name,
+      email,
+      phone: partner.phone ?? null,
+      slug: partner.slug ?? null,
+      company: (partner as any).company ?? null,
+      // Not read here on purpose — see the select above. The upsert matches
+      // on email, so it finds the contact without a stored id.
+      ghl_contact_id: null,
+    });
+    if (ghlResult.contactId) {
+      // Separate best-effort write: the column arrives with migration 20260909,
+      // and the invite must keep working where that hasn't been applied yet
+      // ([[refactor_alongside_production]]).
+      const { error: stampErr } = await db
+        .from("referral_partners")
+        .update({ ghl_contact_id: ghlResult.contactId })
+        .eq("id", id);
+      if (stampErr) {
+        console.warn(
+          "[referral-partners] could not stamp ghl_contact_id (migration 20260909 applied?):",
+          stampErr.message
+        );
+      }
+    } else if (!ghlResult.synced) {
+      console.warn(
+        `[referral-partners] GHL sync skipped for ${email}: ${ghlResult.skipReason || ghlResult.error}`
+      );
+    }
+
     // Email the entry link. Best-effort: access is already provisioned, and the
     // admin can re-send — failing the whole invite over SMTP would leave the
     // partner enabled but the UI saying it didn't work.
@@ -517,6 +560,10 @@ async function provisionPartnerPortal(
         partner_email: email,
         portal_url: magicLink || `${appUrl}/auth/login`,
         referral_url: partner.slug ? partnerReferralUrl(partner.slug) : null,
+        // Read off the role resolved above, not the withDealDesk argument, so a
+        // re-send to an existing deal-desk partner keeps the tier-2 copy instead
+        // of quietly telling them they just share a link.
+        with_deal_desk: role === "partner_advisor",
       });
     } catch (mailErr) {
       console.error("[referral-partners] invite email failed (access granted anyway):", mailErr);

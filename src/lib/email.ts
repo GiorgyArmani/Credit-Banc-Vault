@@ -4736,6 +4736,13 @@ export interface ReferralPartnerInviteData {
   portal_url: string;
   /** Their creditbanc.io referral link, if a slug has been issued. */
   referral_url?: string | null;
+  /**
+   * TIER 2 — this partner works their own files (`partner_advisor`). Selects
+   * the older deal-desk copy; tier 1 (a partner who only shares a link) gets
+   * the activation email. Absent is treated as tier 1, which is the safe
+   * default: the tier-1 copy promises nothing a deal-desk partner doesn't get.
+   */
+  with_deal_desk?: boolean;
 }
 
 export function generate_referral_partner_invite_html(
@@ -4840,17 +4847,186 @@ export function generate_referral_partner_invite_html(
   `;
 }
 
-/** Sends the partner-portal invite. Throws on SMTP failure so the caller can report it. */
+/**
+ * TIER 1 — the plain referral partner (shares a link, watches the dashboard).
+ *
+ * Split from the invite above rather than branching inside it: tier 1 and the
+ * deal-desk tier are drifting apart in copy, and one template carrying both
+ * would turn every future wording change into a conditional. The deal-desk
+ * email stays on generate_referral_partner_invite_html until its own rewrite
+ * lands.
+ *
+ * Voice note: these partners are ALREADY referring. Nothing about their link or
+ * their process changes here — the only new thing is the dashboard — so the copy
+ * reassures rather than onboards.
+ */
+export function generate_referral_partner_welcome_html(
+  data: ReferralPartnerInviteData
+): string {
+  data = escape_email_strings(data);
+  const { partner_name, portal_url } = data;
+  const referral_url = data.referral_url || "";
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Activate your Credit Banc referral dashboard</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #faf9f6;">
+  <div style="display: none; max-height: 0; overflow: hidden; opacity: 0; mso-hide: all;">
+    Activate your account and track every referral you've sent to Credit Banc.
+  </div>
+
+  <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #faf9f6;">
+    <tr>
+      <td align="center" style="padding: 32px 12px;">
+        <table role="presentation" style="width: 600px; max-width: 100%; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 6px 24px rgba(32, 37, 54, 0.08);">
+
+          <tr>
+            <td style="padding: 40px 40px 8px;">
+              <p style="margin: 0 0 6px; font-size: 12px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: #10b981;">Referral Partner Program</p>
+              <h1 style="margin: 0; font-size: 26px; line-height: 1.25; font-weight: 800; color: #202536;">Your referral partner dashboard is ready</h1>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding: 16px 40px 0; font-size: 15px; line-height: 1.7; color: #475569;">
+              <p style="margin: 0 0 16px;">Hi ${partner_name},</p>
+              <p style="margin: 0 0 16px;">
+                Your new referral dashboard inside the Credit Banc Vault is ready.
+                Click below to activate your account and create a password. Once
+                you're in, you'll be able to see the referrals you've sent to
+                Credit Banc and track where each one stands.
+              </p>
+              <p style="margin: 0 0 8px;">
+                Your referral link and process haven't changed. Just activate your
+                account below, and you'll be able to track everything from your
+                dashboard.
+              </p>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding: 28px 40px 8px;" align="center">
+              <a href="${portal_url}" style="display: inline-block; background-color: #10b981; color: #ffffff; text-decoration: none; padding: 14px 34px; border-radius: 10px; font-size: 16px; font-weight: 700;">
+                Activate my account
+              </a>
+              <p style="margin: 12px 0 0; font-size: 12px; color: #94a3b8;">
+                This link signs you in automatically. Just create a password, and after that you can log in to the Credit Banc Vault anytime.
+              </p>
+            </td>
+          </tr>
+
+          ${referral_url ? `
+          <tr>
+            <td style="padding: 24px 40px 0;">
+              <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #f8fafc; border-radius: 12px;">
+                <tr>
+                  <td style="padding: 18px 20px;">
+                    <p style="margin: 0 0 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.15em; text-transform: uppercase; color: #64748b;">Your referral link</p>
+                    <p style="margin: 0 0 4px; font-size: 14px; word-break: break-all;">
+                      <a href="${referral_url}" style="color: #10b981; font-weight: 600; text-decoration: none;">${referral_url}</a>
+                    </p>
+                    <p style="margin: 8px 0 0; font-size: 12px; line-height: 1.6; color: #94a3b8;">
+                      Same link as always. Anyone who applies through it is tracked to you automatically and shows up on your dashboard.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>` : ``}
+
+          <tr>
+            <td style="padding: 28px 40px 40px; font-size: 14px; line-height: 1.7; color: #475569;">
+              <p style="margin: 0;">
+                Questions about a file? Reply here or reach us at
+                <a href="mailto:support@creditbanc.io" style="color: #10b981;">support@creditbanc.io</a>.
+              </p>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding: 24px 40px 32px; text-align: center; color: #94a3b8; font-size: 12px; line-height: 1.6; border-top: 1px solid #f1f5f9;">
+              <p style="margin: 0;">&copy; ${new Date().getFullYear()} Credit Banc. You're receiving this because you're a Credit Banc referral partner.</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `;
+}
+
+/**
+ * Plaintext alternative. The invite above ships HTML-only, but this one carries
+ * the credential that turns a partner into a logged-in user — the worst mail in
+ * the program to have filtered — and a missing text/plain part is one of the
+ * cheapest spam signals to remove.
+ */
+export function generate_referral_partner_welcome_text(
+  data: ReferralPartnerInviteData
+): string {
+  const { partner_name, portal_url } = data;
+  const referral_url = data.referral_url || "";
+
+  return `
+Hi ${partner_name},
+
+Your new referral dashboard inside the Credit Banc Vault is ready. Click below
+to activate your account and create a password. Once you're in, you'll be able
+to see the referrals you've sent to Credit Banc and track where each one stands.
+
+Your referral link and process haven't changed. Just activate your account
+below, and you'll be able to track everything from your dashboard.
+
+Activate my account:
+${portal_url}
+
+This link signs you in automatically. Just create a password, and after that you
+can log in to the Credit Banc Vault anytime.
+${referral_url ? `
+Your referral link (unchanged):
+${referral_url}
+` : ``}
+Questions about a file? Reply here or reach us at support@creditbanc.io.
+
+- Credit Banc
+  `.trim();
+}
+
+/**
+ * Sends the partner-portal invite. Throws on SMTP failure so the caller can
+ * report it.
+ *
+ * Picks the template by tier: a deal-desk partner keeps the original invite
+ * until its rewrite lands, everyone else gets the tier-1 activation email.
+ */
 export async function send_referral_partner_invite(data: ReferralPartnerInviteData) {
   const transporter = create_smtp_transporter();
   const from_email = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
   const from_name = process.env.SMTP_FROM_NAME || 'Credit Banc';
 
+  const mail = data.with_deal_desk
+    ? {
+        subject: 'Set up your Credit Banc partner dashboard',
+        html: generate_referral_partner_invite_html(data),
+      }
+    : {
+        subject: 'Activate your Credit Banc referral dashboard',
+        html: generate_referral_partner_welcome_html(data),
+        text: generate_referral_partner_welcome_text(data),
+      };
+
   return await transporter.sendMail({
     from: `${from_name} <${from_email}>`,
     to: data.partner_email,
-    subject: 'Set up your Credit Banc partner dashboard',
-    html: generate_referral_partner_invite_html(data),
+    ...mail,
   });
 }
 
