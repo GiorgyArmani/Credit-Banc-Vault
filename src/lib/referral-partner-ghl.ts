@@ -127,7 +127,7 @@ export async function syncReferralPartnerToGhl(
   const email = (partner.email ?? "").trim().toLowerCase();
   if (!email) {
     // Expected for most of the roster: partners imported as name + slug only.
-    // bulkImportPartnerContacts is how emails get attached.
+    // preparePartnerInvites is how emails get attached.
     return { ...empty, skipReason: "no email on file" };
   }
 

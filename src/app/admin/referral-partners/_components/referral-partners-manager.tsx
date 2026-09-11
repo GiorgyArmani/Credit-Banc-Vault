@@ -398,13 +398,21 @@ export function ReferralPartnersManager({
   return (
     <div className="max-w-5xl">
       <BulkOnboarding
-        rows={rows}
-        onInvited={(ids) => {
+        onInvited={(ids, { withDealDesk }) => {
           const now = new Date().toISOString();
           setRows((prev) =>
             prev.map((r) =>
               ids.includes(r.id)
-                ? { ...r, portal_enabled: true, has_login: true, invited_at: now }
+                ? {
+                    ...r,
+                    portal_enabled: true,
+                    has_login: true,
+                    invited_at: now,
+                    // A tier-2 send also opened their desk. Without this the row
+                    // still reads "referral only" and a second bulk run would
+                    // treat them as eligible all over again.
+                    deal_desk_enabled: withDealDesk || r.deal_desk_enabled,
+                  }
                 : r
             )
           );

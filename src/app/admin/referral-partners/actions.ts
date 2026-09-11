@@ -8,6 +8,9 @@ import {
   normalizePartnerSlug,
   partnerSlugFromName,
   partnerReferralUrl,
+  buildPartnerLookup,
+  lookupPartner,
+  parsePartnerLine,
 } from "@/lib/referral-partners";
 import { generatePartnerPortalMagicLink } from "@/lib/magic-link";
 import { send_referral_partner_invite } from "@/lib/email";
@@ -779,64 +782,88 @@ async function applyDealDesk(
 // ============================================================================
 // Bulk onboarding
 // ============================================================================
-// ~100 partners already exist as names. Getting them into the portal means two
-// bulk steps, deliberately kept SEPARATE: load the contact details, look at what
-// matched, THEN invite. A single "import and invite" button would fire real
-// emails off the back of a fuzzy name match, and there is no un-sending them.
+// Two premade lists exist offline — who is a tier-1 referral partner, and who is
+// a tier-2 deal-desk partner. The whole job is: pick the tier, paste that list,
+// send. So there is ONE action to prepare a paste and one to send it.
 //
-// Why this lives in the app and not in the migration: emails are operational
-// data. A migration runs once — the first correction, the first new partner, and
-// it's stale, with no error to tell you. Worse, a hardcoded name that doesn't
-// match a row fails silently, and the symptom is a partner who simply never
-// hears from us.
+// Prepare and send stay SEPARATE, though, and that split is the only ceremony
+// here worth keeping: matching is fuzzy (slug, then name), and a single
+// paste-and-send button would fire real email off a typo with no un-sending it.
+// Preparing shows exactly who matched, who is skipped and why, and what didn't
+// match at all — then the send goes to that list and nothing else.
+//
+// Why this lives in the app and not in a migration: emails are operational data.
+// A migration runs once — the first correction, the first new partner, and it's
+// stale, with no error to tell you. Worse, a hardcoded name that doesn't match a
+// row fails silently, and the symptom is a partner who simply never hears from us.
 
-export type BulkImportResult = {
+/** A partner the pasted list resolved to who WILL be invited. */
+export type PreparedInvite = { id: string; name: string; email: string };
+
+export type PrepareInvitesResult = {
   success: boolean;
   error?: string;
-  updated: number;
-  /** Lines whose partner we couldn't find — shown back so nothing is lost. */
+  /** Exactly who the send will go to. */
+  ready: PreparedInvite[];
+  /** Matched, but not eligible for this tier — with the reason, per partner. */
+  skipped: { name: string; reason: string }[];
+  /** Lines that matched no partner. Handed back so nothing is silently dropped. */
   unmatched: string[];
-  /** Lines we couldn't parse, or with an email that isn't one. */
+  /** Lines carrying something that isn't an email address. */
   invalid: string[];
   /** Partners whose email CHANGED (vs was blank) — worth a second look. */
   overwritten: { name: string; from: string; to: string }[];
+  /** How many partner records the paste updated (email / phone / firm). */
+  updated: number;
 };
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
- * Attach emails (and optionally phone / firm) to existing partners from pasted
- * text — one partner per line, comma- or tab-separated, so a spreadsheet column
- * pastes straight in:
+ * Resolve a pasted partner list for a tier, write any contact details it
+ * carries, and report exactly who the invite would go to.
  *
- *   Aaron_Sedlacek, aaron@firm.com
- *   Aaron Sedlacek, aaron@firm.com, (555) 111-2222, Sedlacek CPA
+ * The paste is forgiving on purpose — one partner per line, comma- or
+ * tab-separated, matched on link name or partner name, columns identified by
+ * shape (see parsePartnerLine). A name-only list works, because after the first
+ * send most partners already have an email on file; a full spreadsheet row works
+ * too, and fills in what's missing.
  *
- * Matching is by slug first, then name, both normalized — the same rule the
- * referral links resolve through, so anything that works as a link works here.
- * Creates nothing: a line that matches no partner is REPORTED, not inserted.
- * Inventing partner rows from a typo'd paste is how a registry rots.
+ * Creates nothing. A line matching no partner is REPORTED, not inserted —
+ * inventing partner rows from a typo'd paste is how a registry rots.
+ *
+ * ELIGIBILITY IS TIER-SPECIFIC, and the difference matters:
+ *   tier 1 — skips anyone already on the portal; re-sending a set-password link
+ *            is noise, and the row's own "Re-send link" covers it.
+ *   tier 2 — skips on deal_desk_enabled INSTEAD, so a partner already invited as
+ *            tier 1 is included. That is the whole point: promoting the tier-2
+ *            list after a tier-1 send is the normal case, not an edge one.
  */
-export async function bulkImportPartnerContacts(
-  raw: string
-): Promise<BulkImportResult> {
-  const empty: BulkImportResult = {
+export async function preparePartnerInvites(
+  raw: string,
+  options?: { withDealDesk?: boolean }
+): Promise<PrepareInvitesResult> {
+  const empty: PrepareInvitesResult = {
     success: false,
-    updated: 0,
+    ready: [],
+    skipped: [],
     unmatched: [],
     invalid: [],
     overwritten: [],
+    updated: 0,
   };
 
   const admin = await requireAdminUser();
   if (!admin) return { ...empty, error: "Forbidden" };
+
+  const withDealDesk = options?.withDealDesk === true;
 
   const lines = (raw || "")
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter(Boolean);
 
-  if (!lines.length) return { ...empty, error: "Nothing to import" };
+  if (!lines.length) return { ...empty, error: "Paste a list first" };
   if (lines.length > 500) {
     return { ...empty, error: "That's over 500 lines — split it into smaller batches." };
   }
@@ -844,71 +871,103 @@ export async function bulkImportPartnerContacts(
   const db = createAdminClient();
   const { data: partners, error: readErr } = await db
     .from("referral_partners")
-    .select("id, name, slug, email");
+    .select("id, name, slug, email, active, portal_enabled, deal_desk_enabled");
 
   if (readErr || !partners) {
     return { ...empty, error: readErr?.message || "Could not read the partner list" };
   }
 
-  // Index once by both keys rather than querying per line.
-  const bySlug = new Map<string, any>();
-  const byName = new Map<string, any>();
-  for (const p of partners) {
-    const slugKey = normalizePartnerSlug(p.slug);
-    if (slugKey) bySlug.set(slugKey, p);
-    const nameKey = normalizePartnerSlug(p.name);
-    if (nameKey && !byName.has(nameKey)) byName.set(nameKey, p);
-  }
+  const lookup = buildPartnerLookup(partners);
 
+  const ready: PreparedInvite[] = [];
+  const skipped: { name: string; reason: string }[] = [];
   const unmatched: string[] = [];
   const invalid: string[] = [];
   const overwritten: { name: string; from: string; to: string }[] = [];
+  const seen = new Set<string>();
   let updated = 0;
 
   for (const line of lines) {
-    const cols = line
-      .split(/\t|,/)
-      .map((c) => c.trim())
-      .filter((c, i) => i === 0 || c !== "");
-
-    const key = cols[0];
-    const email = (cols[1] ?? "").toLowerCase();
-    const phone = cols[2] ?? "";
-    const company = cols[3] ?? "";
-
-    if (!key || !email || !EMAIL_RE.test(email)) {
+    const parsed = parsePartnerLine(line);
+    if (!parsed) {
       invalid.push(line);
       continue;
     }
 
-    const wanted = normalizePartnerSlug(key);
-    const partner = (wanted && (bySlug.get(wanted) ?? byName.get(wanted))) || null;
+    if (parsed.email && !EMAIL_RE.test(parsed.email)) {
+      invalid.push(line);
+      continue;
+    }
+
+    // A column we couldn't identify means the line is not what it looks like —
+    // most often an email that lost its "@". Reject it rather than guessing:
+    // guessing writes the typo into the firm name and mails the stale address.
+    if (parsed.unrecognized.length) {
+      invalid.push(line);
+      continue;
+    }
+
+    const partner = lookupPartner(lookup, parsed.key);
     if (!partner) {
       unmatched.push(line);
       continue;
     }
 
-    const patch: Record<string, any> = { email, updated_at: new Date().toISOString() };
-    if (phone) patch.phone = phone;
-    if (company) patch.company = company;
+    // The same partner listed twice is one invite, not two. Without this a
+    // duplicated spreadsheet row sends a second email inside the same batch.
+    if (seen.has(partner.id)) continue;
+    seen.add(partner.id);
 
-    const { error } = await db.from("referral_partners").update(patch).eq("id", partner.id);
-    if (error) {
-      invalid.push(`${line}  — ${error.message}`);
+    // Write whatever contact detail the line carried. Skipped entirely for a
+    // name-only list, which is the common shape for the tier-2 paste.
+    if (parsed.email || parsed.phone || parsed.company) {
+      const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+      if (parsed.email) patch.email = parsed.email;
+      if (parsed.phone) patch.phone = parsed.phone;
+      if (parsed.company) patch.company = parsed.company;
+
+      const { error: updErr } = await db
+        .from("referral_partners")
+        .update(patch)
+        .eq("id", partner.id);
+      if (updErr) {
+        invalid.push(`${line}  — ${updErr.message}`);
+        continue;
+      }
+      updated += 1;
+
+      // Replacing an address that was already there is a different act from
+      // filling in a blank; surface it rather than letting a stale paste
+      // quietly redirect someone's invite.
+      if (parsed.email && partner.email && partner.email.toLowerCase() !== parsed.email) {
+        overwritten.push({ name: partner.name, from: partner.email, to: parsed.email });
+      }
+    }
+
+    const email = parsed.email || partner.email || null;
+
+    if (!email) {
+      skipped.push({ name: partner.name, reason: "no email — add one to the line" });
+      continue;
+    }
+    if (partner.active === false) {
+      skipped.push({ name: partner.name, reason: "inactive" });
+      continue;
+    }
+    if (withDealDesk && partner.deal_desk_enabled === true) {
+      skipped.push({ name: partner.name, reason: "already on the deal desk" });
+      continue;
+    }
+    if (!withDealDesk && partner.portal_enabled === true) {
+      skipped.push({ name: partner.name, reason: "already has portal access" });
       continue;
     }
 
-    // Replacing an address that was already there is a different act from
-    // filling in a blank; surface it rather than letting a stale paste quietly
-    // redirect someone's invite.
-    if (partner.email && partner.email.toLowerCase() !== email) {
-      overwritten.push({ name: partner.name, from: partner.email, to: email });
-    }
-    updated += 1;
+    ready.push({ id: partner.id, name: partner.name, email });
   }
 
   revalidatePath("/admin/referral-partners");
-  return { success: true, updated, unmatched, invalid, overwritten };
+  return { success: true, ready, skipped, unmatched, invalid, overwritten, updated };
 }
 
 export type BulkInviteResult = {
@@ -929,6 +988,12 @@ export type BulkInviteResult = {
  *
  * Sequential rather than parallel: shared SMTP connection, and a burst of 25
  * simultaneous sends is exactly the shape that trips rate limits.
+ *
+ * `withDealDesk` picks the TIER for the whole batch, and is passed straight to
+ * provisionPartnerPortal — the single-partner button and this one provision
+ * identically, including the role flip and the advisors row. The caller decides
+ * who belongs in the batch; preparePartnerInvites is what turns a pasted tier
+ * list into that set of ids.
  */
 export async function inviteReferralPartnersBulk(
   ids: string[],
