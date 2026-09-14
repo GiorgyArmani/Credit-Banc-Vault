@@ -393,14 +393,14 @@ export async function POST(request: Request) {
     // Prefer user_id match; fall back to email if the advisor row isn't linked yet.
     let { data: advisor_row } = await supabase_admin
       .from('advisors')
-      .select('id, first_name, last_name, email, user_id, referral_partner_id')
+      .select('id, first_name, last_name, email, user_id, referral_partner_id, is_external')
       .eq('user_id', session_user.id)
       .maybeSingle();
 
     if (!advisor_row && session_user.email) {
       const { data: by_email } = await supabase_admin
         .from('advisors')
-        .select('id, first_name, last_name, email, user_id, referral_partner_id')
+        .select('id, first_name, last_name, email, user_id, referral_partner_id, is_external')
         .ilike('email', session_user.email)
         .maybeSingle();
       advisor_row = by_email ?? null;
@@ -876,11 +876,11 @@ export async function POST(request: Request) {
       ghlContactId: ghl_contact_id || null,
     });
 
-    // Internal oversight on partner-created deals: admins follow the file and
-    // are notified. No-op for staff-created deals.
+    // Internal oversight on externally created deals (partner advisors, Partner+):
+    // admins follow the file and are notified. No-op for staff-created deals.
     await attachAdminOversightToPartnerDeal(supabase_admin, {
       vaultId: vault_id,
-      creatorPartnerId: advisor_row.referral_partner_id || null,
+      creatorIsExternal: advisor_row.is_external === true,
       clientName: body.client_name,
       companyName: body.company_name,
       partnerName: attributed_partner?.name ?? body.advisor_name,

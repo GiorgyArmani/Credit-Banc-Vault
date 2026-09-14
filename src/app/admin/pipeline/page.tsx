@@ -56,9 +56,9 @@ export default function AdminPipelinePage() {
           .from("client_data_vault")
           .select("id, user_id, advisor_id, client_name, client_email, client_phone, company_name, capital_requested, created_at, reassigned_to_catch_all_at, reassignment_paused_until, referral_partner"),
         // Internal staff only. No is_active filter here by design (inactive
-        // advisors still own historic deals), so referral_partner_id is the only
+        // advisors still own historic deals), so is_external is the only
         // thing excluding external partner advisors from the filter.
-        supabase.from("advisors").select("id, first_name, last_name, email").is("referral_partner_id", null),
+        supabase.from("advisors").select("id, first_name, last_name, email").is("is_external", false),
       ]);
 
       if (error) throw error;

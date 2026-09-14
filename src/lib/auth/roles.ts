@@ -1,7 +1,7 @@
 // The role model, in one place. Client-safe: no crypto, no service-role client,
 // no secrets — this is imported by browser components as well as server code.
 //
-// Eight roles. See [[role_model]]. Never reference a role string that isn't here;
+// Nine roles. See [[role_model]]. Never reference a role string that isn't here;
 // the database CHECK constraint on users.role rejects anything else, and a typo'd
 // role in a comparison fails SILENTLY (the user simply never matches).
 //
@@ -10,6 +10,7 @@
 //   advisor          internal staff working deals
 //   setter           appointment setters, create-only fast funding
 //   partner_advisor  an EXTERNAL referral partner working their own deals
+//   partner_plus     an EXTERNAL paying advisor ($100/mo, Stripe) working own deals at /desk
 //   referral_partner an external partner, read-only referral portal
 //   affiliate        public affiliate program
 //   free             clients
@@ -26,6 +27,7 @@ export const ALL_ROLES = [
   "advisor",
   "setter",
   "partner_advisor",
+  "partner_plus",
   "referral_partner",
   "affiliate",
   "free",
@@ -46,11 +48,11 @@ export function isUserRole(v: unknown): v is UserRole {
  * Access is still bounded per-file by `is_assigned_advisor_for()` in RLS, so
  * membership here grants the SURFACE, never the data.
  */
-export const ADVISOR_WORKSPACE_ROLES = ["advisor", "partner_advisor", "admin"] as const;
+export const ADVISOR_WORKSPACE_ROLES = ["advisor", "partner_advisor", "partner_plus", "admin"] as const;
 
 /**
  * Allowed to act on a deal: move the pipeline, write status history, generate
- * notifications. Includes partner_advisor — they do the advisor job.
+ * notifications. Includes partner_advisor and partner_plus — they do the advisor job.
  *
  * Kept in sync with the database's `is_staff_user()`, with one known difference:
  * the SQL helper excludes 'setter' (pre-existing, out of scope). If you change
@@ -62,6 +64,7 @@ export const STAFF_ROLES = [
   "advisor",
   "setter",
   "partner_advisor",
+  "partner_plus",
 ] as const;
 
 /**
@@ -69,10 +72,10 @@ export const STAFF_ROLES = [
  * because this transition pays real money downstream — it queues the affiliate's
  * gift card and writes a partner commission row — so setters are excluded.
  *
- * partner_advisor IS included, for parity with an advisor. Know what that means:
- * a partner marking their own deal funded self-initiates their own commission.
- * That row lands `status: 'pending'` and releasing it stays an admin action, so
- * the approval gate is downstream rather than here.
+ * No EXTERNAL advisor is included — neither partner_advisor nor partner_plus.
+ * Underwriting closes their deals (Partner+ design, 2026-09-08). partner_advisor
+ * used to be here for parity with an advisor, which let a partner self-initiate
+ * their own commission and fed the funded-volume KPI from outside the company.
  *
  * THIS LIST IS LOAD-BEARING IN TWO PLACES AND THEY MUST NOT DRIFT: the pipeline
  * gate that decides who may record `funded`, and the affiliate payout path that
@@ -81,7 +84,7 @@ export const STAFF_ROLES = [
  * the affiliate — no payout row, no admin surface, just a console warning. Use
  * canRecordFunded() in both rather than re-listing the roles.
  */
-export const FUNDED_ROLES = ["admin", "underwriting", "advisor", "partner_advisor"] as const;
+export const FUNDED_ROLES = ["admin", "underwriting", "advisor"] as const;
 
 export function canRecordFunded(role: string | null | undefined): boolean {
   return !!role && (FUNDED_ROLES as readonly string[]).includes(role);
@@ -105,14 +108,15 @@ export const INTERNAL_STAFF_ROLES = ["admin", "underwriting", "advisor", "setter
  * endpoints.
  *
  * Passing this list is NOT authorization — admin and underwriting work every
- * file, while advisor and partner_advisor must additionally clear the
- * owner/follower check. Use isScopedAdvisorRole() for that second half.
+ * file, while advisor, partner_advisor and partner_plus must additionally clear
+ * the owner/follower check. Use isScopedAdvisorRole() for that second half.
  */
 export const CLIENT_API_ROLES = [
   "admin",
   "advisor",
   "underwriting",
   "partner_advisor",
+  "partner_plus",
 ] as const;
 
 /**
@@ -124,7 +128,7 @@ export const CLIENT_API_ROLES = [
  * this is what it should have been.
  */
 export function isScopedAdvisorRole(role: string | null | undefined): boolean {
-  return role === "advisor" || role === "partner_advisor";
+  return role === "advisor" || role === "partner_advisor" || role === "partner_plus";
 }
 
 export function canUseAdvisorWorkspace(role: string | null | undefined): boolean {
@@ -144,12 +148,12 @@ export function isInternalStaffRole(role: string | null | undefined): boolean {
  * pickers hide them, and whether the stale-file cron may take their deal.
  *
  * Note this is the ROLE test. The durable marker is
- * `advisors.referral_partner_id IS NOT NULL` — prefer that when you are already
+ * `advisors.is_external` — prefer that when you are already
  * querying the advisors table, because it survives a role flip and is what the
  * SQL-side exclusions filter on.
  */
 export function isExternalAdvisor(role: string | null | undefined): boolean {
-  return role === "partner_advisor";
+  return role === "partner_advisor" || role === "partner_plus";
 }
 
 /** Human-readable role names for staff-facing lists (/admin/team). */
@@ -159,6 +163,7 @@ export const ROLE_DISPLAY_LABEL: Record<UserRole, string> = {
   advisor: "Advisor",
   setter: "Appointment Setter",
   partner_advisor: "Partner Advisor",
+  partner_plus: "Partner+",
   referral_partner: "Referral Partner",
   affiliate: "Affiliate",
   free: "Client",

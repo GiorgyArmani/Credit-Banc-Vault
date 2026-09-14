@@ -204,12 +204,12 @@ export function WorkspaceProspects({ basePath }: { basePath: string }) {
                 // Internal staff only — external partner advisors are not part
                 // of the roster this filter is for. Note there is deliberately
                 // no is_active filter here (inactive advisors still own historic
-                // files worth filtering by), so referral_partner_id is the only
+                // files worth filtering by), so is_external is the only
                 // thing keeping partners out.
                 const { data: advisorRows } = await supabase
                     .from('advisors')
                     .select('id, first_name, last_name')
-                    .is('referral_partner_id', null)
+                    .is('is_external', false)
                     .order('first_name', { ascending: true });
                 set_advisors(
                     (advisorRows || []).map((a: any) => ({

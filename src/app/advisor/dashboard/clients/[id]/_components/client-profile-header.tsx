@@ -49,6 +49,13 @@ interface ClientProfileHeaderProps {
      * Defaults to true.
      */
     show_referral_partner?: boolean;
+    /**
+     * Whether to render "Share with Lender". Hidden for EXTERNAL advisors
+     * (/partner, /desk): the share-links API admits only admin and underwriting,
+     * so the button 403s for them — and widening the route would hand a third
+     * party the power to expose client documents to lenders. Defaults to true.
+     */
+    show_share_with_lender?: boolean;
     on_edit: () => void;
     on_delete_vault: () => void;
     on_resend: () => void;
@@ -107,6 +114,7 @@ export function ClientProfileHeader({
     is_sending_password_reset,
     is_saving_referral_partner,
     show_referral_partner = true,
+    show_share_with_lender = true,
     on_edit,
     on_delete_vault,
     on_resend,
@@ -213,12 +221,14 @@ export function ClientProfileHeader({
                             )}
                             {is_sending_password_reset ? "Sending…" : "Send Reset Link"}
                         </button>
-                        <ShareWithLenderButton
-                            clientId={client_profile.id}
-                            businessProfileId={active_business_profile_id}
-                            triggerLabel="Share with Lender"
-                            className="col-span-2 px-4 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-sm font-semibold rounded-xl"
-                        />
+                        {show_share_with_lender && (
+                            <ShareWithLenderButton
+                                clientId={client_profile.id}
+                                businessProfileId={active_business_profile_id}
+                                triggerLabel="Share with Lender"
+                                className="col-span-2 px-4 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-sm font-semibold rounded-xl"
+                            />
+                        )}
                         {!client_profile.contract_completed && (
                             <button
                                 onClick={on_add_funding_app}

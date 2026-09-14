@@ -123,4 +123,7 @@ export const RATE_LIMITS = {
 
   /** Per IP. Creates a pre-confirmed auth user, a GHL contact and an email. */
   affiliateSignup: { name: "affiliate-signup", windowSeconds: 3600, max: 5 } as RateLimitRule,
+
+  /** Per IP. Creates a Stripe Customer and a Checkout Session before any card is taken. */
+  partnerPlusCheckout: { name: "partner-plus-checkout", windowSeconds: 3600, max: 5 } as RateLimitRule,
 } as const;

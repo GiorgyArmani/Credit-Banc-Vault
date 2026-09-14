@@ -70,6 +70,7 @@ export default function LoginForm({
         affiliate: "/affiliate/dashboard",
         referral_partner: "/partner/dashboard",
         partner_advisor: "/partner/deals",
+        partner_plus: "/desk/deals",
         free: "/dashboard",
       };
 

@@ -147,7 +147,7 @@ export async function GET(req: Request) {
             .from("advisors")
             .select("id")
             .in("id", ownerAdvisorIds)
-            .not("referral_partner_id", "is", null);
+            .eq("is_external", true);
 
         if (partnerAdvisorsError) {
             // Fail closed: reassigning a partner's deal is not undoable from the

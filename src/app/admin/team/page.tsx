@@ -81,7 +81,7 @@ export default async function AdminTeamPage() {
       .select(
         "user_id, w9_signed_at, w9_file_path, voided_check_uploaded_at, voided_check_filename, onboarding_completed_at, created_at"
       )
-      .is("referral_partner_id", null)
+      .is("is_external", false)
       .not("user_id", "is", null);
     if (error) {
       console.error("[admin/team] advisor compliance read failed (migration 20260903 applied?):", error.message);
@@ -142,7 +142,7 @@ export default async function AdminTeamPage() {
     const columns = "id, user_id, is_active, referral_partner_id";
     let rows: { id: string; user_id: string | null; is_active: boolean | null; is_catch_all?: boolean }[] = [];
 
-    const withFlag = await db.from("advisors").select(`${columns}, is_catch_all`).is("referral_partner_id", null);
+    const withFlag = await db.from("advisors").select(`${columns}, is_catch_all`).is("is_external", false);
     if (!withFlag.error) {
       rows = withFlag.data ?? [];
     } else {
@@ -150,7 +150,7 @@ export default async function AdminTeamPage() {
         "admin/team: is_catch_all unavailable, falling back (apply 20260908_team_member_removal):",
         withFlag.error.message
       );
-      const plain = await db.from("advisors").select(columns).is("referral_partner_id", null);
+      const plain = await db.from("advisors").select(columns).is("is_external", false);
       rows = plain.data ?? [];
     }
 

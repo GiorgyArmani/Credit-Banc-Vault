@@ -288,6 +288,8 @@ export async function POST(request: Request) {
            *  a narrower shape — it resolves the GHL contact's owner, which is
            *  always internal staff. */
           referral_partner_id?: string | null;
+          /** advisors.is_external — partner advisors and Partner+ reps. */
+          is_external?: boolean | null;
         }
       | null = null;
 
@@ -347,7 +349,7 @@ export async function POST(request: Request) {
         // carry no ghl_user_id today so they cannot match anyway — this makes
         // that a rule rather than an accident, and keeps .maybeSingle() from
         // going ambiguous if one is ever given a GHL seat.
-        .is('referral_partner_id', null)
+        .is('is_external', false)
         .maybeSingle();
 
       if (!owner_advisor || owner_advisor.is_active === false) {
@@ -390,7 +392,7 @@ export async function POST(request: Request) {
       // ----- ADVISOR/ADMIN: resolve the advisor from the session (REQUIRED) -----
       const { data: by_user } = await supabase_admin
         .from('advisors')
-        .select('id, first_name, last_name, email, phone, ghl_user_id, user_id, referral_partner_id')
+        .select('id, first_name, last_name, email, phone, ghl_user_id, user_id, referral_partner_id, is_external')
         .eq('user_id', session_user.id)
         .maybeSingle();
       advisor_row = by_user ?? null;
@@ -398,7 +400,7 @@ export async function POST(request: Request) {
       if (!advisor_row && session_user.email) {
         const { data: by_email } = await supabase_admin
           .from('advisors')
-          .select('id, first_name, last_name, email, phone, ghl_user_id, user_id, referral_partner_id')
+          .select('id, first_name, last_name, email, phone, ghl_user_id, user_id, referral_partner_id, is_external')
           .ilike('email', session_user.email)
           .maybeSingle();
         advisor_row = by_email ?? null;
@@ -785,11 +787,11 @@ export async function POST(request: Request) {
       ghlContactId: ghl_contact_id || null,
     });
 
-    // Internal oversight on partner-created deals: admins follow the file and
-    // are notified. No-op for staff-created deals.
+    // Internal oversight on externally created deals (partner advisors, Partner+):
+    // admins follow the file and are notified. No-op for staff-created deals.
     await attachAdminOversightToPartnerDeal(supabase_admin, {
       vaultId: vault_id,
-      creatorPartnerId: advisor_row.referral_partner_id || null,
+      creatorIsExternal: advisor_row.is_external === true,
       clientName: body.client_name,
       companyName: body.company_name,
       partnerName: attributed_partner?.name ?? advisor_name,

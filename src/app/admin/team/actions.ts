@@ -443,7 +443,7 @@ export async function getAdvisorComplianceLinks(userId: string): Promise<{
     .from("advisors")
     .select("id, w9_signed_at, w9_file_path, voided_check_path")
     .eq("user_id", userId)
-    .is("referral_partner_id", null)
+    .is("is_external", false)
     .maybeSingle();
   if (error || !data) return { success: false, error: "Advisor not found" };
 
@@ -706,10 +706,10 @@ export async function removeTeamMember(input: {
     }
     const { data: successor } = await db
       .from("advisors")
-      .select("id, is_active, referral_partner_id")
+      .select("id, is_active, is_external")
       .eq("id", catchAllSuccessorId)
       .maybeSingle();
-    if (!successor || successor.is_active === false || successor.referral_partner_id) {
+    if (!successor || successor.is_active === false || successor.is_external) {
       return { success: false, error: "That advisor can't hold the catch-all role." };
     }
     // Clear first: the partial unique index permits exactly one holder, so
@@ -887,7 +887,7 @@ export async function setCatchAllAdvisor(advisorId: string): Promise<InviteActio
   const db = createAdminClient();
   const { data: target, error: readErr } = await db
     .from("advisors")
-    .select("id, is_active, referral_partner_id")
+    .select("id, is_active, is_external")
     .eq("id", advisorId)
     .maybeSingle();
 
@@ -896,8 +896,8 @@ export async function setCatchAllAdvisor(advisorId: string): Promise<InviteActio
   if (target.is_active === false) {
     return { success: false, error: "An inactive advisor can't be the catch-all." };
   }
-  if (target.referral_partner_id) {
-    return { success: false, error: "External partner advisors can't hold the catch-all role." };
+  if (target.is_external) {
+    return { success: false, error: "External advisors can't hold the catch-all role." };
   }
 
   const { data: current, error: currentErr } = await db

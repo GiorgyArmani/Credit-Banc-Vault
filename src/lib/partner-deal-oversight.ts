@@ -1,6 +1,7 @@
 // src/lib/partner-deal-oversight.ts
 //
-// Internal oversight of deals created by an EXTERNAL partner advisor.
+// Internal oversight of deals created by an EXTERNAL advisor — a referral
+// partner working their own deals (partner_advisor) or a paying Partner+ rep.
 //
 // A partner advisor owns the files they create — they are the advisor of record
 // and do the advisor job on them. That is the point of the deal desk. But an
@@ -30,21 +31,22 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 /**
  * Attach internal oversight to a freshly created, partner-owned vault.
  *
- * No-op when `creatorPartnerId` is null — i.e. every deal created by staff.
+ * No-op unless the creator is external (`advisors.is_external`) — i.e. every
+ * deal created by staff.
  */
 export async function attachAdminOversightToPartnerDeal(
   db: SupabaseClient,
   args: {
     vaultId: string;
-    /** advisors.referral_partner_id of the creator. Null for staff-created deals. */
-    creatorPartnerId: string | null | undefined;
+    /** advisors.is_external of the creator. False for staff-created deals. */
+    creatorIsExternal: boolean;
     clientName?: string | null;
     companyName?: string | null;
     partnerName?: string | null;
   }
 ): Promise<void> {
-  const { vaultId, creatorPartnerId, clientName, companyName, partnerName } = args;
-  if (!vaultId || !creatorPartnerId) return;
+  const { vaultId, creatorIsExternal, clientName, companyName, partnerName } = args;
+  if (!vaultId || !creatorIsExternal) return;
 
   try {
     const { data: adminUsers, error: adminErr } = await db
@@ -105,9 +107,9 @@ export async function attachAdminOversightToPartnerDeal(
       adminAdvisors.map((a) => ({
         user_id: a.user_id,
         client_id: vaultId,
-        title: "New deal from a referral partner",
+        title: "New deal from an external advisor",
         message:
-          `${label} was created by ${partnerName || "a referral partner"}. ` +
+          `${label} was created by ${partnerName || "an external advisor"}. ` +
           `You've been added as a follower.`,
       }))
     );

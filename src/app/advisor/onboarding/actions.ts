@@ -33,8 +33,8 @@ async function requireStaffAdvisor(): Promise<
 
   const advisor = await getAdvisorOnboardingState(user.id);
   if (!advisor) return { error: "This account isn't linked to an advisor profile." };
-  if (advisor.referral_partner_id) {
-    return { error: "Partner advisors complete their paperwork in the partner portal." };
+  if (advisor.is_external) {
+    return { error: "External advisors complete their paperwork in their own portal." };
   }
   return { advisor };
 }

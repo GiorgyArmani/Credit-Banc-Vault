@@ -157,6 +157,26 @@ export async function generatePartnerPortalMagicLink(email: string): Promise<str
 }
 
 /**
+ * Same passwordless login, for a Partner+ rep's desk.
+ *
+ * Minted by the Stripe webhook right after provisioning: the account is created
+ * with a random password nobody sees, so this link is the only way in until the
+ * rep sets one on /desk/welcome. It forwards straight through on later clicks,
+ * so the welcome email doubles as a sign-in link.
+ */
+export async function generateDeskMagicLink(email: string): Promise<string | null> {
+  try {
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://vault.creditbanc.io";
+    const token = signMagicToken(email);
+    const next = encodeURIComponent("/desk/welcome");
+    return `${appUrl}/auth/magic?token=${token}&next=${next}`;
+  } catch (err) {
+    console.error("❌ Desk magic link generation threw:", err);
+    return null;
+  }
+}
+
+/**
  * Same passwordless login, landing an affiliate on /affiliate/dashboard.
  *
  * Written to the "[Data Vault] Affiliate Dashboard Link" custom field so GHL

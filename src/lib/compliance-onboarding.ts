@@ -47,12 +47,13 @@ export const VOIDED_CHECK_MIME_TYPES = [
 ];
 export const VOIDED_CHECK_MAX_BYTES = 15 * 1024 * 1024; // 15MB
 
-export type ComplianceTable = "referral_partners" | "advisors";
+export type ComplianceTable = "referral_partners" | "advisors" | "external_advisors";
 
 /** Storage folder per table, under the vault bucket. */
 export const COMPLIANCE_DOC_PREFIX: Record<ComplianceTable, string> = {
   referral_partners: "partner-onboarding",
   advisors: "advisor-onboarding",
+  external_advisors: "external-advisor-onboarding",
 };
 
 /** The compliance columns, identical on both tables. */
@@ -297,8 +298,12 @@ export async function recordW9Completed(documentId: string): Promise<W9Completio
   const db = createAdminClient();
 
   let subject: ComplianceSubject | null = null;
-  for (const table of ["referral_partners", "advisors"] as const) {
-    const nameCols = table === "advisors" ? "first_name, last_name" : "name";
+  // external_advisors = Partner+ reps (migration 20260914). The SignWell webhook
+  // is account-wide, so a table missing from this list has its completions
+  // silently dropped as not_tracked.
+  for (const table of ["referral_partners", "advisors", "external_advisors"] as const) {
+    const splitName = table !== "referral_partners";
+    const nameCols = splitName ? "first_name, last_name" : "name";
     const { data, error } = await db
       .from(table)
       .select(`id, email, ${nameCols}, ${COMPLIANCE_COLUMNS}`)
@@ -318,7 +323,7 @@ export async function recordW9Completed(documentId: string): Promise<W9Completio
         id: row.id as string,
         email: (row.email as string | null) ?? null,
         name:
-          table === "advisors"
+          splitName
             ? [row.first_name, row.last_name].filter(Boolean).join(" ").trim()
             : ((row.name as string) ?? ""),
       };

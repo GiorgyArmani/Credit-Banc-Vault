@@ -326,9 +326,10 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
     // (reassign advisor, lender-match review). It is a portal test, not a
     // permission test — the underlying actions re-check the role server-side.
     const is_admin_path = basePath.startsWith("/admin");
-    // Referral partners working their own deals in /partner: the "who referred
-    // this" row would only ever show themselves, so the workspace hides it.
-    const is_partner_path = basePath.startsWith("/partner");
+    // External advisors working their own deals — referral partners in /partner,
+    // Partner+ reps in /desk: the "who referred this" row would only ever show
+    // themselves, and "Share with Lender" is staff-only, so both are hidden.
+    const is_partner_path = basePath.startsWith("/partner") || basePath.startsWith("/desk");
     const client_detail_path = (id: string) => {
         const base = `${basePath}/clients/${id}`;
         // Preserve the pipeline context across prev/next so the filtered set + counter persist.
@@ -1888,7 +1889,7 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
             .from("advisors")
             .select("id, first_name, last_name, email")
             .eq("is_active", true)
-            .is("referral_partner_id", null)
+            .is("is_external", false)
             .order("first_name", { ascending: true });
         if (error) {
             toast.error("Failed to load advisor list");
@@ -2193,6 +2194,7 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
                     is_sending_password_reset={is_sending_password_reset}
                     is_saving_referral_partner={is_saving_referral_partner}
                     show_referral_partner={!is_partner_path}
+                    show_share_with_lender={!is_partner_path}
                     on_edit={() => set_is_edit_modal_open(true)}
                     on_delete_vault={() => set_is_delete_vault_modal_open(true)}
                     on_resend={handle_resend_credentials}

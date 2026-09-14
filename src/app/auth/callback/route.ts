@@ -86,6 +86,7 @@ export async function GET(request: NextRequest) {
         "affiliate": "/affiliate/dashboard",
         "referral_partner": "/partner/dashboard",
         "partner_advisor": "/partner/deals",
+        "partner_plus": "/desk/deals",
         "admin": "/admin/dashboard",
         "free": "/dashboard",
       };

@@ -69,7 +69,7 @@ export async function resolveCatchAllAdvisor(admin: SupabaseClient): Promise<Cat
         // external partner advisor ever holding the role — resolving to one
         // would hand every stale file in the company to an outside CPA,
         // silently.
-        .is("referral_partner_id", null)
+        .is("is_external", false)
         .maybeSingle();
 
     if (!flagged.error) return flagged.data ? shape(flagged.data) : null;
@@ -85,7 +85,7 @@ export async function resolveCatchAllAdvisor(admin: SupabaseClient): Promise<Cat
         .from("advisors")
         .select(SELECT)
         .eq("email", CATCH_ALL_ADVISOR_EMAIL)
-        .is("referral_partner_id", null)
+        .is("is_external", false)
         .maybeSingle();
 
     return data ? shape(data) : null;

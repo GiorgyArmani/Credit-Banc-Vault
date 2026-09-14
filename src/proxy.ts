@@ -73,6 +73,11 @@ export async function proxy(request: NextRequest) {
     "/affiliate", // PUBLIC affiliate program signup — /affiliate/dashboard stays gated
     "/support",
     "/terms",
+    // Partner+ self-serve signup: pay first, the Stripe webhook creates the
+    // account. Exact entries — nothing else under /api/billing is public.
+    "/partner-plus",
+    "/partner-plus/success",
+    "/api/billing/partner-plus/checkout",
   ];
 
   const publicPathPrefixes = [
@@ -163,6 +168,35 @@ export async function proxy(request: NextRequest) {
 
     const userRole = userData?.role || "free";
 
+    // ── Partner+ billing freeze ──────────────────────────────────────────────
+    // Only partner_plus pays this round-trip. A lapsed rep reaches the billing
+    // page (to fix the card) and auth, nothing else: pages redirect to
+    // /desk/billing, APIs answer 402 — the same page-vs-API split as above.
+    // Their borrowers are untouched; the freeze stops at the rep.
+    // /desk/layout.tsx re-checks as a takeover, so a regression here does not
+    // open the desk. Keep the predicate in step with hasDeskAccess().
+    if (userRole === "partner_plus") {
+      const billingReachable =
+        path === "/desk/billing" || path.startsWith("/api/billing/") || path.startsWith("/auth/");
+      if (!billingReachable) {
+        const { data: hasAccess, error: accessError } = await supabase.rpc("my_partner_plus_access");
+        if (accessError) {
+          // Fail CLOSED: the desk submits deals, and "can't tell if they paid"
+          // must not read as "paid". The billing page explains and recovers.
+          console.error(`[billing] access check failed for ${user.id}:`, accessError.message);
+        }
+        if (hasAccess !== true) {
+          if (path.startsWith("/api/")) {
+            return NextResponse.json(
+              { error: "Your Partner+ subscription is inactive.", billing_url: "/desk/billing" },
+              { status: 402 }
+            );
+          }
+          return redirectWithCookies("/desk/billing");
+        }
+      }
+    }
+
     // Role-based route protection
     // admin is intentionally absent — they bypass all role-specific guards
     const roleRoutes: Record<string, string[]> = {
@@ -180,6 +214,9 @@ export async function proxy(request: NextRequest) {
       // /advisor/dashboard/referrals — an unlinked route that service-role reads
       // every unworked affiliate lead — out of an external partner's reach.
       partner_advisor: ["/partner"],
+      // Paying external advisors (Partner+). Their own tree, for the same reason
+      // partner_advisor has /partner: /advisor stays sealed to staff.
+      partner_plus: ["/desk"],
       free: [], // Free users have access to basic /dashboard only
     };
 
@@ -237,6 +274,7 @@ export async function proxy(request: NextRequest) {
           affiliate: "/affiliate/dashboard",
           referral_partner: "/partner/dashboard",
           partner_advisor: "/partner/deals",
+          partner_plus: "/desk/deals",
           free: isOnboardingComplete ? "/dashboard" : "/onboarding",
         };
         return redirectWithCookies(adminRedirectMap[userRole] || "/dashboard");
@@ -278,6 +316,7 @@ export async function proxy(request: NextRequest) {
           affiliate: "/affiliate/dashboard",
           referral_partner: "/partner/dashboard",
           partner_advisor: "/partner/deals",
+          partner_plus: "/desk/deals",
           admin: "/admin/dashboard",
           free: isOnboardingComplete ? "/dashboard" : "/onboarding",
         };
@@ -295,6 +334,7 @@ export async function proxy(request: NextRequest) {
         affiliate: "/affiliate/dashboard",
         referral_partner: "/partner/dashboard",
         partner_advisor: "/partner/deals",
+        partner_plus: "/desk/deals",
         admin: "/admin/dashboard",
         free: isOnboardingComplete ? "/dashboard" : "/onboarding",
       };
@@ -316,6 +356,7 @@ export async function proxy(request: NextRequest) {
         affiliate: "/affiliate/dashboard",
         referral_partner: "/partner/dashboard",
         partner_advisor: "/partner/deals",
+        partner_plus: "/desk/deals",
         admin: "/admin/dashboard",
         free: isOnboardingComplete ? "/dashboard" : "/onboarding",
       };

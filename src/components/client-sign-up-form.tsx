@@ -468,7 +468,7 @@ export default function ClientSignupForm() {
           .from("advisors")
           .select("id, first_name, last_name, email, phone, profile_pic_url, ghl_user_id")
           .eq("is_active", true)
-          .is("referral_partner_id", null)
+          .is("is_external", false)
           .order("first_name", { ascending: true });
         if (error) throw error;
         set_advisors(data || []);

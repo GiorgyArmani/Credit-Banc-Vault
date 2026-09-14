@@ -17,11 +17,11 @@
 // both documents are in), never a redirect — a layout cannot read the
 // pathname, so a redirect would loop on its own target.
 //
-// Who is gated: rows with referral_partner_id NULL (staff), and only those with
+// Who is gated: rows with is_external false (staff), and only those with
 // onboarding_completed_at NULL. Migration 20260903 stamps every advisor who
 // existed before it, so in practice only advisors who sign up after the
-// migration meet the gate. Partner mirror rows are gated through
-// referral_partners and are ignored here.
+// migration meet the gate. External mirror rows (partner advisors, Partner+)
+// are gated through referral_partners / external_advisors and ignored here.
 //
 // PRE-MIGRATION SAFETY. Selecting the compliance columns before the migration
 // is applied fails the whole query (42703). That is treated as "no onboarding
@@ -48,11 +48,13 @@ export interface AdvisorOnboardingState extends ComplianceFields {
   email: string | null;
   /** NULL for staff; set on the mirror rows of partner advisors. */
   referral_partner_id: string | null;
+  /** advisors.is_external — true for partner advisors and Partner+ reps. */
+  is_external: boolean;
   /** Staff advisor with at least one document still outstanding. */
   requires_onboarding: boolean;
 }
 
-const ADVISOR_ONBOARDING_COLUMNS = `id, user_id, first_name, last_name, email, referral_partner_id, ${COMPLIANCE_COLUMNS}`;
+const ADVISOR_ONBOARDING_COLUMNS = `id, user_id, first_name, last_name, email, referral_partner_id, is_external, ${COMPLIANCE_COLUMNS}`;
 
 function decorate(row: Record<string, unknown>): AdvisorOnboardingState {
   const fields = row as unknown as ComplianceFields & {
@@ -62,11 +64,16 @@ function decorate(row: Record<string, unknown>): AdvisorOnboardingState {
     first_name: string | null;
     last_name: string | null;
     referral_partner_id: string | null;
+    is_external: boolean | null;
   };
   return {
     ...fields,
     name: [fields.first_name, fields.last_name].filter(Boolean).join(" ").trim() || fields.email || "",
-    requires_onboarding: !fields.referral_partner_id && !fields.onboarding_completed_at,
+    is_external: fields.is_external === true,
+    // is_external, NOT referral_partner_id: a Partner+ rep has no
+    // referral_partner_id and would otherwise be swept into the INTERNAL flow,
+    // recording their W-9 against the wrong table and storage prefix.
+    requires_onboarding: !fields.is_external && !fields.onboarding_completed_at,
   };
 }
 

@@ -104,7 +104,7 @@ export async function listAssignableAdvisors(
         );
         if (ownerAdvisorId) excludedIds.add(ownerAdvisorId);
 
-        // Internal staff only. External partner advisors (referral_partner_id set)
+        // Internal staff only. External advisors (is_external: partner advisors, Partner+)
         // are excluded: they work their own files, and adding one as a follower
         // on someone else's deal would hand an outside CPA a client that isn't
         // theirs. See [[role_model]].
@@ -112,7 +112,7 @@ export async function listAssignableAdvisors(
             .from("advisors")
             .select("id, first_name, last_name, email, profile_pic_url, ghl_user_id, is_active")
             .eq("is_active", true)
-            .is("referral_partner_id", null)
+            .is("is_external", false)
             .order("first_name", { ascending: true });
 
         if (error) throw error;
