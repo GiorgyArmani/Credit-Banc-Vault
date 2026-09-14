@@ -4711,14 +4711,26 @@ export async function send_client_check_in_notification(
 
 /**
  * ============================================================================
- * REFERRAL PARTNER PORTAL INVITE
+ * REFERRAL PARTNER WELCOME EMAILS
  * ============================================================================
  * Sent when an admin grants a Level-2 referral partner (CPA, banker,
- * professional) access to /partner/dashboard.
+ * professional) portal access. One email per tier, each mirroring its GHL
+ * template in the "Referral Partner Templates" folder:
  *
- * No hero image on purpose: emails that inline a PNG throw at send time if the
- * file isn't committed, and every call site swallows the error
- * ([[email_hero_images_must_be_committed]]). This one has to arrive.
+ *   tier 1 — "Tier 1 Referral Partner WELCOME Email": shares a link, watches
+ *            the dashboard.
+ *   tier 2 — "Tier 2 Referral Partner WELCOME Email": deal desk
+ *            (`partner_advisor`), works their own files; setup steps plus three
+ *            training videos.
+ *
+ * Both depart from GHL in one deliberate way: GHL's copy says a separate
+ * activation email is coming, but THIS is that email — the magic link rides in
+ * it.
+ *
+ * Artwork is referenced by remote GHL-hosted URL, not inlined as an attachment:
+ * a remote <img> that fails to load just renders blank, whereas a missing
+ * committed PNG throws at send time and every call site swallows it
+ * ([[email_hero_images_must_be_committed]]). These have to arrive.
  *
  * Uses the general sending identity rather than the affiliate one — referral
  * partners are a different program with a different audience, and folding them
@@ -4738,19 +4750,131 @@ export interface ReferralPartnerInviteData {
   referral_url?: string | null;
   /**
    * TIER 2 — this partner works their own files (`partner_advisor`). Selects
-   * the older deal-desk copy; tier 1 (a partner who only shares a link) gets
-   * the activation email. Absent is treated as tier 1, which is the safe
-   * default: the tier-1 copy promises nothing a deal-desk partner doesn't get.
+   * the deal-desk welcome (setup steps + training videos); tier 1 (a partner
+   * who only shares a link) gets the referral-link welcome. Absent is treated
+   * as tier 1, which is the safe default: the tier-1 copy promises nothing a
+   * deal-desk partner doesn't get.
    */
   with_deal_desk?: boolean;
 }
 
-export function generate_referral_partner_invite_html(
-  data: ReferralPartnerInviteData
-): string {
-  data = escape_email_strings(data);
-  const { partner_name, portal_url } = data;
-  const referral_url = data.referral_url || "";
+const REFERRAL_WELCOME_ASSET_BASE = "https://storage.googleapis.com/msgsndr/a1rhIidWtsQzq0jXDNwM/media";
+const REFERRAL_WELCOME_ASSETS = {
+  hero: `${REFERRAL_WELCOME_ASSET_BASE}/85734dac-0c3b-4aed-a25d-8ecdac03003c.png`,
+  dashboard: `${REFERRAL_WELCOME_ASSET_BASE}/0e280d76-70a2-4bda-829a-f95bfc038275.jpg`,
+  step_spot: `${REFERRAL_WELCOME_ASSET_BASE}/0a6b21d7-60c2-4e1d-9d64-507d8abd8937.png`,
+  step_share: `${REFERRAL_WELCOME_ASSET_BASE}/f3bcfa2d-f41c-46b6-ad3f-03157b556b02.png`,
+  step_paid: `${REFERRAL_WELCOME_ASSET_BASE}/302b956a-59f5-4045-ada3-bfa365addbe0.png`,
+  tool_link: `${REFERRAL_WELCOME_ASSET_BASE}/f837559c-8d9c-4c8b-b587-49a3bdc81a07.png`,
+  tool_contact: `${REFERRAL_WELCOME_ASSET_BASE}/0081f44a-3f42-4904-bdd6-46ce57b4b180.png`,
+  tool_cheat_sheet: `${REFERRAL_WELCOME_ASSET_BASE}/9abf2eec-608a-462e-94ae-3e9de35d05dd.png`,
+  cheat_sheet_pdf: `${REFERRAL_WELCOME_ASSET_BASE}/9d70828e-2d9f-42bc-a84d-3dc70a99fc05.pdf`,
+  signer_photo: `${REFERRAL_WELCOME_ASSET_BASE}/25442479-7dff-4dba-a8f9-cf1a6c3e728a.png`,
+};
+
+/**
+ * Tier-2 training videos. An email can't play video, so each is a linked
+ * thumbnail plus a "Watch" button, both opening the mp4 directly.
+ */
+const REFERRAL_WELCOME_VIDEO_BASE = "https://assets.cdn.filesafe.space/a1rhIidWtsQzq0jXDNwM/media";
+const REFERRAL_WELCOME_VIDEOS = {
+  setup: {
+    url: `${REFERRAL_WELCOME_VIDEO_BASE}/6aa41fa6770fd0c165a54b0d.mp4`,
+    thumbnail: `${REFERRAL_WELCOME_VIDEO_BASE}/6aa41fd99f8b31b6abb3d918.png`,
+    title: "Setting Up Your Credit Banc Vault",
+  },
+  using_the_vault: {
+    url: `${REFERRAL_WELCOME_VIDEO_BASE}/6aa42079ac64f2f5e5ba06bf.mp4`,
+    thumbnail: `${REFERRAL_WELCOME_VIDEO_BASE}/6aa41bf79f8b31b6abb36eba.png`,
+    title: "How to Use the Credit Banc Vault",
+  },
+  client_view: {
+    url: `${REFERRAL_WELCOME_VIDEO_BASE}/6aa436c778c7b42d15bac309.mp4`,
+    thumbnail: `${REFERRAL_WELCOME_VIDEO_BASE}/6aa436c3f4e2fd8aa0faf439.png`,
+    title: "What Your Clients Will See",
+  },
+};
+
+/** The partner-program contact named in the emails and in their signature. */
+const REFERRAL_WELCOME_CONTACT = {
+  name: "Luigi Rosabianca",
+  title: "Operations Manager",
+  email: "lou@shieldadvisorsllc.com",
+  phone: "917-341-5543",
+};
+
+const REFERRAL_WELCOME_FONT = "Arial, Helvetica, sans-serif";
+
+function referral_welcome_button(href: string, label: string): string {
+  return `
+              <a href="${href}" style="display: inline-block; width: 100%; max-width: 380px; box-sizing: border-box; background-color: #000000; color: #ffffff; text-decoration: none; padding: 11px 20px; border-radius: 25px; font-family: ${REFERRAL_WELCOME_FONT}; font-size: 14px; font-weight: bold; text-align: center;">${label}</a>`;
+}
+
+/** The mint magic-link button, with the reassurance line under it. */
+function referral_welcome_activate_cta(portal_url: string): string {
+  const font = REFERRAL_WELCOME_FONT;
+  return `
+              <div style="padding: 32px 0 0; text-align: center;">
+                <a href="${portal_url}" style="display: inline-block; background-color: #55cf9e; color: #000000; text-decoration: none; padding: 16px 40px; border-radius: 25px; font-family: ${font}; font-size: 18px; font-weight: bold;">Activate My Account</a>
+                <p style="margin: 14px 0 0; font-family: ${font}; font-size: 13px; line-height: 1.5; color: #475569;">
+                  This link signs you in automatically. Just create a password, and after that you can log in to the Credit Banc Vault anytime.
+                </p>
+              </div>`;
+}
+
+/** "Your Tools to Get Paid" — the referral-page blurb is the only per-tier part. */
+function referral_welcome_tools_html(referral_url: string, referral_page_body: string): string {
+  const A = REFERRAL_WELCOME_ASSETS;
+  const C = REFERRAL_WELCOME_CONTACT;
+  const font = REFERRAL_WELCOME_FONT;
+  const tool = (icon: string, alt: string, title: string, body: string, cta = "") => `
+          <tr>
+            <td style="padding: 0 32px 36px;">
+              <table role="presentation" style="width: 100%; border-collapse: collapse;">
+                <tr>
+                  <td width="22%" valign="top" style="padding: 0 16px 0 0;">
+                    <img src="${icon}" alt="${alt}" width="92" style="border: 0; display: block; width: 100%; max-width: 92px; height: auto;">
+                  </td>
+                  <td valign="top" style="font-family: ${font}; font-size: 17px; line-height: 1.45; color: #000000;">
+                    <p style="margin: 0 0 14px; font-family: ${font}; font-size: 22px; font-weight: bold; color: #1e293b;">${title}</p>
+                    ${body}
+                  </td>
+                </tr>
+                ${cta ? `<tr><td colspan="2" align="center" style="padding: 20px 0 0;">${cta}</td></tr>` : ``}
+              </table>
+            </td>
+          </tr>`;
+  const para = (html: string) =>
+    `<p style="margin: 0; font-family: ${font}; font-size: 17px; line-height: 1.45; color: #000000;">${html}</p>`;
+
+  return `
+          <!-- Your tools to get paid -->
+          <tr>
+            <td style="padding: 36px 32px 32px;">
+              <h2 style="margin: 0; font-family: ${font}; font-size: 34px; font-weight: bold; color: #000000; text-align: center;">Your Tools to Get Paid:</h2>
+            </td>
+          </tr>
+          ${tool(A.tool_link, "Link", "Referral Partner Page", referral_page_body, referral_welcome_button(referral_url, "Your Referral Partner Page"))}
+          ${tool(
+            A.tool_contact,
+            "Phone",
+            "Email or Call",
+            para(`<strong>Contact me</strong> at <a href="mailto:${C.email}" style="color: #000000; text-decoration: underline;">${C.email}</a> or ${C.phone} to make a referral or with any questions you might have. Always happy to chat.`)
+          )}
+          ${tool(
+            A.tool_cheat_sheet,
+            "Download",
+            "Referral Cheat Sheet",
+            para(`Grab <strong>this guide</strong> so you&rsquo;ll know exactly what to look for in a solid referral.`),
+            referral_welcome_button(A.cheat_sheet_pdf, "Download Now")
+          )}`;
+}
+
+/** Logo bar + hero on top, signature + footer below, around `sections`. */
+function referral_welcome_shell(opts: { title: string; preheader: string; sections: string }): string {
+  const A = REFERRAL_WELCOME_ASSETS;
+  const C = REFERRAL_WELCOME_CONTACT;
+  const font = REFERRAL_WELCOME_FONT;
 
   return `
 <!DOCTYPE html>
@@ -4758,83 +4882,56 @@ export function generate_referral_partner_invite_html(
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Your Credit Banc partner portal is ready</title>
+  <title>${opts.title}</title>
 </head>
-<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #faf9f6;">
+<body style="margin: 0; padding: 0; font-family: ${font}; background-color: #eaf0f6;">
   <div style="display: none; max-height: 0; overflow: hidden; opacity: 0; mso-hide: all;">
-    Track every client you refer to Credit Banc — where each file sits, in one place.
+    ${opts.preheader}
   </div>
 
-  <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #faf9f6;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #eaf0f6;">
     <tr>
-      <td align="center" style="padding: 32px 12px;">
-        <table role="presentation" style="width: 600px; max-width: 100%; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 6px 24px rgba(32, 37, 54, 0.08);">
+      <td align="center" style="padding: 24px 12px;">
+        <table role="presentation" width="600" style="width: 100%; max-width: 600px; border-collapse: collapse; background-color: #ffffff;">
 
+          <!-- Logo bar -->
           <tr>
-            <td style="padding: 40px 40px 8px;">
-              <p style="margin: 0 0 6px; font-size: 12px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: #10b981;">Referral Partner Program</p>
-              <h1 style="margin: 0; font-size: 26px; line-height: 1.25; font-weight: 800; color: #202536;">Your partner portal is ready</h1>
+            <td align="center" style="padding: 22px 20px; background-color: #000000; line-height: 0;">
+              <img src="${CB_LOGO_URL}" alt="Credit Banc" width="200" style="border: 0; display: block; width: 200px; max-width: 100%; height: auto;">
             </td>
           </tr>
 
+          <!-- Hero -->
           <tr>
-            <td style="padding: 16px 40px 0; font-size: 15px; line-height: 1.7; color: #475569;">
-              <p style="margin: 0 0 16px;">Hi ${partner_name},</p>
-              <p style="margin: 0 0 16px;">
-                You now have a dashboard for every client you send to Credit Banc.
-                Click below to set a password &mdash; then you'll see who you've
-                referred and exactly where each file sits, from first contact
-                through funding.
-              </p>
-              <p style="margin: 0 0 8px;">
-                You keep doing what you already do. We handle the paperwork, the
-                lenders and the follow-up.
-              </p>
+            <td style="padding: 0; line-height: 0;">
+              <img src="${A.hero}" alt="Welcome to the Credit Banc Referral Partner Program" width="600" style="border: 0; display: block; width: 100%; max-width: 600px; height: auto;">
             </td>
           </tr>
+${opts.sections}
 
+          <!-- Signature -->
           <tr>
-            <td style="padding: 28px 40px 8px;" align="center">
-              <a href="${portal_url}" style="display: inline-block; background-color: #10b981; color: #ffffff; text-decoration: none; padding: 14px 34px; border-radius: 10px; font-size: 16px; font-weight: 700;">
-                Set my password
-              </a>
-              <p style="margin: 12px 0 0; font-size: 12px; color: #94a3b8;">
-                This link signs you in automatically &mdash; you'll just choose a password, and after that you can log in any time.
-              </p>
-            </td>
-          </tr>
-
-          ${referral_url ? `
-          <tr>
-            <td style="padding: 24px 40px 0;">
-              <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #f8fafc; border-radius: 12px;">
+            <td style="padding: 32px 32px;">
+              <table role="presentation" style="width: 100%; border-collapse: collapse;">
                 <tr>
-                  <td style="padding: 18px 20px;">
-                    <p style="margin: 0 0 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.15em; text-transform: uppercase; color: #64748b;">Your referral link</p>
-                    <p style="margin: 0 0 4px; font-size: 14px; word-break: break-all;">
-                      <a href="${referral_url}" style="color: #10b981; font-weight: 600; text-decoration: none;">${referral_url}</a>
-                    </p>
-                    <p style="margin: 8px 0 0; font-size: 12px; line-height: 1.6; color: #94a3b8;">
-                      Anyone who applies through this link is tracked to you automatically and shows up on your dashboard.
-                    </p>
+                  <td width="34%" valign="middle" style="padding: 0 20px 0 0;">
+                    <img src="${A.signer_photo}" alt="${C.name}" width="150" style="border: 0; display: block; width: 100%; max-width: 150px; height: auto;">
+                  </td>
+                  <td valign="middle">
+                    <p style="margin: 0 0 12px; font-family: Georgia, Palatino, serif; font-size: 24px; font-weight: bold; color: #000000;">${C.name}</p>
+                    <p style="margin: 0 0 2px; font-family: ${font}; font-size: 22px; color: #000000;">${C.title}</p>
+                    <p style="margin: 0; font-family: ${font}; font-size: 14px; font-weight: bold; color: #000000;">Credit Banc</p>
                   </td>
                 </tr>
               </table>
             </td>
-          </tr>` : ``}
-
-          <tr>
-            <td style="padding: 28px 40px 40px; font-size: 14px; line-height: 1.7; color: #475569;">
-              <p style="margin: 0;">
-                Questions about a file? Reply here or reach us at
-                <a href="mailto:support@creditbanc.io" style="color: #10b981;">support@creditbanc.io</a>.
-              </p>
-            </td>
           </tr>
 
+          <!-- Footer -->
           <tr>
-            <td style="padding: 24px 40px 32px; text-align: center; color: #94a3b8; font-size: 12px; line-height: 1.6; border-top: 1px solid #f1f5f9;">
-              <p style="margin: 0;">&copy; ${new Date().getFullYear()} Credit Banc. You're receiving this because you're a Credit Banc referral partner.</p>
+            <td align="center" style="padding: 36px 32px 32px; background-color: #000000;">
+              <p style="margin: 0 0 28px; font-family: ${font}; font-size: 14px; font-style: italic; color: #ffffff;">Copyright &copy; ${new Date().getFullYear()} Credit Banc, All rights reserved.</p>
+              <img src="${CB_LOGO_URL}" alt="Credit Banc" width="180" style="border: 0; display: block; width: 180px; max-width: 100%; height: auto;">
             </td>
           </tr>
 
@@ -4847,18 +4944,26 @@ export function generate_referral_partner_invite_html(
   `;
 }
 
+/** Plaintext "Your Tools to Get Paid" + sign-off, shared by both tiers. */
+function referral_welcome_tools_text(referral_url: string, referral_page_blurb: string): string {
+  const C = REFERRAL_WELCOME_CONTACT;
+  return `
+YOUR TOOLS TO GET PAID
+
+Referral Partner Page - ${referral_page_blurb}
+${referral_url}
+
+Email or Call - contact me at ${C.email} or ${C.phone} to make a
+referral or with any questions you might have. Always happy to chat.
+
+Referral Cheat Sheet - grab this guide so you'll know exactly what to look for
+in a solid referral.
+${REFERRAL_WELCOME_ASSETS.cheat_sheet_pdf}`.trim();
+}
+
 /**
  * TIER 1 — the plain referral partner (shares a link, watches the dashboard).
- *
- * Split from the invite above rather than branching inside it: tier 1 and the
- * deal-desk tier are drifting apart in copy, and one template carrying both
- * would turn every future wording change into a conditional. The deal-desk
- * email stays on generate_referral_partner_invite_html until its own rewrite
- * lands.
- *
- * Voice note: these partners are ALREADY referring. Nothing about their link or
- * their process changes here — the only new thing is the dashboard — so the copy
- * reassures rather than onboards.
+ * The activation button sits directly under the dashboard screenshot.
  */
 export function generate_referral_partner_welcome_html(
   data: ReferralPartnerInviteData
@@ -4866,146 +4971,312 @@ export function generate_referral_partner_welcome_html(
   data = escape_email_strings(data);
   const { partner_name, portal_url } = data;
   const referral_url = data.referral_url || "";
+  const A = REFERRAL_WELCOME_ASSETS;
+  const font = REFERRAL_WELCOME_FONT;
 
-  return `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Activate your Credit Banc referral dashboard</title>
-</head>
-<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #faf9f6;">
-  <div style="display: none; max-height: 0; overflow: hidden; opacity: 0; mso-hide: all;">
-    Activate your account and track every referral you've sent to Credit Banc.
-  </div>
+  const step = (icon: string, alt: string, title: string, body: string) => `
+                  <td width="33%" valign="top" align="center" style="padding: 0 6px;">
+                    <img src="${icon}" alt="${alt}" width="120" style="border: 0; display: block; width: 100%; max-width: 120px; height: auto; margin: 0 auto 28px;">
+                    <p style="margin: 0 0 12px; font-family: ${font}; font-size: 20px; font-weight: bold; color: #000000;">${title}</p>
+                    <p style="margin: 0; font-family: ${font}; font-size: 18px; line-height: 1.3; color: #000000;">${body}</p>
+                  </td>`;
 
-  <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #faf9f6;">
-    <tr>
-      <td align="center" style="padding: 32px 12px;">
-        <table role="presentation" style="width: 600px; max-width: 100%; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 6px 24px rgba(32, 37, 54, 0.08);">
-
+  return referral_welcome_shell({
+    title: "Welcome to the Credit Banc Referral Partner Program",
+    preheader: "Glad to have you on board. Activate your referral dashboard and start earning.",
+    sections: `
+          <!-- Glad to have you on board -->
           <tr>
-            <td style="padding: 40px 40px 8px;">
-              <p style="margin: 0 0 6px; font-size: 12px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: #10b981;">Referral Partner Program</p>
-              <h1 style="margin: 0; font-size: 26px; line-height: 1.25; font-weight: 800; color: #202536;">Your referral partner dashboard is ready</h1>
-            </td>
-          </tr>
-
-          <tr>
-            <td style="padding: 16px 40px 0; font-size: 15px; line-height: 1.7; color: #475569;">
-              <p style="margin: 0 0 16px;">Hi ${partner_name},</p>
-              <p style="margin: 0 0 16px;">
-                Your new referral dashboard inside the Credit Banc Vault is ready.
-                Click below to activate your account and create a password. Once
-                you're in, you'll be able to see the referrals you've sent to
-                Credit Banc and track where each one stands.
-              </p>
-              <p style="margin: 0 0 8px;">
-                Your referral link and process haven't changed. Just activate your
-                account below, and you'll be able to track everything from your
-                dashboard.
+            <td align="center" style="padding: 36px 32px 32px; background-color: #f2f2f2; border-bottom: 2px solid #202536;">
+              <h1 style="margin: 0 0 16px; font-family: ${font}; font-size: 30px; line-height: 1.25; font-weight: bold; color: #000000;">Glad to have you on board!</h1>
+              <p style="margin: 0; font-family: ${font}; font-size: 20px; line-height: 1.4; color: #000000;">
+                ${partner_name}, you just joined one of the easiest ways to earn extra income. Spot a business owner who needs funding, send them our way, and you get paid when the deal closes. Simple.
               </p>
             </td>
           </tr>
 
+          <!-- How it works -->
           <tr>
-            <td style="padding: 28px 40px 8px;" align="center">
-              <a href="${portal_url}" style="display: inline-block; background-color: #10b981; color: #ffffff; text-decoration: none; padding: 14px 34px; border-radius: 10px; font-size: 16px; font-weight: 700;">
-                Activate my account
-              </a>
-              <p style="margin: 12px 0 0; font-size: 12px; color: #94a3b8;">
-                This link signs you in automatically. Just create a password, and after that you can log in to the Credit Banc Vault anytime.
-              </p>
-            </td>
-          </tr>
-
-          ${referral_url ? `
-          <tr>
-            <td style="padding: 24px 40px 0;">
-              <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #f8fafc; border-radius: 12px;">
+            <td style="padding: 32px 16px 40px;">
+              <h2 style="margin: 0 0 36px; font-family: ${font}; font-size: 30px; font-weight: bold; color: #000000; text-align: center;">How It Works:</h2>
+              <table role="presentation" style="width: 100%; border-collapse: collapse;">
                 <tr>
-                  <td style="padding: 18px 20px;">
-                    <p style="margin: 0 0 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.15em; text-transform: uppercase; color: #64748b;">Your referral link</p>
-                    <p style="margin: 0 0 4px; font-size: 14px; word-break: break-all;">
-                      <a href="${referral_url}" style="color: #10b981; font-weight: 600; text-decoration: none;">${referral_url}</a>
-                    </p>
-                    <p style="margin: 8px 0 0; font-size: 12px; line-height: 1.6; color: #94a3b8;">
-                      Same link as always. Anyone who applies through it is tracked to you automatically and shows up on your dashboard.
-                    </p>
-                  </td>
+                  ${step(A.step_spot, "Magnifying glass", "Step 1:", "Spot a business owner who needs funding.")}
+                  ${step(A.step_share, "Phone with a message", "Step 2:", "Share your link or send us their info.")}
+                  ${step(A.step_paid, "Handshake over a dollar sign", "Step 3:", "You track the referral and collect your commission when the deal closes.")}
                 </tr>
               </table>
             </td>
-          </tr>` : ``}
+          </tr>
 
+          <!-- Activate your dashboard (the magic link) -->
           <tr>
-            <td style="padding: 28px 40px 40px; font-size: 14px; line-height: 1.7; color: #475569;">
-              <p style="margin: 0;">
-                Questions about a file? Reply here or reach us at
-                <a href="mailto:support@creditbanc.io" style="color: #10b981;">support@creditbanc.io</a>.
+            <td style="padding: 36px 32px 40px; background-color: #f2f2f2;">
+              <h2 style="margin: 0 0 28px; font-family: ${font}; font-size: 34px; line-height: 1.2; font-weight: bold; color: #000000; text-align: center;">First things first: activate your dashboard.</h2>
+              <p style="margin: 0 0 16px; font-family: ${font}; font-size: 19px; line-height: 1.4; color: #000000;">
+                Click the button below to activate your account and create your password.
               </p>
+              <p style="margin: 0 0 24px; font-family: ${font}; font-size: 19px; line-height: 1.4; color: #000000;">
+                Once you're in, you'll have access to your referral dashboard inside the <strong>Credit Banc Vault,</strong> where you can see how many referrals you've sent and where each one stands: <strong>in progress, funded, or not a fit.</strong>
+              </p>
+              <img src="${A.dashboard}" alt="Your Credit Banc referral dashboard" width="532" style="border: 2px solid #202536; display: block; width: 100%; max-width: 532px; height: auto; margin: 0 auto;">
+              ${referral_welcome_activate_cta(portal_url)}
             </td>
           </tr>
+${referral_welcome_tools_html(
+  referral_url,
+  `<p style="margin: 0; font-family: ${font}; font-size: 17px; line-height: 1.45; color: #000000;">Your <strong>customized referral partner link</strong> tracks every referral back to you. Share it often on social media, email signature, or wherever people will see it (and use it!).</p>`
+)}
 
+          <!-- Closing -->
           <tr>
-            <td style="padding: 24px 40px 32px; text-align: center; color: #94a3b8; font-size: 12px; line-height: 1.6; border-top: 1px solid #f1f5f9;">
-              <p style="margin: 0;">&copy; ${new Date().getFullYear()} Credit Banc. You're receiving this because you're a Credit Banc referral partner.</p>
+            <td style="padding: 32px 32px 36px; background-color: #f2f2f2;">
+              <p style="margin: 0 0 28px; font-family: ${font}; font-size: 19px; line-height: 1.4; color: #000000;">
+                That's everything you need to start earning right away.<br>
+                <strong>Keep it simple</strong>: share, submit, and cash the check.
+              </p>
+              <p style="margin: 0; font-family: ${font}; font-size: 19px; font-style: italic; color: #000000;">Now let's make you some money.</p>
             </td>
-          </tr>
-
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>
-  `;
+          </tr>`,
+  });
 }
 
 /**
- * Plaintext alternative. The invite above ships HTML-only, but this one carries
- * the credential that turns a partner into a logged-in user — the worst mail in
- * the program to have filtered — and a missing text/plain part is one of the
- * cheapest spam signals to remove.
+ * Plaintext alternative. These emails carry the credential that turns a
+ * partner into a logged-in user — the worst mail in the program to have
+ * filtered — and a missing text/plain part is one of the cheapest spam signals
+ * to remove.
  */
 export function generate_referral_partner_welcome_text(
   data: ReferralPartnerInviteData
 ): string {
   const { partner_name, portal_url } = data;
   const referral_url = data.referral_url || "";
+  const C = REFERRAL_WELCOME_CONTACT;
 
   return `
-Hi ${partner_name},
+Glad to have you on board!
 
-Your new referral dashboard inside the Credit Banc Vault is ready. Click below
-to activate your account and create a password. Once you're in, you'll be able
-to see the referrals you've sent to Credit Banc and track where each one stands.
+${partner_name}, you just joined one of the easiest ways to earn extra income.
+Spot a business owner who needs funding, send them our way, and you get paid
+when the deal closes. Simple.
 
-Your referral link and process haven't changed. Just activate your account
-below, and you'll be able to track everything from your dashboard.
+HOW IT WORKS
+Step 1: Spot a business owner who needs funding.
+Step 2: Share your link or send us their info.
+Step 3: You track the referral and collect your commission when the deal closes.
+
+FIRST THINGS FIRST: ACTIVATE YOUR DASHBOARD
+Click the link below to activate your account and create your password. Once
+you're in, you'll have access to your referral dashboard inside the Credit Banc
+Vault, where you can see how many referrals you've sent and where each one
+stands: in progress, funded, or not a fit.
 
 Activate my account:
 ${portal_url}
 
 This link signs you in automatically. Just create a password, and after that you
 can log in to the Credit Banc Vault anytime.
-${referral_url ? `
-Your referral link (unchanged):
-${referral_url}
-` : ``}
-Questions about a file? Reply here or reach us at support@creditbanc.io.
 
-- Credit Banc
+${referral_welcome_tools_text(
+  referral_url,
+  `your customized referral partner link tracks every
+referral back to you. Share it often on social media, email signature, or
+wherever people will see it (and use it!).`
+)}
+
+That's everything you need to start earning right away.
+Keep it simple: share, submit, and cash the check.
+
+Now let's make you some money.
+
+${C.name}
+${C.title}, Credit Banc
   `.trim();
 }
 
 /**
- * Sends the partner-portal invite. Throws on SMTP failure so the caller can
- * report it.
- *
- * Picks the template by tier: a deal-desk partner keeps the original invite
- * until its rewrite lands, everyone else gets the tier-1 activation email.
+ * TIER 2 — the deal-desk partner (`partner_advisor`), who works their own
+ * files. Walks them through activation, the W-9 / voided-check onboarding gate
+ * ([[partner_advisor_onboarding]]) and three training videos. The activation
+ * button sits in Step 1, where GHL's copy points at a separate email.
+ */
+export function generate_referral_partner_deal_desk_welcome_html(
+  data: ReferralPartnerInviteData
+): string {
+  data = escape_email_strings(data);
+  const { partner_name, portal_url } = data;
+  const referral_url = data.referral_url || "";
+  const A = REFERRAL_WELCOME_ASSETS;
+  const V = REFERRAL_WELCOME_VIDEOS;
+  const font = REFERRAL_WELCOME_FONT;
+
+  const body = (html: string, margin = "0 0 16px") =>
+    `<p style="margin: ${margin}; font-family: ${font}; font-size: 19px; line-height: 1.4; color: #000000;">${html}</p>`;
+  const step_title = (text: string) =>
+    `<p style="margin: 0 0 14px; font-family: ${font}; font-size: 20px; font-weight: bold; color: #000000;">${text}</p>`;
+  const video = (v: { url: string; thumbnail: string; title: string }) => `
+              <a href="${v.url}" style="display: block; text-decoration: none;">
+                <img src="${v.thumbnail}" alt="Watch: ${v.title}" width="532" style="border: 2px solid #202536; display: block; width: 100%; max-width: 532px; height: auto; margin: 8px auto 0;">
+              </a>
+              <div style="padding: 16px 0 0; text-align: center;">
+                <a href="${v.url}" style="display: inline-block; background-color: #000000; color: #ffffff; text-decoration: none; padding: 11px 28px; border-radius: 25px; font-family: ${font}; font-size: 14px; font-weight: bold;">&#9654;&#xFE0E;&nbsp; Watch: ${v.title}</a>
+              </div>`;
+
+  return referral_welcome_shell({
+    title: "Welcome to the Credit Banc Referral Partner Program",
+    preheader: "A few quick setup steps, three short videos, and you&rsquo;ll be ready to go.",
+    sections: `
+          <!-- Intro -->
+          <tr>
+            <td align="center" style="padding: 36px 32px 28px; background-color: #f2f2f2;">
+              <h1 style="margin: 0 0 20px; font-family: ${font}; font-size: 30px; line-height: 1.25; font-weight: bold; color: #000000;">${partner_name}, glad to have you as a Credit Banc referral partner.</h1>
+              <p style="margin: 0 0 16px; font-family: ${font}; font-size: 20px; line-height: 1.4; color: #000000;">We appreciate the partnership and look forward to helping you support the business owners you send our way.</p>
+              <p style="margin: 0 0 16px; font-family: ${font}; font-size: 20px; line-height: 1.4; color: #000000;">As a partner, you&rsquo;ll have access to the <strong>Credit Banc Vault</strong>, where you can manage leads, work with clients, submit documents, communicate with underwriting, and track your deals from start to finish.</p>
+              <p style="margin: 0; font-family: ${font}; font-size: 20px; line-height: 1.4; color: #000000;">But first, you'll need to set up a few things.</p>
+            </td>
+          </tr>
+
+          <!-- Dashboard -->
+          <tr>
+            <td style="padding: 28px 32px 8px;">
+              <img src="${A.dashboard}" alt="Your Credit Banc partner dashboard" width="536" style="border: 0; display: block; width: 100%; max-width: 536px; height: auto; margin: 0 auto;">
+            </td>
+          </tr>
+
+          <!-- What happens next -->
+          <tr>
+            <td style="padding: 32px 32px 8px;">
+              <h2 style="margin: 0; font-family: ${font}; font-size: 34px; font-weight: bold; color: #000000; text-align: center;">Here's what happens next:</h2>
+            </td>
+          </tr>
+
+          <!-- Step 1: activate (the magic link) -->
+          <tr>
+            <td style="padding: 28px 32px 40px;">
+              ${step_title("Step 1: Activate your account")}
+              ${body("Click the button below to activate your Vault account and create your password.", "0")}
+              ${referral_welcome_activate_cta(portal_url)}
+              ${body("Once you&rsquo;re in, you&rsquo;ll also need to:", "32px 0 8px")}
+              <ul style="margin: 0 0 16px; padding: 0 0 0 28px; font-family: ${font}; font-size: 19px; line-height: 1.4; color: #000000;">
+                <li style="margin: 0 0 4px;">Add a working phone number where clients can reach you</li>
+                <li style="margin: 0 0 4px;">Submit your W-9</li>
+                <li style="margin: 0;">Upload a voided check</li>
+              </ul>
+              ${body("We made a short video that walks you through the entire setup.")}
+              ${video(V.setup)}
+            </td>
+          </tr>
+
+          <!-- Step 2: learn the Vault -->
+          <tr>
+            <td style="padding: 36px 32px 40px; background-color: #f2f2f2;">
+              ${step_title("Step 2: Get familiar with the Vault")}
+              ${body("This next video shows you how to actually use it.")}
+              ${body("You&rsquo;ll learn how to <strong>create and manage leads, open client Vaults, request and upload documents, track clients through the pipeline, work with underwriting, and keep an eye on your deals from start to finish.</strong>")}
+              ${video(V.using_the_vault)}
+            </td>
+          </tr>
+
+          <!-- Step 3: the client's view -->
+          <tr>
+            <td style="padding: 36px 32px 16px;">
+              ${step_title("Step 3: See what your clients will see")}
+              ${body("The last video gives you a look at the Vault from the client side, so you&rsquo;ll know exactly what the process looks like for the people you refer.")}
+              ${video(V.client_view)}
+              ${body("And that&rsquo;s it.", "32px 0 16px")}
+              ${body("All three videos together are only about 10 minutes, so you can get the full lay of the land without losing half your day to software training.", "0")}
+            </td>
+          </tr>
+${referral_welcome_tools_html(
+  referral_url,
+  `<p style="margin: 0 0 14px; font-family: ${font}; font-size: 17px; line-height: 1.45; color: #000000;">Your customized referral partner link lives inside your account, but we&rsquo;ve included it here too for easy access.</p>
+                    <p style="margin: 0; font-family: ${font}; font-size: 17px; line-height: 1.45; color: #000000;"><strong>Every referral submitted through your link is tracked back to you.</strong> Share it on social media, in your email signature, by text, or wherever your network is most likely to actually use it.</p>`
+)}
+
+          <!-- Closing -->
+          <tr>
+            <td style="padding: 32px 32px 36px; background-color: #f2f2f2;">
+              ${body("Thanks again for being part of the <strong>Credit Banc referral partner program.</strong>")}
+              ${body("We appreciate the partnership and look forward to helping you get deals moving, take care of your clients, and get paid along the way.", "0")}
+            </td>
+          </tr>`,
+  });
+}
+
+export function generate_referral_partner_deal_desk_welcome_text(
+  data: ReferralPartnerInviteData
+): string {
+  const { partner_name, portal_url } = data;
+  const referral_url = data.referral_url || "";
+  const V = REFERRAL_WELCOME_VIDEOS;
+  const C = REFERRAL_WELCOME_CONTACT;
+
+  return `
+${partner_name}, glad to have you as a Credit Banc referral partner.
+
+We appreciate the partnership and look forward to helping you support the
+business owners you send our way.
+
+As a partner, you'll have access to the Credit Banc Vault, where you can manage
+leads, work with clients, submit documents, communicate with underwriting, and
+track your deals from start to finish.
+
+But first, you'll need to set up a few things.
+
+HERE'S WHAT HAPPENS NEXT
+
+Step 1: Activate your account
+Click the link below to activate your Vault account and create your password.
+${portal_url}
+
+This link signs you in automatically. Just create a password, and after that you
+can log in to the Credit Banc Vault anytime.
+
+Once you're in, you'll also need to:
+- Add a working phone number where clients can reach you
+- Submit your W-9
+- Upload a voided check
+
+We made a short video that walks you through the entire setup.
+Watch "${V.setup.title}": ${V.setup.url}
+
+Step 2: Get familiar with the Vault
+This next video shows you how to actually use it. You'll learn how to create
+and manage leads, open client Vaults, request and upload documents, track
+clients through the pipeline, work with underwriting, and keep an eye on your
+deals from start to finish.
+Watch "${V.using_the_vault.title}": ${V.using_the_vault.url}
+
+Step 3: See what your clients will see
+The last video gives you a look at the Vault from the client side, so you'll
+know exactly what the process looks like for the people you refer.
+Watch "${V.client_view.title}": ${V.client_view.url}
+
+And that's it. All three videos together are only about 10 minutes, so you can
+get the full lay of the land without losing half your day to software training.
+
+${referral_welcome_tools_text(
+  referral_url,
+  `your customized referral partner link lives inside your
+account, but we've included it here too for easy access. Every referral
+submitted through your link is tracked back to you. Share it on social media, in
+your email signature, by text, or wherever your network is most likely to
+actually use it.`
+)}
+
+Thanks again for being part of the Credit Banc referral partner program. We
+appreciate the partnership and look forward to helping you get deals moving,
+take care of your clients, and get paid along the way.
+
+${C.name}
+${C.title}, Credit Banc
+  `.trim();
+}
+
+/**
+ * Sends the partner-portal welcome. Throws on SMTP failure so the caller can
+ * report it. Picks the template by tier — see ReferralPartnerInviteData.
  */
 export async function send_referral_partner_invite(data: ReferralPartnerInviteData) {
   const transporter = create_smtp_transporter();
@@ -5015,7 +5286,8 @@ export async function send_referral_partner_invite(data: ReferralPartnerInviteDa
   const mail = data.with_deal_desk
     ? {
         subject: 'Set up your Credit Banc partner dashboard',
-        html: generate_referral_partner_invite_html(data),
+        html: generate_referral_partner_deal_desk_welcome_html(data),
+        text: generate_referral_partner_deal_desk_welcome_text(data),
       }
     : {
         subject: 'Activate your Credit Banc referral dashboard',

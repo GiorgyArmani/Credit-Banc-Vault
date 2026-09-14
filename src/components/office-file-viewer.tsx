@@ -140,45 +140,48 @@ export function OfficeFileViewer({ kind, url, name, downloadUrl }: Props) {
     void render();
   }, [render]);
 
-  if (loading) {
-    return (
-      <div className="flex h-full w-full flex-col items-center justify-center gap-3">
-        <Loader2 className="h-6 w-6 animate-spin text-emerald-400" />
-        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
-          Rendering {kind === "xlsx" ? "spreadsheet" : "document"}
-        </p>
+  const status = loading ? (
+    <div className="flex h-full w-full flex-col items-center justify-center gap-3">
+      <Loader2 className="h-6 w-6 animate-spin text-emerald-400" />
+      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+        Rendering {kind === "xlsx" ? "spreadsheet" : "document"}
+      </p>
+    </div>
+  ) : error ? (
+    <div className="flex h-full w-full flex-col items-center justify-center gap-4 p-8 text-center">
+      <FileWarning className="h-10 w-10 text-slate-500" />
+      <div>
+        <p className="text-sm font-bold text-slate-200">Preview unavailable</p>
+        <p className="mt-1 max-w-sm text-xs text-slate-400">{error}</p>
       </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="flex h-full w-full flex-col items-center justify-center gap-4 p-8 text-center">
-        <FileWarning className="h-10 w-10 text-slate-500" />
-        <div>
-          <p className="text-sm font-bold text-slate-200">Preview unavailable</p>
-          <p className="mt-1 max-w-sm text-xs text-slate-400">{error}</p>
-        </div>
-        {downloadUrl && (
-          <a
-            href={downloadUrl}
-            className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white transition-colors hover:bg-emerald-700"
-          >
-            <Download className="h-3.5 w-3.5" />
-            Download to open it
-          </a>
-        )}
-      </div>
-    );
-  }
+      {downloadUrl && (
+        <a
+          href={downloadUrl}
+          className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white transition-colors hover:bg-emerald-700"
+        >
+          <Download className="h-3.5 w-3.5" />
+          Download to open it
+        </a>
+      )}
+    </div>
+  ) : null;
 
   if (kind === "docx") {
+    // The container must stay MOUNTED while loading: render() runs from an
+    // effect after the first paint, and docx-preview writes into this ref. An
+    // early spinner return left the ref null ("Preview container unavailable").
+    // `invisible` rather than unmounting keeps layout so the pages can measure.
     return (
-      <div className="h-full w-full overflow-auto bg-slate-200 p-4">
-        <div ref={docx_container} className="mx-auto" />
+      <div className="relative h-full w-full">
+        <div className={clsx("h-full w-full overflow-auto bg-slate-200 p-4", status && "invisible")}>
+          <div ref={docx_container} className="mx-auto" />
+        </div>
+        {status && <div className="absolute inset-0">{status}</div>}
       </div>
     );
   }
+
+  if (status) return status;
 
   const sheet = sheets[active_sheet];
 
