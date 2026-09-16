@@ -17,6 +17,8 @@ import { Loader2, Check, X, ExternalLink, BarChart3, Plus } from "lucide-react";
 import Link from "next/link";
 import { BankAnalysisViewer } from "./bank-analysis-viewer";
 import { LenderResponsePanel } from "@/components/lender/lender-response-panel";
+import { LenderApiRowActions } from "@/components/lender-api/lender-api-row-actions";
+import { useLenderApiAssignments } from "@/components/lender-api/use-lender-api-assignments";
 import { toast } from "@/lib/toast";
 import clsx from "clsx";
 import { format } from "date-fns";
@@ -97,6 +99,7 @@ export function AdminLenderReviewCard({ clientId }: Props) {
      *  of a browser confirm(), which blocks the whole tab. */
     const [confirm_remove_id, set_confirm_remove_id] = useState<string | null>(null);
     const [busy_row_id, set_busy_row_id] = useState<string | null>(null);
+    const { summaries: lender_api_summaries, reload: reload_lender_api } = useLenderApiAssignments(clientId);
 
     async function fetch_assignments() {
         set_is_loading(true);
@@ -505,6 +508,16 @@ export function AdminLenderReviewCard({ clientId }: Props) {
                                             )}
                                         </div>
                                     </div>
+
+                                    <LenderApiRowActions
+                                        className="mt-3 flex justify-end"
+                                        assignmentId={a.id}
+                                        assignmentStatus={a.status}
+                                        summary={lender_api_summaries[a.id]}
+                                        onChanged={async () => {
+                                            await Promise.all([fetch_assignments(), reload_lender_api()]);
+                                        }}
+                                    />
 
                                     {/* Action row — only for a lender that hasn't gone out yet.
                                         Send it, or take it off the list. No decision to record. */}

@@ -85,6 +85,8 @@ import { ShareWithLenderButton } from "@/components/share/share-with-lender-butt
 import { FundingRoundsCard } from "@/components/funding/funding-rounds-card";
 import { LenderResponsePanel } from "@/components/lender/lender-response-panel";
 import { UwAddLenderButton } from "@/components/lender/uw-add-lender-button";
+import { LenderApiRowActions } from "@/components/lender-api/lender-api-row-actions";
+import { useLenderApiAssignments } from "@/components/lender-api/use-lender-api-assignments";
 import { requestDocuments, approveDocumentCategory } from "@/app/advisor/dashboard/clients/[id]/actions";
 import { getClientPipelineHistory, updateLoanStatus, type LoanStatus, type PipelineStatusEntry } from "@/app/actions/pipeline";
 import { ClientCommandBar } from "@/components/workspace/client-command-bar";
@@ -339,6 +341,7 @@ export default function UnderwritingClientDetailsPage() {
     const [lender_assignments, set_lender_assignments] = useState<LenderAssignment[]>([]);
     const [is_loading_assignments, set_is_loading_assignments] = useState(false);
     const [submitting_assignment_id, set_submitting_assignment_id] = useState<string | null>(null);
+    const { summaries: lender_api_summaries, reload: reload_lender_api } = useLenderApiAssignments(client_id);
     /**
      * Re-submit dialog: sending a deal back to a lender that already answered,
      * with whatever that lender asked for. Held as the target row rather than a
@@ -2616,6 +2619,14 @@ export default function UnderwritingClientDetailsPage() {
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-3 shrink-0">
+                                        <LenderApiRowActions
+                                            assignmentId={assign.id}
+                                            assignmentStatus={assign.status}
+                                            summary={lender_api_summaries[assign.id]}
+                                            onChanged={async () => {
+                                                await Promise.all([fetch_lender_assignments(), reload_lender_api()]);
+                                            }}
+                                        />
                                         {row_state === 'ready_to_submit' && (
                                             <Button
                                                 size="sm"

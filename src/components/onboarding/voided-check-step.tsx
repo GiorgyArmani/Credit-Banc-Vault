@@ -7,9 +7,13 @@
 // One file, straight to the PRIVATE `vault` bucket via that action. The file
 // never touches a public URL and the browser never gets a storage token; it
 // posts the bytes to the action and the server does the write.
+//
+// Three ways in, because the artifact is a piece of paper on someone's desk:
+// drop it, pick it, or photograph it. The camera input is mobile-only — most
+// reps are holding the check and a phone, not a scanner.
 
 import { useRef, useState } from "react";
-import { CheckCircle2, Loader2, Upload } from "lucide-react";
+import { Camera, CheckCircle2, Loader2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/lib/toast";
 
@@ -30,7 +34,9 @@ export function VoidedCheckStep({
   const [uploading, setUploading] = useState(false);
   const [uploaded, setUploaded] = useState(!!existingFilename);
   const [filename, setFilename] = useState(existingFilename);
+  const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
 
   const handleFile = async (file: File) => {
     // Checked here as well as in the action — the point is a useful message
@@ -61,10 +67,27 @@ export function VoidedCheckStep({
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start gap-4 rounded-2xl border border-black/5 bg-cb-cream/60 p-6">
+      <div
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragging(false);
+          const file = e.dataTransfer.files?.[0];
+          if (file) void handleFile(file);
+        }}
+        className={`flex items-start gap-4 rounded-2xl border-2 border-dashed p-6 transition-colors ${
+          dragging ? "border-cb-mint bg-cb-mint/5" : "border-black/10 bg-cb-cream/60"
+        }`}
+      >
         <Upload className="mt-0.5 h-6 w-6 shrink-0 text-cb-mint" />
         <div className="min-w-0">
-          <p className="font-semibold text-cb-ink">Upload a voided check</p>
+          <p className="font-semibold text-cb-ink">
+            {dragging ? "Drop it here" : "Drag it here, or pick a file below"}
+          </p>
           <p className="mt-1 text-sm leading-relaxed text-cb-ink/60">{description}</p>
         </div>
       </div>
@@ -90,27 +113,50 @@ export function VoidedCheckStep({
         }}
       />
 
-      <Button
-        onClick={() => inputRef.current?.click()}
-        disabled={uploading}
-        variant={uploaded ? "outline" : "default"}
-        className={
-          uploaded
-            ? "rounded-xl border-black/10 px-5 py-6 font-semibold text-cb-ink/70"
-            : "rounded-xl bg-cb-ink px-6 py-6 font-semibold text-cb-mint hover:bg-cb-ink/90"
-        }
-      >
-        {uploading ? (
-          <>
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Uploading&hellip;
-          </>
-        ) : (
-          <>
-            <Upload className="mr-2 h-4 w-4" />
-            {uploaded ? "Replace it" : "Choose a file"}
-          </>
-        )}
-      </Button>
+      <input
+        ref={cameraRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) void handleFile(file);
+        }}
+      />
+
+      <div className="flex flex-wrap gap-2">
+        <Button
+          onClick={() => inputRef.current?.click()}
+          disabled={uploading}
+          variant={uploaded ? "outline" : "default"}
+          className={
+            uploaded
+              ? "rounded-xl border-black/10 px-5 py-6 font-semibold text-cb-ink/70"
+              : "rounded-xl bg-cb-ink px-6 py-6 font-semibold text-cb-mint hover:bg-cb-ink/90"
+          }
+        >
+          {uploading ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Uploading&hellip;
+            </>
+          ) : (
+            <>
+              <Upload className="mr-2 h-4 w-4" />
+              {uploaded ? "Replace it" : "Choose a file"}
+            </>
+          )}
+        </Button>
+        <Button
+          onClick={() => cameraRef.current?.click()}
+          disabled={uploading}
+          variant="outline"
+          className="rounded-xl border-black/10 px-5 py-6 font-semibold text-cb-ink/70 sm:hidden"
+        >
+          <Camera className="mr-2 h-4 w-4" />
+          Take a photo
+        </Button>
+      </div>
     </div>
   );
 }

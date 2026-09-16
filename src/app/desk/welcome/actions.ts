@@ -1,6 +1,7 @@
 "use server";
 
-// Partner+ onboarding actions — password, contact phone, W-9, voided check.
+// Partner+ onboarding actions — password, contact phone, profile photo, W-9,
+// voided check.
 //
 // Every action re-resolves the rep from the SESSION. An id is never accepted
 // from the client: it is the only thing standing between a logged-in rep and
@@ -8,6 +9,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { updateStaffProfilePhoto } from "@/app/actions/staff-profile";
 import {
   completeExternalAdvisorOnboardingIfReady,
   ensureExternalAdvisorW9Document,
@@ -69,7 +71,30 @@ export async function saveDeskContactPhone(
   return result;
 }
 
-/** Step 3 — open (or resume) the W-9 in SignWell. */
+/**
+ * Step 3 — the face their borrowers see on the "Your Advisor" card.
+ *
+ * Delegates to updateStaffProfilePhoto rather than re-implementing the upload:
+ * that action already owns the size/type validation, the timestamped object
+ * name (the bucket is public and cached hard, so overwriting in place leaves
+ * people looking at the old face), the write to the advisors mirror and the
+ * cleanup of the photo being replaced. It already admits partner_plus.
+ *
+ * requireDeskRep still runs first, for the one thing it adds: a paused account
+ * (active = false) cannot write anything, photo included.
+ */
+export async function saveDeskProfilePhoto(
+  formData: FormData
+): Promise<{ success: boolean; url?: string; error?: string }> {
+  const resolved = await requireDeskRep();
+  if ("error" in resolved) return { success: false, error: resolved.error };
+
+  const result = await updateStaffProfilePhoto(formData);
+  if (result.success) revalidatePath("/desk", "layout");
+  return result;
+}
+
+/** Step 4 — open (or resume) the W-9 in SignWell. */
 export async function startDeskW9(): Promise<{ success: boolean; url?: string; error?: string }> {
   const resolved = await requireDeskRep();
   if ("error" in resolved) return { success: false, error: resolved.error };
@@ -79,7 +104,7 @@ export async function startDeskW9(): Promise<{ success: boolean; url?: string; e
   return { success: true, url: result.url };
 }
 
-/** Step 3 — ask SignWell whether it's signed yet (backstop for the webhook). */
+/** Step 4 — ask SignWell whether it's signed yet (backstop for the webhook). */
 export async function checkDeskW9(): Promise<{ success: boolean; signed: boolean; error?: string }> {
   const resolved = await requireDeskRep();
   if ("error" in resolved) return { success: false, signed: false, error: resolved.error };
@@ -89,7 +114,7 @@ export async function checkDeskW9(): Promise<{ success: boolean; signed: boolean
   return { success: !error, signed, error };
 }
 
-/** Step 4 — the voided check, into the PRIVATE vault bucket. */
+/** Step 5 — the voided check, into the PRIVATE vault bucket. */
 export async function uploadDeskVoidedCheck(formData: FormData): Promise<{ success: boolean; error?: string }> {
   const resolved = await requireDeskRep();
   if ("error" in resolved) return { success: false, error: resolved.error };

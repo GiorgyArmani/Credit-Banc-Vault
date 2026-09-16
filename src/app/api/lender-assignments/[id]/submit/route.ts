@@ -1,24 +1,21 @@
 // src/app/api/lender-assignments/[id]/submit/route.ts
 //
 // PATCH /api/lender-assignments/[id]/submit
-//   Marks a lender assignment as submitted to the lender —
-//   the signal that UW has physically pushed the deal out and we're now
-//   waiting on the lender's approval.
+//   Marks a lender assignment as submitted to the lender — UW has physically
+//   pushed the deal out and we're now waiting on the lender.
 //
-// Transition: status='pending' → status='submitted'. Refused if:
-//   • the row doesn't exist
-//   • decision is not 'approved' (matcher rejected the lender)
-//   • admin_review is 'rejected' (the lender was removed from the file)
-//   • status is not 'pending' (already submitted, or beyond)
+// Transition: status='pending' → status='submitted'. Guards, ledger, admin
+// notification and the "every lender out" Slack summary live in
+// markAssignmentSubmitted (src/lib/lender-assignment-transitions.ts), shared
+// with the lender-API engine.
 //
 // AuthZ: admin OR underwriting (see require-staff).
 
-import { NextResponse, after } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-import { requireStaff } from '@/lib/auth/require-staff';
-import { openAttempt, resolveRecorderName } from '@/lib/lender-response-history';
-import { slackPostMessage } from '@/lib/slack-api';
-import { notifyAdminsOfLenderPipelineEvent } from '@/lib/notifications/lender-pipeline';
+import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
+import { requireStaff } from "@/lib/auth/require-staff";
+import { resolveRecorderName } from "@/lib/lender-response-history";
+import { markAssignmentSubmitted } from "@/lib/lender-assignment-transitions";
 
 const supabase_admin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -36,138 +33,20 @@ export async function PATCH(
 
     const { id } = await params;
     if (!id) {
-      return NextResponse.json({ error: 'Missing assignment id.' }, { status: 400 });
+      return NextResponse.json({ error: "Missing assignment id." }, { status: 400 });
     }
 
-    const { data: existing, error: fetch_error } = await supabase_admin
-      .from('client_lender_assignments')
-      .select('id, client_id, lender_name, decision, admin_review, status')
-      .eq('id', id)
-      .maybeSingle();
-
-    if (fetch_error) {
-      console.error('lender-assignment submit fetch error:', fetch_error);
-      return NextResponse.json({ error: 'Lookup failed.' }, { status: 500 });
-    }
-    if (!existing) {
-      return NextResponse.json({ error: 'Assignment not found.' }, { status: 404 });
-    }
-    if (existing.decision !== 'approved') {
-      return NextResponse.json(
-        { error: 'Assignment was not approved by the matching engine.' },
-        { status: 409 }
-      );
-    }
-    // Only an explicitly REMOVED lender is refused. This used to require
-    // admin_review === 'approved', which made the column an approval gate: every
-    // legacy row still sitting at 'pending' — they were never backfilled — was
-    // permanently unsubmittable, and the admin had to clear each new lender
-    // before UW could act. Admins no longer approve lenders, they are informed
-    // of them, so 'pending' now means exactly what it says: nobody has removed
-    // this one.
-    if (existing.admin_review === 'rejected') {
-      return NextResponse.json(
-        { error: 'This lender was removed from the file.' },
-        { status: 409 }
-      );
-    }
-    if (existing.status !== 'pending') {
-      return NextResponse.json(
-        { error: `Assignment status is already "${existing.status}".` },
-        { status: 409 }
-      );
-    }
-
-    const now = new Date().toISOString();
-    // submitted_at, not just updated_at: the verdict write later overwrites
-    // updated_at, so without its own column "out 6 days, still silent" — the
-    // single thing the daily spreadsheet was tracking — is not derivable.
-    const { data: updated, error: update_error } = await supabase_admin
-      .from('client_lender_assignments')
-      .update({ status: 'submitted', submitted_at: now, updated_at: now })
-      .eq('id', id)
-      .select('*')
-      .single();
-
-    if (update_error) {
-      console.error('lender-assignment submit update error:', update_error);
-      return NextResponse.json({ error: update_error.message }, { status: 500 });
-    }
-
-    // Open attempt 1 in the response ledger. Best-effort by design — see the
-    // note at the top of lender-response-history: losing a ledger row is a gap
-    // in the story, failing this request is a submission that never got
-    // recorded.
-    await openAttempt(supabase_admin, {
+    const result = await markAssignmentSubmitted(supabase_admin, {
       assignmentId: id,
-      submittedAt: now,
-      recordedBy: gate.user.id,
-      recordedByName: await resolveRecorderName(supabase_admin, gate.user.id),
+      actor: { id: gate.user.id, name: await resolveRecorderName(supabase_admin, gate.user.id) },
     });
 
-    // Trigger #1: notify admins that this specific lender was just submitted
-    // (in-app + email + Slack). Deferred with after() so it survives the
-    // response being returned — a bare detached promise is killed when the
-    // serverless function freezes.
-    after(async () => {
-      try {
-        await notifyAdminsOfLenderPipelineEvent(
-          {
-            id: existing.id,
-            client_id: (existing as any).client_id,
-            lender_name: (existing as any).lender_name,
-            specialty: (updated as any)?.specialty ?? null,
-          },
-          'submitted'
-        );
-      } catch (e) {
-        console.error('submit notify error (non-fatal):', e);
-      }
-    });
-
-    // Trigger #2: if EVERY lender still on this file is now out the
-    // door (status submitted / approved_by_lender / funded), post a Slack
-    // summary into the deal channel. Fire-and-forget, only if a channel exists.
-    try {
-      const client_id = (existing as any).client_id as string | null;
-      if (client_id) {
-        const { data: all_approved } = await supabase_admin
-          .from('client_lender_assignments')
-          .select('lender_name, status')
-          .eq('client_id', client_id)
-          .neq('admin_review', 'rejected');
-
-        const rows = all_approved ?? [];
-        const OUT = new Set(['submitted', 'approved_by_lender', 'funded']);
-        const all_out = rows.length > 0 && rows.every((r: any) => OUT.has(r.status));
-
-        if (all_out) {
-          const { data: vault } = await supabase_admin
-            .from('client_data_vault')
-            .select('slack_channel_id, company_name')
-            .eq('id', client_id)
-            .maybeSingle();
-
-          const channel_id = (vault as any)?.slack_channel_id as string | null;
-          if (channel_id) {
-            const lender_list = rows.map((r: any) => `• ${r.lender_name}`).join('\n');
-            const text =
-              `✅ This file has been submitted to every lender on it` +
-              `${(vault as any)?.company_name ? ` for ${(vault as any).company_name}` : ''}.\n${lender_list}`;
-            await slackPostMessage(channel_id, text);
-          }
-        }
-      }
-    } catch (slack_err) {
-      console.error('lender-assignment submit Slack notify error (non-fatal):', slack_err);
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: result.httpStatus });
     }
-
-    return NextResponse.json({ success: true, assignment: updated });
+    return NextResponse.json({ success: true, assignment: result.assignment });
   } catch (err: any) {
-    console.error('lender-assignment submit error:', err);
-    return NextResponse.json(
-      { error: err?.message || 'Server error' },
-      { status: 500 }
-    );
+    console.error("lender-assignment submit error:", err);
+    return NextResponse.json({ error: err?.message || "Server error" }, { status: 500 });
   }
 }

@@ -110,7 +110,7 @@ export interface ResolvedShare {
  * Returns an empty map on failure — the labels then read exactly as they did
  * before groups existed, which is a degraded packet, not a broken page.
  */
-async function loadGroupsByBusiness(
+export async function loadGroupsByBusiness(
   supabase: ReturnType<typeof createAdminClient>,
   client_vault_id: string,
   business_profile_id: string | null
@@ -141,7 +141,7 @@ async function loadGroupsByBusiness(
 }
 
 /** `Business Bank Statements — Chase ••4821`, or the plain label. */
-function groupScopedCategoryLabel(
+export function groupScopedCategoryLabel(
   base_label: string,
   document_group_id: string | null | undefined,
   groups: Map<string, DocumentGroup>
@@ -172,7 +172,7 @@ function groupScopedCategoryLabel(
  */
 const STORAGE_LIST_LIMIT = 1000;
 
-async function filterToExistingObjects<T extends { storage_path: string }>(
+export async function filterToExistingObjects<T extends { storage_path: string }>(
   supabase: ReturnType<typeof createAdminClient>,
   user_id: string,
   docs: T[]

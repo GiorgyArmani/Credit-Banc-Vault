@@ -7,7 +7,8 @@
 //   1. authenticated?          → /auth/login
 //   2. partner_plus or admin?  → /dashboard
 //   3. subscription active?    → BILLING TAKEOVER
-//   4. onboarding complete?    → ONBOARDING TAKEOVER (password, phone, W-9, check)
+//   4. onboarding complete?    → ONBOARDING TAKEOVER
+//                                (password, phone, photo, W-9, voided check)
 //   5. render the desk
 //
 // Billing precedes onboarding: a lapsed account is not asked for paperwork.
@@ -112,31 +113,22 @@ export default async function DeskLayout({ children }: { children: React.ReactNo
       w9Signed = signed;
     }
 
+    // No card wrapper and no heading here: the wizard is one step per screen and
+    // owns its own headline, so a second "Welcome" above it would compete with
+    // the step's own question.
     return (
       <PlainChrome>
-        <div className="mx-auto max-w-xl px-4 py-14 md:py-20">
-          <div className="rounded-3xl border border-black/5 bg-white p-8 shadow-sm md:p-10">
-            <p className="mb-3 text-xs font-bold uppercase tracking-[0.2em] text-cb-mint">Partner+</p>
-            <h1 className="font-manrope text-3xl font-extrabold tracking-tight text-cb-ink">
-              Welcome, {rep.first_name}.
-            </h1>
-            <p className="mt-3 text-[15px] leading-relaxed text-cb-ink/60">
-              A few things before you start submitting deals — how your clients reach you, your W-9, and
-              where to send your commission.
-            </p>
-            <div className="mt-8">
-              <DeskOnboardingWizard
-                email={user.email ?? rep.email}
-                firstName={rep.first_name}
-                passwordSet={!!rep.password_set_at}
-                phone={rep.phone}
-                phoneSet={isValidUsPhone(rep.phone)}
-                w9Signed={w9Signed}
-                voidedCheckFilename={rep.voided_check_filename}
-              />
-            </div>
-          </div>
-        </div>
+        <DeskOnboardingWizard
+          email={user.email ?? rep.email}
+          firstName={rep.first_name}
+          fullName={rep.name}
+          passwordSet={!!rep.password_set_at}
+          phone={rep.phone}
+          phoneSet={isValidUsPhone(rep.phone)}
+          profilePicUrl={rep.profile_pic_url}
+          w9Signed={w9Signed}
+          voidedCheckFilename={rep.voided_check_filename}
+        />
       </PlainChrome>
     );
   }

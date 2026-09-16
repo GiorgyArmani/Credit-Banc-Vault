@@ -20,6 +20,12 @@
 // has always been rendered for them by the shared workspace shell — this action
 // just used to answer "Forbidden".
 //
+// partner_plus (Partner+ reps at /desk) reaches this through isExternalAdvisor
+// too, and for them the photo is a REQUIRED onboarding step rather than a
+// topbar afterthought — see lib/external-advisor-onboarding.ts. Which is why
+// this revalidates the /desk layout below: that layout decides whether the
+// onboarding wizard still takes over the desk.
+//
 // The upload goes through the service role, matching post-signup-advisor —
 // advisor-profiles is not writable by a normal session.
 
@@ -204,6 +210,10 @@ export async function updateStaffProfilePhoto(
   revalidatePath("/admin/dashboard");
   revalidatePath("/partner/dashboard");
   revalidatePath("/partner/deals");
+  // Partner+ reps: the photo is a required onboarding step, so the /desk LAYOUT
+  // (which decides whether to show the wizard at all) has to be revalidated,
+  // not just a page under it.
+  revalidatePath("/desk", "layout");
   revalidatePath("/dashboard");
 
   return { success: true, url: publicUrl };

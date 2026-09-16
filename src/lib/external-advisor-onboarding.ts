@@ -8,7 +8,16 @@
 //      by the Stripe webhook with a random password nobody saw)
 //   2. give a contact phone number — a PRODUCT requirement: they are the advisor
 //      of record, and the client portal puts that number on the contact card
-//   3. sign a W-9 and 4. upload a voided check — commission money flows to them
+//   3. add a profile photo — same reasoning as the phone, and REQUIRED for the
+//      same reason staff-profile.ts exists: while it was optional it was skipped
+//      every time, leaving every one of their borrowers looking at a grey
+//      initials circle on the "Your Advisor" card
+//   4. sign a W-9 and 5. upload a voided check — commission money flows to them
+//
+// The photo is the one artifact that does NOT live on external_advisors: it is
+// advisors.profile_pic_url on the Partner+ mirror row, which is what
+// components/advisor-display.tsx already renders. Kept there rather than
+// mirrored onto external_advisors so there is one source of truth for a face.
 //
 // Steps 3–4 are the same two documents partners and internal advisors owe, so
 // the SignWell / storage / webhook mechanics live once in
@@ -48,20 +57,84 @@ export interface ExternalAdvisorOnboardingState extends ComplianceFields {
   current_period_end: string | null;
   cancel_at_period_end: boolean;
   stripe_customer_id: string | null;
+  /** advisors.profile_pic_url from the Partner+ mirror row, not this table. */
+  profile_pic_url: string | null;
   /** At least one onboarding step still outstanding. */
   requires_onboarding: boolean;
+}
+
+/**
+ * The artifacts a rep owes before the desk opens, in the order the wizard asks
+ * for them. `password` is deliberately absent: the wizard sequences it first,
+ * but the server gate has never required it — they are already authenticated by
+ * the magic link, and hard-gating it would strand a rep whose password update
+ * failed after their paperwork was accepted.
+ */
+export type OnboardingRequirement = "phone" | "photo" | "w9" | "check";
+
+/** What a rep is told when the server refuses to open the desk. */
+export const ONBOARDING_REQUIREMENT_MESSAGE: Record<OnboardingRequirement, string> = {
+  phone: "Add a contact phone number to finish.",
+  photo: "Add a profile photo to finish.",
+  w9: "Your W-9 isn't signed yet.",
+  check: "Upload a voided check to finish.",
+};
+
+/**
+ * The single definition of "finished" — pure, so the wizard's order and the
+ * server's refusal can never drift apart. Returns the EARLIEST outstanding
+ * requirement in wizard order, or null when the desk can open.
+ */
+export function missingOnboardingRequirement(row: {
+  phone: string | null;
+  profile_pic_url: string | null;
+  w9_signed_at: string | null;
+  voided_check_path: string | null;
+}): OnboardingRequirement | null {
+  if (!isValidUsPhone(row.phone)) return "phone";
+  if (!row.profile_pic_url?.trim()) return "photo";
+  if (!row.w9_signed_at) return "w9";
+  if (!row.voided_check_path) return "check";
+  return null;
 }
 
 // One literal: PostgREST's typings parse the select string at compile time.
 const EXTERNAL_ADVISOR_COLUMNS = `id, user_id, first_name, last_name, email, phone, company_name, password_set_at, active, billing_exempt, subscription_status, current_period_end, cancel_at_period_end, stripe_customer_id, ${COMPLIANCE_COLUMNS}`;
 
-function decorate(row: Record<string, unknown>): ExternalAdvisorOnboardingState {
-  const r = row as unknown as Omit<ExternalAdvisorOnboardingState, "name" | "requires_onboarding">;
+function decorate(
+  row: Record<string, unknown>,
+  profilePicUrl: string | null
+): ExternalAdvisorOnboardingState {
+  const r = row as unknown as Omit<
+    ExternalAdvisorOnboardingState,
+    "name" | "requires_onboarding" | "profile_pic_url"
+  >;
   return {
     ...r,
+    profile_pic_url: profilePicUrl,
     name: [r.first_name, r.last_name].filter(Boolean).join(" ").trim() || r.email,
+    // The completion stamp is the authority, NOT a live re-check of the four
+    // artifacts: a rep whose photo is later replaced or removed must not be
+    // thrown back into the wizard with a desk full of live deals behind it.
     requires_onboarding: !r.onboarding_completed_at,
   };
+}
+
+/** The photo lives on the advisors mirror; read it by the FK we set ourselves. */
+async function readMirrorPhoto(
+  db: ReturnType<typeof createAdminClient>,
+  externalAdvisorId: string
+): Promise<string | null> {
+  const { data, error } = await db
+    .from("advisors")
+    .select("profile_pic_url")
+    .eq("external_advisor_id", externalAdvisorId)
+    .maybeSingle();
+  if (error) {
+    console.error("[external-advisor-onboarding] mirror photo read failed:", error.message);
+    return null;
+  }
+  return (data?.profile_pic_url as string | null) ?? null;
 }
 
 function toSubject(advisor: ExternalAdvisorOnboardingState): ComplianceSubject {
@@ -83,7 +156,10 @@ export async function getExternalAdvisorState(
     console.error("[external-advisor-onboarding] state read failed:", error.message);
     return null;
   }
-  return data ? decorate(data as Record<string, unknown>) : null;
+  if (!data) return null;
+
+  const row = data as Record<string, unknown>;
+  return decorate(row, await readMirrorPhoto(db, row.id as string));
 }
 
 /** Record that the rep chose their own password (Supabase can't tell us). */
@@ -164,9 +240,14 @@ export async function completeExternalAdvisorOnboardingIfReady(
 
   if (readErr || !data) return { completed: false, error: "Account not found." };
   if (data.onboarding_completed_at) return { completed: true };
-  if (!isValidUsPhone(data.phone)) return { completed: false, error: "Add a contact phone number to finish." };
-  if (!data.w9_signed_at) return { completed: false, error: "Your W-9 isn't signed yet." };
-  if (!data.voided_check_path) return { completed: false, error: "Upload a voided check to finish." };
+
+  const missing = missingOnboardingRequirement({
+    phone: data.phone,
+    profile_pic_url: await readMirrorPhoto(db, id),
+    w9_signed_at: data.w9_signed_at,
+    voided_check_path: data.voided_check_path,
+  });
+  if (missing) return { completed: false, error: ONBOARDING_REQUIREMENT_MESSAGE[missing] };
 
   const { error } = await db
     .from("external_advisors")
