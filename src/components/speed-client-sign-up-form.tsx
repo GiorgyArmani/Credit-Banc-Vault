@@ -39,6 +39,7 @@ import {
   ChevronLeft,
 } from "lucide-react";
 import { useErrorDialog } from "@/components/error-dialog";
+import { toast } from "@/lib/toast";
 import { FUNDING_OPTIONS } from "@/data/loan-types";
 import { packageForLoanTypes, FALLBACK_DOCUMENT_PACKAGE } from "@/data/program-document-packages";
 import { ReferralPartnerSelect } from "@/components/referral-partner-select";
@@ -73,6 +74,8 @@ const STEPS = [
 
 const inputClass = "h-12 rounded-xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-5";
 const labelClass = "text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-1.5 block ml-1";
+
+const STEP_ERRORS_TOAST_ID = "client-form-step-errors";
 
 export default function SpeedClientSignUpForm({ isSetter = false }: { isSetter?: boolean }) {
   const router = useRouter();
@@ -181,65 +184,91 @@ export default function SpeedClientSignUpForm({ isSetter = false }: { isSetter?:
     })();
   }, [supabase, router]);
 
-  // Per-step validation — returns the first error message, or null if the step
-  // is complete. Used to gate "Next" and the final submit.
-  const validate_step = (n: number): string | null => {
+  // Per-step validation — every problem on step `n`, empty when it's complete.
+  // Gates "Next", jumping ahead in the step rail, and the final submit.
+  const step_errors = (n: number): string[] => {
+    const errors: string[] = [];
+    const require = (label: string, value: string) => {
+      if (!value.trim()) errors.push(`${label} is required.`);
+    };
     if (n === 1) {
-      const required: [string, string][] = [
-        [client_name, "Client Full Name"],
-        [company_name, "Company Name"],
-        [client_phone, "Cell Phone #"],
-        [client_email, "Email Address"],
-        [legal_entity_type, "Type of Business Entity"],
-        [business_start_date, "Business Start Date"],
-        [company_city, "Business City"],
-        [company_state, "Business State"],
-        [company_zip_code, "Business Zip Code"],
-      ];
-      const missing = required.filter(([v]) => !v.trim()).map(([, label]) => label);
-      if (missing.length > 0) return `Please complete: ${missing.join(", ")}`;
+      require("Client Full Name", client_name);
+      require("Company Name", company_name);
+      require("Cell Phone #", client_phone);
+      require("Email Address", client_email);
+      require("Type of Business Entity", legal_entity_type);
+      require("Business Start Date", business_start_date);
+      require("Business City", company_city);
+      require("State", company_state);
+      require("Zip Code", company_zip_code);
       // The phone is the client's SMS channel and the key we match GHL contacts
       // on — a partial number breaks both, so it never reaches the server.
-      if (!isValidUsPhone(client_phone)) return "Enter a valid 10-digit US phone number.";
+      if (client_phone.trim() && !isValidUsPhone(client_phone)) {
+        errors.push("Enter a valid 10-digit US phone number.");
+      }
     }
     if (n === 2) {
-      const required: [string, string][] = [
-        [avg_annual_revenue, "Gross Annual Revenue"],
-        [avg_monthly_deposits, "Monthly Bank Deposit Volume"],
-        [capital_requested, "Funding Amount Requested"],
-        [credit_score, "Approximate Credit Score"],
-        // Setters capture call notes here instead of "Use of Funds".
-        isSetter ? [additional_notes, "Call Notes"] : [loan_purpose, "Use of Funds"],
-      ];
-      const missing = required.filter(([v]) => !v.trim()).map(([, label]) => label);
-      if (missing.length > 0) return `Please complete: ${missing.join(", ")}`;
+      require("Gross Annual Revenue", avg_annual_revenue);
+      require("Monthly Bank Deposit Volume", avg_monthly_deposits);
+      require("Funding Amount Requested", capital_requested);
+      require("Approximate Credit Score", credit_score);
+      // Setters capture call notes here instead of "Use of Funds".
+      if (isSetter) require("Call Notes", additional_notes);
+      else require("Use of Funds", loan_purpose);
       // Setters don't pick a loan type — it's auto-set to "other".
-      if (!isSetter && proposed_loan_types.length === 0) return "Select at least one proposed loan type.";
+      if (!isSetter && proposed_loan_types.length === 0) {
+        errors.push("Select at least one proposed loan type.");
+      }
     }
-    return null;
+    return errors;
   };
 
-  const go_next = () => {
-    const err = validate_step(step);
-    if (err) {
-      showError(new Error(err), { context: "Speed form" });
-      return;
-    }
-    set_step((s) => Math.min(s + 1, steps.length));
+  // Blocked moves surface as a warning toast (the app's notification style —
+  // toast.error is reserved for the must-dismiss failure modal). One fixed id,
+  // so clicking Next again replaces the toast instead of stacking copies.
+  const notify_step_errors = (errors: string[]) => {
+    toast.warning("Complete this step before continuing", {
+      id: STEP_ERRORS_TOAST_ID,
+      description: (
+        <ul className="mt-1 list-disc pl-4">
+          {errors.map((err) => (
+            <li key={err}>{err}</li>
+          ))}
+        </ul>
+      ),
+    });
   };
 
-  const go_back = () => set_step((s) => Math.max(s - 1, 1));
+  // Send the user to the first incomplete step in [from, until). Returns true
+  // if one was found.
+  const stop_at_incomplete_step = (from: number, until: number) => {
+    for (let n = from; n < until; n++) {
+      const errors = step_errors(n);
+      if (errors.length > 0) {
+        set_step(n);
+        notify_step_errors(errors);
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // Going back is always allowed; going forward requires every step in
+  // between to be complete.
+  const go_to_step = (target: number) => {
+    if (target > step && stop_at_incomplete_step(step, target)) return;
+    toast.dismiss(STEP_ERRORS_TOAST_ID);
+    set_step(target);
+  };
+
+  const go_next = () => go_to_step(Math.min(step + 1, steps.length));
+  const go_back = () => go_to_step(Math.max(step - 1, 1));
 
   const handle_submit = async () => {
+    if (stop_at_incomplete_step(1, steps.length + 1)) return;
+
     set_submitting(true);
     try {
-      for (let n = 1; n <= steps.length; n++) {
-        const err = validate_step(n);
-        if (err) {
-          set_step(n);
-          throw new Error(err);
-        }
-      }
 
       const payload = {
         // Contact & business
@@ -415,7 +444,7 @@ export default function SpeedClientSignUpForm({ isSetter = false }: { isSetter?:
                       <button
                         key={s.num}
                         type="button"
-                        onClick={() => set_step(s.num)}
+                        onClick={() => go_to_step(s.num)}
                         className={`flex items-center gap-3 rounded-2xl p-3 text-left shrink-0 md:w-full transition-all active:scale-[0.98] ${active ? "bg-emerald-50 border border-emerald-100" : "border border-transparent hover:bg-slate-50"}`}
                       >
                         <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black shrink-0 transition-all duration-500 ${active ? "bg-emerald-500 text-white shadow-lg shadow-emerald-500/20" : done ? "bg-emerald-50 text-emerald-500 border border-emerald-100" : "bg-slate-50 text-slate-300 border border-slate-100"}`}>

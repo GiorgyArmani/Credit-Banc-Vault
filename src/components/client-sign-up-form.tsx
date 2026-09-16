@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { addManualFundingApplication } from "@/app/advisor/dashboard/clients/[id]/actions";
 import { useErrorDialog } from "@/components/error-dialog";
+import { toast } from "@/lib/toast";
 import { FollowersPicker } from "@/components/followers-picker";
 import { FUNDING_OPTIONS, LOAN_TYPES } from "@/data/loan-types";
 import { packageForLoanTypes, FALLBACK_DOCUMENT_PACKAGE } from "@/data/program-document-packages";
@@ -120,6 +121,8 @@ const LOAN_TYPE_DEFAULTS: Record<string, { frequency: string; term_unit: string 
   'Line of Credit':           { frequency: 'Monthly', term_unit: 'months remaining' },
 };
 
+
+const STEP_ERRORS_TOAST_ID = "client-form-step-errors";
 
 export default function ClientSignupForm() {
   const router = useRouter();
@@ -541,68 +544,118 @@ export default function ClientSignupForm() {
     return tags;
   };
 
+  /**
+   * What is still wrong on a given step. Checked when the user tries to LEAVE
+   * the step (Next, or jumping ahead in the progress bar), so a gap is flagged
+   * where it lives instead of surfacing as one error at the very end.
+   *
+   * Every field here maps to a NOT NULL column in client_data_vault. The server
+   * validates too, but a missing field used to slip through and fail on the DB
+   * constraint only AFTER the auth user / profile / GHL contact were created —
+   * leaving a half-built "ghost" client.
+   */
+  const step_errors = (n: number): string[] => {
+    const errors: string[] = [];
+    const require = (label: string, value: string) => {
+      if (!String(value ?? "").trim()) errors.push(`${label} is required.`);
+    };
+
+    if (n === 1) {
+      require("Client name", client_name);
+      require("Company name", company_name);
+      require("Email address", client_email);
+      require("Phone number", client_phone);
+      // The phone is the client's SMS channel and the key we match GHL contacts
+      // on — a partial number breaks both, so it never reaches the server.
+      if (client_phone.trim() && !isValidUsPhone(client_phone)) {
+        errors.push("Enter a valid 10-digit US phone number.");
+      }
+    } else if (n === 2) {
+      require("State", company_state);
+      require("ZIP code", company_zip_code);
+      require("Legal entity type", legal_entity_type);
+      require("Business start date", business_start_date);
+      require("Number of employees", employees_count);
+    } else if (n === 3) {
+      require("Capital requested", capital_requested);
+      if (proposed_loan_types.length === 0) errors.push("Pick at least one proposed loan type.");
+      require("Loan purpose", loan_purpose);
+      require("Average monthly deposits", avg_monthly_deposits);
+      require("Average annual revenue", avg_annual_revenue);
+    } else if (n === 4) {
+      require("Owner 1 name", owner_1_name);
+      if (!validate_ownership()) errors.push("Ownership percentages must sum to 100%.");
+    } else if (n === 5) {
+      require("Credit score range", credit_score);
+      // Positions are only checked when the client claims existing loans — an
+      // empty positions list with the flag unchecked is still a valid form.
+      if (has_existing_loans) {
+        open_positions.forEach((pos, i) => {
+          const err = validate_position(pos, i);
+          if (err) errors.push(err);
+        });
+      }
+    } else if (n === 6) {
+      require("Funding ETA", funding_eta);
+    }
+    return errors;
+  };
+
+  // Blocked moves surface as a warning toast (the app's notification style —
+  // toast.error is reserved for the must-dismiss failure modal). One fixed id,
+  // so clicking Next again replaces the toast instead of stacking copies.
+  const notify_step_errors = (errors: string[]) => {
+    toast.warning("Complete this step before continuing", {
+      id: STEP_ERRORS_TOAST_ID,
+      description: (
+        <ul className="mt-1 list-disc pl-4">
+          {errors.map((err) => (
+            <li key={err}>{err}</li>
+          ))}
+        </ul>
+      ),
+    });
+  };
+
+  // Send the user to the first incomplete step at or after `from` and before
+  // `until`. Returns true if one was found.
+  const stop_at_incomplete_step = (from: number, until: number) => {
+    for (let n = from; n < until; n++) {
+      const errors = step_errors(n);
+      if (errors.length > 0) {
+        set_step(n);
+        notify_step_errors(errors);
+        return true;
+      }
+    }
+    return false;
+  };
+
+  /**
+   * Move to `target`. Going back is always allowed; going forward requires
+   * every step in between to be complete.
+   */
+  const go_to_step = (target: number) => {
+    if (target > step && stop_at_incomplete_step(step, target)) return;
+    toast.dismiss(STEP_ERRORS_TOAST_ID);
+    set_step(target);
+  };
+
   // Handle submit
   const handle_submit = async () => {
+    // Same per-step checks as Next — if anything is still missing (e.g. a step
+    // skipped past before this check existed), send the user to it.
+    if (stop_at_incomplete_step(1, 7)) return;
+
     set_submitting(true);
 
     try {
-      // Require every field that maps to a NOT NULL column in client_data_vault.
-      // The server validates these too, but a missing field used to slip through
-      // and fail on the DB constraint only AFTER the auth user / profile / GHL
-      // contact were created — leaving a half-built "ghost" client. Catch it here
-      // for instant feedback before any of that runs.
-      const required_fields: Record<string, string> = {
-        "Client name": client_name,
-        "Company name": company_name,
-        "Client email": client_email,
-        "Client phone": client_phone,
-        "Company state": company_state,
-        "Company zip code": company_zip_code,
-        "Capital requested": capital_requested,
-        "Loan purpose": loan_purpose,
-        "Average monthly deposits": avg_monthly_deposits,
-        "Average annual revenue": avg_annual_revenue,
-        "Legal entity type": legal_entity_type,
-        "Business start date": business_start_date,
-        "Number of employees": employees_count,
-        "Owner 1 name": owner_1_name,
-        "Credit score": credit_score,
-        "Funding ETA": funding_eta,
-      };
-      const missing = Object.entries(required_fields)
-        .filter(([, val]) => !String(val ?? "").trim())
-        .map(([label]) => label);
-      if (proposed_loan_types.length === 0) missing.push("Proposed loan type");
-      if (missing.length > 0) {
-        throw new Error(`Please complete all required fields: ${missing.join(", ")}.`);
-      }
-
-      // The phone is the client's SMS channel and the key we match GHL contacts
-      // on — a partial number breaks both, so it never reaches the server.
-      if (!isValidUsPhone(client_phone)) {
-        throw new Error("Enter a valid 10-digit US phone number.");
-      }
-
       // A vault with an empty document request leaves the client nothing to
       // upload. That can no longer happen from the form — the product package
       // decides the list and falls back to the baseline — but the check stays
       // as the last guard before a client is created.
       if (document_codes.length === 0) {
         throw new Error("No document package resolved for the selected products — pick a funding product.");
-      }
-
-      // Validar ownership percentages
-      if (!validate_ownership()) {
-        throw new Error("Ownership percentages must sum to 100%");
-      }
-
-      // Validate open positions only when the client claims existing loans —
-      // an empty positions list with the flag unchecked is still a valid form.
-      if (has_existing_loans) {
-        for (let i = 0; i < open_positions.length; i++) {
-          const err = validate_position(open_positions[i], i);
-          if (err) throw new Error(err);
-        }
       }
 
       // Obtener nombre del advisor
@@ -853,7 +906,7 @@ export default function ClientSignupForm() {
                 <div key={s.num} className="flex items-center shrink-0">
                   <div
                     className="flex flex-col items-center cursor-pointer group"
-                    onClick={() => set_step(s.num)}
+                    onClick={() => go_to_step(s.num)}
                   >
                     <div
                       className={`w-12 h-12 md:w-14 md:h-14 rounded-2xl flex items-center justify-center font-black transition-all duration-500 group-hover:scale-110 active:scale-95
@@ -940,7 +993,7 @@ export default function ClientSignupForm() {
 
                   <div className="flex justify-end pt-10">
                     <Button
-                      onClick={() => set_step(2)}
+                      onClick={() => go_to_step(2)}
                       className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black rounded-2xl px-10 py-6 shadow-xl shadow-emerald-500/20 transition-all active:scale-95"
                     >
                       Next: Location
@@ -987,7 +1040,7 @@ export default function ClientSignupForm() {
                     </div>
 
                     <div>
-                      <Label htmlFor="company_zip_code" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">ZIP Code</Label>
+                      <Label htmlFor="company_zip_code" className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">ZIP Code *</Label>
                       <Input
                         id="company_zip_code"
                         value={company_zip_code}
@@ -1054,7 +1107,7 @@ export default function ClientSignupForm() {
 
                   <div className="flex flex-col sm:flex-row justify-between gap-4 pt-10">
                     <Button
-                      onClick={() => set_step(1)}
+                      onClick={() => go_to_step(1)}
                       variant="outline"
                       className="border-2 border-emerald-600 text-emerald-600 hover:bg-emerald-50 px-8 py-6 rounded-2xl font-black transition-all active:scale-95"
                     >
@@ -1062,7 +1115,7 @@ export default function ClientSignupForm() {
                       Previous
                     </Button>
                     <Button
-                      onClick={() => set_step(3)}
+                      onClick={() => go_to_step(3)}
                       className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black rounded-2xl px-10 py-6 shadow-xl shadow-emerald-500/20 transition-all active:scale-95"
                     >
                       Next: Financials
@@ -1196,7 +1249,7 @@ export default function ClientSignupForm() {
 
                   <div className="flex flex-col sm:flex-row justify-between gap-4 pt-6">
                     <Button
-                      onClick={() => set_step(2)}
+                      onClick={() => go_to_step(2)}
                       variant="outline"
                       className="border-2 border-emerald-600 text-emerald-600 hover:bg-emerald-50 px-8 py-6 rounded-2xl font-black transition-all active:scale-95"
                     >
@@ -1204,7 +1257,7 @@ export default function ClientSignupForm() {
                       Previous
                     </Button>
                     <Button
-                      onClick={() => set_step(4)}
+                      onClick={() => go_to_step(4)}
                       className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black rounded-2xl px-10 py-6 shadow-xl shadow-emerald-500/20 transition-all active:scale-95"
                     >
                       Next: Owners
@@ -1399,7 +1452,7 @@ export default function ClientSignupForm() {
 
                   <div className="flex flex-col sm:flex-row justify-between gap-4 pt-10">
                     <Button
-                      onClick={() => set_step(3)}
+                      onClick={() => go_to_step(3)}
                       variant="outline"
                       className="border-2 border-emerald-600 text-emerald-600 hover:bg-emerald-50 px-8 py-6 rounded-2xl font-black transition-all active:scale-95"
                     >
@@ -1407,7 +1460,7 @@ export default function ClientSignupForm() {
                       Previous
                     </Button>
                     <Button
-                      onClick={() => set_step(5)}
+                      onClick={() => go_to_step(5)}
                       className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black rounded-2xl px-10 py-6 shadow-xl shadow-emerald-500/20 transition-all active:scale-95"
                     >
                       Next: Credit
@@ -1927,7 +1980,7 @@ export default function ClientSignupForm() {
 
                   <div className="flex flex-col sm:flex-row justify-between gap-4 pt-6">
                     <Button
-                      onClick={() => set_step(4)}
+                      onClick={() => go_to_step(4)}
                       variant="outline"
                       className="border-2 border-emerald-600 text-emerald-600 hover:bg-emerald-50 px-8 py-6 rounded-2xl font-black transition-all active:scale-95"
                     >
@@ -1935,7 +1988,7 @@ export default function ClientSignupForm() {
                       Previous
                     </Button>
                     <Button
-                      onClick={() => set_step(6)}
+                      onClick={() => go_to_step(6)}
                       className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black rounded-2xl px-10 py-6 shadow-xl shadow-emerald-500/20 transition-all active:scale-95"
                     >
                       Next: Final Details
@@ -2090,7 +2143,7 @@ export default function ClientSignupForm() {
 
                   <div className="flex flex-col sm:flex-row justify-between gap-4 pt-10 border-t border-emerald-50">
                     <Button
-                      onClick={() => set_step(5)}
+                      onClick={() => go_to_step(5)}
                       variant="outline"
                       className="border-2 border-emerald-600 text-emerald-600 hover:bg-emerald-50 px-8 py-6 rounded-2xl font-black transition-all active:scale-95"
                     >
@@ -2117,6 +2170,7 @@ export default function ClientSignupForm() {
                   </div>
                 </div>
               )}
+
             </div>
           </CardContent>
         </Card>

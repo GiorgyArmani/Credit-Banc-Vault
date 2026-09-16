@@ -13,6 +13,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { LogoutButton } from '@/components/logout-button'
 import { Zap } from 'lucide-react'
+import { Toaster } from 'sonner'
 
 export default async function SetterLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
@@ -49,6 +50,7 @@ export default async function SetterLayout({ children }: { children: React.React
         </div>
       </header>
       <main>{children}</main>
+      <Toaster position="top-right" richColors />
     </div>
   )
 }
