@@ -28,6 +28,7 @@
 import { NextResponse } from "next/server";
 import { resolveShareFile, SIGNED_URL_TTL_SECONDS } from "@/lib/share-links";
 import { getWatermarkedPath, DOCUMENTS_BUCKET } from "@/lib/watermark";
+import { resolveServedFileName } from "@/lib/document-access";
 
 export const dynamic = "force-dynamic";
 // Stamping a large multi-page statement is the slow path, and it only happens
@@ -57,7 +58,8 @@ export async function GET(
 
     // Stamped copies are always PDFs (images are converted), so the download
     // name has to follow or the file opens in the wrong app.
-    const base_name = doc.custom_label || doc.name || "document";
+    // Borrows the extension from the stored name — auto-labels carry none.
+    const base_name = resolveServedFileName(doc);
     const download_name = serve.stamped
       ? `${base_name.replace(/\.[A-Za-z0-9]+$/, "")}.pdf`
       : base_name;

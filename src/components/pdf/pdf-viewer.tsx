@@ -15,6 +15,12 @@ import { cn } from '@/lib/utils'
 interface DocumentPreviewBodyProps {
     documentId: string
     docName: string
+    /**
+     * The stored file name (`user_documents.name`), used only to detect the
+     * type. `docName` is usually the custom label, and upload auto-labels
+     * ("Debt Schedule - Jorge Rivera") carry no extension.
+     */
+    fileName?: string | null
     fileType?: string
     className?: string
     /**
@@ -28,6 +34,7 @@ interface DocumentPreviewBodyProps {
 export function DocumentPreviewBody({
     documentId,
     docName,
+    fileName,
     fileType,
     className,
     hide_toolbar = false,
@@ -38,16 +45,14 @@ export function DocumentPreviewBody({
     // in front of a string we already know.
     const previewUrl = documentId ? documentFileUrl(documentId) : null
 
+    const typeName = fileName || docName
     const isImage = fileType?.startsWith('image/') ||
-                   docName.toLowerCase().endsWith('.png') ||
-                   docName.toLowerCase().endsWith('.jpg') ||
-                   docName.toLowerCase().endsWith('.jpeg') ||
-                   docName.toLowerCase().endsWith('.webp')
+                   /\.(png|jpe?g|webp)$/i.test(typeName)
 
     // Spreadsheets and Word files render in-app. Browsers cannot display them
     // in an iframe — the old path silently downloaded the file instead of
     // previewing it, which read as a broken button.
-    const officeKind = detectOfficeKind(docName, fileType)
+    const officeKind = detectOfficeKind(typeName, fileType)
 
     return (
         <div className={cn("flex-1 bg-slate-900/50 relative flex items-center justify-center overflow-hidden", className)}>
@@ -64,7 +69,7 @@ export function DocumentPreviewBody({
                     <OfficeFileViewer
                         kind={officeKind}
                         url={previewUrl}
-                        name={docName}
+                        name={typeName}
                         downloadUrl={documentFileUrl(documentId, { download: true })}
                     />
                 ) : (
@@ -94,6 +99,8 @@ interface DocumentPreviewModalProps {
      * redirects to a short-lived signed URL.
      */
     documentId: string
+    /** Stored file name, for type detection — see DocumentPreviewBody. */
+    fileName?: string | null
     fileType?: string
     /** When provided, renders a "Rename" button in the header that calls this. */
     onRename?: () => void
@@ -104,6 +111,7 @@ export default function DocumentPreviewModal({
     onClose,
     docName,
     documentId,
+    fileName,
     fileType,
     onRename,
 }: DocumentPreviewModalProps) {
@@ -178,6 +186,7 @@ export default function DocumentPreviewModal({
                 <DocumentPreviewBody
                     documentId={documentId}
                     docName={docName}
+                    fileName={fileName}
                     fileType={fileType}
                     // The modal has its own header and Open Original, so it keeps
                     // today's toolbar-less iframe — appearance unchanged.

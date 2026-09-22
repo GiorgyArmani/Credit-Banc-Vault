@@ -24,7 +24,10 @@ import { formatDate } from "./format";
 
 export type ReviewFile = {
   id: string;
+  /** Display label (custom_label ?? name) — often has no extension. */
   name: string;
+  /** Stored file name, for type detection in the preview. */
+  file_name?: string | null;
   type?: string;
   upload_date?: string | null;
   uploaded_by_role?: string | null;
@@ -297,6 +300,7 @@ export function ReviewWorkbench({
             <DocumentPreviewBody
               documentId={selected.file.id}
               docName={selected.file.name}
+              fileName={selected.file.file_name}
               fileType={selected.file.type}
               className="h-full rounded-none"
             />

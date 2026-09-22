@@ -932,6 +932,7 @@ export default function Vault({
         isOpen={preview_modal.isOpen}
         onClose={() => set_preview_modal({ isOpen: false, doc: null })}
         docName={preview_modal.doc?.custom_label || preview_modal.doc?.name || ""}
+        fileName={preview_modal.doc?.name}
         documentId={preview_modal.doc?.id || ""}
         fileType={preview_modal.doc?.type}
         onRename={preview_modal.doc ? () => set_renaming_file({

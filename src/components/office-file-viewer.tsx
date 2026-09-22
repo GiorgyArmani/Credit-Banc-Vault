@@ -103,8 +103,13 @@ export function OfficeFileViewer({ kind, url, name, downloadUrl }: Props) {
         return;
       }
 
-      // CSV: no parser needed, and read-excel-file does not handle it.
-      if (/\.csv$/i.test(name)) {
+      // CSV: no parser needed, and read-excel-file does not handle it. Decided
+      // by CONTENT, not name: renamed docs lose their extension ("Debt
+      // Schedule - Jorge"), and detectOfficeKind routed them here off the
+      // text/csv MIME. A real .xlsx/.xlsm is a ZIP, which always opens "PK".
+      const head = new Uint8Array(await blob.slice(0, 2).arrayBuffer());
+      const is_zip = head[0] === 0x50 && head[1] === 0x4b;
+      if (!is_zip) {
         const text = await blob.text();
         set_sheets([{ name: "CSV", rows: parseCsv(text) }]);
         set_loading(false);

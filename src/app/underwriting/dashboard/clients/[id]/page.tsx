@@ -2162,6 +2162,7 @@ export default function UnderwritingClientDetailsPage() {
             files: files.map((d) => ({
                 id: d.id,
                 name: d.custom_label || d.name,
+                file_name: d.name,
                 type: d.type,
                 upload_date: d.upload_date,
                 uploaded_by_role: d.uploaded_by_role ?? null,
@@ -2895,6 +2896,7 @@ export default function UnderwritingClientDetailsPage() {
                 isOpen={preview_modal.isOpen}
                 onClose={() => set_preview_modal({ isOpen: false, doc: null })}
                 docName={preview_modal.doc?.custom_label || preview_modal.doc?.name || ""}
+                fileName={preview_modal.doc?.name}
                 documentId={preview_modal.doc?.id || ""}
                 fileType={preview_modal.doc?.type}
                 onRename={preview_modal.doc ? () => set_renaming_file({

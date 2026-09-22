@@ -14,7 +14,11 @@ import {
 } from "@/lib/referral-partners";
 import { generatePartnerPortalMagicLink } from "@/lib/magic-link";
 import { send_referral_partner_invite } from "@/lib/email";
-import { syncReferralPartnerToGhl } from "@/lib/referral-partner-ghl";
+import {
+  syncReferralPartnerToGhl,
+  applyPartnerTierPromotion,
+  removeAllPartnerTags,
+} from "@/lib/referral-partner-ghl";
 
 async function requireAdminUser() {
   const supabase = await createClient();
@@ -513,6 +517,10 @@ async function provisionPartnerPortal(
     // portal access is already live by this point.
     const ghlResult = await syncReferralPartnerToGhl({
       id: partner.id,
+      // Tier drives the second tag. Read off the resolved role, like the email
+      // below, so re-inviting an existing deal-desk partner can't demote their
+      // tag to tier 1.
+      tier: role === "partner_advisor" ? 2 : 1,
       name: partner.name,
       email,
       phone: partner.phone ?? null,
@@ -771,6 +779,28 @@ async function applyDealDesk(
       .update({ deal_desk_enabled: enabled, updated_at: now })
       .eq("id", partner.id);
     if (flagErr) return { success: false, error: flagErr.message };
+
+    // PROMOTION is the one place tier tags move outside an invite, and it is a
+    // manual, reviewed action — so letting it trigger the tier-2 workflow in
+    // GHL is intended. Turning the desk back off strips BOTH tier tags and adds
+    // none back (see applyPartnerTierPromotion). Never fails the toggle: the
+    // role flip above is what actually grants or removes the deal desk.
+    const { data: crmRow } = await db
+      .from("referral_partners")
+      .select("ghl_contact_id")
+      .eq("id", partner.id)
+      .maybeSingle();
+
+    const tagResult = await applyPartnerTierPromotion({
+      email: partner.email,
+      ghl_contact_id: (crmRow as { ghl_contact_id?: string | null } | null)?.ghl_contact_id ?? null,
+      promoted: enabled,
+    });
+    if (!tagResult.synced) {
+      console.warn(
+        `[referral-partners] tier tag not updated for ${partner.id}: ${tagResult.skipReason}`
+      );
+    }
 
     return { success: true, name: partner.name ?? undefined };
   } catch (err: any) {
@@ -1055,9 +1085,11 @@ export async function deleteReferralPartner(id: string): Promise<ActionResult> {
 
   const db = createAdminClient();
 
+  // email + ghl_contact_id come along for the CRM tag cleanup at the end —
+  // once the row is deleted there is nothing left to look them up from.
   const { data: partner, error: readErr } = await db
     .from("referral_partners")
-    .select("id, name, user_id")
+    .select("id, name, user_id, email, ghl_contact_id")
     .eq("id", id)
     .maybeSingle();
 
@@ -1172,6 +1204,19 @@ export async function deleteReferralPartner(id: string): Promise<ActionResult> {
 
   const { error: delErr } = await db.from("referral_partners").delete().eq("id", id);
   if (delErr) return { success: false, error: delErr.message };
+
+  // Deleting from the referral list is the ONE place the partner tags come off
+  // in GHL — marker and tier alike. Runs after the delete and never fails it:
+  // the row is already gone, and the CRM contact itself is left in place.
+  const tagCleanup = await removeAllPartnerTags({
+    email: (partner as { email?: string | null }).email ?? null,
+    ghl_contact_id: (partner as { ghl_contact_id?: string | null }).ghl_contact_id ?? null,
+  });
+  if (!tagCleanup.synced) {
+    console.warn(
+      `[referral-partners] CRM tags not cleared for ${partner.name}: ${tagCleanup.skipReason}`
+    );
+  }
 
   revalidatePath("/admin/referral-partners");
   return { success: true, name: partner.name };

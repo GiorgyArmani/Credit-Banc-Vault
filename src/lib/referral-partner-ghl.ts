@@ -23,17 +23,46 @@ import {
   ghlResolveFieldId,
   ghlUpdateContact,
   ghlAddTags,
+  ghlRemoveTags,
+  ghlSearchContacts,
 } from "@/lib/ghl-api";
 import { generatePartnerPortalMagicLink } from "@/lib/magic-link";
 import { partnerReferralUrl } from "@/lib/referral-partners";
 
 /**
- * The durable "this is a referral partner" marker. Add-only and never removed
- * by the app, so re-running the cron can't re-trigger a one-time workflow —
- * which is exactly why it is a segment marker and not a `new …` trigger tag
- * like the affiliate program's.
+ * The durable "this is a referral partner" marker. Add-only everywhere except
+ * removeAllPartnerTags (deleting the partner from the referral list), so
+ * re-running the cron can't re-trigger a one-time workflow — which is exactly
+ * why it is a segment marker and not a `new …` trigger tag like the affiliate
+ * program's.
  */
 export const PARTNER_TAG = "referral partner";
+
+/**
+ * The TIER tag, added alongside PARTNER_TAG when a partner is invited. Both
+ * already exist in the live location, and the welcome automations key on them:
+ *   tier 1 — shares a link, watches the dashboard (`referral_partner`)
+ *   tier 2 — works their own files on the deal desk (`partner_advisor`)
+ *
+ * Exactly ONE of the two is ever on a contact: promoting a tier-1 partner to
+ * the deal desk removes the tier-1 tag as it adds tier 2 (user decision), so a
+ * segment filtered on "tier 1 referral partner" stops matching them. That is
+ * the one place this module removes a tag — PARTNER_TAG itself stays add-only.
+ */
+export const PARTNER_TIER_TAGS = {
+  1: "tier 1 referral partner",
+  2: "tier 2 referral partner",
+} as const;
+
+export type PartnerTier = keyof typeof PARTNER_TIER_TAGS;
+
+/** The tier tag to add, and the other one to take off. */
+export function partnerTierTags(tier: PartnerTier): { add: string; remove: string } {
+  return {
+    add: PARTNER_TIER_TAGS[tier],
+    remove: PARTNER_TIER_TAGS[tier === 2 ? 1 : 2],
+  };
+}
 
 /**
  * Native GHL contact type. This location defines its own set rather than the
@@ -55,6 +84,9 @@ export interface PartnerGhlInput {
   company?: string | null;
   /** Known contact id, when we've synced this partner before. */
   ghl_contact_id?: string | null;
+  /** The tier this partner is being INVITED as. Only the invite sets it; the
+   *  refresh cron omits it, which leaves tier tags untouched. */
+  tier?: PartnerTier;
 }
 
 export interface PartnerGhlResult {
@@ -96,6 +128,126 @@ async function resolveFieldIds(locationId: string) {
   }
 
   return { partnerLinkFieldId, dashboardFieldId };
+}
+
+/**
+ * Put the partner tags on a contact: the durable marker, plus exactly one tier
+ * tag when a tier is known (adding the current one, removing the other).
+ *
+ * Add-only for PARTNER_TAG; the tier pair is the one place this module removes
+ * a tag, so a promoted partner stops matching a tier-1 segment.
+ *
+ * Throws — callers wrap it, since a tag write must never fail the work that
+ * came before it.
+ */
+export async function syncPartnerTags(
+  contactId: string,
+  tier?: PartnerTier
+): Promise<void> {
+  if (!tier) {
+    await ghlAddTags(contactId, [PARTNER_TAG]);
+    return;
+  }
+  const { add, remove } = partnerTierTags(tier);
+  await ghlAddTags(contactId, [PARTNER_TAG, add]);
+  try {
+    await ghlRemoveTags(contactId, [remove]);
+  } catch (removeErr) {
+    // The tag that matters is on. A stale opposite tag is worth a log, not a
+    // thrown invite.
+    console.warn(`[partner-ghl] could not remove "${remove}" from ${contactId}:`, removeErr);
+  }
+}
+
+/**
+ * Strip every partner tag from the CRM contact — the marker AND both tier tags.
+ *
+ * ONLY for deleting a partner from the referral list (admin decision). Nothing
+ * else removes PARTNER_TAG: deactivating, or dropping the deal desk, leaves
+ * someone who is still a referral partner, and pulling the marker would quietly
+ * drop them out of every partner campaign.
+ *
+ * The GHL CONTACT is left in place. They may be a client, a lead, or a past
+ * partner with history worth keeping; this only says "not a partner any more".
+ *
+ * NEVER THROWS — the row is already gone from the vault by the time this runs,
+ * and a CRM hiccup must not turn a completed delete into an error.
+ */
+export async function removeAllPartnerTags(args: {
+  email: string | null;
+  ghl_contact_id?: string | null;
+}): Promise<{ synced: boolean; contactId: string | null; skipReason?: string }> {
+  const locationId = process.env.GHL_LOCATION_ID;
+  if (!locationId) return { synced: false, contactId: null, skipReason: "no GHL_LOCATION_ID" };
+
+  const email = (args.email ?? "").trim().toLowerCase();
+  let contactId = args.ghl_contact_id ?? null;
+
+  try {
+    if (!contactId) {
+      if (!email) return { synced: false, contactId: null, skipReason: "no email on file" };
+      const found = await ghlSearchContacts({ email, locationId });
+      contactId = found[0]?.id ?? null;
+    }
+    if (!contactId) return { synced: false, contactId: null, skipReason: "no GHL contact" };
+
+    await ghlRemoveTags(contactId, [PARTNER_TAG, PARTNER_TIER_TAGS[1], PARTNER_TIER_TAGS[2]]);
+    return { synced: true, contactId };
+  } catch (err: any) {
+    console.error(`[partner-ghl] tag cleanup failed for ${email || contactId}:`, err);
+    return { synced: false, contactId, skipReason: err?.message || String(err) };
+  }
+}
+
+/**
+ * Move a partner's tier tags when the deal-desk toggle flips — the one manual,
+ * reviewed promotion path, so it is safe to let it trigger a GHL workflow.
+ *
+ *   promoted  → add "tier 2 referral partner", remove "tier 1 referral partner"
+ *   demoted   → remove BOTH tier tags (admin decision)
+ *
+ * The demotion strips the tier tags and adds none back: re-adding tier 1 would
+ * re-trigger the tier-1 welcome automation for someone who has been a partner
+ * for months. Both are removed rather than just tier 2, so a tag added by hand
+ * in GHL can't leave a demoted partner sitting in a tier segment.
+ *
+ * PARTNER_TAG survives a demotion: turning the deal desk off makes someone a
+ * plain referral partner again, not a non-partner, and dropping the marker
+ * would silently pull them out of every partner campaign.
+ *
+ * NEVER THROWS: the role flip has already happened and is what actually grants
+ * the deal desk; the CRM tag is bookkeeping on top of it.
+ */
+export async function applyPartnerTierPromotion(args: {
+  email: string | null;
+  ghl_contact_id?: string | null;
+  /** true when the deal desk was just turned ON. */
+  promoted: boolean;
+}): Promise<{ synced: boolean; contactId: string | null; skipReason?: string }> {
+  const locationId = process.env.GHL_LOCATION_ID;
+  if (!locationId) return { synced: false, contactId: null, skipReason: "no GHL_LOCATION_ID" };
+
+  const email = (args.email ?? "").trim().toLowerCase();
+  let contactId = args.ghl_contact_id ?? null;
+
+  try {
+    if (!contactId) {
+      if (!email) return { synced: false, contactId: null, skipReason: "no email on file" };
+      const found = await ghlSearchContacts({ email, locationId });
+      contactId = found[0]?.id ?? null;
+    }
+    if (!contactId) return { synced: false, contactId: null, skipReason: "no GHL contact" };
+
+    if (args.promoted) {
+      await syncPartnerTags(contactId, 2);
+    } else {
+      await ghlRemoveTags(contactId, [PARTNER_TIER_TAGS[1], PARTNER_TIER_TAGS[2]]);
+    }
+    return { synced: true, contactId };
+  } catch (err: any) {
+    console.error(`[partner-ghl] tier tag change failed for ${email || contactId}:`, err);
+    return { synced: false, contactId, skipReason: err?.message || String(err) };
+  }
 }
 
 /**
@@ -161,7 +313,9 @@ export async function syncReferralPartnerToGhl(
       companyName: partner.company || undefined,
       country: "US",
       locationId,
-      tags: [PARTNER_TAG],
+      // Both tags on invite: the durable "referral partner" marker and the tier
+      // the welcome automation branches on.
+      tags: partner.tier ? [PARTNER_TAG, PARTNER_TIER_TAGS[partner.tier]] : [PARTNER_TAG],
       ...(customFields.length ? { customFields } : {}),
     };
 
@@ -184,6 +338,20 @@ export async function syncReferralPartnerToGhl(
       return { ...empty, error: "GHL upsert returned no contact id" };
     }
 
+    // Promotion: a partner invited to the deal desk should no longer match a
+    // tier-1 segment. Separate and best-effort — the upsert above already
+    // carries the tag that matters, and a stale opposite tag must not report
+    // the sync as failed.
+    if (partner.tier) {
+      const { remove } = partnerTierTags(partner.tier);
+      try {
+        await ghlRemoveTags(contactId, [remove]);
+      } catch (tagErr) {
+        console.warn(`[partner-ghl] could not remove "${remove}" from ${contactId}:`, tagErr);
+      }
+    }
+
+
     return { synced: true, contactId, wroteFields };
   } catch (err: any) {
     console.error(`[partner-ghl] sync failed for ${email}:`, err);
@@ -195,8 +363,14 @@ export async function syncReferralPartnerToGhl(
  * Re-stamp both fields on a contact we already know the id of. Used by the cron
  * on its happy path — one PUT instead of an upsert round trip.
  *
- * Adds the tag too: it is add-only and durable, so this is how partners who
+ * Adds PARTNER_TAG too: it is add-only and durable, so this is how partners who
  * existed in GHL before the vault ever knew about them pick it up.
+ *
+ * TIER-BLIND, and the cron passes no tier on purpose (admin decision,
+ * 2026-09-22): the existing roster is being tagged by hand, and a tier tag is a
+ * live workflow trigger — a weekly sweep across 100+ contacts would fire the
+ * tier welcome at partners onboarded months ago. Tier tags are written only by
+ * the two deliberate, reviewed actions: the invite and the deal-desk promotion.
  */
 export async function refreshPartnerLinkFields(
   contactId: string,
@@ -236,7 +410,7 @@ export async function refreshPartnerLinkFields(
     // Best-effort and separate: a tag failure must not make a successful field
     // refresh report as failed.
     try {
-      await ghlAddTags(contactId, [PARTNER_TAG]);
+      await syncPartnerTags(contactId, partner.tier);
     } catch (tagErr) {
       console.warn(`[partner-ghl] tag add failed for ${contactId}:`, tagErr);
     }

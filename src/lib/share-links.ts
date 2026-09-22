@@ -15,6 +15,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { matchesActiveBusiness } from "@/lib/document-scope";
 import { formatGroupShort, type DocumentGroup } from "@/lib/document-groups";
 import { isStampable } from "@/lib/watermark";
+import { resolveServedFileName } from "@/lib/document-access";
 
 export const SHARE_BUCKET = "user-documents";
 // How long the per-file signed URLs handed to the lender stay valid. The share
@@ -677,7 +678,10 @@ export async function resolveShareLink(token: string): Promise<ResolvedShare | n
   const documents: SharedDocument[] = [];
   for (const d of eligible as any[]) {
     const code = (d.doc_code ?? d.category ?? "") as string;
-    const raw_name = d.custom_label || d.name || "document";
+    // Not the bare custom_label: uploads auto-label files "Debt Schedule -
+    // Jorge Rivera" with no extension, so an unstamped CSV/xlsx/docx reached
+    // the lender as a file their machine couldn't open.
+    const raw_name = resolveServedFileName(d);
     const will_be_pdf = stamping && isStampable(d.type, d.name ?? raw_name);
     const filename = will_be_pdf
       ? `${raw_name.replace(/\.[A-Za-z0-9]+$/, "")}.pdf`

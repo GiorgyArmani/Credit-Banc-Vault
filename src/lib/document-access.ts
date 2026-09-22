@@ -155,7 +155,9 @@ export async function callerMayReadClientFiles(
  * download helper: prefer the human label, never hand the OS an extensionless
  * file.
  */
-export function resolveServedFileName(doc: AccessibleDocument): string {
+export function resolveServedFileName(
+  doc: Pick<AccessibleDocument, "name" | "custom_label">
+): string {
   const fallback = doc.name || "document";
   if (!doc.custom_label) return fallback;
 
