@@ -47,6 +47,9 @@ interface Props {
         collapsed-section header can show follower names). Fires on every load
         and after add/remove. */
     onFollowersChange?: (followers: FollowerRow[]) => void;
+    /** "rail" is the compact rendering for the client file's Team card.
+        "default" (the underwriting page) keeps the original markup. */
+    variant?: "default" | "rail";
 }
 
 function initials(first: string, last: string) {
@@ -81,7 +84,7 @@ function Avatar({
     );
 }
 
-export function ClientFollowersCard({ clientId, canManage, onFollowersChange }: Props) {
+export function ClientFollowersCard({ clientId, canManage, onFollowersChange, variant = "default" }: Props) {
     const [followers, setFollowers] = useState<FollowerRow[]>([]);
     const [loading, setLoading] = useState(true);
     const [dialogOpen, setDialogOpen] = useState(false);
@@ -148,89 +151,8 @@ export function ClientFollowersCard({ clientId, canManage, onFollowersChange }: 
         }
     };
 
-    return (
-        <section className="p-6">
-            <div className="flex items-center justify-between mb-5">
-                <div className="flex items-center gap-2">
-                    <div className="w-7 h-7 rounded-lg bg-emerald-100 flex items-center justify-center">
-                        <Users className="h-4 w-4 text-emerald-700" />
-                    </div>
-                    <span className="text-[11px] font-bold text-slate-400 tabular-nums">
-                        {loading ? "…" : `${followers.length} follower${followers.length === 1 ? "" : "s"}`}
-                    </span>
-                </div>
-                {canManage && (
-                    <button
-                        type="button"
-                        onClick={openAddDialog}
-                        className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700 hover:text-emerald-800 px-2.5 py-1.5 rounded-lg hover:bg-emerald-50 transition-colors"
-                    >
-                        <UserPlus className="h-3.5 w-3.5" />
-                        Add follower
-                    </button>
-                )}
-            </div>
-
-            {loading ? (
-                <div className="flex items-center justify-center py-8">
-                    <Loader2 className="h-5 w-5 animate-spin text-slate-300" />
-                </div>
-            ) : followers.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-8 text-center">
-                    <div className="w-10 h-10 rounded-2xl bg-slate-100 flex items-center justify-center mb-2.5">
-                        <Users className="h-5 w-5 text-slate-300" />
-                    </div>
-                    <p className="text-sm font-semibold text-slate-400">No followers yet</p>
-                    {canManage && (
-                        <p className="text-xs text-slate-300 mt-1">
-                            Assign another advisor to collaborate on this client
-                        </p>
-                    )}
-                </div>
-            ) : (
-                <div className="space-y-2">
-                    {followers.map((f) => {
-                        const name = `${f.first_name} ${f.last_name}`.trim();
-                        const isPending = pendingId === f.advisor_id;
-                        return (
-                            <div
-                                key={f.advisor_id}
-                                className="flex items-center gap-3 p-2 rounded-xl hover:bg-slate-50 transition-colors"
-                            >
-                                <Avatar
-                                    first={f.first_name}
-                                    last={f.last_name}
-                                    url={f.profile_pic_url}
-                                />
-                                <div className="flex-1 min-w-0">
-                                    <p className="text-sm font-bold text-slate-900 truncate">
-                                        {name}
-                                    </p>
-                                    <p className="text-[11px] text-slate-400 truncate">
-                                        {f.email}
-                                    </p>
-                                </div>
-                                {canManage && (
-                                    <button
-                                        type="button"
-                                        onClick={() => setRemoveTarget(f)}
-                                        disabled={isPending}
-                                        className="p-1.5 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-50"
-                                        title="Remove follower"
-                                    >
-                                        {isPending ? (
-                                            <Loader2 className="h-4 w-4 animate-spin" />
-                                        ) : (
-                                            <X className="h-4 w-4" />
-                                        )}
-                                    </button>
-                                )}
-                            </div>
-                        );
-                    })}
-                </div>
-            )}
-
+    const dialogs = (
+        <>
             <AlertDialog
                 open={!!removeTarget}
                 onOpenChange={(open) => {
@@ -324,6 +246,160 @@ export function ClientFollowersCard({ clientId, canManage, onFollowersChange }: 
                     </Command>
                 </DialogContent>
             </Dialog>
+        </>
+    );
+
+    if (variant === "rail") {
+        return (
+            <section className="px-5 pb-4 pt-2">
+                <div className="flex items-center justify-between gap-2 py-1">
+                    <p className="text-xs text-cb-ink/50">
+                        Followers
+                        {!loading && <span className="ml-1 tabular-nums">{followers.length}</span>}
+                    </p>
+                    {canManage && (
+                        <button
+                            type="button"
+                            onClick={openAddDialog}
+                            className="text-xs font-semibold text-emerald-700 hover:underline"
+                        >
+                            Add follower
+                        </button>
+                    )}
+                </div>
+
+                {loading ? (
+                    <div className="flex items-center py-3">
+                        <Loader2 className="h-4 w-4 animate-spin text-cb-ink/30" />
+                    </div>
+                ) : followers.length === 0 ? (
+                    <p className="py-3 text-sm text-cb-ink/40">No followers yet</p>
+                ) : (
+                    <div className="mt-1 space-y-1">
+                        {followers.map((f) => {
+                            const name = `${f.first_name} ${f.last_name}`.trim();
+                            const isPending = pendingId === f.advisor_id;
+                            return (
+                                <div key={f.advisor_id} className="flex items-center gap-2.5 py-1">
+                                    <Avatar
+                                        first={f.first_name}
+                                        last={f.last_name}
+                                        url={f.profile_pic_url}
+                                        size="sm"
+                                    />
+                                    <p className="min-w-0 flex-1 truncate text-sm text-cb-ink" title={f.email}>
+                                        {name}
+                                    </p>
+                                    {canManage && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setRemoveTarget(f)}
+                                            disabled={isPending}
+                                            className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-cb-ink/40 transition-colors hover:bg-black/5 hover:text-cb-ink disabled:opacity-50"
+                                            title="Remove follower"
+                                        >
+                                            {isPending ? (
+                                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                            ) : (
+                                                <X className="h-3.5 w-3.5" />
+                                            )}
+                                        </button>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
+
+                {dialogs}
+            </section>
+        );
+    }
+
+    return (
+        <section className="p-6">
+            <div className="flex items-center justify-between mb-5">
+                <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-lg bg-emerald-100 flex items-center justify-center">
+                        <Users className="h-4 w-4 text-emerald-700" />
+                    </div>
+                    <span className="text-[11px] font-bold text-slate-400 tabular-nums">
+                        {loading ? "…" : `${followers.length} follower${followers.length === 1 ? "" : "s"}`}
+                    </span>
+                </div>
+                {canManage && (
+                    <button
+                        type="button"
+                        onClick={openAddDialog}
+                        className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700 hover:text-emerald-800 px-2.5 py-1.5 rounded-lg hover:bg-emerald-50 transition-colors"
+                    >
+                        <UserPlus className="h-3.5 w-3.5" />
+                        Add follower
+                    </button>
+                )}
+            </div>
+
+            {loading ? (
+                <div className="flex items-center justify-center py-8">
+                    <Loader2 className="h-5 w-5 animate-spin text-slate-300" />
+                </div>
+            ) : followers.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-8 text-center">
+                    <div className="w-10 h-10 rounded-2xl bg-slate-100 flex items-center justify-center mb-2.5">
+                        <Users className="h-5 w-5 text-slate-300" />
+                    </div>
+                    <p className="text-sm font-semibold text-slate-400">No followers yet</p>
+                    {canManage && (
+                        <p className="text-xs text-slate-300 mt-1">
+                            Assign another advisor to collaborate on this client
+                        </p>
+                    )}
+                </div>
+            ) : (
+                <div className="space-y-2">
+                    {followers.map((f) => {
+                        const name = `${f.first_name} ${f.last_name}`.trim();
+                        const isPending = pendingId === f.advisor_id;
+                        return (
+                            <div
+                                key={f.advisor_id}
+                                className="flex items-center gap-3 p-2 rounded-xl hover:bg-slate-50 transition-colors"
+                            >
+                                <Avatar
+                                    first={f.first_name}
+                                    last={f.last_name}
+                                    url={f.profile_pic_url}
+                                />
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-bold text-slate-900 truncate">
+                                        {name}
+                                    </p>
+                                    <p className="text-[11px] text-slate-400 truncate">
+                                        {f.email}
+                                    </p>
+                                </div>
+                                {canManage && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setRemoveTarget(f)}
+                                        disabled={isPending}
+                                        className="p-1.5 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-50"
+                                        title="Remove follower"
+                                    >
+                                        {isPending ? (
+                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                        ) : (
+                                            <X className="h-4 w-4" />
+                                        )}
+                                    </button>
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+
+            {dialogs}
         </section>
     );
 }

@@ -74,3 +74,5 @@ multi-business-refactor-plan.md
 .agents
 skills-lock.json
 *.md
+# Playwright MCP session artifacts (screenshots, snapshots, console logs)
+.playwright-mcp/

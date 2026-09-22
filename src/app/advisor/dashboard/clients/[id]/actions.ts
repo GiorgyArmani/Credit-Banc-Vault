@@ -9,7 +9,7 @@ import { syncUnifiedClientData } from "@/lib/user-management";
 import { updateLoanStatus } from "@/app/actions/pipeline";
 import { ghlSyncDocument } from "@/lib/ghl-document-sync";
 import { isClientScopedDoc } from "@/lib/document-scope";
-import { getOrCreateActiveDeal, isDealFunded } from "@/lib/funding-deals";
+import { getActiveDeal, getOrCreateActiveDeal, isDealFunded } from "@/lib/funding-deals";
 import { resolveCatchAllAdvisor } from "@/lib/catch-all-advisor";
 import { send_file_reassignment_notification } from "@/lib/email";
 import { resolvePartnerByName } from "@/lib/referral-partners";
@@ -258,6 +258,9 @@ export async function requestDocuments(
                 business_profile_id: bizId,
                 is_active: true,
                 requested_at: new Date().toISOString(),
+                // Always set: the column defaults to 'ghl_webhook', which
+                // mislabelled every staff request as coming from GHL.
+                requested_via: notify_client ? "staff_request" : "staff_silent_slot",
                 // Bank statements carry a per-request month count; other docs ignore it.
                 statement_months: code === 'business_bank_statements' ? (statementMonths ?? null) : null,
             };
@@ -319,8 +322,17 @@ export async function requestDocuments(
                     status: 'documents_requested'
                 }, { onConflict: 'user_id' });
 
-            // 5.1 Update Loan Pipeline status
-            await updateLoanStatus(clientId, 'documents_requested', `Advisor requested ${documentIds.length} new documents`);
+            // 5.1 Update Loan Pipeline status — on THIS business's round, so a
+            // request on business #2 doesn't move business #1's stage.
+            const stageDeal = defaultBusinessProfileId
+                ? await getActiveDeal(supabaseAdmin, defaultBusinessProfileId)
+                : null;
+            await updateLoanStatus(
+                clientId,
+                'documents_requested',
+                `Advisor requested ${documentIds.length} new documents`,
+                stageDeal?.id ?? null
+            );
 
             if (statusError) {
                 console.error("Error updating submission status:", statusError);
@@ -1063,7 +1075,7 @@ export async function reassignClientAdvisor(clientId: string, newAdvisorId: stri
         // ownership back to GHL).
         const { data: newAdvisor, error: advisorErr } = await supabaseAdmin
             .from("advisors")
-            .select("id, first_name, last_name, email, is_active, ghl_user_id")
+            .select("id, first_name, last_name, email, is_active, ghl_user_id, user_id")
             .eq("id", newAdvisorId)
             .maybeSingle();
         if (advisorErr || !newAdvisor) {
@@ -1154,33 +1166,53 @@ export async function reassignClientAdvisor(clientId: string, newAdvisorId: stri
         const previous_advisor_id = existing?.advisor_id ?? null;
         const previous_advisor_name = existing?.advisor_name ?? null;
 
-        // Notify the catch-all advisor (in-app + email), mirroring the cron.
-        if (isToCatchAll && catchAll) {
-            if (catchAll.user_id) {
+        // Notify the new owner (in-app + email) on EVERY manual reassignment,
+        // not only the hand-off to the catch-all advisor. Same notice and email
+        // the stale-file cron sends; the links point into the recipient's own
+        // portal, since an advisor can't open /admin. Skipped when the file
+        // didn't actually change hands.
+        if (previous_advisor_id !== newAdvisorId) {
+            const recipient = isToCatchAll && catchAll
+                ? { user_id: catchAll.user_id, name: catchAll.name, email: catchAll.email }
+                : { user_id: newAdvisor.user_id, name: advisor_name, email: newAdvisor.email };
+
+            if (recipient.user_id) {
                 await supabaseAdmin.from("in_app_notifications").insert({
-                    user_id: catchAll.user_id,
+                    user_id: recipient.user_id,
                     client_id: clientId,
                     title: "Client reassigned to you",
                     message: `${existing?.client_name || "A client"}${existing?.company_name ? ` (${existing.company_name})` : ""} has been reassigned to you. Please reach out as soon as possible.`,
                 });
             }
+
+            const { data: recipientUser } = recipient.user_id
+                ? await supabaseAdmin.from("users").select("role").eq("id", recipient.user_id).maybeSingle()
+                : { data: null };
+            const portal =
+                recipientUser?.role === "admin" ? { clients: "/admin/clients", pipeline: "/admin/pipeline" }
+                : recipientUser?.role === "partner_advisor" ? { clients: "/partner/clients", pipeline: "/partner/pipeline" }
+                : recipientUser?.role === "partner_plus" ? { clients: "/desk/clients", pipeline: "/desk/pipeline" }
+                : { clients: "/advisor/dashboard/clients", pipeline: "/advisor/dashboard/pipeline" };
+
             const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://vault.creditbanc.io";
-            try {
-                await send_file_reassignment_notification({
-                    advisor_name: catchAll.name,
-                    advisor_email: catchAll.email,
-                    files: [{
-                        client_name: existing?.client_name || "",
-                        company_name: existing?.company_name || "",
-                        capital_requested: existing?.capital_requested ?? null,
-                        previous_advisor_name,
-                        inactivity_days: 0,
-                        detail_url: `${appUrl}/admin/clients/${clientId}`,
-                    }],
-                    login_url: `${appUrl}/admin/pipeline`,
-                });
-            } catch (mailErr) {
-                console.error("reassignClientAdvisor: catch-all email failed:", mailErr);
+            if (recipient.email) {
+                try {
+                    await send_file_reassignment_notification({
+                        advisor_name: recipient.name,
+                        advisor_email: recipient.email,
+                        files: [{
+                            client_name: existing?.client_name || "",
+                            company_name: existing?.company_name || "",
+                            capital_requested: existing?.capital_requested ?? null,
+                            previous_advisor_name,
+                            inactivity_days: 0,
+                            detail_url: `${appUrl}${portal.clients}/${clientId}`,
+                        }],
+                        login_url: `${appUrl}${portal.pipeline}`,
+                    });
+                } catch (mailErr) {
+                    console.error("reassignClientAdvisor: reassignment email failed:", mailErr);
+                }
             }
         }
 
@@ -1484,15 +1516,38 @@ export async function rejectDocumentCategory(clientId: string, docCode: string, 
 
         if (!client) throw new Error("Client not found");
 
+        // Underwriters review packets in the Review tab and are the ones who
+        // can say what is wrong with a document — but they have no `advisors`
+        // row, so the ownership check below could never pass and every reject
+        // came back "Access denied". Mirrors approveDocumentCategory's bypass
+        // (user decision 2026-09-17).
+        const { data: callerRole } = await supabase
+            .from("users")
+            .select("role, first_name, last_name, email")
+            .eq("id", advisorUser.id)
+            .single();
+        const isStaffApprover = callerRole?.role === "underwriting" || callerRole?.role === "admin";
+
         const { data: advisorData } = await supabase
             .from("advisors")
             .select("id, first_name, last_name, email")
             .eq("user_id", advisorUser.id)
             .single();
 
-        if (!advisorData || !(await hasClientAccess(supabase, advisorData.id, clientId, client.advisor_id))) {
-            throw new Error("Access denied");
+        if (!isStaffApprover) {
+            if (!advisorData || !(await hasClientAccess(supabase, advisorData.id, clientId, client.advisor_id))) {
+                throw new Error("Access denied");
+            }
         }
+
+        // Who the client sees on the rejection email. Staff callers have no
+        // advisors row, so fall back to their `users` record.
+        const reviewer = advisorData ?? callerRole ?? null;
+        const reviewerName = [reviewer?.first_name, reviewer?.last_name]
+            .filter(Boolean)
+            .join(" ")
+            .trim() || "Your advisor";
+        const reviewerEmail = reviewer?.email ?? null;
 
         const supabaseAdmin = createAdminClient();
 
@@ -1570,7 +1625,7 @@ export async function rejectDocumentCategory(clientId: string, docCode: string, 
             const { send_document_rejection_email } = await import("@/lib/email");
             const { getFollowerEmailsForClient } = await import("@/lib/followers");
             const follower_emails = await getFollowerEmailsForClient(supabaseAdmin, clientId);
-            const cc_emails = [advisorData.email, ...follower_emails]
+            const cc_emails = [reviewerEmail, ...follower_emails]
                 .filter((e): e is string => typeof e === "string" && e.includes("@"));
 
             await send_document_rejection_email({
@@ -1578,7 +1633,7 @@ export async function rejectDocumentCategory(clientId: string, docCode: string, 
                 client_email: client.client_email,
                 doc_label: docLabel,
                 rejection_reason: reason,
-                advisor_name: `${advisorData.first_name} ${advisorData.last_name}`,
+                advisor_name: reviewerName,
                 advisor_cc_emails: cc_emails,
                 login_url: `${process.env.NEXT_PUBLIC_SITE_URL || 'https://vault.creditbanc.io'}/auth/login`
             });

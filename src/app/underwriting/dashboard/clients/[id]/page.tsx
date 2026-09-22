@@ -3,43 +3,25 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { useRouter, useParams, usePathname } from "next/navigation";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { useRouter, useParams } from "next/navigation";
+import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
-    ArrowLeft,
     Download,
     FileText,
-    Calendar,
     Mail,
     Phone,
-    Building2,
-    DollarSign,
     AlertCircle,
     Loader2,
-    CheckCircle2,
-    ShieldCheck,
     Bell,
     ExternalLink,
-    Clock,
     Plus,
-    ChevronDown,
-    ChevronUp,
-    ChevronLeft,
-    ChevronRight,
-    Eye,
-    Star,
     Trash2,
-    Pencil,
     UploadCloud,
-    BarChart3,
     Slack,
     Send,
     Search,
     Archive,
-    MoreHorizontal,
-    RotateCcw
 } from "lucide-react";
 import {
     AlertDialog,
@@ -59,66 +41,73 @@ import {
     DialogFooter,
     DialogHeader,
     DialogTitle,
-    DialogTrigger,
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-    Tooltip,
-    TooltipContent,
-    TooltipProvider,
-    TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { Textarea } from "@/components/ui/textarea";
 import { notifyAdvisor, markDocumentAsViewed } from "../../actions";
 import { fetchInternalNotes, addInternalNote } from "@/app/actions/internal-notes";
 import { toast } from "@/lib/toast";
 import clsx from "clsx";
-import { format } from "date-fns";
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { LoanFundedDialog } from "@/components/loan-funded-dialog";
-import { ShareWithLenderButton } from "@/components/share/share-with-lender-button";
 import { FundingRoundsCard } from "@/components/funding/funding-rounds-card";
-import { LenderResponsePanel } from "@/components/lender/lender-response-panel";
-import { UwAddLenderButton } from "@/components/lender/uw-add-lender-button";
-import { LenderApiRowActions } from "@/components/lender-api/lender-api-row-actions";
 import { useLenderApiAssignments } from "@/components/lender-api/use-lender-api-assignments";
-import { requestDocuments, approveDocumentCategory } from "@/app/advisor/dashboard/clients/[id]/actions";
+import {
+    LenderPanel,
+    type LenderAssignment,
+    type SubmittedLifecycleStatus,
+} from "@/components/client-file/panels/lender-panel";
+import {
+    OpenPositionsPanel,
+    type OpenPosition,
+} from "@/components/client-file/panels/open-positions-panel";
+import {
+    UwDocumentPacket,
+    type UserDocument,
+} from "@/components/client-file/panels/uw-document-packet";
+import {
+    requestDocuments,
+    approveDocumentCategory,
+    rejectDocumentCategory,
+} from "@/app/advisor/dashboard/clients/[id]/actions";
 import { getClientPipelineHistory, updateLoanStatus, type LoanStatus, type PipelineStatusEntry } from "@/app/actions/pipeline";
-import { ClientCommandBar } from "@/components/workspace/client-command-bar";
 import { getBulkClientActivity } from "@/app/actions/advisor";
-import { ActivityAgeBadge } from "@/components/advisor/activity-age-badge";
 import { differenceInDays } from "date-fns";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { renameClientFile, deleteClientFile } from "../../actions";
-import { EditProfileModal } from "@/app/advisor/dashboard/clients/[id]/edit-profile-modal";
-import { ClientFollowersCard } from "@/app/advisor/dashboard/clients/[id]/_components/client-followers-card";
-import {
-    addManualFundingApplication,
-    deleteClientVault,
-} from "@/app/advisor/dashboard/clients/[id]/actions";
+import { InternalCommunication } from "@/app/advisor/dashboard/clients/[id]/_components/internal-communication";
+import { addManualFundingApplication } from "@/app/advisor/dashboard/clients/[id]/actions";
 import { BankAnalysisViewer } from "@/components/admin/bank-analysis-viewer";
-import { BusinessTabStrip, type BusinessTab } from "@/app/advisor/dashboard/clients/[id]/_components/business-tab-strip";
-import { CollapsibleSection, broadcast_toggle_all } from "@/app/advisor/dashboard/clients/[id]/_components/collapsible-section";
-import { isClientScopedDoc, matchesActiveBusiness, matchesActiveDeal, normalizeSupabaseJoin, formatRequirementLabel } from "@/lib/document-scope";
+import type { BusinessTab } from "@/app/advisor/dashboard/clients/[id]/_components/business-tab-strip";
+import { matchesActiveBusiness, matchesActiveDeal, normalizeSupabaseJoin, formatRequirementLabel } from "@/lib/document-scope";
+// The shared client-file shell (phase 1). Everything below is presentational:
+// this page keeps its state, fetching, handlers and dialogs and fills the slots.
+import { getClientFileCapabilities } from "@/components/client-file/capabilities";
+import { useFileTab } from "@/components/client-file/use-file-tab";
+import { ClientFileShell } from "@/components/client-file/client-file-shell";
+import { FileHeader, type HeaderAction, type HeaderMenuItem } from "@/components/client-file/file-header";
+import { FileTabs, type FileTabItem } from "@/components/client-file/file-tabs";
+import { SummaryTiles, type SummaryTile } from "@/components/client-file/summary-tiles";
+import { PanelCard } from "@/components/client-file/panel-card";
+import { FactList } from "@/components/client-file/fact-list";
+import { EmptyLine } from "@/components/client-file/empty-line";
+import { ContactRow } from "@/components/client-file/contact-row";
+import { StatusLine } from "@/components/client-file/status-line";
+import { ReviewWorkbench, type ReviewCategory } from "@/components/client-file/review-workbench";
+import {
+    formatCurrency,
+    formatCreditScore,
+    formatDate,
+    formatMonthly,
+    formatTimeInBusiness,
+} from "@/components/client-file/format";
 import {
     formatGroupLabel,
     getGroupConfig,
-    getDocumentPeriod,
-    groupDocuments,
-    groupsForDocCode,
-    offersGrouping,
     UNGROUPED_KEY,
     UNGROUPED_LABEL,
-    type DocumentGroup,
 } from "@/lib/document-groups";
 import { zipDocuments, downloadDocument } from "@/lib/document-download";
-import { DocumentGroupPicker } from "@/components/document-group-picker";
 import { useDocumentGroups } from "@/hooks/use-document-groups";
 
 // Slack deal-channel integration is built but not yet tested end-to-end.
@@ -190,80 +179,14 @@ interface ClientProfile {
     };
 }
 
-interface OpenPosition {
-    id: string;
-    lender_name: string;
-    loan_type: string;
-    current_balance: number | null;
-    payment_amount: number | null;
-    payment_term: string | null;
-}
+// OpenPosition moved to @/components/client-file/panels/open-positions-panel
+// with the table that renders it.
 
-interface LenderAssignment {
-    id: string;
-    lender_name: string;
-    specialty: string | null;
-    decision: 'approved' | 'rejected';
-    payment_type: string | null;
-    min_funding: number | null;
-    max_funding: number | null;
-    assigned_at: string;
-    admin_review: 'pending' | 'approved' | 'rejected';
-    admin_review_notes: string | null;
-    admin_reviewed_at: string | null;
-    source: 'match_tool' | 'admin_manual';
-    status: 'pending' | 'submitted' | 'approved_by_lender' | 'declined_by_lender' | 'funded';
-}
+// LenderAssignment, LenderRowState and derive_lender_row_state moved to
+// @/components/client-file/panels/lender-panel with the panel that renders them.
 
-// Effective UI states for a lender assignment. The matching engine proposes
-// (decision), UW selects, and the selection is cleared for outreach on the spot
-// (admin_review='approved' at insert). UW then physically pushes the file out
-// (status='submitted') and records the lender's verdict
-// (status='approved_by_lender' | 'declined_by_lender'). The label rendered to
-// UW is the derived combination of those columns.
-//
-// Admins do not approve lenders any more — they are informed of them. The only
-// thing admin_review still expresses is REMOVAL: 'rejected' means the lender was
-// taken off the file (removed_by_admin, and the submit route refuses it).
-// 'pending' — the state every legacy row was left in, never backfilled — now
-// reads as "nobody removed this", so those rows are submittable like any other.
-type LenderRowState =
-    | 'rejected_by_matcher'   // decision = rejected
-    | 'removed_by_admin'       // decision = approved, admin_review = rejected
-    | 'ready_to_submit'        // on the file, status = pending
-    | 'submitted'              // status = submitted, awaiting lender
-    | 'approved_by_lender'     // lender approved the submission
-    | 'declined_by_lender'     // lender declined the submission
-    | 'funded';                // deal funded
-
-function derive_lender_row_state(a: LenderAssignment): LenderRowState {
-    if (a.decision !== 'approved') return 'rejected_by_matcher';
-    if (a.admin_review === 'rejected') return 'removed_by_admin';
-    if (a.status === 'funded') return 'funded';
-    if (a.status === 'approved_by_lender') return 'approved_by_lender';
-    if (a.status === 'declined_by_lender') return 'declined_by_lender';
-    if (a.status === 'submitted') return 'submitted';
-    return 'ready_to_submit';
-}
-
-interface UserDocument {
-    id: string;
-    name: string;
-    size: number;
-    type: string;
-    category: string | null;
-    doc_code?: string | null;
-    custom_label: string | null;
-    upload_date: string;
-    storage_path: string;
-    viewed_at: string | null;
-    uploaded_by_role?: 'advisor' | 'client';
-    business_profile_id?: string | null;
-    /** Set on files that have been filed into a group within their own field. */
-    document_group_id?: string | null;
-    /** Carries metadata.original_file_name, which dates a periodic file. */
-    metadata?: any;
-}
+// UserDocument moved to @/components/client-file/panels/uw-document-packet with
+// the packet that renders it.
 
 interface InternalNote {
     id: string;
@@ -276,50 +199,23 @@ interface InternalNote {
 // matchesActiveBusiness is shared with the advisor page + vault.tsx — see
 // @/lib/document-scope. Don't re-declare it here.
 
-/**
- * Action recipes for the navy profile hero. One height, one radius, one type
- * scale for every control in that cluster — those buttons were authored inline
- * one at a time, which is how they drifted into a ragged staircase of four
- * differently-sized pills. Exactly ONE emerald primary lives in the hero (mark
- * funded); everything else is a ghost, and the destructive channel action sits
- * in an overflow menu instead of competing with the daily ones.
- */
-const HERO_ACTION = {
-    base: "inline-flex h-10 items-center justify-center gap-2 rounded-xl px-3.5 text-[10px] font-black uppercase tracking-widest transition-colors disabled:opacity-40 disabled:cursor-not-allowed",
-    primary: "bg-emerald-500 text-white hover:bg-emerald-600 shadow-lg shadow-emerald-500/25",
-    ghost: "border border-white/15 bg-white/10 text-white hover:bg-white/[0.18]",
-    quiet: "border border-white/10 bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white",
-};
-
 export default function UnderwritingClientDetailsPage() {
     const supabase = createClient();
     const router = useRouter();
     const params = useParams();
-    const pathname = usePathname();
     const client_id = params.id as string;
 
-    // This page now only mounts under /underwriting/dashboard/clients/[id].
-    // Admin routes (/admin/uw/dashboard/clients/[id], /admin/advisor/clients/[id])
-    // redirect to /admin/clients/[id], which renders the advisor page instead.
-    // The is_admin_* flags below are kept as a safety net in case the route is
-    // remounted under /admin/* in the future, but they currently never fire.
-    const is_admin_uw_route = pathname?.startsWith("/admin/uw") ?? false;
-    const is_admin_unified_route = pathname?.startsWith("/admin/clients") ?? false;
-    const is_admin_route = is_admin_uw_route || is_admin_unified_route;
-    const is_underwriting_route = pathname?.startsWith("/underwriting") ?? false;
-    // Document upload is open to all staff surfaces of this page (admin already
-    // exposes it via Admin Actions; UW gets its own trigger below).
-    const can_upload = is_admin_route || is_underwriting_route;
-    const queue_path = is_admin_unified_route
-        ? "/admin/dashboard"
-        : is_admin_uw_route
-            ? "/admin/uw/dashboard"
-            : "/underwriting/dashboard";
-    const client_base_path = is_admin_unified_route
-        ? "/admin/clients"
-        : is_admin_uw_route
-            ? "/admin/uw/dashboard/clients"
-            : "/underwriting/dashboard/clients";
+    // This page only mounts under /underwriting/dashboard/clients/[id]. The
+    // admin routes (/admin/uw/dashboard/clients/[id], /admin/advisor/clients/[id])
+    // redirect to /admin/clients/[id], which renders the workspace file instead,
+    // so the old is_admin_* branches here were dead and are gone.
+    const capabilities = useMemo(() => getClientFileCapabilities("underwriting"), []);
+    // Staff-only surface: uploading, requesting and funding-app tools are all
+    // open here. Kept as a variable so the packet props read the same.
+    const can_upload = true;
+    const queue_path = "/underwriting/dashboard";
+    const client_base_path = "/underwriting/dashboard/clients";
+    const [active_tab, set_active_tab] = useFileTab(capabilities.tabs);
 
     const [component_state, set_component_state] = useState<ComponentState>(ComponentState.LOADING);
     const [client_profile, set_client_profile] = useState<ClientProfile | null>(null);
@@ -382,7 +278,6 @@ export default function UnderwritingClientDetailsPage() {
     // Move a submitted file around the lender lifecycle (the status dropdown).
     // Drives status to submitted / approved_by_lender / declined_by_lender and
     // notifies admins so the admin portal mirrors the outcome.
-    type SubmittedLifecycleStatus = 'submitted' | 'approved_by_lender' | 'declined_by_lender';
     async function mark_assignment_status(assignment_id: string, status: SubmittedLifecycleStatus) {
         set_submitting_assignment_id(assignment_id);
         try {
@@ -509,14 +404,6 @@ export default function UnderwritingClientDetailsPage() {
         }
     }
 
-    // Admin-only: client profile edit modal
-    const [is_edit_profile_open, set_is_edit_profile_open] = useState(false);
-
-    // Admin-only: submit vault to underwriting
-    const [is_submit_vault_open, set_is_submit_vault_open] = useState(false);
-    const [is_submitting_vault, set_is_submitting_vault] = useState(false);
-    const [submit_vault_fico, set_submit_vault_fico] = useState("");
-
     // Manual funding application upload
     const [is_funding_app_open, set_is_funding_app_open] = useState(false);
     const [funding_app_file, set_funding_app_file] = useState<File | null>(null);
@@ -526,7 +413,7 @@ export default function UnderwritingClientDetailsPage() {
     // touch the document-request flow.
     const [funding_app_for_lenders, set_funding_app_for_lenders] = useState(false);
 
-    // Admin-only: upload documents on behalf of client (generic multi-type modal)
+    // Upload documents on behalf of the client (generic multi-type modal)
     const [is_doc_upload_open, set_is_doc_upload_open] = useState(false);
     const [doc_upload_code, set_doc_upload_code] = useState("");
     const [doc_upload_files, set_doc_upload_files] = useState<File[]>([]);
@@ -559,10 +446,24 @@ export default function UnderwritingClientDetailsPage() {
     const [requesting_again_code, set_requesting_again_code] = useState<string | null>(null);
     const [approving_code, set_approving_code] = useState<string | null>(null);
 
-    // Admin-only: delete vault confirmation
-    const [is_delete_vault_open, set_is_delete_vault_open] = useState(false);
-    const [delete_confirm_text, set_delete_confirm_text] = useState("");
-    const [is_deleting_vault, set_is_deleting_vault] = useState(false);
+    /**
+     * Category rejection. Underwriting can now bounce a category back to the
+     * client from the Review tab — same server action, same client email and
+     * in-app notice as the advisor surface.
+     */
+    const [is_reject_modal_open, set_is_reject_modal_open] = useState(false);
+    const [reject_doc_type, set_reject_doc_type] = useState<{ code: string; label: string } | null>(null);
+    const [reject_reason, set_reject_reason] = useState("");
+    const [is_rejecting, set_is_rejecting] = useState(false);
+    // The dialog fades out over 200ms after reject_doc_type is cleared; without
+    // a sticky copy the title would flash "Reject document?" on the way out.
+    const reject_label_ref = useRef("document");
+    if (reject_doc_type) reject_label_ref.current = reject_doc_type.label;
+
+    // Which file the Review tab is showing. The workbench keeps its own fallback
+    // selection; this mirrors it only so the auto-selected first file can be
+    // marked viewed (see review_visible_file_id).
+    const [review_selected_file_id, set_review_selected_file_id] = useState<string | null>(null);
 
     // Inline bank analysis viewer modal
     const [is_bank_analysis_viewer_open, set_is_bank_analysis_viewer_open] = useState(false);
@@ -654,6 +555,13 @@ export default function UnderwritingClientDetailsPage() {
         }
         return out;
     }, [required_docs, active_business_id]);
+
+    // Files on the active tab that sit outside the required set — the
+    // "Miscellaneous Files" block at the foot of the packet.
+    const misc_documents = useMemo<UserDocument[]>(
+        () => scoped_documents.filter((d) => !scoped_required_docs.some((r) => r.code === d.category)),
+        [scoped_documents, scoped_required_docs],
+    );
 
     // "Full documentation approved" for the active business tab: every required
     // doc has both an uploaded file and a category approval. Mirrors the
@@ -1416,49 +1324,50 @@ export default function UnderwritingClientDetailsPage() {
         if (outstanding.length === 0) return null;
 
         return (
-            <div className="bg-amber-50 border-2 border-amber-200 rounded-[2rem] p-6 mb-8 shadow-xl shadow-amber-500/5">
-                <div className="flex items-start gap-4">
-                    <div className="bg-amber-100 p-3 rounded-2xl">
-                        <AlertCircle className="h-7 w-7 text-amber-600" />
-                    </div>
-                    <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-3">
-                            <h4 className="text-amber-900 font-black text-sm uppercase tracking-widest">
-                                Vault Health Check: {outstanding.length} Pending Actions
-                            </h4>
-                            <Badge className="bg-amber-500 text-white border-none font-black text-[10px] uppercase px-3">Attention Required</Badge>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
+            <div className="rounded-2xl border border-amber-200/70 bg-amber-50/60 p-4">
+                <div className="flex items-start gap-3">
+                    <AlertCircle className="h-5 w-5 flex-shrink-0 text-amber-600" />
+                    <div className="min-w-0 flex-1">
+                        <h4 className="text-sm font-semibold text-amber-900">
+                            {outstanding.length} outstanding item{outstanding.length === 1 ? "" : "s"}
+                        </h4>
+                        <div className="mt-2 flex flex-wrap gap-2">
                             {outstanding.map(doc => {
-                                const category_docs = get_documents_by_category(doc.code);
-                                const is_pending_upload = category_docs.length === 0;
-                                
+                                const is_pending_upload = get_documents_by_category(doc.code).length === 0;
                                 return (
-                                    <Badge 
+                                    <button
+                                        type="button"
                                         key={doc.code}
-                                        variant="outline"
-                                        className={clsx(
-                                            "cursor-pointer hover:shadow-lg hover:scale-105 active:scale-95 transition-all px-4 py-2 border-2 rounded-xl text-[10px] font-black uppercase tracking-widest",
-                                            is_pending_upload 
-                                                ? "bg-red-50 text-red-500 border-red-100 hover:bg-red-100" 
-                                                : "bg-amber-100/50 text-amber-700 border-amber-200 hover:bg-amber-200"
-                                        )}
+                                        className="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-white px-2.5 py-1 text-xs font-medium text-cb-ink transition-colors hover:bg-cb-cream"
                                         onClick={() => {
+                                            // The categories live on the Documents tab now.
+                                            set_active_tab("documents");
                                             if (!expanded_categories.has(doc.code)) {
                                                 toggle_category_expansion(doc.code);
                                             }
-                                            const el = document.getElementById(`category-${doc.code}`);
-                                            setTimeout(() => el?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
+                                            // Wait a frame for the tab panel to mount before scrolling.
+                                            requestAnimationFrame(() => {
+                                                document
+                                                    .getElementById(`category-${doc.code}`)
+                                                    ?.scrollIntoView({ behavior: "smooth", block: "center" });
+                                            });
                                         }}
                                     >
-                                        {doc.label} {is_pending_upload ? "• Missing" : "• Awaiting Advisor"}
-                                    </Badge>
+                                        <span
+                                            aria-hidden
+                                            className={clsx(
+                                                "h-1.5 w-1.5 flex-shrink-0 rounded-full",
+                                                is_pending_upload ? "bg-rose-500" : "bg-amber-500"
+                                            )}
+                                        />
+                                        {doc.label}
+                                        <span className="text-cb-ink/40">
+                                            {is_pending_upload ? " · missing" : " · awaiting approval"}
+                                        </span>
+                                    </button>
                                 );
                             })}
                         </div>
-                        <p className="text-[10px] font-bold text-amber-600 mt-4 uppercase tracking-[0.2em] opacity-80 italic">
-                            * Advisors must verify all documents before underwriting final review.
-                        </p>
                     </div>
                 </div>
             </div>
@@ -1511,6 +1420,58 @@ export default function UnderwritingClientDetailsPage() {
             toast.error('An unexpected error occurred');
         } finally {
             set_approving_code(null);
+        }
+    }
+
+    /**
+     * Send a category back to the client with a reason.
+     *
+     * The mirror of handle_approve_category: the reviewer looking at the file
+     * is the person who can say what is wrong with it. rejectDocumentCategory
+     * owns the client email + in-app notice, so nothing is duplicated here.
+     */
+    /**
+     * Close the reject dialog and drop the category it was aimed at.
+     *
+     * reject_doc_type used to survive the close, so the NEXT reject that opened
+     * before its own setter landed would have been read against the previous
+     * category. Nothing may outlive the dialog.
+     */
+    function close_reject_modal() {
+        set_is_reject_modal_open(false);
+        set_reject_doc_type(null);
+        set_reject_reason("");
+    }
+
+    async function handle_reject_category() {
+        if (!reject_doc_type) return;
+        if (!reject_reason.trim()) {
+            toast.error("Please provide a reason for rejection");
+            return;
+        }
+
+        set_is_rejecting(true);
+        try {
+            const result = await rejectDocumentCategory(
+                client_id,
+                reject_doc_type.code,
+                reject_doc_type.label,
+                reject_reason,
+                active_business_id,
+            );
+
+            if (result?.success) {
+                toast.success(`${reject_doc_type.label} rejected. The client has been notified.`);
+                close_reject_modal();
+                fetch_client_details();
+            } else {
+                toast.error((result as any)?.error || "Failed to reject category");
+            }
+        } catch (err: any) {
+            console.error("reject category error:", err);
+            toast.error("An unexpected error occurred");
+        } finally {
+            set_is_rejecting(false);
         }
     }
 
@@ -1601,44 +1562,9 @@ export default function UnderwritingClientDetailsPage() {
         }
     }
 
-    function format_file_size(bytes: number): string {
-        if (!bytes) return "0 Bytes";
-        const k = 1024;
-        const sizes = ["Bytes", "KB", "MB", "GB"];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
-    }
-
     // ============================================
-    // ADMIN-ONLY ACTION HANDLERS (advisor-side duties)
-    // Available only when is_admin_route is true.
+    // STAFF UPLOAD HANDLERS (advisor-side duties UW performs on the file)
     // ============================================
-
-    async function handle_admin_submit_vault() {
-        if (!submit_vault_fico) return;
-        set_is_submitting_vault(true);
-        try {
-            const res = await fetch('/api/advisor/clients/submit-vault', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ client_id, credit_score: submit_vault_fico }),
-            });
-            const result = await res.json();
-            if (result.success) {
-                toast.success('Vault submitted to underwriting');
-                set_is_submit_vault_open(false);
-                set_submit_vault_fico("");
-                fetch_client_details();
-            } else {
-                toast.error(result.error || 'Submission failed');
-            }
-        } catch (err: any) {
-            console.error('admin submit vault error:', err);
-            toast.error('An unexpected error occurred');
-        } finally {
-            set_is_submitting_vault(false);
-        }
-    }
 
     async function handle_admin_funding_app_upload() {
         if (!funding_app_file) return;
@@ -1864,24 +1790,50 @@ export default function UnderwritingClientDetailsPage() {
         }
     }
 
-    async function handle_admin_delete_vault() {
-        if (delete_confirm_text !== client_profile?.client_name) return;
-        set_is_deleting_vault(true);
-        try {
-            const result = await deleteClientVault(client_id);
-            if (result.success) {
-                toast.success('Client vault deleted');
-                router.push(queue_path);
-            } else {
-                toast.error(result.error || 'Failed to delete vault');
-            }
-        } catch (err: any) {
-            console.error('admin delete vault error:', err);
-            toast.error('An unexpected error occurred');
-        } finally {
-            set_is_deleting_vault(false);
-        }
+    /**
+     * Mark a file read the moment the reviewer lands on it in the workbench.
+     *
+     * The unread dot is the only cue for "nobody has looked at this yet", so it
+     * has to clear on selection, not on a modal open. Optimistic: the server
+     * write is fire-and-forget because a failed stamp must not block review.
+     */
+    function mark_document_viewed(document_id: string) {
+        const doc = documents.find((d) => d.id === document_id);
+        if (!doc || doc.viewed_at) return;
+        set_documents(prev =>
+            prev.map(d => (d.id === document_id ? { ...d, viewed_at: new Date().toISOString() } : d))
+        );
+        markDocumentAsViewed(document_id).catch((err) => {
+            console.error('markDocumentAsViewed failed (non-fatal):', err);
+        });
     }
+
+    /**
+     * The Review tab's FIRST file is previewed without anyone clicking it.
+     *
+     * ReviewWorkbench's fallback auto-selection deliberately fires no callback
+     * (it is presentational and the caller may drive selection), so the file it
+     * lands on kept its unread dot forever even though a reviewer had it on
+     * screen. Mirror the workbench's default here — first file of the first
+     * non-approved category, else the first category with files — and stamp
+     * whatever the tab is actually showing. The workbench stays untouched.
+     */
+    const review_visible_file_id = useMemo(() => {
+        if (review_selected_file_id) return review_selected_file_id;
+        const with_files = scoped_required_docs
+            .map((r) => ({ code: r.code, files: scoped_documents.filter((d) => d.category === r.code) }))
+            .filter((c) => c.files.length > 0);
+        const first_open = with_files.find((c) => !approvals.has(c.code));
+        return (first_open ?? with_files[0])?.files[0]?.id ?? null;
+    }, [review_selected_file_id, scoped_required_docs, scoped_documents, approvals]);
+
+    useEffect(() => {
+        if (active_tab !== "review" || !review_visible_file_id) return;
+        // mark_document_viewed already no-ops on an already-viewed doc, so this
+        // re-runs harmlessly; only the id and the tab matter as keys.
+        mark_document_viewed(review_visible_file_id);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [active_tab, review_visible_file_id]);
 
     /**
      * handle_rename: Updates a document's custom label
@@ -1935,790 +1887,11 @@ export default function UnderwritingClientDetailsPage() {
         }
     }
 
-    /**
-     * render_document_card: Renders individual document card with download/preview for underwriting
-     */
-    function render_document_card(doc: UserDocument, options?: { selectable?: boolean }) {
-        const is_selectable = options?.selectable ?? false;
-        const is_selected = selected_document_ids.has(doc.id);
-        // Only ever a hint — it comes from parsing the original filename, and
-        // every document uploaded before that name was recorded returns null.
-        const period = getDocumentPeriod(doc);
-
-        return (
-            <Card
-                key={doc.id}
-                className={clsx(
-                    "hover:shadow-md transition-shadow group bg-white",
-                    is_selected ? "border-emerald-300 ring-1 ring-emerald-200" : "border-slate-100"
-                )}
-            >
-                <CardContent className="p-4">
-                    <div className="flex items-start justify-between">
-                        <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-2">
-                                {is_selectable && (
-                                    <Checkbox
-                                        checked={is_selected}
-                                        onCheckedChange={() => toggle_document_selection(doc.id)}
-                                        aria-label={`Select ${doc.custom_label || doc.name}`}
-                                        className="flex-shrink-0"
-                                    />
-                                )}
-                                <FileText className="h-5 w-5 text-slate-300 flex-shrink-0" />
-                                <h4 className="font-bold text-slate-900 truncate">
-                                    {doc.custom_label || doc.name}
-                                </h4>
-                                {period && (
-                                    <Badge variant="outline" className="text-[8px] font-black uppercase px-2 h-4 border-none shrink-0 bg-indigo-50 text-indigo-500">
-                                        {period.label}
-                                    </Badge>
-                                )}
-                                {doc.uploaded_by_role && (
-                                    <Badge variant="outline" className={clsx(
-                                        "text-[8px] font-black uppercase px-2 h-4 border-none shrink-0",
-                                        doc.uploaded_by_role === 'advisor' ? "bg-blue-50 text-blue-500" : "bg-slate-50 text-slate-400"
-                                    )}>
-                                        {doc.uploaded_by_role === 'advisor' ? "By Advisor" : "By Client"}
-                                    </Badge>
-                                )}
-                                {!doc.viewed_at && (
-                                    <Badge className="bg-emerald-500 text-white border-none text-[8px] font-black uppercase px-2 h-4 scale-90 origin-left animate-pulse">
-                                        NEW
-                                    </Badge>
-                                )}
-                            </div>
-
-                            <div className="space-y-1 text-xs text-slate-500">
-                                <p className="truncate">{doc.name}</p>
-                                <div className="flex items-center gap-3 font-bold opacity-60">
-                                    <span>{format_file_size(doc.size)}</span>
-                                    <span>•</span>
-                                    <span>Uploaded {format(new Date(doc.upload_date), "MMM d, yyyy")}</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="flex items-center gap-2 ml-4 flex-shrink-0">
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => set_preview_modal({ isOpen: true, doc })}
-                                className="h-8 w-8 p-0 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
-                                title="Preview Document"
-                            >
-                                <Eye className="h-4 w-4" />
-                            </Button>
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => download_document(doc)}
-                                className="h-8 w-8 p-0 text-slate-400 hover:text-slate-900"
-                                title="Download File"
-                            >
-                                <Download className="h-4 w-4" />
-                            </Button>
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => set_renaming_file({ id: doc.id, label: doc.custom_label || doc.name })}
-                                className="h-8 w-8 p-0 text-slate-400 hover:text-slate-900"
-                                title="Rename Document"
-                            >
-                                <Pencil className="h-3.5 w-3.5" />
-                            </Button>
-                            {can_upload && (
-                                <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => set_file_to_delete(doc)}
-                                    className="h-8 w-8 p-0 text-slate-400 hover:text-red-600 hover:bg-red-50"
-                                    title="Delete Document"
-                                >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                </Button>
-                            )}
-                        </div>
-                    </div>
-                </CardContent>
-            </Card>
-        );
-    }
-
-    /**
-     * render_document_category: Renders a category section with its documents for underwriting
-     */
-    /**
-     * render_group_sections: a category body, cut into one section per group.
-     *
-     * This is the whole point of the feature for underwriting. Flat, a funded
-     * file's statements are one undifferentiated scroll (124 rows on the
-     * O'Rourke file) with no way to tell which account any given PDF is from —
-     * and its 132 tax returns are the same problem wearing a different hat.
-     * Sectioned, that list reads as four runs of twelve (or five years of
-     * returns), each downloadable on its own — which is also the shape a lender
-     * wants the packet in.
-     *
-     * The Ungrouped section is where every pre-existing file starts, so it
-     * renders with its checkboxes ready.
-     */
-    function render_group_sections(doc_code: string, category_docs: UserDocument[]) {
-        const field_groups = groupsForDocCode(document_groups, doc_code);
-        const config = getGroupConfig(doc_code);
-        // includeEmptyGroups: this is the management surface. A group with
-        // nothing filed under it still has to be visible, because invisible
-        // here means undeletable — which is exactly how a mistyped or test
-        // group becomes permanent.
-        const sections = groupDocuments(category_docs, field_groups, {
-            includeEmptyGroups: can_upload,
-        });
-        const selected_count = selected_document_ids.size;
-
-        return (
-            <div className="space-y-4">
-                {/* Where the next upload goes. Set before hitting Upload, so a
-                    twelve-file drop lands sorted instead of needing a second pass. */}
-                {can_upload && (
-                    <div className="rounded-2xl border border-slate-200 bg-white/70 p-4">
-                        <DocumentGroupPicker
-                            docCode={doc_code}
-                            businessProfileId={active_business_id}
-                            groups={document_groups}
-                            value={upload_group_id}
-                            onChange={set_upload_group_id}
-                            onGroupCreated={add_document_group}
-                            tone="slate"
-                            helpText={`New uploads in this category are filed under this ${config.noun.toLowerCase()}. Upload one at a time.`}
-                        />
-                    </div>
-                )}
-
-                {sections.map(group => {
-                    const group_ids = group.documents.map(d => d.id);
-                    const all_selected = group_ids.every(id => selected_document_ids.has(id));
-                    const is_unassigned = group.key === UNGROUPED_KEY;
-
-                    return (
-                        <div
-                            key={group.key}
-                            className={clsx(
-                                "rounded-2xl border overflow-hidden",
-                                // Ungrouped is the work queue, so it reads as
-                                // something to act on rather than as a peer of
-                                // the organised sections.
-                                is_unassigned
-                                    ? "border-dashed border-slate-300 bg-slate-50/60"
-                                    : "border-slate-200 bg-white"
-                            )}
-                        >
-                            <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-slate-100">
-                                <div className="flex items-center gap-3 min-w-0">
-                                    {/* An empty group has nothing to select. */}
-                                    {can_upload && group_ids.length > 0 && (
-                                        <Checkbox
-                                            checked={all_selected}
-                                            onCheckedChange={(checked) =>
-                                                toggle_document_section(group_ids, checked === true)
-                                            }
-                                            aria-label={`Select all in ${group.label}`}
-                                        />
-                                    )}
-                                    <div className="min-w-0">
-                                        <p className={clsx(
-                                            "font-black uppercase tracking-tighter truncate",
-                                            is_unassigned ? "text-slate-500" : "text-slate-900"
-                                        )}>
-                                            {group.label}
-                                        </p>
-                                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                                            {group.documents.length === 0
-                                                ? 'Empty · no files yet'
-                                                : `${group.documents.length} file${group.documents.length === 1 ? '' : 's'}`}
-                                            {group.group?.subtype && ` · ${group.group.subtype}`}
-                                            {is_unassigned && ' · needs sorting'}
-                                        </p>
-                                    </div>
-                                </div>
-
-                                <div className="flex items-center gap-2 shrink-0">
-                                    {group.documents.length > 1 && (
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
-                                            disabled={!!is_zipping}
-                                            onClick={() => download_all_documents(group.documents)}
-                                            className="border-emerald-200 text-emerald-600 hover:bg-emerald-50 rounded-xl h-8 px-3 font-black text-[9px] uppercase tracking-widest disabled:opacity-50"
-                                        >
-                                            {is_zipping ? (
-                                                <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                                            ) : (
-                                                <Download className="h-3.5 w-3.5 mr-1" />
-                                            )}
-                                            Zip {group.documents.length}
-                                        </Button>
-                                    )}
-
-                                    {/* Fix a typo in the name or the identifier.
-                                        The API re-labels this group's files too,
-                                        so the correction reaches the download
-                                        name and the lender page. */}
-                                    {can_upload && group.group && (
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => {
-                                                const g = group.group as DocumentGroup;
-                                                set_group_edit_error(null);
-                                                set_group_being_edited({
-                                                    id: g.id,
-                                                    doc_code: g.doc_code,
-                                                    name: g.name,
-                                                    identifier: g.identifier ?? '',
-                                                    subtype: g.subtype ?? '',
-                                                    nickname: g.nickname ?? '',
-                                                });
-                                            }}
-                                            className="h-8 w-8 p-0 text-slate-300 hover:text-slate-900"
-                                            title={`Edit this ${config.noun.toLowerCase()}`}
-                                        >
-                                            <Pencil className="h-3.5 w-3.5" />
-                                        </Button>
-                                    )}
-
-                                    {/* Delete the GROUP, never the files. On a
-                                        loaded group the API answers 409 with
-                                        the real count, which opens the confirm
-                                        below — nothing is deleted on this click. */}
-                                    {can_upload && group.group && (
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() =>
-                                                handle_delete_group(group.group!.id, group.label)
-                                            }
-                                            className="h-8 w-8 p-0 text-slate-300 hover:text-red-600 hover:bg-red-50"
-                                            title={`Delete this ${config.noun.toLowerCase()} (files move to Ungrouped)`}
-                                        >
-                                            <Trash2 className="h-3.5 w-3.5" />
-                                        </Button>
-                                    )}
-                                </div>
-                            </div>
-
-                            {group.documents.length > 0 && (
-                                <div className="p-4 space-y-3">
-                                    {group.documents.map(doc =>
-                                        render_document_card(doc, { selectable: can_upload })
-                                    )}
-                                </div>
-                            )}
-                        </div>
-                    );
-                })}
-
-                {/* The assign bar, pinned to the VIEWPORT.
-                    Not `sticky`: the category card wrapping this is
-                    `overflow-hidden`, which resolves sticky against a box that
-                    never scrolls — the bar then sits in normal flow at the
-                    bottom of a 133-row list, i.e. nowhere the user can see it.
-                    `fixed` is correct here anyway: the selection is made while
-                    scrolling a long list, so the action has to follow the eye.
-                    Nothing in the ancestor chain sets transform/filter, so no
-                    containing block hijacks it. */}
-                {can_upload && selected_count > 0 && (
-                    <div className="fixed bottom-6 left-1/2 z-50 flex w-[min(92vw,44rem)] -translate-x-1/2 flex-wrap items-center gap-3 rounded-2xl border border-slate-900 bg-slate-900 px-4 py-3 shadow-2xl">
-                        <span className="shrink-0 text-[10px] font-black uppercase tracking-widest text-white">
-                            {selected_count} selected
-                        </span>
-                        <span className="shrink-0 text-[10px] font-black uppercase tracking-widest text-white/40">
-                            Move to
-                        </span>
-                        <select
-                            value={assign_target_group_id ?? ""}
-                            onChange={(e) => set_assign_target_group_id(e.target.value || null)}
-                            disabled={is_assigning_documents}
-                            className="min-w-[12rem] flex-1 rounded-lg border-0 bg-white/10 px-3 py-1.5 text-xs font-semibold text-white outline-none disabled:opacity-60"
-                        >
-                            {/* Listed first so the dropdown always has a valid
-                                option, but it is the un-do, not the default —
-                                the target is seeded from the group picker above
-                                the moment a selection starts. */}
-                            <option value="" className="text-slate-900">Ungrouped (remove from group)</option>
-                            {/* This FIELD's groups only. Offering another
-                                field's would be an assign the API rejects as
-                                wrong_field. */}
-                            {field_groups.filter(g => g.is_active).map(group_option => (
-                                <option key={group_option.id} value={group_option.id} className="text-slate-900">
-                                    {formatGroupLabel(group_option)}
-                                </option>
-                            ))}
-                        </select>
-                        <Button
-                            size="sm"
-                            disabled={is_assigning_documents}
-                            onClick={() => handle_assign_documents(assign_target_group_id)}
-                            className="shrink-0 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl h-8 px-4 font-black text-[9px] uppercase tracking-widest"
-                        >
-                            {is_assigning_documents
-                                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                : `Move ${selected_count} file${selected_count === 1 ? '' : 's'}`}
-                        </Button>
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            disabled={is_assigning_documents}
-                            onClick={() => set_selected_document_ids(new Set())}
-                            className="text-white/60 hover:text-white hover:bg-white/10 rounded-xl h-8 px-3 font-black text-[9px] uppercase tracking-widest"
-                        >
-                            Clear
-                        </Button>
-                    </div>
-                )}
-            </div>
-        );
-    }
-
-    /**
-     * render_document_category: Renders a category section with its documents for underwriting
-     */
-    function render_document_category(doc_type: { code: string; label: string }) {
-        const category_docs = scoped_documents.filter(d => d.category === doc_type.code);
-        const has_docs = category_docs.length > 0;
-        const is_approved = approvals.has(doc_type.code);
-        const is_expanded = expanded_categories.has(doc_type.code);
-        // A field that subdivides renders as sections; everything else stays the
-        // flat list it has always been. This is the MANAGEMENT surface, so the
-        // sectioned view also appears on a field with no groups yet — that empty
-        // state is where the group picker and the bulk-file bar live, and
-        // without it there is nowhere to start organising from.
-        const is_grouped_category = offersGrouping(doc_type.code, {
-            groupCount: groupsForDocCode(document_groups, doc_type.code).length,
-        });
-
-        // Define status theme
-        const status = is_approved ? 'approved' : has_docs ? 'uploaded' : 'pending';
-        
-        const themes = {
-            approved: "bg-emerald-50 border-emerald-200",
-            uploaded: "bg-amber-50 border-amber-200",
-            pending: "bg-slate-50 border-slate-100 opacity-60"
-        };
-
-        return (
-            <div
-                key={doc_type.code}
-                id={`category-${doc_type.code}`}
-                className={clsx(
-                    "border rounded-[2rem] transition-all duration-300 shadow-sm overflow-hidden",
-                    themes[status]
-                )}
-            >
-                {/* Category Header */}
-                <div 
-                    className="flex items-center justify-between p-5 cursor-pointer hover:bg-black/[0.02] active:scale-[0.995] transition-all"
-                    onClick={() => toggle_category_expansion(doc_type.code)}
-                >
-                    <div className="flex items-center gap-4">
-                        <div className={clsx(
-                            "w-12 h-12 rounded-2xl flex items-center justify-center shadow-sm transition-colors",
-                            status === 'approved' ? "bg-emerald-500 text-white" :
-                            status === 'uploaded' ? "bg-amber-500 text-white" : "bg-white border border-slate-200 text-slate-300"
-                        )}>
-                            {status === 'approved' ? <ShieldCheck className="h-6 w-6" /> :
-                             status === 'uploaded' ? <CheckCircle2 className="h-6 w-6" /> : <Clock className="h-6 w-6" />}
-                        </div>
-                        <div>
-                            <h3 className="font-black text-slate-900 leading-tight uppercase tracking-tighter">{doc_type.label}</h3>
-                            <div className="flex items-center gap-2 mt-1">
-                                {/* "Verified", not "Advisor Verified": UW and admin
-                                    approve here too, and a staff upload is approved
-                                    on the spot. The approvals table records who
-                                    (approved_by) but not their role, so naming one
-                                    role in the badge was already a guess. */}
-                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                                    {status === 'approved' ? 'Verified' :
-                                     status === 'uploaded' ? 'Ready for Audit' : 'Awaiting Submission'}
-                                </p>
-                                {has_docs && (
-                                    <>
-                                        <div className="w-1 h-1 rounded-full bg-slate-300" />
-                                        <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest">
-                                            {category_docs.length} File{category_docs.length > 1 ? 's' : ''}
-                                        </p>
-                                    </>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                        {/* Approve — only while files are sitting unreviewed. */}
-                        {can_upload && status === 'uploaded' && (
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                disabled={approving_code === doc_type.code}
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    handle_approve_category(doc_type);
-                                }}
-                                className="border-emerald-200 text-emerald-600 hover:bg-emerald-50 rounded-xl h-8 px-3 font-black text-[9px] uppercase tracking-widest"
-                            >
-                                {approving_code === doc_type.code ? (
-                                    <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                                ) : (
-                                    <ShieldCheck className="h-3.5 w-3.5 mr-1" />
-                                )}
-                                Approve
-                            </Button>
-                        )}
-                        {/* Request this doc from the client + upload it (admin + UW),
-                            mirroring the advisor view */}
-                        {can_upload && (
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                disabled={requesting_again_code === doc_type.code}
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    handle_request_again(doc_type);
-                                }}
-                                className="border-slate-200 text-slate-600 hover:bg-slate-50 rounded-xl h-8 px-3 font-black text-[9px] uppercase tracking-widest"
-                            >
-                                {requesting_again_code === doc_type.code ? (
-                                    <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                                ) : (
-                                    <Send className="h-3.5 w-3.5 mr-1" />
-                                )}
-                                Request
-                            </Button>
-                        )}
-                        {can_upload && (
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                disabled={inline_uploading_code === doc_type.code}
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    trigger_category_upload(doc_type.code);
-                                }}
-                                className="border-slate-200 text-slate-600 hover:bg-slate-50 rounded-xl h-8 px-3 font-black text-[9px] uppercase tracking-widest"
-                            >
-                                {inline_uploading_code === doc_type.code ? (
-                                    <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                                ) : (
-                                    <UploadCloud className="h-3.5 w-3.5 mr-1" />
-                                )}
-                                Upload
-                            </Button>
-                        )}
-
-                        {/* Download All — one ZIP, not N browser downloads. */}
-                        {has_docs && category_docs.length > 1 && (
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                disabled={!!is_zipping}
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    download_all_documents(category_docs);
-                                }}
-                                className="border-emerald-200 text-emerald-600 hover:bg-emerald-50 rounded-xl h-8 px-3 font-black text-[9px] uppercase tracking-widest shadow-lg shadow-emerald-500/10 disabled:opacity-50"
-                            >
-                                {is_zipping ? (
-                                    <>
-                                        <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                                        {is_zipping.completed}/{is_zipping.total}
-                                    </>
-                                ) : (
-                                    <>
-                                        <Download className="h-3.5 w-3.5 mr-1" />
-                                        Zip All ({category_docs.length})
-                                    </>
-                                )}
-                            </Button>
-                        )}
-
-                        <div className="w-px h-6 bg-slate-200 mx-1" />
-                        
-                        {is_expanded ? <ChevronUp className="h-5 w-5 text-slate-400" /> : <ChevronDown className="h-5 w-5 text-slate-400" />}
-                    </div>
-                </div>
-
-                {/* Docs List if expanded */}
-                {is_expanded && has_docs && (
-                    <div className="px-5 pb-5 space-y-3">
-                        {is_grouped_category
-                            ? render_group_sections(doc_type.code, category_docs)
-                            : category_docs.map(doc => render_document_card(doc))}
-                    </div>
-                )}
-
-                {/* The group picker is the only thing worth showing in an empty
-                    subdividable category — it lets UW set the groups up before
-                    the client uploads anything. */}
-                {is_expanded && !has_docs && is_grouped_category && can_upload && (
-                    <div className="px-5 pb-5">
-                        <div className="rounded-2xl border border-slate-200 bg-white/70 p-4">
-                            <DocumentGroupPicker
-                                docCode={doc_type.code}
-                                businessProfileId={active_business_id}
-                                groups={document_groups}
-                                value={upload_group_id}
-                                onChange={set_upload_group_id}
-                                onGroupCreated={add_document_group}
-                                tone="slate"
-                                helpText="Set these up now and uploads will file themselves."
-                            />
-                        </div>
-                    </div>
-                )}
-            </div>
-        );
-    }
-
-    /**
-     * render_lender_assignments: the lenders on this file.
-     *
-     * Renders even with NONE on it. It used to return null on an empty list,
-     * which hid the whole card — and with it the Add Lender button — on exactly
-     * the file that needs it: the common case is an admin naming the lender and
-     * UW attaching and contacting it, no match run at all. The empty card is
-     * where that starts, so it has to be on screen.
-     */
-    function render_lender_assignments() {
-        const ready_count = active_round_assignments.filter(a => derive_lender_row_state(a) === 'ready_to_submit').length;
-        const submitted_count = active_round_assignments.filter(a => derive_lender_row_state(a) === 'submitted').length;
-
-        const STATE_BADGE: Record<LenderRowState, { label: string; classes: string }> = {
-            rejected_by_matcher: { label: 'Rejected (matcher)', classes: 'bg-rose-100 text-rose-700 hover:bg-rose-100' },
-            removed_by_admin:    { label: 'Removed (admin)',     classes: 'bg-orange-100 text-orange-700 hover:bg-orange-100' },
-            ready_to_submit:     { label: 'Ready to submit',     classes: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100' },
-            submitted:           { label: 'Submitted · awaiting lender', classes: 'bg-blue-100 text-blue-700 hover:bg-blue-100' },
-            approved_by_lender:  { label: 'Approved by lender',  classes: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100' },
-            declined_by_lender:  { label: 'Declined by lender',  classes: 'bg-rose-100 text-rose-700 hover:bg-rose-100' },
-            funded:              { label: 'Funded',              classes: 'bg-violet-100 text-violet-700 hover:bg-violet-100' },
-        };
-
-        return (
-            <div>
-                <div className="px-5 py-4 border-b border-slate-100 flex flex-row items-center justify-between bg-slate-50/30 flex-wrap gap-3">
-                    <div className="flex items-center gap-3">
-                        <div className="bg-emerald-500/10 p-2 rounded-xl">
-                            <Star className="h-4 w-4 text-emerald-600" />
-                        </div>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                            {ready_count} Ready · {submitted_count} Submitted · {active_round_assignments.length} Total
-                        </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => set_is_bank_analysis_viewer_open(true)}
-                            className="h-8 rounded-xl text-[9px] font-black uppercase tracking-widest border-slate-200 hover:bg-slate-50"
-                        >
-                            <BarChart3 className="w-3 h-3 mr-1.5" />
-                            View Bank Analysis
-                        </Button>
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => router.push(
-                                is_admin_route
-                                    ? `/admin/uw/lender-match?client=${client_id}`
-                                    : `/underwriting/lender-match?client=${client_id}`
-                            )}
-                            className="h-8 rounded-xl text-[9px] font-black uppercase tracking-widest border-slate-200 hover:bg-slate-50"
-                        >
-                            <ExternalLink className="w-3 h-3 mr-1.5" />
-                            Match Tool
-                        </Button>
-                        <UwAddLenderButton
-                            clientId={client_id}
-                            businessProfileId={active_business_id}
-                            assignedLenderNames={active_round_assignments.map((a) => a.lender_name)}
-                            onAdded={fetch_lender_assignments}
-                        />
-                        <ShareWithLenderButton
-                            clientId={client_id}
-                            businessProfileId={active_business_id}
-                            triggerLabel="Share"
-                            lenderOptions={active_round_assignments.map((a) => a.lender_name)}
-                            className="h-8 rounded-xl text-[9px] font-black uppercase tracking-widest border border-slate-200 hover:bg-slate-50 text-slate-700 px-3"
-                        />
-                    </div>
-                </div>
-                <div>
-                    {active_round_assignments.length === 0 && (
-                        <div className="p-10 text-center">
-                            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">
-                                No lenders on this file yet
-                            </p>
-                            <p className="text-[11px] font-medium text-slate-400 mt-2">
-                                Add the lender directly if you already know who this deal is going to —
-                                no match run or bank analysis needed. Or open the match tool to score the file.
-                            </p>
-                        </div>
-                    )}
-                    <div className="divide-y divide-slate-100">
-                        {active_round_assignments.map((assign) => {
-                            const row_state = derive_lender_row_state(assign);
-                            const badge = STATE_BADGE[row_state];
-                            const is_submitting_this = submitting_assignment_id === assign.id;
-                            // Rows that are out the door (and not yet funded) get the inline
-                            // status dropdown instead of a static badge.
-                            const is_lifecycle_row =
-                                row_state === 'submitted' ||
-                                row_state === 'approved_by_lender' ||
-                                row_state === 'declined_by_lender';
-                            const tile_classes =
-                                row_state === 'submitted'           ? 'bg-blue-500 text-white' :
-                                row_state === 'approved_by_lender'  ? 'bg-emerald-500 text-white' :
-                                row_state === 'ready_to_submit'     ? 'bg-emerald-500 text-white' :
-                                row_state === 'funded'              ? 'bg-violet-500 text-white' :
-                                row_state === 'removed_by_admin'    ? 'bg-orange-500 text-white' :
-                                                                       'bg-rose-500 text-white';
-                            const tile_glyph =
-                                row_state === 'submitted'           ? '→' :
-                                row_state === 'approved_by_lender'  ? '✓' :
-                                row_state === 'ready_to_submit'     ? '✓' :
-                                row_state === 'funded'              ? '★' :
-                                                                       '✕';
-
-                            return (
-                                <div key={assign.id} className="p-4 hover:bg-slate-50/50 transition-all group">
-                                  <div className="flex items-center justify-between gap-4">
-                                    <div className="flex items-center gap-4 min-w-0">
-                                        <div className={clsx(
-                                            "w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm shadow-sm shrink-0",
-                                            tile_classes
-                                        )}>
-                                            {tile_glyph}
-                                        </div>
-                                        <div className="min-w-0">
-                                            <div className="flex items-center gap-2 flex-wrap">
-                                                <p className="font-black text-slate-900 group-hover:text-emerald-600 transition-colors uppercase tracking-tight truncate">
-                                                    {assign.lender_name}
-                                                </p>
-                                                {assign.specialty && (
-                                                    <Badge variant="outline" className="text-[8px] font-black tracking-widest uppercase py-0 px-2 border-slate-200 text-slate-400">
-                                                        {assign.specialty}
-                                                    </Badge>
-                                                )}
-                                            </div>
-                                            <div className="flex items-center gap-3 mt-1 text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-                                                <span>{assign.payment_type || 'Custom Terms'}</span>
-                                                {assign.min_funding && (
-                                                    <>
-                                                        <span className="opacity-30">•</span>
-                                                        <span>Min: ${(assign.min_funding / 1000).toFixed(0)}k</span>
-                                                    </>
-                                                )}
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center gap-3 shrink-0">
-                                        <LenderApiRowActions
-                                            assignmentId={assign.id}
-                                            assignmentStatus={assign.status}
-                                            summary={lender_api_summaries[assign.id]}
-                                            onChanged={async () => {
-                                                await Promise.all([fetch_lender_assignments(), reload_lender_api()]);
-                                            }}
-                                        />
-                                        {row_state === 'ready_to_submit' && (
-                                            <Button
-                                                size="sm"
-                                                disabled={is_submitting_this}
-                                                onClick={() => mark_assignment_submitted(assign.id)}
-                                                className="h-8 rounded-lg text-[10px] font-black uppercase tracking-widest bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm"
-                                            >
-                                                {is_submitting_this ? (
-                                                    <><Loader2 className="h-3 w-3 mr-1 animate-spin" />Submitting</>
-                                                ) : (
-                                                    'Mark as Submitted'
-                                                )}
-                                            </Button>
-                                        )}
-                                        {/* A lender that has answered can be worked again: get what it
-                                            asked for, send the same file back. Separate from the status
-                                            dropdown on purpose — the dropdown is for correcting a
-                                            misclick, and only this button retires the recorded response. */}
-                                        {(row_state === 'approved_by_lender' || row_state === 'declined_by_lender') && (
-                                            <Button
-                                                size="sm"
-                                                variant="outline"
-                                                disabled={is_submitting_this}
-                                                onClick={() => {
-                                                    set_resubmit_note("");
-                                                    set_resubmit_target({ id: assign.id, lender_name: assign.lender_name, status: assign.status });
-                                                }}
-                                                className="h-8 rounded-lg text-[10px] font-black uppercase tracking-widest border-slate-200 text-slate-600 hover:text-emerald-600 hover:border-emerald-300"
-                                            >
-                                                <RotateCcw className="h-3 w-3 mr-1" />
-                                                Re-submit
-                                            </Button>
-                                        )}
-                                        <div className="text-right flex flex-col items-end">
-                                            {is_lifecycle_row ? (
-                                                // Submitted-lifecycle rows: the status pill is a dropdown so
-                                                // UW can record the lender's verdict (or correct it) inline.
-                                                <div className="relative inline-flex items-center">
-                                                    <select
-                                                        value={assign.status}
-                                                        disabled={is_submitting_this}
-                                                        onChange={(e) => mark_assignment_status(assign.id, e.target.value as 'submitted' | 'approved_by_lender' | 'declined_by_lender')}
-                                                        className={clsx(
-                                                            "appearance-none font-black text-[9px] uppercase tracking-widest pl-3 pr-7 py-1.5 rounded-md border-0 cursor-pointer outline-none disabled:opacity-60",
-                                                            badge.classes
-                                                        )}
-                                                    >
-                                                        <option value="submitted">Submitted · Awaiting Lender</option>
-                                                        <option value="approved_by_lender">Lender Approved</option>
-                                                        <option value="declined_by_lender">Lender Declined</option>
-                                                    </select>
-                                                    {is_submitting_this ? (
-                                                        <Loader2 className="h-3 w-3 animate-spin absolute right-2 pointer-events-none" />
-                                                    ) : (
-                                                        <ChevronDown className="h-3 w-3 absolute right-2 pointer-events-none opacity-70" />
-                                                    )}
-                                                </div>
-                                            ) : (
-                                                <Badge className={clsx(
-                                                    "font-black text-[9px] uppercase tracking-widest px-3 py-1",
-                                                    badge.classes
-                                                )}>
-                                                    {badge.label}
-                                                </Badge>
-                                            )}
-                                            <p className="text-[8px] font-bold text-slate-300 mt-1 uppercase tracking-tighter">
-                                                Assigned {format(new Date(assign.assigned_at), 'MMM d')}
-                                            </p>
-                                        </div>
-                                    </div>
-                                  </div>
-                                  {is_lifecycle_row && (
-                                    <LenderResponsePanel
-                                        key={`${assign.id}:${response_panel_epoch[assign.id] ?? 0}`}
-                                        assignmentId={assign.id}
-                                        status={assign.status}
-                                    />
-                                  )}
-                                </div>
-                            );
-                        })}
-                    </div>
-                </div>
-            </div>
-        );
-    }
-
     if (component_state === ComponentState.LOADING) {
         return (
             <div className="flex flex-col items-center justify-center py-20">
                 <Loader2 className="h-12 w-12 text-emerald-500 animate-spin mb-4" />
-                <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">Loading Review Profile...</p>
+                <p className="text-sm text-cb-ink/50">Loading review profile…</p>
             </div>
         );
     }
@@ -2726,11 +1899,11 @@ export default function UnderwritingClientDetailsPage() {
     if (component_state === ComponentState.ERROR) {
         return (
             <div className="max-w-md mx-auto py-20">
-                <Card className="bg-red-50 border-red-100 p-8 text-center rounded-[2.5rem]">
-                    <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
-                    <h3 className="text-xl font-black text-slate-900 uppercase tracking-tighter mb-2">Review Error</h3>
-                    <p className="text-slate-500 font-bold mb-6">{error_message}</p>
-                    <Button onClick={() => router.push("/underwriting/dashboard")} variant="outline">Back to Queue</Button>
+                <Card className="rounded-2xl border-rose-100 bg-rose-50 p-8 text-center">
+                    <AlertCircle className="h-10 w-10 text-rose-500 mx-auto mb-4" />
+                    <h3 className="font-manrope text-lg font-bold text-cb-ink mb-2">Couldn&apos;t open this file</h3>
+                    <p className="text-sm text-cb-ink/60 mb-6">{error_message}</p>
+                    <Button onClick={() => router.push(queue_path)} variant="outline">Back to queue</Button>
                 </Card>
             </div>
         );
@@ -2739,76 +1912,600 @@ export default function UnderwritingClientDetailsPage() {
     if (!client_profile) return null;
 
     // Doc completion is computed against the active business tab. Client-scoped
-    // docs surface on every tab via the scoped_* memos, so the completion
-    // percentage is consistent across tabs for those rows.
-    const completed_count = scoped_required_docs.filter(r => scoped_documents.some(d => d.category === r.code)).length;
-    const total_count = scoped_required_docs.length;
-    const completion_pct = Math.round((completed_count / (total_count || 1)) * 100);
+    // docs surface on every tab via the scoped_* memos, so the numbers are
+    // consistent across tabs for those rows. Approval-based, same as the
+    // workspace file: an uploaded-but-unapproved category is not done.
+    const total_required = scoped_required_docs.length;
+    const completed_categories = scoped_required_docs.filter(r => approvals.has(r.code)).length;
+    const completion_percentage = total_required > 0
+        ? Math.round((completed_categories / total_required) * 100)
+        : 100;
+
+    // ── Per-business display values ─────────────────────────────────────
+    // Non-primary businesses carry their own profile + funding ask (flattened
+    // onto the tab row); the primary business falls back to the vault row.
+    const active_business = businesses.find((b) => b.id === active_business_id);
+    const use_biz = !!active_business && !active_business.is_primary;
+    const displayed = {
+        capital_requested: use_biz ? (active_business!.capital_requested ?? null) : client_profile.capital_requested,
+        avg_monthly_deposits: use_biz ? (active_business!.avg_monthly_deposits ?? null) : client_profile.avg_monthly_deposits,
+        business_start_date: use_biz ? (active_business!.business_start_date ?? null) : client_profile.business_start_date,
+        legal_entity_type: use_biz ? (active_business!.legal_entity_type ?? null) : client_profile.legal_entity_type,
+        industry: active_business?.industry || client_profile.industry,
+        proposed_loan_type: use_biz ? (active_business!.proposed_loan_type ?? null) : client_profile.proposed_loan_type,
+        loan_purpose: use_biz ? (active_business!.loan_purpose ?? null) : client_profile.loan_purpose,
+        employees_count: use_biz ? (active_business!.employees_count ?? null) : (client_profile.employees_count ?? null),
+        company_city: use_biz ? (active_business!.company_city ?? null) : client_profile.company_city,
+        company_state: use_biz ? (active_business!.company_state ?? null) : client_profile.company_state,
+    };
+
+    // Owners live on the vault row (client-level), so they do not rescope per
+    // business. Blank slots are dropped rather than rendered as empty rows.
+    const owner_facts: { label: string; value: string | null }[] = [
+        { name: client_profile.owner_1_name, pct: client_profile.owner_1_ownership_pct },
+        { name: client_profile.owner_2_name, pct: client_profile.owner_2_ownership_pct },
+        { name: client_profile.owner_3_name, pct: client_profile.owner_3_ownership_pct },
+        { name: client_profile.owner_4_name, pct: client_profile.owner_4_ownership_pct },
+        { name: client_profile.owner_5_name, pct: client_profile.owner_5_ownership_pct },
+    ]
+        .filter((o): o is { name: string; pct: number | null } => !!o.name)
+        // Label is the slot, not the name: two owners can share a surname and a
+        // FactList keys on the label.
+        .map((o, i) => ({
+            label: `Owner ${i + 1}`,
+            value: o.pct === null || o.pct === undefined ? o.name : `${o.name} · ${o.pct}%`,
+        }));
+    if (owner_facts.length === 0) {
+        owner_facts.push({ label: "Owners", value: null });
+    }
+    owner_facts.unshift({ label: "Number of owners", value: client_profile.number_of_owners || null });
+
+    // ── Status line inputs ──────────────────────────────────────────────
+    const last_upload = documents.length > 0
+        ? documents.reduce((a, b) => new Date(a.upload_date) > new Date(b.upload_date) ? a : b).upload_date
+        : null;
+    const upload_baseline = last_upload ?? client_profile.created_at;
+    const days_since_last_upload = differenceInDays(new Date(), new Date(upload_baseline));
+    // The docs counter is approval-based, so a file where the client has
+    // uploaded everything and staff simply hasn't approved yet still reads
+    // completion_percentage < 100. Calling that "No uploads" blames the client
+    // for our own queue; the ball is on this side of the net.
+    const all_required_uploaded = total_required > 0
+        && scoped_required_docs.every((r) => scoped_documents.some((d) => d.category === r.code));
+    const upload_alert = days_since_last_upload >= 5 && completion_percentage < 100
+        ? (all_required_uploaded
+            ? `Awaiting review · ${days_since_last_upload}d`
+            : last_upload
+                ? `No uploads · ${days_since_last_upload}d`
+                : `No uploads yet · ${days_since_last_upload}d`)
+        : null;
+
+    // ── Header actions (ids with no handler on this surface are skipped) ──
+    const actions: HeaderAction[] = capabilities.headerActions.flatMap((id): HeaderAction[] => {
+        switch (id) {
+            case "notify_advisor":
+                return [{ id, label: "Notify advisor", icon: Bell, onClick: () => set_is_notify_modal_open(true) }];
+            case "slack": {
+                if (!SLACK_FEATURE_ENABLED) return [];
+                if (slack_channel.id) {
+                    return [{
+                        id,
+                        render: (className) => (
+                            <a
+                                href={slack_deep_link(slack_channel.id!, slack_team_id)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className={className}
+                            >
+                                <Slack className="h-4 w-4" />
+                                Open Slack
+                                <ExternalLink className="h-3 w-3 opacity-60" />
+                            </a>
+                        ),
+                    }];
+                }
+                return [{
+                    id,
+                    label: "Create channel",
+                    icon: Slack,
+                    onClick: create_slack_channel,
+                    disabled: !is_docs_approved,
+                    busy: is_creating_slack_channel,
+                    title: !is_docs_approved ? "Available once all documents are approved" : undefined,
+                }];
+            }
+            case "decline":
+                // A declined or funded file has nothing left to decline.
+                return current_pipeline_status === "declined" || current_pipeline_status === "funded"
+                    ? []
+                    : [{ id, label: "Decline", onClick: () => handleAdvanceStatus("declined"), tone: "danger" as const }];
+            case "funded": {
+                // Rescope the funded modal to the active business: the requested
+                // amount, the lenders that actually reached submission, and the
+                // deal row that receives the funded figures all key off the
+                // business currently in view.
+                const FUNDED_LABEL: Record<string, string> = {
+                    submitted: 'Submitted',
+                    approved_by_lender: 'Approved by lender',
+                    funded: 'Funded',
+                };
+                const lender_options = active_round_assignments
+                    .filter((a) => ['submitted', 'approved_by_lender', 'funded'].includes(a.status))
+                    .map((a) => ({
+                        assignmentId: a.id,
+                        lenderName: a.lender_name,
+                        stateLabel: FUNDED_LABEL[a.status] ?? a.status,
+                    }));
+                // Already-funded round → the dialog prompts for a new round
+                // instead of collecting figures that would overwrite a closed deal.
+                const active_round_funded = !!active_business?.active_deal_funded_at;
+                const advisor_name = [client_profile.advisor?.first_name, client_profile.advisor?.last_name]
+                    .filter(Boolean)
+                    .join(" ");
+                return [{
+                    id,
+                    render: (className) => (
+                        <LoanFundedDialog
+                            clientId={client_id}
+                            clientName={client_profile.client_name}
+                            businessProfileId={active_business_id}
+                            amountRequested={displayed.capital_requested}
+                            lenderOptions={lender_options}
+                            defaultSalesRep={advisor_name}
+                            defaultSlackChannel={slack_channel.name ?? ''}
+                            activeRoundFunded={active_round_funded}
+                            activeRoundLender={active_round_assignments.find((a) => a.status === 'funded')?.lender_name ?? null}
+                            onSuccess={() => { fetch_client_details(); fetch_lender_assignments(); }}
+                            triggerClassName={className}
+                        />
+                    ),
+                }];
+            }
+            default:
+                return [];
+        }
+    });
+
+    const menu: HeaderMenuItem[] = capabilities.menuItems.flatMap((id): HeaderMenuItem[] => {
+        switch (id) {
+            case "add_doc_type":
+                return [{
+                    id,
+                    label: "Add document type",
+                    icon: Plus,
+                    onSelect: () => {
+                        set_selected_request_ids([]);
+                        set_request_search("");
+                        set_also_ask_client(false);
+                        set_stip_lender("");
+                        set_is_request_modal_open(true);
+                    },
+                }];
+            case "upload_for_client":
+                return [{ id, label: "Upload for client", icon: UploadCloud, onSelect: () => set_is_doc_upload_open(true) }];
+            case "upload_funding_app":
+                return [{
+                    id,
+                    label: "Upload funding app",
+                    icon: FileText,
+                    onSelect: () => {
+                        set_funding_app_file(null);
+                        set_is_funding_app_open(true);
+                    },
+                }];
+            case "zip_packet":
+                // One file is not a packet — the per-category download covers it.
+                return scoped_documents.length <= 1
+                    ? []
+                    : [{
+                        id,
+                        label: is_zipping ? `Zipping ${is_zipping.completed}/${is_zipping.total}…` : `Zip packet (${scoped_documents.length} files)`,
+                        icon: Download,
+                        onSelect: download_entire_packet,
+                        disabled: !!is_zipping,
+                    }];
+            // No "bank_analysis" / "match_tool" cases: both live in LenderPanel's
+            // toolbar on the Lenders tab, and underwriting's capabilities row no
+            // longer lists them, so a mapping here would be dead code.
+            case "archive_slack":
+                return SLACK_FEATURE_ENABLED && slack_channel.id
+                    ? [{
+                        id,
+                        label: "Archive Slack channel",
+                        icon: Archive,
+                        onSelect: () => set_show_archive_slack_confirm(true),
+                        busy: is_archiving_slack_channel,
+                        destructive: true,
+                    }]
+                    : [];
+            default:
+                return [];
+        }
+    });
+
+    // ── Tiles ───────────────────────────────────────────────────────────
+    const tiles: SummaryTile[] = [
+        { id: "requested", label: "Requested", value: formatCurrency(displayed.capital_requested) },
+        { id: "deposits", label: "Deposits", value: formatMonthly(displayed.avg_monthly_deposits) },
+        { id: "fico", label: "FICO", value: formatCreditScore(client_profile.credit_score) },
+        { id: "tib", label: "In business", value: formatTimeInBusiness(displayed.business_start_date) },
+        {
+            id: "docs",
+            label: "Docs approved",
+            value: `${completed_categories} / ${total_required}`,
+            tone: total_required > 0 && completed_categories === total_required ? "positive" : "default",
+        },
+    ];
+    if (capabilities.showLenderTile) {
+        // Everything past 'pending' has actually gone out to the lender.
+        const submitted_count = active_round_assignments.filter((a) => a.status !== 'pending').length;
+        tiles.push({
+            id: "lenders",
+            label: "Lenders submitted",
+            value: `${submitted_count} / ${active_round_assignments.length}`,
+        });
+    }
+
+    // ── Review tab: required categories mapped to the workbench's shape ──
+    const review_categories: ReviewCategory[] = scoped_required_docs.map((doc_type) => {
+        const files = get_documents_by_category(doc_type.code);
+        const state = approvals.has(doc_type.code)
+            ? "approved" as const
+            : files.length > 0
+                ? "ready_for_review" as const
+                : "awaiting_upload" as const;
+        return {
+            code: doc_type.code,
+            label: doc_type.label,
+            state,
+            file_count: files.length,
+            files: files.map((d) => ({
+                id: d.id,
+                name: d.custom_label || d.name,
+                type: d.type,
+                upload_date: d.upload_date,
+                uploaded_by_role: d.uploaded_by_role ?? null,
+                viewed: !!d.viewed_at,
+            })),
+        };
+    });
+    /** The workbench hands back a ReviewFile; the page's handlers want the row. */
+    const find_document = (file_id: string) => scoped_documents.find((d) => d.id === file_id) ?? null;
+
+    // ── Tabs ────────────────────────────────────────────────────────────
+    const tab_items: FileTabItem[] = [];
+    for (const id of capabilities.tabs) {
+        if (id === "overview") {
+            tab_items.push({
+                id,
+                label: "Overview",
+                content: (
+                    <>
+                        {render_outstanding_banner(scoped_required_docs)}
+                        <PanelCard title="Use of proceeds" bodyClassName="px-5 py-4">
+                            {displayed.loan_purpose
+                                ? <p className="text-sm leading-relaxed text-cb-ink/80">{displayed.loan_purpose}</p>
+                                : <EmptyLine>No use of proceeds on file</EmptyLine>}
+                        </PanelCard>
+                        <PanelCard title="Ownership & structure" bodyClassName="px-5 py-1.5">
+                            <FactList facts={owner_facts} />
+                        </PanelCard>
+                        <FundingRoundsCard
+                            clientId={client_id}
+                            businessProfileId={active_business_id}
+                            canStartRound={true}
+                            onRoundStarted={fetch_client_details}
+                        />
+                    </>
+                ),
+            });
+        } else if (id === "documents") {
+            tab_items.push({
+                id,
+                label: "Documents",
+                badge: total_required > 0 ? `${completed_categories}/${total_required}` : null,
+                content: (
+                    <>
+                        {/* No "Share with lender" here: LenderPanel's toolbar on
+                            the Lenders tab owns that dialog. It used to sit above
+                            the packet too, which gave one action two homes. */}
+                        {/* The packet — required categories, then the miscellaneous
+                            block — is one component so phase 3 can mount the same
+                            surface on the admin client file. */}
+                        <UwDocumentPacket
+                            required_docs={scoped_required_docs}
+                            documents={scoped_documents}
+                            misc_documents={misc_documents}
+                            approvals={approvals}
+                            expanded_categories={expanded_categories}
+                            on_toggle_expand={toggle_category_expansion}
+                            document_groups={document_groups}
+                            active_business_id={active_business_id}
+                            can_upload={can_upload}
+                            approving_code={approving_code}
+                            on_approve={handle_approve_category}
+                            on_reject={(doc_type) => {
+                                set_reject_doc_type(doc_type);
+                                set_reject_reason("");
+                                set_is_reject_modal_open(true);
+                            }}
+                            requesting_again_code={requesting_again_code}
+                            on_request_again={handle_request_again}
+                            inline_uploading_code={inline_uploading_code}
+                            on_inline_upload={trigger_category_upload}
+                            zipping={is_zipping}
+                            on_download_all={download_all_documents}
+                            on_preview={(doc) => set_preview_modal({ isOpen: true, doc })}
+                            on_download={download_document}
+                            on_rename={(doc) => set_renaming_file({ id: doc.id, label: doc.custom_label || doc.name })}
+                            on_delete={set_file_to_delete}
+                            upload_group_id={upload_group_id}
+                            on_upload_group_change={set_upload_group_id}
+                            on_add_group={add_document_group}
+                            selected_document_ids={selected_document_ids}
+                            on_toggle_selection={toggle_document_selection}
+                            on_toggle_section={toggle_document_section}
+                            on_clear_selection={() => set_selected_document_ids(new Set())}
+                            assign_target_group_id={assign_target_group_id}
+                            on_assign_target_change={set_assign_target_group_id}
+                            is_assigning={is_assigning_documents}
+                            on_assign={handle_assign_documents}
+                            on_edit_group={(group) => {
+                                set_group_edit_error(null);
+                                set_group_being_edited({
+                                    id: group.id,
+                                    doc_code: group.doc_code as string,
+                                    name: group.name as string,
+                                    identifier: (group.identifier as string | null) ?? '',
+                                    subtype: (group.subtype as string | null) ?? '',
+                                    nickname: (group.nickname as string | null) ?? '',
+                                });
+                            }}
+                            on_delete_group={handle_delete_group}
+                        />
+                    </>
+                ),
+            });
+        } else if (id === "review") {
+            tab_items.push({
+                id,
+                label: "Review",
+                content: (
+                    <ReviewWorkbench
+                        categories={review_categories}
+                        on_select_file={(file) => {
+                            set_review_selected_file_id(file.id);
+                            mark_document_viewed(file.id);
+                        }}
+                        on_approve={(category) => handle_approve_category({ code: category.code, label: category.label })}
+                        on_reject={(category) => {
+                            set_reject_doc_type({ code: category.code, label: category.label });
+                            set_reject_reason("");
+                            set_is_reject_modal_open(true);
+                        }}
+                        approving_code={approving_code}
+                        on_rename={(file) => {
+                            const doc = find_document(file.id);
+                            if (doc) set_renaming_file({ id: doc.id, label: doc.custom_label || doc.name });
+                        }}
+                        on_download={(file) => {
+                            const doc = find_document(file.id);
+                            if (doc) download_document(doc);
+                        }}
+                        on_open_full={(file) => {
+                            const doc = find_document(file.id);
+                            if (doc) set_preview_modal({ isOpen: true, doc });
+                        }}
+                        can_decide={capabilities.canDecideDocuments}
+                    />
+                ),
+            });
+        } else if (id === "lenders") {
+            tab_items.push({
+                id,
+                label: "Lenders",
+                badge: active_round_assignments.length > 0 ? active_round_assignments.length : null,
+                content: (
+                    <>
+                        <PanelCard title="Lender matching">
+                            <LenderPanel
+                                assignments={active_round_assignments}
+                                api_summaries={lender_api_summaries}
+                                on_api_changed={async () => {
+                                    await Promise.all([fetch_lender_assignments(), reload_lender_api()]);
+                                }}
+                                response_panel_epoch={response_panel_epoch}
+                                submitting_assignment_id={submitting_assignment_id}
+                                on_mark_submitted={mark_assignment_submitted}
+                                on_mark_status={mark_assignment_status}
+                                on_resubmit_request={(row) => {
+                                    set_resubmit_note("");
+                                    set_resubmit_target(row);
+                                }}
+                                on_open_bank_analysis={() => set_is_bank_analysis_viewer_open(true)}
+                                // The admin routes redirect elsewhere, so the admin match-tool
+                                // branch this used to carry was dead.
+                                on_open_match_tool={() => router.push(`/underwriting/lender-match?client=${client_id}`)}
+                                client_id={client_id}
+                                business_profile_id={active_business_id}
+                                on_lender_added={fetch_lender_assignments}
+                            />
+                        </PanelCard>
+                        <PanelCard title="Open positions (previous debt)">
+                            <OpenPositionsPanel positions={open_positions} />
+                        </PanelCard>
+                    </>
+                ),
+            });
+        } else if (id === "notes") {
+            tab_items.push({
+                id,
+                label: "Notes",
+                badge: notes.length > 0 ? notes.length : null,
+                content: (
+                    <InternalCommunication
+                        notes={notes}
+                        new_note={new_standalone_note}
+                        is_adding={is_adding_note}
+                        on_note_change={set_new_standalone_note}
+                        on_add_note={handleAddNote}
+                    />
+                ),
+            });
+        }
+    }
+
+    // ── Rail ────────────────────────────────────────────────────────────
+    const latest_note = notes[0]; // fetchInternalNotes orders newest first
+    const rail = (
+        <>
+            <PanelCard title="Business" bodyClassName="px-5 py-1.5">
+                <FactList
+                    facts={[
+                        { label: "Industry", value: displayed.industry || null },
+                        { label: "Entity", value: displayed.legal_entity_type || null },
+                        { label: "Started", value: displayed.business_start_date ? formatDate(displayed.business_start_date) : null },
+                        { label: "Location", value: [displayed.company_city, displayed.company_state].filter(Boolean).join(", ") || null },
+                        { label: "Loan type", value: displayed.proposed_loan_type || null },
+                        { label: "Employees", value: displayed.employees_count ?? null },
+                    ]}
+                />
+            </PanelCard>
+
+            <PanelCard title="Contact" bodyClassName="space-y-2.5 px-5 py-4">
+                <p className="text-sm font-semibold text-cb-ink">{client_profile.client_name}</p>
+                <ContactRow icon={Mail} value={client_profile.client_email} href={`mailto:${client_profile.client_email}`} copy_label="Copy email" />
+                <ContactRow icon={Phone} value={client_profile.client_phone} href={`tel:${client_profile.client_phone}`} copy_label="Copy phone" />
+                <p className="text-xs text-cb-ink/40">Vault created {formatDate(client_profile.created_at)}</p>
+            </PanelCard>
+
+            <PanelCard title="Team">
+                <div className="px-5 py-4">
+                    <FactList
+                        facts={[
+                            {
+                                label: "Advisor",
+                                value: [client_profile.advisor.first_name, client_profile.advisor.last_name]
+                                    .filter(Boolean).join(" ") || "Unassigned",
+                            },
+                            { label: "Email", value: client_profile.advisor.email || null },
+                        ]}
+                    />
+                </div>
+                {/* No <ClientFollowersCard> here: listClientFollowers goes through
+                    assertCanAccessClient, which admits only the assigned advisor, a
+                    follower, or an admin. An underwriting user has no `advisors` row,
+                    so it throws and this page's error modal opens ("Access denied").
+                    Followers are advisor-scoped; admin gets them in phase 3 via the
+                    workspace file (/admin/clients/[id]). */}
+            </PanelCard>
+
+            {SLACK_FEATURE_ENABLED && (
+                <PanelCard title="Slack" bodyClassName="space-y-2 px-5 py-4">
+                    {slack_channel.id ? (
+                        <a
+                            href={slack_deep_link(slack_channel.id, slack_team_id)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-2 text-sm font-medium text-cb-ink hover:text-emerald-700"
+                        >
+                            <Slack className="h-4 w-4 shrink-0 text-cb-ink/40" />
+                            <span className="truncate">{slack_channel.name ? `#${slack_channel.name}` : "Open channel"}</span>
+                            <ExternalLink className="h-3 w-3 shrink-0 opacity-60" />
+                        </a>
+                    ) : (
+                        <>
+                            <EmptyLine>No channel yet</EmptyLine>
+                            {!is_docs_approved && (
+                                <p className="text-xs text-cb-ink/40">Unlocks once every document is approved</p>
+                            )}
+                        </>
+                    )}
+                </PanelCard>
+            )}
+
+            <PanelCard
+                title="Latest note"
+                accessory={
+                    <button type="button" onClick={() => set_active_tab("notes")} className="text-xs font-semibold text-emerald-700 hover:underline">
+                        All notes
+                    </button>
+                }
+                bodyClassName="px-5 py-3"
+            >
+                {latest_note ? (
+                    <div className="space-y-1">
+                        <p className="line-clamp-3 text-sm text-cb-ink/80">{latest_note.content}</p>
+                        <p className="text-xs text-cb-ink/40">
+                            {latest_note.author_name} · {formatDate(latest_note.created_at)}
+                        </p>
+                    </div>
+                ) : (
+                    <EmptyLine action={{ label: "Add one", onClick: () => set_active_tab("notes") }}>No notes yet</EmptyLine>
+                )}
+            </PanelCard>
+        </>
+    );
 
     return (
         <div className="space-y-8">
-            {/* One bar: queue nav + pipeline + stage actions + fold controls.
-                Chips (activity age, stale-upload alert) ride inside it, so the
-                file opens on content instead of four stacked control strips. */}
-            {(() => {
-                const last_upload = documents.length > 0
-                    ? documents.reduce((a, b) => new Date(a.upload_date) > new Date(b.upload_date) ? a : b).upload_date
-                    : null;
-                const upload_baseline = last_upload ?? client_profile.created_at;
-                const days_since_last_upload = differenceInDays(new Date(), new Date(upload_baseline));
-                const show_upload_alert = days_since_last_upload >= 5 && completion_pct < 100;
-                return (
-                    <ClientCommandBar
-                        back_label="Back to Queue"
+            {/* The shared client-file shell: header (queue nav, business
+                switcher, pipeline, actions), summary tiles, a tabbed work
+                column and the context rail. The capability matrix decides
+                which tabs, actions and menu items underwriting sees. */}
+            <ClientFileShell
+                header={
+                    <FileHeader
+                        back_label="Back to queue"
                         on_back={() => router.push(queue_path)}
                         on_prev={prev_client_id ? () => router.push(`${client_base_path}/${prev_client_id}`) : undefined}
                         on_next={next_client_id ? () => router.push(`${client_base_path}/${next_client_id}`) : undefined}
                         nav_index={current_nav_index >= 0 ? current_nav_index + 1 : undefined}
                         nav_total={navigable_client_ids.length}
+                        businesses={businesses}
+                        active_business_id={active_business_id}
+                        fallback_business_name={client_profile.company_name}
+                        on_select_business={set_active_business_id}
+                        // Creating and removing businesses lives with advisors;
+                        // underwriting only switches between them.
+                        identity={[client_profile.client_name, displayed.industry, displayed.legal_entity_type]}
+                        status_line={
+                            <StatusLine
+                                created_at={client_profile.created_at}
+                                last_activity_at={last_activity_at}
+                                reassigned_to_catch_all_at={client_profile.reassigned_to_catch_all_at}
+                                upload_alert={upload_alert}
+                            />
+                        }
                         current_status={current_pipeline_status}
                         pipeline_history={pipeline_history}
                         on_status_change={handleAdvanceStatus}
-                        on_decline={() => handleAdvanceStatus("declined")}
+                        advance_limit_index={capabilities.stageCeilingIndex}
                         is_advancing={is_advancing_status}
-                        on_expand_all={() => broadcast_toggle_all(true)}
-                        on_collapse_all={() => broadcast_toggle_all(false)}
-                        chips={
-                            <>
-                                <ActivityAgeBadge
-                                    created_at={client_profile.created_at}
-                                    last_activity_at={last_activity_at}
-                                    reassigned_to_catch_all_at={client_profile.reassigned_to_catch_all_at}
-                                />
-                                {show_upload_alert && (
-                                    <span
-                                        className="inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-red-700"
-                                        title={last_upload
-                                            ? `Last upload was ${days_since_last_upload} day${days_since_last_upload === 1 ? "" : "s"} ago`
-                                            : `No client uploads since vault was created ${days_since_last_upload} day${days_since_last_upload === 1 ? "" : "s"} ago`}
-                                    >
-                                        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" />
-                                        {last_upload ? `No uploads · ${days_since_last_upload}d` : `No uploads yet · ${days_since_last_upload}d`}
-                                    </span>
-                                )}
-                            </>
-                        }
+                        actions={actions}
+                        primary_id={capabilities.headerActions[capabilities.headerActions.length - 1]}
+                        menu={menu}
                     />
-                );
-            })()}
+                }
+                tiles={<SummaryTiles tiles={tiles} />}
+                tabs={<FileTabs items={tab_items} active={active_tab} on_change={set_active_tab} />}
+                // Review runs full width: the workbench needs the pixels, and the rail's facts are one tab away.
+                rail={active_tab === "review" ? null : rail}
+            />
 
             {/* Modals that used to hang off the old header row. */}
             <div>
                 <Dialog open={is_notify_modal_open} onOpenChange={set_is_notify_modal_open}>
-                    <DialogContent className="sm:max-w-md rounded-[3rem] p-8">
+                    <DialogContent className="sm:max-w-md">
                         <DialogHeader>
-                            <DialogTitle className="text-2xl font-black text-slate-900 uppercase tracking-tighter">Missing Documents</DialogTitle>
+                            <DialogTitle>Notify the advisor</DialogTitle>
                             <DialogDescription className="text-slate-500 font-bold">
                                 Select which documents are missing or rejected to notify <strong>{client_profile.advisor.first_name} {client_profile.advisor.last_name}</strong>.
                             </DialogDescription>
                         </DialogHeader>
                         <div className="py-6 space-y-6 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
                             <div className="space-y-3">
-                                <p className="text-xs font-black uppercase tracking-widest text-slate-400">Select Missing Required Items</p>
+                                <p className="text-xs text-cb-ink/50">Missing required items</p>
                                 <div className="grid grid-cols-1 gap-2 border rounded-2xl p-4 bg-slate-50/50">
                                     {scoped_required_docs.map((doc) => {
                                         const is_done = scoped_documents.some(d => d.category === doc.code);
@@ -2832,7 +2529,7 @@ export default function UnderwritingClientDetailsPage() {
                             </div>
 
                             <div className="space-y-3">
-                                <p className="text-xs font-black uppercase tracking-widest text-slate-400">Select Additional Documents to Request</p>
+                                <p className="text-xs text-cb-ink/50">Additional documents to request</p>
                                 <div className="grid grid-cols-1 gap-2 border rounded-2xl p-4 bg-slate-50/50 max-h-[250px] overflow-y-auto custom-scrollbar">
                                     {all_available_docs
                                         .filter(doc => !scoped_required_docs.some(r => r.code === doc.code))
@@ -2855,20 +2552,20 @@ export default function UnderwritingClientDetailsPage() {
                             </div>
 
                             <div className="space-y-2 pt-2">
-                                <label className="text-xs font-black uppercase tracking-widest text-slate-400">Custom message (Internal Note)</label>
+                                <label className="text-xs text-cb-ink/50">Custom message (internal note)</label>
                                 <Textarea
                                     placeholder="Add specific instructions for the advisor..."
-                                    className="min-h-[100px] rounded-2xl border-slate-200 focus:ring-emerald-500"
+                                    className="min-h-[100px] rounded-xl"
                                     value={custom_note}
                                     onChange={(e) => set_custom_note(e.target.value)}
                                 />
                             </div>
                         </div>
                         <DialogFooter>
-                            <Button variant="outline" onClick={() => set_is_notify_modal_open(false)} className="rounded-xl font-bold">Cancel</Button>
+                            <Button variant="outline" onClick={() => set_is_notify_modal_open(false)} className="rounded-xl">Cancel</Button>
                             <Button
                                 onClick={handleNotifyAdvisor}
-                                className="bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-black shadow-lg shadow-emerald-500/20"
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-semibold"
                                 disabled={is_notifying || (selected_missing_docs.length === 0 && selected_extra_docs.length === 0)}
                             >
                                 {is_notifying ? "Sending..." : "Send Notification"}
@@ -2882,11 +2579,9 @@ export default function UnderwritingClientDetailsPage() {
                     open={!!resubmit_target}
                     onOpenChange={(open) => { if (!open) set_resubmit_target(null); }}
                 >
-                    <DialogContent className="sm:max-w-md rounded-[3rem] p-8">
+                    <DialogContent className="sm:max-w-md">
                         <DialogHeader>
-                            <DialogTitle className="text-2xl font-black text-slate-900 uppercase tracking-tighter">
-                                Re-submit to {resubmit_target?.lender_name}
-                            </DialogTitle>
+                            <DialogTitle>Re-submit to {resubmit_target?.lender_name}</DialogTitle>
                             <DialogDescription className="text-slate-500 font-bold">
                                 {resubmit_target?.status === 'declined_by_lender'
                                     ? 'This lender declined. Send the file back with what they asked for.'
@@ -2895,12 +2590,10 @@ export default function UnderwritingClientDetailsPage() {
                         </DialogHeader>
                         <div className="py-4 space-y-4">
                             <div className="space-y-2">
-                                <label className="text-xs font-black uppercase tracking-widest text-slate-400">
-                                    What changed this round
-                                </label>
+                                <label className="text-xs text-cb-ink/50">What changed this round</label>
                                 <Textarea
                                     placeholder="New bank statements, corrected application, updated financials…"
-                                    className="min-h-[100px] rounded-2xl border-slate-200 focus:ring-emerald-500"
+                                    className="min-h-[100px] rounded-xl"
                                     value={resubmit_note}
                                     onChange={(e) => set_resubmit_note(e.target.value)}
                                     maxLength={2000}
@@ -2919,14 +2612,14 @@ export default function UnderwritingClientDetailsPage() {
                             <Button
                                 variant="outline"
                                 onClick={() => set_resubmit_target(null)}
-                                className="rounded-xl font-bold"
+                                className="rounded-xl"
                             >
                                 Cancel
                             </Button>
                             <Button
                                 onClick={resubmit_assignment}
                                 disabled={!!resubmit_target && submitting_assignment_id === resubmit_target.id}
-                                className="bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-black shadow-lg shadow-emerald-500/20"
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-semibold"
                             >
                                 {!!resubmit_target && submitting_assignment_id === resubmit_target.id
                                     ? 'Re-submitting…'
@@ -2937,128 +2630,12 @@ export default function UnderwritingClientDetailsPage() {
                 </Dialog>
             </div>
 
-            {/* Admin Quick Actions — only when an admin is viewing this page.
-                Surfaces advisor-side duties (edit profile, manage followers,
-                submit vault, upload docs, delete) that aren't part of the UW
-                workflow but admins need on the same screen so they don't have
-                to switch portals. */}
-            {is_admin_route && (
-                <CollapsibleSection
-                    clientId={client_id}
-                    slug="uw-admin-actions"
-                    title="Admin Actions"
-                    defaultOpen
-                >
-                <div className="p-6 space-y-4">
-                        <div className="flex flex-wrap gap-2">
-                            <Button
-                                onClick={() => set_is_edit_profile_open(true)}
-                                size="sm"
-                                className="h-9 rounded-xl text-[10px] font-black uppercase tracking-widest bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm"
-                            >
-                                <Pencil className="w-3.5 h-3.5 mr-1.5" />
-                                Edit Profile
-                            </Button>
-                            <Button
-                                onClick={() => set_is_submit_vault_open(true)}
-                                size="sm"
-                                variant="outline"
-                                className="h-9 rounded-xl text-[10px] font-black uppercase tracking-widest"
-                            >
-                                <ShieldCheck className="w-3.5 h-3.5 mr-1.5" />
-                                Submit to UW
-                            </Button>
-                            <Button
-                                onClick={() => set_is_doc_upload_open(true)}
-                                size="sm"
-                                variant="outline"
-                                className="h-9 rounded-xl text-[10px] font-black uppercase tracking-widest"
-                            >
-                                <Plus className="w-3.5 h-3.5 mr-1.5" />
-                                Upload Doc
-                            </Button>
-                            <Button
-                                onClick={() => set_is_funding_app_open(true)}
-                                size="sm"
-                                variant="outline"
-                                className="h-9 rounded-xl text-[10px] font-black uppercase tracking-widest"
-                            >
-                                <FileText className="w-3.5 h-3.5 mr-1.5" />
-                                Funding App
-                            </Button>
-                            <Button
-                                onClick={() => set_is_delete_vault_open(true)}
-                                size="sm"
-                                variant="outline"
-                                className="h-9 rounded-xl text-[10px] font-black uppercase tracking-widest text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
-                            >
-                                <Trash2 className="w-3.5 h-3.5 mr-1.5" />
-                                Delete Vault
-                            </Button>
-                        </div>
-                        <ClientFollowersCard clientId={client_id} canManage={true} />
-                </div>
-                </CollapsibleSection>
-            )}
-
-            {/* Edit profile modal (admin-only — but harmless to mount when closed) */}
-            {is_admin_route && client_profile && (
-                <EditProfileModal
-                    isOpen={is_edit_profile_open}
-                    onClose={() => set_is_edit_profile_open(false)}
-                    onSuccess={fetch_client_details}
-                    clientData={client_profile as any}
-                />
-            )}
-
             {/* Inline bank analysis viewer (UW + admin both) */}
             <BankAnalysisViewer
                 clientId={client_id}
                 isOpen={is_bank_analysis_viewer_open}
                 onClose={() => set_is_bank_analysis_viewer_open(false)}
             />
-
-            {/* Submit to Underwriting confirmation (admin-only) */}
-            {is_admin_route && (
-                <Dialog
-                    open={is_submit_vault_open}
-                    onOpenChange={(open) => { if (!is_submitting_vault) set_is_submit_vault_open(open); }}
-                >
-                    <DialogContent className="sm:max-w-md">
-                        <DialogHeader>
-                            <DialogTitle>Submit Vault to Underwriting?</DialogTitle>
-                            <DialogDescription>
-                                Submit <strong>{client_profile?.client_name}</strong>'s vault to the underwriting queue. UW will be notified.
-                            </DialogDescription>
-                        </DialogHeader>
-                        <div className="py-4 border-y border-slate-100 my-2 space-y-2">
-                            <Label htmlFor="submit_vault_fico" className="text-xs font-black uppercase tracking-widest text-slate-400">
-                                Client FICO Score
-                            </Label>
-                            <Input
-                                id="submit_vault_fico"
-                                type="number"
-                                placeholder="e.g. 720"
-                                value={submit_vault_fico}
-                                onChange={(e) => set_submit_vault_fico(e.target.value)}
-                                className="h-12 rounded-xl"
-                            />
-                        </div>
-                        <DialogFooter>
-                            <Button variant="ghost" onClick={() => set_is_submit_vault_open(false)} disabled={is_submitting_vault}>
-                                Cancel
-                            </Button>
-                            <Button
-                                onClick={handle_admin_submit_vault}
-                                disabled={is_submitting_vault || !submit_vault_fico}
-                                className="bg-emerald-500 hover:bg-emerald-600 text-white"
-                            >
-                                {is_submitting_vault ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Submitting...</> : <><ShieldCheck className="h-4 w-4 mr-2" />Submit</>}
-                            </Button>
-                        </DialogFooter>
-                    </DialogContent>
-                </Dialog>
-            )}
 
             {/* Manual Funding Application Upload (admin + UW) */}
             {can_upload && (
@@ -3068,7 +2645,7 @@ export default function UnderwritingClientDetailsPage() {
                 >
                     <DialogContent className="sm:max-w-md">
                         <DialogHeader>
-                            <DialogTitle>Upload Funding Application</DialogTitle>
+                            <DialogTitle>Upload funding application</DialogTitle>
                             <DialogDescription>
                                 {funding_app_for_lenders
                                     ? "Lender version (agreement page removed). Stored as a shareable document only — it won't mark the deal complete, sync to GHL, or request anything from the client."
@@ -3083,13 +2660,13 @@ export default function UnderwritingClientDetailsPage() {
                                     className="mt-0.5"
                                 />
                                 <span className="text-xs text-slate-600">
-                                    <span className="font-black uppercase tracking-widest text-slate-500">For lenders (omit agreement page)</span>
+                                    <span className="font-semibold text-cb-ink">For lenders (omit agreement page)</span>
                                     <br />
                                     Upload the lender-facing copy without the agreement page — no deal-complete, GHL, or document-request triggers.
                                 </span>
                             </label>
                             <div className="space-y-2">
-                                <Label htmlFor="funding_app_file" className="text-xs font-black uppercase tracking-widest text-slate-400">
+                                <Label htmlFor="funding_app_file" className="text-xs text-cb-ink/50">
                                     Application (PDF)
                                 </Label>
                                 <Input
@@ -3135,7 +2712,7 @@ export default function UnderwritingClientDetailsPage() {
                 >
                     <DialogContent className="sm:max-w-md">
                         <DialogHeader>
-                            <DialogTitle>Add a Document Type</DialogTitle>
+                            <DialogTitle>Add a document type</DialogTitle>
                             <DialogDescription>
                                 {also_ask_client
                                     ? "Opens the slot on the vault AND asks the client for it — email, SMS and reminders."
@@ -3144,7 +2721,7 @@ export default function UnderwritingClientDetailsPage() {
                         </DialogHeader>
                         <div className="py-2 space-y-3">
                             <div className="space-y-1.5">
-                                <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                <Label className="text-xs text-cb-ink/50">
                                     Requested by (optional)
                                 </Label>
                                 <select
@@ -3168,7 +2745,7 @@ export default function UnderwritingClientDetailsPage() {
                                     className="mt-0.5"
                                 />
                                 <span className="text-xs text-slate-600">
-                                    <span className="font-black uppercase tracking-widest text-slate-500">Also ask the client for it</span>
+                                    <span className="font-semibold text-cb-ink">Also ask the client for it</span>
                                     <br />
                                     Tick only if the CLIENT has to supply this one. Off, nothing is sent and any approval already on the file stays put.
                                 </span>
@@ -3237,14 +2814,14 @@ export default function UnderwritingClientDetailsPage() {
                 >
                     <DialogContent className="sm:max-w-md">
                         <DialogHeader>
-                            <DialogTitle>Upload Document on Behalf of Client</DialogTitle>
+                            <DialogTitle>Upload a document for the client</DialogTitle>
                             <DialogDescription>
                                 Choose the document type and attach the file(s). The upload is recorded as advisor-uploaded.
                             </DialogDescription>
                         </DialogHeader>
                         <div className="py-4 space-y-4">
                             <div className="space-y-2">
-                                <Label className="text-xs font-black uppercase tracking-widest text-slate-400">Document type</Label>
+                                <Label className="text-xs text-cb-ink/50">Document type</Label>
                                 <select
                                     value={doc_upload_code}
                                     onChange={(e) => set_doc_upload_code(e.target.value)}
@@ -3257,7 +2834,7 @@ export default function UnderwritingClientDetailsPage() {
                                 </select>
                             </div>
                             <div className="space-y-2">
-                                <Label htmlFor="doc_upload_files" className="text-xs font-black uppercase tracking-widest text-slate-400">File(s)</Label>
+                                <Label htmlFor="doc_upload_files" className="text-xs text-cb-ink/50">File(s)</Label>
                                 <Input
                                     id="doc_upload_files"
                                     type="file"
@@ -3282,227 +2859,6 @@ export default function UnderwritingClientDetailsPage() {
                     </DialogContent>
                 </Dialog>
             )}
-
-            {/* Delete vault confirmation (admin-only, destructive) */}
-            {is_admin_route && (
-                <Dialog
-                    open={is_delete_vault_open}
-                    onOpenChange={(open) => {
-                        if (!is_deleting_vault) {
-                            set_is_delete_vault_open(open);
-                            if (!open) set_delete_confirm_text("");
-                        }
-                    }}
-                >
-                    <DialogContent className="sm:max-w-md">
-                        <DialogHeader>
-                            <DialogTitle className="text-red-600">Delete Client Vault?</DialogTitle>
-                            <DialogDescription>
-                                This permanently deletes <strong>{client_profile?.client_name}</strong>'s vault, all documents, notes, lender assignments, bank analyses, and pipeline history. This cannot be undone.
-                                <br /><br />
-                                Type the client's name <strong>{client_profile?.client_name}</strong> to confirm.
-                            </DialogDescription>
-                        </DialogHeader>
-                        <div className="py-4">
-                            <Input
-                                value={delete_confirm_text}
-                                onChange={(e) => set_delete_confirm_text(e.target.value)}
-                                placeholder={client_profile?.client_name ?? ""}
-                                className="h-12 rounded-xl"
-                            />
-                        </div>
-                        <DialogFooter>
-                            <Button variant="ghost" onClick={() => set_is_delete_vault_open(false)} disabled={is_deleting_vault}>
-                                Cancel
-                            </Button>
-                            <Button
-                                onClick={handle_admin_delete_vault}
-                                disabled={is_deleting_vault || delete_confirm_text !== client_profile?.client_name}
-                                className="bg-red-600 hover:bg-red-700 text-white"
-                            >
-                                {is_deleting_vault ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Deleting...</> : <><Trash2 className="h-4 w-4 mr-2" />Delete Permanently</>}
-                            </Button>
-                        </DialogFooter>
-                    </DialogContent>
-                </Dialog>
-            )}
-
-            {/* Business tab strip — surface per-business doc reviews. The
-                "+ Add Business" CTA is intentionally omitted on the UW side;
-                creating new businesses lives with advisors. Delete is also
-                hidden here. Single-business clients render no tabs since
-                show_when_single defaults to true but the strip is a no-op
-                visually when there's only one business and no actions. */}
-            <BusinessTabStrip
-                businesses={businesses}
-                active_business_id={active_business_id}
-                on_select={set_active_business_id}
-            />
-
-            {/* Outstanding Documents Banner */}
-            {render_outstanding_banner(scoped_required_docs)}
-
-            {/* Profile Hero */}
-            <Card className="bg-slate-900 text-white border-slate-800 rounded-[3rem] shadow-2xl overflow-hidden relative">
-                <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/5 rounded-full blur-[100px] -mr-32 -mt-32" />
-                <CardContent className="p-10 relative z-10 flex flex-col md:flex-row justify-between items-center gap-8">
-                    <div className="space-y-4 text-center md:text-left">
-                        <Badge className="bg-white/10 text-emerald-400 hover:bg-white/10 border-white/20 uppercase tracking-widest font-black text-[10px] px-3 py-1">
-                            {completion_pct}% Documentation Verified
-                        </Badge>
-                        {/* Company name leads — UW identifies the file by
-                            business. When a non-primary tab is active we
-                            display that business's name; primary falls back
-                            to client_profile.company_name. */}
-                        <h2 className="text-4xl md:text-5xl font-black uppercase tracking-tighter leading-none">
-                            {(() => {
-                                const active = businesses.find((b) => b.id === active_business_id);
-                                const useBiz = active && !active.is_primary;
-                                return useBiz ? active!.company_name : client_profile.company_name;
-                            })()}
-                        </h2>
-                        {(() => {
-                            // Rescope the funding figures to the active business.
-                            // Non-primary businesses carry their ask on funding_deals
-                            // (flattened onto the tab); primary falls back to the
-                            // client_data_vault row.
-                            const active = businesses.find((b) => b.id === active_business_id);
-                            const useBiz = active && !active.is_primary;
-                            const amount = useBiz ? (active!.capital_requested ?? 0) : client_profile.capital_requested;
-                            const loanType = useBiz ? active!.proposed_loan_type : client_profile.proposed_loan_type;
-                            return (
-                        <div className="flex flex-wrap items-center justify-center md:justify-start gap-6 text-slate-400 font-bold">
-                            <span className="flex items-center gap-2"><Building2 className="w-4 h-4" /> {client_profile.client_name}</span>
-                            <span className="flex items-center gap-2 text-emerald-400"><DollarSign className="w-4 h-4" /> {(amount ?? 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</span>
-                            {loanType && <span className="flex items-center gap-2">{loanType}</span>}
-                        </div>
-                            );
-                        })()}
-                    </div>
-
-                    {/* Deal actions. One aligned cluster instead of a stair-step
-                        of pills: ghosts first, the single emerald primary last
-                        (where the eye lands), and the channel archive — rare and
-                        destructive — behind the overflow menu. */}
-                    <div className="flex w-full shrink-0 flex-col items-center gap-2 md:w-auto md:items-end">
-                        <div className="flex flex-wrap items-center justify-center gap-2 md:justify-end">
-                            <Button
-                                onClick={() => set_is_notify_modal_open(true)}
-                                className={clsx(HERO_ACTION.base, HERO_ACTION.ghost)}
-                            >
-                                <Bell className="h-4 w-4" />
-                                Notify Advisor
-                            </Button>
-
-                            {SLACK_FEATURE_ENABLED && (
-                                slack_channel.id ? (
-                                    <a
-                                        href={slack_deep_link(slack_channel.id, slack_team_id)}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className={clsx(HERO_ACTION.base, HERO_ACTION.ghost)}
-                                    >
-                                        <Slack className="h-4 w-4 text-emerald-400" />
-                                        Open Slack
-                                        <ExternalLink className="h-3 w-3 opacity-60" />
-                                    </a>
-                                ) : (
-                                    <Button
-                                        onClick={create_slack_channel}
-                                        disabled={!is_docs_approved || is_creating_slack_channel}
-                                        title={!is_docs_approved ? "Available once all documents are approved" : undefined}
-                                        className={clsx(HERO_ACTION.base, HERO_ACTION.ghost)}
-                                    >
-                                        {is_creating_slack_channel ? (
-                                            <><Loader2 className="h-4 w-4 animate-spin" /> Creating…</>
-                                        ) : (
-                                            <><Slack className="h-4 w-4 text-emerald-400" /> Create Channel</>
-                                        )}
-                                    </Button>
-                                )
-                            )}
-
-                            {(() => {
-                                // Rescope the funded modal to the active business: the
-                                // requested amount, the lenders that actually reached
-                                // submission, and the deal row that receives the funded
-                                // figures all key off the business currently in view.
-                                const active = businesses.find((b) => b.id === active_business_id);
-                                const useBiz = active && !active.is_primary;
-                                const requested = useBiz ? (active!.capital_requested ?? null) : (client_profile.capital_requested ?? null);
-                                const FUNDED_LABEL: Record<string, string> = {
-                                    submitted: 'Submitted',
-                                    approved_by_lender: 'Approved by lender',
-                                    funded: 'Funded',
-                                };
-                                const lenderOptions = active_round_assignments
-                                    .filter((a) => ['submitted', 'approved_by_lender', 'funded'].includes(a.status))
-                                    .map((a) => ({
-                                        assignmentId: a.id,
-                                        lenderName: a.lender_name,
-                                        stateLabel: FUNDED_LABEL[a.status] ?? a.status,
-                                    }));
-                                // Already-funded round → the dialog prompts for a
-                                // new round instead of collecting figures that
-                                // would overwrite a closed deal.
-                                const active_business = businesses.find((b) => b.id === active_business_id);
-                                const active_round_funded = !!active_business?.active_deal_funded_at;
-                                const advisor_name = [client_profile.advisor?.first_name, client_profile.advisor?.last_name]
-                                    .filter(Boolean)
-                                    .join(" ");
-                                return (
-                                    <LoanFundedDialog
-                                        clientId={client_id}
-                                        clientName={client_profile.client_name}
-                                        businessProfileId={active_business_id}
-                                        amountRequested={requested}
-                                        lenderOptions={lenderOptions}
-                                        defaultSalesRep={advisor_name}
-                                        defaultSlackChannel={slack_channel.name ?? ''}
-                                        activeRoundFunded={active_round_funded}
-                                        activeRoundLender={active_round_assignments.find((a) => a.status === 'funded')?.lender_name ?? null}
-                                        onSuccess={() => { fetch_client_details(); fetch_lender_assignments(); }}
-                                        triggerClassName={clsx(HERO_ACTION.base, HERO_ACTION.primary)}
-                                    />
-                                );
-                            })()}
-
-                            {SLACK_FEATURE_ENABLED && slack_channel.id && (
-                                <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                        <button
-                                            type="button"
-                                            aria-label="More deal actions"
-                                            className={clsx(HERO_ACTION.base, HERO_ACTION.quiet, "w-10 px-0")}
-                                        >
-                                            <MoreHorizontal className="h-4 w-4" />
-                                        </button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end" className="w-60">
-                                        <DropdownMenuItem
-                                            onClick={() => set_show_archive_slack_confirm(true)}
-                                            disabled={is_archiving_slack_channel}
-                                            className="text-red-600 focus:text-red-700"
-                                        >
-                                            {is_archiving_slack_channel ? (
-                                                <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Archiving…</>
-                                            ) : (
-                                                <><Archive className="mr-2 h-4 w-4" /> Archive Slack channel</>
-                                            )}
-                                        </DropdownMenuItem>
-                                    </DropdownMenuContent>
-                                </DropdownMenu>
-                            )}
-                        </div>
-
-                        {SLACK_FEATURE_ENABLED && !slack_channel.id && !is_docs_approved && (
-                            <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500">
-                                Channel unlocks when every document is approved
-                            </p>
-                        )}
-                    </div>
-                </CardContent>
-            </Card>
 
             <AlertDialog
                 open={show_archive_slack_confirm}
@@ -3534,419 +2890,6 @@ export default function UnderwritingClientDetailsPage() {
                 </AlertDialogContent>
             </AlertDialog>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 pb-20">
-                {/* Information Column */}
-                <div className="lg:col-span-1 space-y-6">
-                    <CollapsibleSection
-                        clientId={client_id}
-                        slug="uw-company-integrity"
-                        title="Company Integrity"
-                        defaultOpen
-                    >
-                    <div className="p-6 space-y-4">
-                            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Assigned Advisor</p>
-                                <p className="text-slate-900 font-black">{client_profile.advisor.first_name} {client_profile.advisor.last_name}</p>
-                                <p className="text-slate-500 font-medium text-xs break-all">{client_profile.advisor.email}</p>
-                            </div>
-                            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Industry</p>
-                                <p className="text-slate-900 font-black uppercase tracking-tight">{client_profile.industry || "Not Specified"}</p>
-                            </div>
-                            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Proposed Loan Type</p>
-                                <div className="flex flex-wrap gap-1 mt-1">
-                                    {(client_profile.proposed_loan_type || "").split(',').map((type, i) => (
-                                        <Badge key={i} variant="secondary" className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100 border-none text-[9px] font-black uppercase">
-                                            {type.trim()}
-                                        </Badge>
-                                    ))}
-                                </div>
-                            </div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Time in Biz (Full)</p>
-                                    <p className="text-slate-900 font-black text-xs">{format(new Date(client_profile.business_start_date), "MMM d, yyyy")}</p>
-                                </div>
-                                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Credit Score</p>
-                                    <p className="text-emerald-500 font-black">{client_profile.credit_score}</p>
-                                </div>
-                            </div>
-                            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Entity Profile</p>
-                                <p className="text-slate-900 font-black uppercase tracking-tighter">{client_profile.legal_entity_type}</p>
-                            </div>
-                    </div>
-                    </CollapsibleSection>
-
-                    <CollapsibleSection
-                        clientId={client_id}
-                        slug="uw-ownership"
-                        title="Ownership & Structure"
-                        summary={`${client_profile.number_of_owners} owner${String(client_profile.number_of_owners) === "1" ? "" : "s"}`}
-                        defaultOpen={false}
-                    >
-                    <div className="p-6 space-y-4">
-                            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Amount of Owners</p>
-                                <p className="text-slate-900 font-black">{client_profile.number_of_owners}</p>
-                            </div>
-                            
-                            <div className="space-y-2">
-                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Owner Detail</p>
-                                <div className="space-y-2">
-                                    <div className="p-3 bg-white rounded-xl border border-slate-100 flex justify-between items-center shadow-sm">
-                                        <span className="text-xs font-bold text-slate-700 truncate pr-2">{client_profile.owner_1_name}</span>
-                                        <Badge className="bg-slate-900 text-white text-[10px]">{client_profile.owner_1_ownership_pct}%</Badge>
-                                    </div>
-                                    {client_profile.owner_2_name && (
-                                        <div className="p-3 bg-white rounded-xl border border-slate-100 flex justify-between items-center shadow-sm">
-                                            <span className="text-xs font-bold text-slate-700 truncate pr-2">{client_profile.owner_2_name}</span>
-                                            <Badge className="bg-slate-400 text-white text-[10px]">{client_profile.owner_2_ownership_pct}%</Badge>
-                                        </div>
-                                    )}
-                                    {client_profile.owner_3_name && (
-                                        <div className="p-3 bg-white rounded-xl border border-slate-100 flex justify-between items-center shadow-sm">
-                                            <span className="text-xs font-bold text-slate-700 truncate pr-2">{client_profile.owner_3_name}</span>
-                                            <Badge className="bg-slate-400 text-white text-[10px]">{client_profile.owner_3_ownership_pct}%</Badge>
-                                        </div>
-                                    )}
-                                    {client_profile.owner_4_name && (
-                                        <div className="p-3 bg-white rounded-xl border border-slate-100 flex justify-between items-center shadow-sm">
-                                            <span className="text-xs font-bold text-slate-700 truncate pr-2">{client_profile.owner_4_name}</span>
-                                            <Badge className="bg-slate-400 text-white text-[10px]">{client_profile.owner_4_ownership_pct}%</Badge>
-                                        </div>
-                                    )}
-                                    {client_profile.owner_5_name && (
-                                        <div className="p-3 bg-white rounded-xl border border-slate-100 flex justify-between items-center shadow-sm">
-                                            <span className="text-xs font-bold text-slate-700 truncate pr-2">{client_profile.owner_5_name}</span>
-                                            <Badge className="bg-slate-400 text-white text-[10px]">{client_profile.owner_5_ownership_pct}%</Badge>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                    </div>
-                    </CollapsibleSection>
-
-                    <CollapsibleSection
-                        clientId={client_id}
-                        slug="uw-contact"
-                        title="Client Direct Contact"
-                        summary={client_profile.client_email}
-                        defaultOpen={false}
-                    >
-                    <div className="p-6 space-y-3">
-                            <div className="flex items-center gap-3 p-3 text-slate-600 font-bold hover:bg-slate-50 rounded-xl transition-colors">
-                                <Mail className="w-5 h-5 text-emerald-500" />
-                                <span className="truncate text-sm">{client_profile.client_email}</span>
-                            </div>
-                            <div className="flex items-center gap-3 p-3 text-slate-600 font-bold hover:bg-slate-50 rounded-xl transition-colors">
-                                <Phone className="w-5 h-5 text-emerald-500" />
-                                <span className="text-sm">{client_profile.client_phone}</span>
-                            </div>
-                    </div>
-                    </CollapsibleSection>
-
-                    {/* Funding rounds — every financing this business has taken,
-                        and the entry point for the next one. Renders only for
-                        repeat/funded files; a first-time deal shows nothing. */}
-                    <FundingRoundsCard
-                        clientId={client_id}
-                        businessProfileId={active_business_id}
-                        canStartRound={can_upload}
-                        onRoundStarted={fetch_client_details}
-                    />
-
-                    {/* Internal Notes Feed */}
-                    <CollapsibleSection
-                        clientId={client_id}
-                        slug="uw-internal-comm"
-                        title="Internal Communication"
-                        summary={notes.length === 0 ? "No notes yet" : `${notes.length} note${notes.length === 1 ? "" : "s"}`}
-                        accessory={<Badge variant="outline" className="text-[9px]">{notes.length}</Badge>}
-                        defaultOpen
-                    >
-                    <div className="flex flex-col h-[500px] p-6">
-                        <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-                            {/* Notes List */}
-                            <div className="flex-1 overflow-y-auto space-y-4 pr-2 mb-4 custom-scrollbar">
-                                {notes.length === 0 ? (
-                                    <div className="h-full flex flex-col items-center justify-center text-center p-8">
-                                        <Clock className="w-8 h-8 text-slate-200 mb-2" />
-                                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">No activity yet</p>
-                                    </div>
-                                ) : (
-                                    notes.map((note) => (
-                                        <div key={note.id} className="space-y-1">
-                                            <div className="flex items-center justify-between">
-                                                <span className={clsx(
-                                                    "text-[10px] font-black uppercase tracking-tighter px-2 py-0.5 rounded",
-                                                    note.author_role === 'underwriting' ? "bg-slate-100 text-slate-600" : "bg-emerald-100 text-emerald-700"
-                                                )}>
-                                                    {note.author_name}
-                                                </span>
-                                                <span className="text-[9px] font-bold text-slate-400">
-                                                    {format(new Date(note.created_at), 'MMM d, h:mm a')}
-                                                </span>
-                                            </div>
-                                            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
-                                                <p className="text-xs text-slate-700 font-medium whitespace-pre-wrap">{note.content}</p>
-                                            </div>
-                                        </div>
-                                    ))
-                                )}
-                            </div>
-
-                            {/* Add Note Input */}
-                            <div className="shrink-0 space-y-2 pt-4 border-t border-slate-100">
-                                <Textarea
-                                    placeholder="Type a note..."
-                                    className="min-h-[80px] rounded-2xl border-slate-200 text-xs focus:ring-emerald-500"
-                                    value={new_standalone_note}
-                                    onChange={(e) => set_new_standalone_note(e.target.value)}
-                                />
-                                <Button
-                                    className="w-full h-10 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-black uppercase tracking-widest text-[10px]"
-                                    onClick={handleAddNote}
-                                    disabled={is_adding_note || !new_standalone_note.trim()}
-                                >
-                                    {is_adding_note ? <Loader2 className="w-4 h-4 animate-spin" /> : "Post Note"}
-                                </Button>
-                            </div>
-                        </div>
-                    </div>
-                    </CollapsibleSection>
-                </div>
-
-                {/* Documents Column */}
-                <div className="lg:col-span-2 space-y-8">
-                    {/* Use of Proceeds & Open Positions Section */}
-                    <div className="space-y-6">
-                        <div className="grid grid-cols-1 gap-6">
-                            {/* Use of Proceeds */}
-                            <CollapsibleSection
-                                clientId={client_id}
-                                slug="uw-use-of-proceeds"
-                                title="Use of Proceeds"
-                                summary={client_profile.loan_purpose ? client_profile.loan_purpose.slice(0, 60) : "Not specified"}
-                                defaultOpen
-                            >
-                            <div className="p-6">
-                                    <p className="text-sm font-bold text-slate-700 leading-relaxed italic">
-                                        "{client_profile.loan_purpose || "No use of proceeds specified."}"
-                                    </p>
-                            </div>
-                            </CollapsibleSection>
-
-                            {/* Lender Matching Results */}
-                            <CollapsibleSection
-                                clientId={client_id}
-                                slug="uw-lender-matches"
-                                title="Lender Matching Results"
-                                defaultOpen
-                            >
-                                {render_lender_assignments()}
-                            </CollapsibleSection>
-
-                            {/* Open Positions Table */}
-                            <CollapsibleSection
-                                clientId={client_id}
-                                slug="uw-open-positions"
-                                title="Open Positions (Previous Debt)"
-                                summary={open_positions.length === 0 ? "None reported" : `${open_positions.length} position${open_positions.length === 1 ? "" : "s"}`}
-                                accessory={<Badge variant="outline" className="text-emerald-500 font-black">{open_positions.length}</Badge>}
-                                defaultOpen
-                            >
-                            <div className="overflow-hidden">
-                                    {open_positions.length === 0 ? (
-                                        <div className="p-10 text-center">
-                                            <CheckCircle2 className="w-8 h-8 text-emerald-200 mx-auto mb-2" />
-                                            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">No open positions reported</p>
-                                        </div>
-                                    ) : (
-                                        <div className="overflow-x-auto">
-                                            <table className="w-full text-left border-collapse">
-                                                <thead>
-                                                    <tr className="bg-slate-50/50">
-                                                        <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100 italic">Lender</th>
-                                                        <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100">Type</th>
-                                                        <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100">Balance</th>
-                                                        <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100">Payment</th>
-                                                        <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100">Term</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    {open_positions.map((pos, i) => (
-                                                        <tr key={pos.id} className="hover:bg-slate-50/30 transition-colors group">
-                                                            <td className="px-6 py-4 border-b border-slate-50">
-                                                                <p className="text-sm font-black text-slate-900">{pos.lender_name}</p>
-                                                            </td>
-                                                            <td className="px-6 py-4 border-b border-slate-50">
-                                                                <Badge variant="secondary" className="bg-slate-100 text-slate-600 border-none text-[9px] font-black uppercase whitespace-nowrap">
-                                                                    {pos.loan_type}
-                                                                </Badge>
-                                                            </td>
-                                                            <td className="px-6 py-4 border-b border-slate-50 font-black text-xs text-slate-700">
-                                                                {pos.current_balance ? pos.current_balance.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) : "-"}
-                                                            </td>
-                                                            <td className="px-6 py-4 border-b border-slate-50 font-black text-xs text-emerald-600">
-                                                                {pos.payment_amount ? pos.payment_amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) : "-"}
-                                                            </td>
-                                                            <td className="px-6 py-4 border-b border-slate-50">
-                                                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{pos.payment_term || "-"}</p>
-                                                            </td>
-                                                        </tr>
-                                                    ))}
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    )}
-                                </div>
-                            </CollapsibleSection>
-                        </div>
-                    </div>
-
-                    {/* Required Documents Section */}
-                    <CollapsibleSection
-                        clientId={client_id}
-                        slug="uw-required-docs"
-                        title="Required Review Packet"
-                        summary={`${completion_pct}% complete · ${completed_count}/${total_count} docs`}
-                        accessory={
-                            can_upload ? (
-                                // Icon-only. Four labelled buttons could not fit
-                                // beside the section title at any realistic width;
-                                // the names live in tooltips instead. Every button
-                                // keeps an aria-label so the meaning survives for
-                                // screen readers, where a tooltip does not.
-                                <TooltipProvider delayDuration={200}>
-                                    <div className="flex items-center gap-1">
-                                        {/* The WHOLE packet in one archive, foldered
-                                            by category (and by bank account inside
-                                            the statements). The per-category buttons
-                                            below cover one section each; this is the
-                                            "hand me the file" action. */}
-                                        {scoped_documents.length > 1 && (
-                                            <Tooltip>
-                                                <TooltipTrigger asChild>
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="sm"
-                                                        disabled={!!is_zipping}
-                                                        aria-label={`Download the whole packet as a ZIP (${scoped_documents.length} files)`}
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            download_entire_packet();
-                                                        }}
-                                                        className="h-8 px-2 rounded-lg text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
-                                                    >
-                                                        {is_zipping ? (
-                                                            <>
-                                                                <Loader2 className="w-4 h-4 animate-spin" />
-                                                                <span className="ml-1.5 text-[9px] font-black tabular-nums">
-                                                                    {is_zipping.completed}/{is_zipping.total}
-                                                                </span>
-                                                            </>
-                                                        ) : (
-                                                            <Download className="w-4 h-4" />
-                                                        )}
-                                                    </Button>
-                                                </TooltipTrigger>
-                                                <TooltipContent>
-                                                    Zip packet ({scoped_documents.length} files)
-                                                </TooltipContent>
-                                            </Tooltip>
-                                        )}
-
-                                        <Tooltip>
-                                            <TooltipTrigger asChild>
-                                                <Button
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    aria-label="Upload funding application for lenders"
-                                                    onClick={() => {
-                                                        set_funding_app_for_lenders(true);
-                                                        set_funding_app_file(null);
-                                                        set_is_funding_app_open(true);
-                                                    }}
-                                                    className="h-8 px-2 rounded-lg text-slate-600 hover:bg-slate-100"
-                                                >
-                                                    <FileText className="w-4 h-4" />
-                                                </Button>
-                                            </TooltipTrigger>
-                                            <TooltipContent>Funding app (lenders)</TooltipContent>
-                                        </Tooltip>
-
-                                        <Tooltip>
-                                            <TooltipTrigger asChild>
-                                                <Button
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    aria-label="Add a document type to this file"
-                                                    onClick={() => {
-                                                        set_selected_request_ids([]);
-                                                        set_request_search("");
-                                                        set_also_ask_client(false);
-                                                        set_stip_lender("");
-                                                        set_is_request_modal_open(true);
-                                                    }}
-                                                    className="h-8 px-2 rounded-lg text-slate-600 hover:bg-slate-100"
-                                                >
-                                                    <Send className="w-4 h-4" />
-                                                </Button>
-                                            </TooltipTrigger>
-                                            <TooltipContent>Add doc type</TooltipContent>
-                                        </Tooltip>
-
-                                        {/* Share sits with the documents, not with the
-                                            lender card — staff hand files to lenders
-                                            long before the match is finalized. */}
-                                        <Tooltip>
-                                            <TooltipTrigger asChild>
-                                                <span>
-                                                    <ShareWithLenderButton
-                                                        clientId={client_id}
-                                                        businessProfileId={active_business_id}
-                                                        triggerLabel=""
-                                                        ariaLabel="Share documents with a lender"
-                                                        lenderOptions={active_round_assignments.map((a) => a.lender_name)}
-                                                        className="h-8 w-9 rounded-lg text-slate-600 hover:bg-slate-100"
-                                                    />
-                                                </span>
-                                            </TooltipTrigger>
-                                            <TooltipContent>Share docs with a lender</TooltipContent>
-                                        </Tooltip>
-                                    </div>
-                                </TooltipProvider>
-                            ) : undefined
-                        }
-                        defaultOpen
-                    >
-                    <div className="space-y-4 p-6">
-                        {scoped_required_docs.map((docType) => render_document_category(docType))}
-                    </div>
-                    </CollapsibleSection>
-
-                    {/* Uncategorized Documents Section */}
-                    {scoped_documents.filter(d => !scoped_required_docs.some(r => r.code === d.category)).length > 0 && (
-                        <CollapsibleSection
-                            clientId={client_id}
-                            slug="uw-misc-files"
-                            title="Miscellaneous Files"
-                            summary={`${scoped_documents.filter(d => !scoped_required_docs.some(r => r.code === d.category)).length} file(s)`}
-                            defaultOpen={false}
-                        >
-                        <div className="p-6">
-                            <div className="grid grid-cols-1 gap-4">
-                                {scoped_documents.filter(d => !scoped_required_docs.some(r => r.code === d.category)).map(doc => render_document_card(doc))}
-                            </div>
-                        </div>
-                        </CollapsibleSection>
-                    )}
-                </div>
-            </div>
-
             {/* Document Preview Modal */}
             <DocumentPreviewModal
                 isOpen={preview_modal.isOpen}
@@ -3967,7 +2910,7 @@ export default function UnderwritingClientDetailsPage() {
             >
                 <DialogContent className="sm:max-w-md">
                     <DialogHeader>
-                        <DialogTitle>Delete Document?</DialogTitle>
+                        <DialogTitle>Delete this document?</DialogTitle>
                         <DialogDescription>
                             <strong>{file_to_delete?.custom_label || file_to_delete?.name}</strong> will be
                             permanently removed from the client&apos;s vault — for the client and the advisor
@@ -4029,7 +2972,7 @@ export default function UnderwritingClientDetailsPage() {
                                 {group_being_edited && (
                                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 py-2">
                                         <div className="space-y-1.5">
-                                            <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                            <Label className="text-xs text-cb-ink/50">
                                                 {edit_config.nameLabel}
                                             </Label>
                                             <Input
@@ -4043,7 +2986,7 @@ export default function UnderwritingClientDetailsPage() {
 
                                         {edit_config.identifier && (
                                             <div className="space-y-1.5">
-                                                <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                                <Label className="text-xs text-cb-ink/50">
                                                     {edit_config.identifier.label}
                                                 </Label>
                                                 <Input
@@ -4069,7 +3012,7 @@ export default function UnderwritingClientDetailsPage() {
 
                                         {edit_config.subtypes && (
                                             <div className="space-y-1.5">
-                                                <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                                <Label className="text-xs text-cb-ink/50">
                                                     {edit_config.subtypeLabel ?? 'Type'}
                                                 </Label>
                                                 <select
@@ -4093,7 +3036,7 @@ export default function UnderwritingClientDetailsPage() {
 
                                         {edit_config.nicknameLabel && (
                                             <div className="space-y-1.5">
-                                                <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                                <Label className="text-xs text-cb-ink/50">
                                                     {edit_config.nicknameLabel}
                                                 </Label>
                                                 <Input
@@ -4200,14 +3143,14 @@ export default function UnderwritingClientDetailsPage() {
             <Dialog open={!!renaming_file} onOpenChange={(open) => !open && set_renaming_file(null)}>
                 <DialogContent className="sm:max-w-md">
                     <DialogHeader>
-                        <DialogTitle>Rename Document</DialogTitle>
+                        <DialogTitle>Rename document</DialogTitle>
                         <DialogDescription>
                             Enter a new display name for this document. This will be visible to the advisor and client as well.
                         </DialogDescription>
                     </DialogHeader>
                     <div className="grid gap-4 py-4">
                         <div className="grid gap-2">
-                            <Label htmlFor="new-name">Display Name</Label>
+                            <Label htmlFor="new-name" className="text-xs text-cb-ink/50">Display name</Label>
                             <Input
                                 id="new-name"
                                 value={renaming_file?.label || ""}
@@ -4241,6 +3184,56 @@ export default function UnderwritingClientDetailsPage() {
                             ) : (
                                 "Save Changes"
                             )}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Reject a document category — opened from the packet and from the
+                Review tab's decision panel. The reason is mandatory: it is what
+                the client receives, so "rejected" with no explanation would send
+                them back to the same upload. */}
+            <Dialog
+                open={is_reject_modal_open}
+                onOpenChange={(open) => {
+                    if (is_rejecting) return;
+                    if (open) set_is_reject_modal_open(true);
+                    else close_reject_modal();
+                }}
+            >
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Reject {reject_label_ref.current}?</DialogTitle>
+                        <DialogDescription>
+                            Say what is wrong with it. The client gets this reason by email and in
+                            their vault, and the category reopens for a new upload.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="py-2 space-y-2">
+                        <Label htmlFor="reject-reason" className="text-xs text-cb-ink/50">Reason</Label>
+                        <Textarea
+                            id="reject-reason"
+                            placeholder="e.g. Needs the full 6 months, or the scan is unreadable."
+                            value={reject_reason}
+                            onChange={(e) => set_reject_reason(e.target.value)}
+                            className="min-h-[120px] rounded-xl"
+                        />
+                    </div>
+                    <DialogFooter>
+                        <Button
+                            variant="ghost"
+                            onClick={close_reject_modal}
+                            disabled={is_rejecting}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            onClick={handle_reject_category}
+                            disabled={is_rejecting || !reject_reason.trim()}
+                            className="bg-red-600 hover:bg-red-700 text-white"
+                        >
+                            {is_rejecting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                            Reject category
                         </Button>
                     </DialogFooter>
                 </DialogContent>

@@ -13,6 +13,10 @@
 //      followers as well as owners), appear on the file, and are CC'd on the
 //      client-facing emails the vault sends.
 //   2. Those same admins get an in-app notification that the deal exists.
+//   3. For deal-desk referral partners (role partner_advisor) ONLY, the
+//      partner-program contact (Luigi) gets an email — see
+//      send_partner_deal_created_notification for the recipient override.
+//      Partner+ deals deliberately don't email.
 //
 // This also replaces the stale-file safety net: partner-owned files are exempt
 // from the reassign-stale-files cron (an outside partner shouldn't silently lose
@@ -27,6 +31,7 @@
 // Entirely best-effort: a signup must never fail because oversight wiring did.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { send_partner_deal_created_notification } from "@/lib/email";
 
 /**
  * Attach internal oversight to a freshly created, partner-owned vault.
@@ -40,13 +45,34 @@ export async function attachAdminOversightToPartnerDeal(
     vaultId: string;
     /** advisors.is_external of the creator. False for staff-created deals. */
     creatorIsExternal: boolean;
+    /** users.id of the creator — its role decides whether the email goes out. */
+    creatorUserId?: string | null;
     clientName?: string | null;
     companyName?: string | null;
     partnerName?: string | null;
   }
 ): Promise<void> {
-  const { vaultId, creatorIsExternal, clientName, companyName, partnerName } = args;
+  const { vaultId, creatorIsExternal, creatorUserId, clientName, companyName, partnerName } = args;
   if (!vaultId || !creatorIsExternal) return;
+
+  // Sent first and on its own: the follower wiring below bails early when no
+  // admin has an advisors row, and that must not swallow the email.
+  try {
+    const { data: creator } = creatorUserId
+      ? await db.from("users").select("role").eq("id", creatorUserId).maybeSingle()
+      : { data: null };
+    if (creator?.role === "partner_advisor") {
+      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "https://vault.creditbanc.io";
+      await send_partner_deal_created_notification({
+        client_name: clientName || "A client",
+        company_name: companyName,
+        partner_name: partnerName || "A referral partner",
+        detail_url: `${baseUrl}/admin/clients/${vaultId}`,
+      });
+    }
+  } catch (err) {
+    console.error("[partner-oversight] partner-deal email failed (non-fatal):", err);
+  }
 
   try {
     const { data: adminUsers, error: adminErr } = await db

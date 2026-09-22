@@ -18,7 +18,6 @@ import { createClient } from "@/lib/supabase/client";
 import { useRouter, useParams } from "next/navigation";
 import { canUseAdvisorWorkspace, isScopedAdvisorRole } from "@/lib/auth/roles";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
     ArrowLeft,
     AlertCircle,
@@ -32,12 +31,18 @@ import {
     Pencil,
     UserCog,
     BarChart3,
-    XCircle,
     Download,
     ChevronLeft,
     ChevronRight,
     ArrowBigUp,
     ArrowUp,
+    FilePlus2,
+    KeyRound,
+    Link2,
+    Mail,
+    Phone,
+    Send,
+    Users,
 } from "lucide-react";
 import {
     Dialog,
@@ -74,21 +79,17 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { EditProfileModal } from "@/app/advisor/dashboard/clients/[id]/edit-profile-modal";
 import { getClientPipelineHistory, updateLoanStatus, type LoanStatus, type PipelineStatusEntry } from "@/app/actions/pipeline";
+import { PIPELINE_STEPS } from "@/components/loan-pipeline-status";
 import { getBulkClientActivity } from "@/app/actions/advisor";
-import { ActivityAgeBadge } from "@/components/advisor/activity-age-badge";
 import DocumentPreviewModal from "@/components/pdf/pdf-viewer";
 
 // ── New UI components ─────────────────────────────────────────────────────────
-import { ClientProfileHeader } from "@/app/advisor/dashboard/clients/[id]/_components/client-profile-header";
-import { BusinessTabStrip, type BusinessTab } from "@/app/advisor/dashboard/clients/[id]/_components/business-tab-strip";
+import type { BusinessTab } from "@/app/advisor/dashboard/clients/[id]/_components/business-tab-strip";
 import { AddBusinessModal } from "@/app/advisor/dashboard/clients/[id]/_components/add-business-modal";
-import { ClientCommandBar } from "@/components/workspace/client-command-bar";
-import { DocumentUploadStatus } from "@/app/advisor/dashboard/clients/[id]/_components/document-upload-status";
+import { DocumentUploadStatus, isCategoryRejected } from "@/app/advisor/dashboard/clients/[id]/_components/document-upload-status";
 import { InternalCommunication } from "@/app/advisor/dashboard/clients/[id]/_components/internal-communication";
-import { SubmitUnderwritingCTA } from "@/app/advisor/dashboard/clients/[id]/_components/submit-underwriting-cta";
 import { ClientFollowersCard } from "@/app/advisor/dashboard/clients/[id]/_components/client-followers-card";
 import { FundingRoundsCard } from "@/components/funding/funding-rounds-card";
-import { listClientFollowers, type FollowerRow } from "@/app/advisor/dashboard/clients/[id]/follower-actions";
 import { ClientNotesCard, type FileNote } from "@/app/advisor/dashboard/clients/[id]/_components/client-notes-card";
 // M2 / Communications Hub — hidden until the outbound-email identity question is
 // settled (advisors sit on creditbanc.io, Mailgun sends from creditbanc.net, and
@@ -98,12 +99,33 @@ import { ClientNotesCard, type FileNote } from "@/app/advisor/dashboard/clients/
 // the entry point is withdrawn. Restore both this import and the section below.
 // import { CommunicationsTimeline } from "@/app/advisor/dashboard/clients/[id]/_components/communications-timeline";
 import { AdminLenderReviewCard } from "@/components/admin/admin-lender-review-card";
-import { CollapsibleSection, broadcast_toggle_all } from "@/app/advisor/dashboard/clients/[id]/_components/collapsible-section";
 import { isClientScopedDoc, matchesActiveBusiness, matchesActiveDeal, normalizeSupabaseJoin } from "@/lib/document-scope";
 import { offersGrouping, groupsForDocCode } from "@/lib/document-groups";
 import { zipDocuments, downloadDocument } from "@/lib/document-download";
 import { DocumentGroupPicker } from "@/components/document-group-picker";
 import { useDocumentGroups } from "@/hooks/use-document-groups";
+import { ClientFileShell } from "@/components/client-file/client-file-shell";
+import { FileHeader, type HeaderAction, type HeaderMenuItem } from "@/components/client-file/file-header";
+import { FileTabs, type FileTabItem } from "@/components/client-file/file-tabs";
+import { SummaryTiles, type SummaryTile } from "@/components/client-file/summary-tiles";
+import { PanelCard } from "@/components/client-file/panel-card";
+import { FactList } from "@/components/client-file/fact-list";
+import { EmptyLine } from "@/components/client-file/empty-line";
+import { ContactRow } from "@/components/client-file/contact-row";
+import { StatusLine } from "@/components/client-file/status-line";
+import { latestPipelineStatus, scopePipelineHistory } from "@/components/client-file/pipeline-scope";
+import { ReferralPartnerPicker } from "@/components/client-file/referral-partner-picker";
+import { getClientFileCapabilities, getClientFilePortal } from "@/components/client-file/capabilities";
+import { useFileTab } from "@/components/client-file/use-file-tab";
+import {
+    formatCreditScore,
+    formatCurrency,
+    formatDate,
+    formatMonthly,
+    formatTimeInBusiness,
+} from "@/components/client-file/format";
+import { ShareWithLenderButton } from "@/components/share/share-with-lender-button";
+import { ReassignmentPauseControl } from "@/app/advisor/dashboard/clients/[id]/_components/reassignment-pause-control";
 
 /**
  * ============================================================================
@@ -258,6 +280,7 @@ interface ClientProfile {
     contract_completed: boolean;
     contract_completed_at: string | null;
     company_zip_code?: string;
+    industry?: string;
     avg_annual_revenue?: number;
     loan_purpose?: string;
     additional_notes?: string;
@@ -291,6 +314,8 @@ interface UserDocument {
     document_group_id?: string | null;
     /** Carries metadata.original_file_name, which dates a periodic file. */
     metadata?: any;
+    /** 'rejected' once staff reject the category — see isCategoryRejected. */
+    status?: string | null;
 }
 
 interface InternalNote {
@@ -326,10 +351,15 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
     // (reassign advisor, lender-match review). It is a portal test, not a
     // permission test — the underlying actions re-check the role server-side.
     const is_admin_path = basePath.startsWith("/admin");
-    // External advisors working their own deals — referral partners in /partner,
-    // Partner+ reps in /desk: the "who referred this" row would only ever show
-    // themselves, and "Share with Lender" is staff-only, so both are hidden.
-    const is_partner_path = basePath.startsWith("/partner") || basePath.startsWith("/desk");
+    // Who sees which tabs/actions on this file: one matrix shared by every
+    // portal (see components/client-file/capabilities.ts). The partner portals
+    // (/partner, /desk) lose the referral-partner card and Share with Lender
+    // there. is_admin_path above still gates the remaining admin-only modals.
+    const capabilities = getClientFileCapabilities(getClientFilePortal(basePath));
+    // Phase 1: the workspace file has no Review tab yet (arrives with the UW
+    // move), so it is left out of the tabs this surface can land on.
+    const surface_tabs = capabilities.tabs.filter((t) => t !== "review" && (t !== "lenders" || is_admin_path));
+    const [active_tab, set_active_tab] = useFileTab(surface_tabs);
     const client_detail_path = (id: string) => {
         const base = `${basePath}/clients/${id}`;
         // Preserve the pipeline context across prev/next so the filtered set + counter persist.
@@ -356,24 +386,6 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
     // is-owner-state: Whether current advisor owns this client (vs. being a follower).
     // Drives the "Manage Followers" permission (owner + admin can manage; followers cannot).
     const [is_owner, set_is_owner] = useState(false);
-
-    // followers-list-state: page-level mirror of the Followers card's data. The
-    // card self-fetches, but the collapse unmounts it when closed — so the page
-    // fetches once here to populate the collapsed section header (follower
-    // names), and the card keeps this in sync via onFollowersChange after loads
-    // and add/remove.
-    const [followers_list, set_followers_list] = useState<FollowerRow[]>([]);
-
-    useEffect(() => {
-        if (!client_profile?.id) return;
-        let cancelled = false;
-        listClientFollowers(client_profile.id).then((res) => {
-            if (!cancelled && res.success && res.followers) set_followers_list(res.followers);
-        });
-        return () => {
-            cancelled = true;
-        };
-    }, [client_profile?.id]);
 
     // navigable-clients-state: Ordered list of client IDs the current advisor can access
     // (owned + followed for advisors, all for admins). Powers the prev/next buttons in the header.
@@ -491,7 +503,18 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
 
     // Pipeline state
     const [pipeline_history, set_pipeline_history] = useState<PipelineStatusEntry[]>([]);
-    const [current_pipeline_status, set_current_pipeline_status] = useState<LoanStatus>("created");
+
+    // The stage is per BUSINESS — see pipeline-scope.ts. Without this a
+    // brand-new second business showed the first one's "Docs In · 5d in pipeline".
+    const active_business_row = businesses.find((b) => b.id === active_business_id) ?? null;
+    const scoped_pipeline_history = useMemo(
+        () => scopePipelineHistory(pipeline_history, active_business_row, businesses.length),
+        [pipeline_history, active_business_row, businesses.length]
+    );
+    const current_pipeline_status = useMemo(
+        () => latestPipelineStatus(scoped_pipeline_history) as LoanStatus,
+        [scoped_pipeline_history]
+    );
 
     // Route the back-to-list button. If the user came from the funding pipeline,
     // send them back there. Otherwise route by the file's status: funded files go
@@ -919,7 +942,7 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
                 getBulkClientActivity([client_id]),
                 supabase
                     .from("business_profiles")
-                    .select("id, company_name, is_primary, display_order, legal_entity_type, business_start_date, company_city, company_state, company_zip_code, avg_monthly_deposits, avg_annual_revenue, employees_count, is_home_based, industry, funding_deals (id, capital_requested, proposed_loan_type, loan_purpose, funding_eta, display_order, funded_at)")
+                    .select("id, company_name, is_primary, created_at, display_order, legal_entity_type, business_start_date, company_city, company_state, company_zip_code, avg_monthly_deposits, avg_annual_revenue, employees_count, is_home_based, industry, funding_deals (id, capital_requested, proposed_loan_type, loan_purpose, funding_eta, display_order, funded_at)")
                     .eq("client_vault_id", client_id)
                     .order("is_primary", { ascending: false })
                     .order("display_order", { ascending: true })
@@ -979,12 +1002,6 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
             // Pipeline history
             if (history_result) {
                 set_pipeline_history(history_result);
-                if (history_result.length > 0) {
-                    const sorted = [...history_result].sort(
-                        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-                    );
-                    set_current_pipeline_status(sorted[0].status as LoanStatus);
-                }
             }
 
             // Document category approvals — store with business_profile_id
@@ -1031,9 +1048,13 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
                 });
                 set_businesses(rows);
                 // Default the active tab to the primary business (or the first row if none flagged).
+                // A pipeline card for a second business links here with
+                // ?business=<id>, so the file opens on that business.
                 const primary = rows.find((b) => b.is_primary) || rows[0];
-                if (primary && !active_business_id) {
-                    set_active_business_id(primary.id);
+                const linked_business_id = new URLSearchParams(window.location.search).get("business");
+                const linked = rows.find((b) => b.id === linked_business_id);
+                if (!active_business_id && (linked || primary)) {
+                    set_active_business_id((linked || primary).id);
                 }
             }
 
@@ -1202,39 +1223,46 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
         if (outstanding.length === 0) return null;
 
         return (
-            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 shadow-sm">
-                <div className="flex items-start gap-4">
-                    <div className="bg-amber-100 p-2 rounded-lg">
-                        <AlertCircle className="h-6 w-6 text-amber-600" />
-                    </div>
-                    <div className="flex-1">
-                        <h4 className="text-amber-900 font-bold text-sm uppercase tracking-wider mb-1">
-                            Action Required: {outstanding.length} Outstanding Items
+            <div className="rounded-2xl border border-amber-200/70 bg-amber-50/60 p-4">
+                <div className="flex items-start gap-3">
+                    <AlertCircle className="h-5 w-5 flex-shrink-0 text-amber-600" />
+                    <div className="min-w-0 flex-1">
+                        <h4 className="text-sm font-semibold text-amber-900">
+                            {outstanding.length} outstanding item{outstanding.length === 1 ? "" : "s"}
                         </h4>
-                        <div className="flex flex-wrap gap-2 mt-2">
+                        <div className="mt-2 flex flex-wrap gap-2">
                             {outstanding.map(doc => {
                                 const is_pending_upload = get_documents_by_category(doc.code).length === 0;
+                                const is_rejected = isCategoryRejected(get_documents_by_category(doc.code));
                                 return (
-                                    <Badge
+                                    <button
+                                        type="button"
                                         key={doc.code}
-                                        variant="outline"
-                                        className={clsx(
-                                            "cursor-pointer hover:shadow-md transition-all px-3 py-1 border-2",
-                                            is_pending_upload
-                                                ? "bg-red-50 text-red-700 border-red-200"
-                                                : "bg-yellow-50 text-yellow-700 border-yellow-200"
-                                        )}
+                                        className="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-white px-2.5 py-1 text-xs font-medium text-cb-ink transition-colors hover:bg-cb-cream"
                                         onClick={() => {
-                                            // Expand and scroll to category
+                                            // The categories live on the Documents tab now.
+                                            set_active_tab("documents");
                                             if (!expanded_categories.has(doc.code)) {
                                                 toggle_category_expansion(doc.code);
                                             }
-                                            const el = document.getElementById(`category-${doc.code}`);
-                                            el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                            // Wait a frame for the tab panel to mount before scrolling.
+                                            requestAnimationFrame(() => {
+                                                document
+                                                    .getElementById(`category-${doc.code}`)
+                                                    ?.scrollIntoView({ behavior: "smooth", block: "center" });
+                                            });
                                         }}
                                     >
-                                        {doc.label} {is_pending_upload ? "(Missing)" : "(Pending Approval)"}
-                                    </Badge>
+                                        <span
+                                            aria-hidden
+                                            className={clsx(
+                                                "h-1.5 w-1.5 flex-shrink-0 rounded-full",
+                                                is_pending_upload || is_rejected ? "bg-rose-500" : "bg-amber-500"
+                                            )}
+                                        />
+                                        {doc.label}
+                                        <span className="text-cb-ink/40">{is_pending_upload ? " · missing" : is_rejected ? " · rejected" : " · awaiting approval"}</span>
+                                    </button>
                                 );
                             })}
                         </div>
@@ -1510,12 +1538,13 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
      */
     async function handle_status_change(newStatus: LoanStatus, note: string = "Updated by advisor") {
         try {
-            const res = await updateLoanStatus(client_id, newStatus, note);
+            // Stamped with the business's current round so it moves only the
+            // business on screen.
+            const res = await updateLoanStatus(client_id, newStatus, note, active_deal_id);
             if (res.success) {
-                // Refresh state
+                // Refresh state; the stage is derived from the history.
                 const history = await getClientPipelineHistory(client_id);
                 set_pipeline_history(history);
-                set_current_pipeline_status(newStatus);
                 toast.success(`Pipeline updated to ${newStatus}`);
             } else {
                 // Carries the real reason — e.g. `funded` requires Underwriting's
@@ -2029,74 +2058,336 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
             : 100;
 
         return (
-            <div className="space-y-6">
-                {/* One bar: queue nav + pipeline + stage actions + fold
-                    controls. Replaces the three stacked strips (nav, status
-                    chips, full pipeline card) that used to open every file. */}
+            <div>
+                {/* ── Client file shell ────────────────────────────────
+                    Header (queue nav, business switcher, pipeline, actions),
+                    summary tiles, tabbed work column and the context rail.
+                    Capability matrix decides what each portal sees. */}
                 {(() => {
+                    const active_business = businesses.find((b) => b.id === active_business_id);
+                    const profile = displayed_profile ?? client_profile;
+
+                    // ── Status line inputs ──────────────────────────────
                     const last_upload = documents.length > 0
                         ? documents.reduce((a, b) => new Date(a.upload_date) > new Date(b.upload_date) ? a : b).upload_date
                         : null;
                     const upload_baseline = last_upload ?? client_profile.created_at;
                     const days_since_last_upload = differenceInDays(new Date(), new Date(upload_baseline));
-                    const show_upload_alert = days_since_last_upload >= 5 && completion_percentage < 100;
-                    return (
-                        <ClientCommandBar
-                            back_label={came_from_pipeline ? "Back to Pipeline" : "Back to Clients"}
-                            on_back={() => router.push(clients_list_path)}
-                            on_prev={prev_client_id ? () => router.push(client_detail_path(prev_client_id)) : undefined}
-                            on_next={next_client_id ? () => router.push(client_detail_path(next_client_id)) : undefined}
-                            nav_index={current_nav_index >= 0 ? current_nav_index + 1 : undefined}
-                            nav_total={navigable_client_ids.length}
-                            current_status={current_pipeline_status}
-                            pipeline_history={pipeline_history}
-                            on_status_change={(status) => handle_status_change(status, "Set by advisor")}
-                            // Advisors walk a file only as far as documents
-                            // received (index 3); underwriting takes it from
-                            // there. Same ceiling the old advance button had.
-                            advance_limit_index={3}
-                            on_expand_all={() => broadcast_toggle_all(true)}
-                            on_collapse_all={() => broadcast_toggle_all(false)}
-                            chips={
-                                <>
-                                    <ActivityAgeBadge
-                                        created_at={client_profile.created_at}
-                                        last_activity_at={last_activity_at}
-                                        reassigned_to_catch_all_at={client_profile.reassigned_to_catch_all_at}
+                    const upload_alert = days_since_last_upload >= 5 && completion_percentage < 100
+                        ? (last_upload ? `No uploads · ${days_since_last_upload}d` : `No uploads yet · ${days_since_last_upload}d`)
+                        : null;
+
+                    // ── Header actions (ids without a handler here are skipped) ──
+                    const already_submitted = submission_status === "locked" && completion_percentage === 100;
+                    const actions: HeaderAction[] = capabilities.headerActions.flatMap((id): HeaderAction[] => {
+                        switch (id) {
+                            case "request_docs":
+                                return [{ id, label: "Request docs", icon: FilePlus2, onClick: () => set_is_request_modal_open(true) }];
+                            case "share_with_lender":
+                                return [{
+                                    id,
+                                    render: (className) => (
+                                        <ShareWithLenderButton
+                                            clientId={client_profile.id}
+                                            businessProfileId={active_business_id}
+                                            triggerLabel="Share"
+                                            className={className}
+                                        />
+                                    ),
+                                }];
+                            case "submit_to_uw":
+                                return [{
+                                    id,
+                                    label: already_submitted ? "Submitted" : "Submit to UW",
+                                    icon: Send,
+                                    onClick: () => set_is_submit_confirm_open(true),
+                                    disabled: completion_percentage < 100 || already_submitted,
+                                    busy: is_submitting_vault,
+                                    title: completion_percentage < 100 ? "Available once every required document is approved" : undefined,
+                                }];
+                            default:
+                                return []; // funded / decline / notify / slack: wired when the UW surface joins
+                        }
+                    });
+
+                    const menu: HeaderMenuItem[] = capabilities.menuItems.flatMap((id): HeaderMenuItem[] => {
+                        switch (id) {
+                            case "edit_profile":
+                                return [{ id, label: "Edit profile", icon: UserCog, onSelect: () => set_is_edit_modal_open(true) }];
+                            case "copy_magic_link":
+                                return [{ id, label: "Copy magic link", icon: Link2, onSelect: handle_copy_magic_link, busy: is_generating_magic_link }];
+                            case "resend_credentials":
+                                return [{ id, label: "Resend login", icon: Send, onSelect: handle_resend_credentials, busy: is_resending }];
+                            case "send_password_reset":
+                                return [{ id, label: "Send password reset", icon: KeyRound, onSelect: handle_send_password_reset, busy: is_sending_password_reset }];
+                            case "add_funding_app":
+                                return client_profile.contract_completed
+                                    ? []
+                                    : [{ id, label: "Add funding app", icon: FileSignature, onSelect: () => set_is_manual_funding_modal_open(true) }];
+                            case "add_business":
+                                return [{ id, label: "Add business", icon: Plus, onSelect: () => set_is_add_business_open(true) }];
+                            case "reassign_advisor":
+                                return [{ id, label: "Reassign advisor", icon: Users, onSelect: open_reassign_modal }];
+                            case "delete_vault":
+                                return [{ id, label: "Delete vault", icon: Trash2, onSelect: () => set_is_delete_vault_modal_open(true), destructive: true }];
+                            default:
+                                return []; // start_round lives in the funding rounds card; upload_for_client / archive_slack arrive with UW
+                        }
+                    });
+
+                    // ── Tiles ───────────────────────────────────────────
+                    const tiles: SummaryTile[] = [
+                        { id: "requested", label: "Requested", value: formatCurrency(profile?.capital_requested) },
+                        { id: "deposits", label: "Deposits", value: formatMonthly(profile?.avg_monthly_deposits) },
+                        { id: "fico", label: "FICO", value: formatCreditScore(client_profile.credit_score) },
+                        { id: "tib", label: "In business", value: formatTimeInBusiness(profile?.business_start_date) },
+                        {
+                            id: "docs",
+                            label: "Docs approved",
+                            value: `${completed_categories} / ${total_required}`,
+                            tone: total_required > 0 && completed_categories === total_required ? "positive" : "default",
+                        },
+                    ];
+                    // Lender tile: the workspace has no page-level lender count
+                    // (AdminLenderReviewCard self-fetches). It joins with the UW panels.
+
+                    // ── Tabs ────────────────────────────────────────────
+                    const tab_items: FileTabItem[] = [];
+                    for (const id of surface_tabs) {
+                        if (id === "overview") {
+                            tab_items.push({
+                                id,
+                                label: "Overview",
+                                content: (
+                                    <>
+                                        {render_outstanding_banner(scoped_required_docs)}
+                                        <PanelCard title="Client notes">
+                                            <ClientNotesCard
+                                                loan_purpose={profile?.loan_purpose || ""}
+                                                additional_notes={profile?.additional_notes || ""}
+                                                file_notes={file_notes}
+                                                new_file_note={new_file_note}
+                                                is_adding_file_note={is_adding_file_note}
+                                                on_new_file_note_change={set_new_file_note}
+                                                on_add_file_note={handle_add_file_note}
+                                                on_save_signup_notes={handle_save_signup_notes}
+                                            />
+                                        </PanelCard>
+                                        <FundingRoundsCard
+                                            clientId={client_profile.id}
+                                            businessProfileId={active_business_id}
+                                            canStartRound={is_admin_path}
+                                            onRoundStarted={fetch_client_details}
+                                        />
+                                    </>
+                                ),
+                            });
+                        } else if (id === "documents") {
+                            tab_items.push({
+                                id,
+                                label: "Documents",
+                                badge: total_required > 0 ? `${completed_categories}/${total_required}` : null,
+                                content: (
+                                    <>
+                                        <DocumentUploadStatus
+                                            embedded
+                                            required_docs={scoped_required_docs}
+                                            documents={scoped_documents}
+                                            approvals={approvals}
+                                            expanded_categories={expanded_categories}
+                                            completion_percentage={completion_percentage}
+                                            document_groups={document_groups}
+                                            zipping={is_zipping}
+                                            on_download_packet={download_entire_packet}
+                                            requesting_again_code={requesting_again_code}
+                                            on_toggle_expand={toggle_category_expansion}
+                                            on_request_docs={() => set_is_request_modal_open(true)}
+                                            on_request_again={handle_request_again}
+                                            on_upload={(code, label) => {
+                                                set_upload_doc_code(code);
+                                                set_upload_doc_label(label);
+                                                set_upload_files([]);
+                                                // A leftover account from the last upload would
+                                                // silently file this batch under the wrong one.
+                                                set_upload_document_group_id(null);
+                                                set_is_upload_modal_open(true);
+                                            }}
+                                            on_approve={(doc) => {
+                                                set_category_to_approve(doc);
+                                                setIs_approving_modal_open(true);
+                                            }}
+                                            on_reject={(doc) => {
+                                                set_reject_doc_type(doc);
+                                                set_is_reject_modal_open(true);
+                                            }}
+                                            on_remove_request={(doc) => {
+                                                set_doc_to_remove_request(doc);
+                                                set_is_remove_request_modal_open(true);
+                                            }}
+                                            on_preview={(doc) => set_preview_modal({ isOpen: true, doc })}
+                                            on_download={download_document}
+                                            on_download_all={download_all_documents}
+                                            on_delete_file={(doc) => {
+                                                set_file_to_delete(doc);
+                                                set_is_delete_file_modal_open(true);
+                                            }}
+                                            on_rename={(doc) => set_renaming_file({ id: doc.id, label: doc.custom_label || doc.name })}
+                                        />
+                                        {/* SubmitUnderwritingCTA retired here: the header's Submit to UW button (and its Submitted state) covers it. The capabilities.showSubmitCta flag went with it — nothing read it. */}
+                                    </>
+                                ),
+                            });
+                        } else if (id === "lenders") {
+                            tab_items.push({
+                                id,
+                                label: "Lenders",
+                                content: (
+                                    <PanelCard title="Lenders & responses">
+                                        <AdminLenderReviewCard clientId={client_profile.id} />
+                                    </PanelCard>
+                                ),
+                            });
+                        } else if (id === "notes") {
+                            tab_items.push({
+                                id,
+                                label: "Notes",
+                                badge: notes.length > 0 ? notes.length : null,
+                                content: (
+                                    <InternalCommunication
+                                        notes={notes}
+                                        new_note={new_standalone_note}
+                                        is_adding={is_adding_note}
+                                        on_note_change={set_new_standalone_note}
+                                        on_add_note={handle_add_note}
                                     />
-                                    {show_upload_alert && (
-                                        <span
-                                            className="inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-red-700"
-                                            title={last_upload
-                                                ? `Last upload was ${days_since_last_upload} day${days_since_last_upload === 1 ? "" : "s"} ago`
-                                                : `No client uploads since vault was created ${days_since_last_upload} day${days_since_last_upload === 1 ? "" : "s"} ago`}
-                                        >
-                                            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" />
-                                            {last_upload ? `No uploads · ${days_since_last_upload}d` : `No uploads yet · ${days_since_last_upload}d`}
-                                        </span>
+                                ),
+                            });
+                        }
+                    }
+
+                    // ── Rail ────────────────────────────────────────────
+                    const latest_note = notes[0]; // fetchInternalNotes orders newest first
+                    const rail = (
+                        <>
+                            <PanelCard title="Business" bodyClassName="px-5 py-1.5">
+                                <FactList
+                                    facts={[
+                                        { label: "Industry", value: active_business?.industry || profile?.industry || null },
+                                        { label: "Entity", value: profile?.legal_entity_type && profile.legal_entity_type !== "—" ? profile.legal_entity_type : null },
+                                        { label: "Started", value: profile?.business_start_date ? formatDate(profile.business_start_date) : null },
+                                        { label: "Location", value: [profile?.company_city, profile?.company_state].filter(Boolean).join(", ") || null },
+                                        { label: "Loan type", value: profile?.proposed_loan_type || null },
+                                        { label: "Employees", value: profile?.employees_count ?? null },
+                                    ]}
+                                />
+                            </PanelCard>
+
+                            <PanelCard title="Contact" bodyClassName="space-y-2.5 px-5 py-4">
+                                <p className="text-sm font-semibold text-cb-ink">{client_profile.client_name}</p>
+                                <ContactRow icon={Mail} value={client_profile.client_email} href={`mailto:${client_profile.client_email}`} copy_label="Copy email" />
+                                <ContactRow icon={Phone} value={client_profile.client_phone} href={`tel:${client_profile.client_phone}`} copy_label="Copy phone" />
+                                <p className="text-xs text-cb-ink/40">Vault created {formatDate(client_profile.created_at)}</p>
+                            </PanelCard>
+
+                            <PanelCard
+                                title="Team"
+                                accessory={capabilities.canReassignAdvisor ? (
+                                    <button type="button" onClick={open_reassign_modal} className="text-xs font-semibold text-emerald-700 hover:underline">
+                                        Reassign
+                                    </button>
+                                ) : undefined}
+                            >
+                                <div className="space-y-3 px-5 pt-4">
+                                    <FactList facts={[{ label: "Advisor", value: client_profile.advisor_name || "Unassigned" }]} />
+                                    {capabilities.showReferralPartner && (
+                                        <div className="space-y-1.5">
+                                            <p className="text-xs text-cb-ink/50">Referral partner</p>
+                                            <ReferralPartnerPicker
+                                                value={client_profile.referral_partner ?? null}
+                                                is_saving={is_saving_referral_partner}
+                                                on_change={handle_referral_partner_change}
+                                            />
+                                        </div>
                                     )}
-                                </>
+                                    <ReassignmentPauseControl
+                                        clientId={client_profile.id}
+                                        paused_until={client_profile.reassignment_paused_until ?? null}
+                                    />
+                                </div>
+                                <ClientFollowersCard clientId={client_profile.id} canManage={is_owner} variant="rail" />
+                            </PanelCard>
+
+                            <PanelCard
+                                title="Latest note"
+                                accessory={
+                                    <button type="button" onClick={() => set_active_tab("notes")} className="text-xs font-semibold text-emerald-700 hover:underline">
+                                        All notes
+                                    </button>
+                                }
+                                bodyClassName="px-5 py-3"
+                            >
+                                {latest_note ? (
+                                    <div className="space-y-1">
+                                        <p className="line-clamp-3 text-sm text-cb-ink/80">{latest_note.content}</p>
+                                        <p className="text-xs text-cb-ink/40">
+                                            {latest_note.author_name} · {formatDate(latest_note.created_at)}
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <EmptyLine action={{ label: "Add one", onClick: () => set_active_tab("notes") }}>No notes yet</EmptyLine>
+                                )}
+                            </PanelCard>
+                        </>
+                    );
+
+                    return (
+                        <ClientFileShell
+                            header={
+                                <FileHeader
+                                    back_label={came_from_pipeline ? "Back to pipeline" : "Back to clients"}
+                                    on_back={() => router.push(clients_list_path)}
+                                    on_prev={prev_client_id ? () => router.push(client_detail_path(prev_client_id)) : undefined}
+                                    on_next={next_client_id ? () => router.push(client_detail_path(next_client_id)) : undefined}
+                                    nav_index={current_nav_index >= 0 ? current_nav_index + 1 : undefined}
+                                    nav_total={navigable_client_ids.length}
+                                    businesses={businesses}
+                                    active_business_id={active_business_id}
+                                    fallback_business_name={client_profile.company_name}
+                                    on_select_business={set_active_business_id}
+                                    on_add_business={capabilities.canManageBusinesses && businesses.length > 1 ? () => set_is_add_business_open(true) : undefined}
+                                    on_delete_business={capabilities.canManageBusinesses ? (b) => set_business_pending_delete(b) : undefined}
+                                    identity={[client_profile.client_name, active_business?.industry || profile?.industry || null, profile?.legal_entity_type]}
+                                    status_line={
+                                        <StatusLine
+                                            created_at={
+                                                active_business_row && !active_business_row.is_primary
+                                                    ? active_business_row.created_at ?? client_profile.created_at
+                                                    : client_profile.created_at
+                                            }
+                                            last_activity_at={last_activity_at}
+                                            reassigned_to_catch_all_at={client_profile.reassigned_to_catch_all_at}
+                                            upload_alert={upload_alert}
+                                        />
+                                    }
+                                    current_status={current_pipeline_status}
+                                    pipeline_history={scoped_pipeline_history}
+                                    on_status_change={(status) => handle_status_change(status, "Set by advisor")}
+                                    // Cap the one-click advance at Lender Matched when the
+                                    // matrix leaves the ceiling uncapped (admin here): Funded
+                                    // needs the UW funded dialog (phase 3), and pipeline-core
+                                    // rejects funded without a funded deal.
+                                    advance_limit_index={capabilities.stageCeilingIndex ?? PIPELINE_STEPS.findIndex((s) => s.status === "lender_matched")}
+                                    actions={actions}
+                                    primary_id={capabilities.headerActions[capabilities.headerActions.length - 1]}
+                                    menu={menu}
+                                />
                             }
+                            tiles={<SummaryTiles tiles={tiles} />}
+                            tabs={<FileTabs items={tab_items} active={active_tab} on_change={set_active_tab} />}
+                            rail={rail}
                         />
                     );
                 })()}
-
-                {/* Outstanding actions banner */}
-                {render_outstanding_banner(scoped_required_docs)}
-
-                {/* ── Business tab strip ─────────────────────────────
-                    Renders one tab per business. The "Add Business" CTA at the
-                    end opens the modal for creating an additional business
-                    under this client. Switching tabs updates active_business_id;
-                    per-tab data scoping (docs / pipeline / etc.) lands in a
-                    later pass. */}
-                <BusinessTabStrip
-                    businesses={businesses}
-                    active_business_id={active_business_id}
-                    on_select={set_active_business_id}
-                    on_add={() => set_is_add_business_open(true)}
-                    on_delete={(b) => set_business_pending_delete(b)}
-                />
 
                 <AddBusinessModal
                     client_vault_id={client_id}
@@ -2170,147 +2461,6 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
                     </Dialog>
                 )}
 
-                {/* ── Profile Header ──────────────────────────────────
-                    Client-level identity fields (name, email, phone, credit
-                    score, referral, funding app status) stay constant across
-                    tabs. The "Business" + "Financials" columns rescope to the
-                    active tab.
-
-                    For the PRIMARY tab we keep reading from client_data_vault
-                    (legacy fat row — has every field populated from signup).
-                    For NON-PRIMARY tabs we read STRICTLY from the business_profiles
-                    row — no fallback to cdv. Missing fields render as "—" so
-                    the advisor can see what's actually on each business
-                    instead of accidentally showing primary's data. */}
-                {(() => {
-                    if (!displayed_profile) return null;
-                    return (
-                <ClientProfileHeader
-                    client_profile={displayed_profile}
-                    completion_percentage={completion_percentage}
-                    active_business_profile_id={active_business_id}
-                    is_resending={is_resending}
-                    is_generating_magic_link={is_generating_magic_link}
-                    is_sending_password_reset={is_sending_password_reset}
-                    is_saving_referral_partner={is_saving_referral_partner}
-                    show_referral_partner={!is_partner_path}
-                    show_share_with_lender={!is_partner_path}
-                    on_edit={() => set_is_edit_modal_open(true)}
-                    on_delete_vault={() => set_is_delete_vault_modal_open(true)}
-                    on_resend={handle_resend_credentials}
-                    on_copy_magic_link={handle_copy_magic_link}
-                    on_add_funding_app={() => set_is_manual_funding_modal_open(true)}
-                    on_send_password_reset={handle_send_password_reset}
-                    on_referral_partner_change={handle_referral_partner_change}
-                />
-                    );
-                })()}
-
-                {/* ── Client Notes (signup context + file notes) ────── */}
-                <CollapsibleSection
-                    clientId={client_profile.id}
-                    slug="notes"
-                    title="Client Notes"
-                    summary={
-                        file_notes.length === 0
-                            ? "Loan purpose + signup notes"
-                            : `${file_notes.length} file note${file_notes.length === 1 ? "" : "s"}`
-                    }
-                    defaultOpen
-                >
-                    <ClientNotesCard
-                        loan_purpose={displayed_profile?.loan_purpose || ""}
-                        additional_notes={displayed_profile?.additional_notes || ""}
-                        file_notes={file_notes}
-                        new_file_note={new_file_note}
-                        is_adding_file_note={is_adding_file_note}
-                        on_new_file_note_change={set_new_file_note}
-                        on_add_file_note={handle_add_file_note}
-                        on_save_signup_notes={handle_save_signup_notes}
-                    />
-                </CollapsibleSection>
-
-                {/* ── Admin: Reassign Advisor (admin-only) ──────────────
-                    Lets admins move a client to a different primary advisor.
-                    Renders just above the Followers card so the assignment
-                    chain reads naturally: owner → followers. */}
-                {is_admin_path && (
-                    <CollapsibleSection
-                        clientId={client_profile.id}
-                        slug="reassign"
-                        title="Assigned Advisor"
-                        summary={client_profile.advisor_name || "Unassigned"}
-                        accessory={
-                            <Button
-                                onClick={open_reassign_modal}
-                                size="sm"
-                                variant="outline"
-                                className="h-9 rounded-xl text-[10px] font-black uppercase tracking-widest border-emerald-300 hover:bg-emerald-100"
-                            >
-                                <UserCog className="w-3.5 h-3.5 mr-1.5" />
-                                Reassign Advisor
-                            </Button>
-                        }
-                        defaultOpen={false}
-                    >
-                        <div className="bg-emerald-50/40 p-5">
-                            <p className="text-base font-bold text-slate-900">
-                                {client_profile.advisor_name || "Unassigned"}
-                            </p>
-                        </div>
-                    </CollapsibleSection>
-                )}
-
-                {/* ── Followers ─────────────────────────────────────── */}
-                <CollapsibleSection
-                    clientId={client_profile.id}
-                    slug="followers"
-                    title="Followers"
-                    summary={
-                        followers_list.length === 0
-                            ? undefined
-                            : followers_list.length <= 2
-                                ? followers_list.map((f) => `${f.first_name} ${f.last_name}`.trim()).join(", ")
-                                : `${followers_list.slice(0, 2).map((f) => `${f.first_name} ${f.last_name}`.trim()).join(", ")} +${followers_list.length - 2} more`
-                    }
-                    defaultOpen={false}
-                >
-                    <ClientFollowersCard
-                        clientId={client_profile.id}
-                        canManage={is_owner}
-                        onFollowersChange={set_followers_list}
-                    />
-                </CollapsibleSection>
-
-                {/* ── Funding rounds ───────────────────────────────────
-                    Every financing this business has taken, so a repeat
-                    client's history is readable instead of overwritten.
-                    Advisors see it; only admins open the next round. */}
-                <div className="mb-6">
-                    <FundingRoundsCard
-                        clientId={client_profile.id}
-                        businessProfileId={active_business_id}
-                        canStartRound={is_admin_path}
-                        onRoundStarted={fetch_client_details}
-                    />
-                </div>
-
-                {/* ── Lenders & responses (admin-only) ──────────────────
-                    Who this file is going to and what each lender answered.
-                    Informational — there is no admin approval step. The admin
-                    can add a lender they already know and mark it submitted
-                    from here. Self-fetches its own data. */}
-                {is_admin_path && (
-                    <CollapsibleSection
-                        clientId={client_profile.id}
-                        slug="lender-match"
-                        title="Lenders & Responses"
-                        defaultOpen
-                    >
-                        <AdminLenderReviewCard clientId={client_profile.id} />
-                    </CollapsibleSection>
-                )}
-
                 {/* ── Contact history (calls / texts / emails) ───────────
                     HIDDEN — M2 / Communications Hub. Contact WITH the client, as
                     opposed to the staff-to-staff notes in the Internal
@@ -2319,8 +2469,8 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
                     is what keeps a file from going stale.
 
                     Withdrawn from the page until the sending identity is decided
-                    (see the import note above). Uncomment this block and its
-                    import to bring it back — nothing else needs changing.
+                    (see the import note above). A revival becomes a tab in the
+                    client-file shell (FileTabs), not a collapsible section.
 
                 <CollapsibleSection
                     clientId={client_profile.id}
@@ -2339,85 +2489,6 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
                     />
                 </CollapsibleSection>
                 */}
-
-                {/* ── Docs + Communication 2-col grid ───────────────── */}
-                <CollapsibleSection
-                    clientId={client_profile.id}
-                    slug="docs-comm"
-                    title="Documents & Communication"
-                    summary={`${completion_percentage}% complete${notes.length > 0 ? ` · ${notes.length} note${notes.length === 1 ? "" : "s"}` : ""}`}
-                    defaultOpen
-                >
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 p-6">
-                    {/* Left: document accordion */}
-                    <div className="lg:col-span-2">
-                        <DocumentUploadStatus
-                            required_docs={scoped_required_docs}
-                            documents={scoped_documents}
-                            approvals={approvals}
-                            expanded_categories={expanded_categories}
-                            completion_percentage={completion_percentage}
-                            document_groups={document_groups}
-                            zipping={is_zipping}
-                            on_download_packet={download_entire_packet}
-                            requesting_again_code={requesting_again_code}
-                            on_toggle_expand={toggle_category_expansion}
-                            on_request_docs={() => set_is_request_modal_open(true)}
-                            on_request_again={handle_request_again}
-                            on_upload={(code, label) => {
-                                set_upload_doc_code(code);
-                                set_upload_doc_label(label);
-                                set_upload_files([]);
-                                // A leftover account from the last upload would
-                                // silently file this batch under the wrong one.
-                                set_upload_document_group_id(null);
-                                set_is_upload_modal_open(true);
-                            }}
-                            on_approve={(doc) => {
-                                set_category_to_approve(doc);
-                                setIs_approving_modal_open(true);
-                            }}
-                            on_reject={(doc) => {
-                                set_reject_doc_type(doc);
-                                set_is_reject_modal_open(true);
-                            }}
-                            on_remove_request={(doc) => {
-                                set_doc_to_remove_request(doc);
-                                set_is_remove_request_modal_open(true);
-                            }}
-                            on_preview={(doc) => set_preview_modal({ isOpen: true, doc })}
-                            on_download={download_document}
-                            on_download_all={download_all_documents}
-                            on_delete_file={(doc) => {
-                                set_file_to_delete(doc);
-                                set_is_delete_file_modal_open(true);
-                            }}
-                            on_rename={(doc) => set_renaming_file({ id: doc.id, label: doc.custom_label || doc.name })}
-                        />
-                    </div>
-
-                    {/* Right: internal communication */}
-                    <div>
-                        <InternalCommunication
-                            notes={notes}
-                            new_note={new_standalone_note}
-                            is_adding={is_adding_note}
-                            on_note_change={set_new_standalone_note}
-                            on_add_note={handle_add_note}
-                        />
-                    </div>
-                </div>
-                </CollapsibleSection>
-
-                {/* ── Submit to Underwriting CTA ────────────────────── */}
-                <SubmitUnderwritingCTA
-                    client_name={client_profile.client_name}
-                    completion_percentage={completion_percentage}
-                    submission_status={submission_status}
-                    submitted_at={client_profile.data_vault_submitted_at}
-                    is_submitting={is_submitting_vault}
-                    on_submit={() => set_is_submit_confirm_open(true)}
-                />
 
                 {/* Document Preview Modal */}
                 <DocumentPreviewModal
@@ -3084,46 +3155,47 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
 
                 {/* Rejection Modal */}
                 <Dialog open={is_reject_modal_open} onOpenChange={set_is_reject_modal_open}>
-                    <DialogContent className="sm:max-w-md bg-white border-2 border-red-100 rounded-3xl overflow-hidden p-0">
-                        <div className="bg-red-600 p-8 text-white text-center">
-                            <div className="bg-white/20 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-inner">
-                                <XCircle className="h-8 w-8" />
-                            </div>
-                            <DialogTitle className="text-2xl font-black tracking-tight mb-2 uppercase">Reject Document?</DialogTitle>
-                            <DialogDescription className="text-red-50 font-medium">
-                                Please explain why this document category is incomplete or incorrect.
-                                The client will receive an email and in-app notification.
+                    <DialogContent className="sm:max-w-md">
+                        <DialogHeader>
+                            <DialogTitle>Reject {reject_doc_type?.label ?? "document"}?</DialogTitle>
+                            <DialogDescription>
+                                Tell the client what's wrong or missing. They'll get an email and an
+                                in-app notice asking for a replacement.
                             </DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-2">
+                            <Label htmlFor="reject-reason">Reason</Label>
+                            <Textarea
+                                id="reject-reason"
+                                placeholder="e.g. Needs the full 6 months, or the file is unreadable."
+                                value={reject_reason}
+                                onChange={(e) => set_reject_reason(e.target.value)}
+                                className="min-h-[120px]"
+                            />
                         </div>
-                        <div className="p-8 space-y-4">
-                            <div className="space-y-2">
-                                <Label htmlFor="reject-reason" className="text-emerald-950 font-black uppercase tracking-widest text-[10px]">Reason for Rejection</Label>
-                                <Textarea
-                                    id="reject-reason"
-                                    placeholder="e.g. Needs to be the full 6 months, or file is unreadable."
-                                    value={reject_reason}
-                                    onChange={(e) => set_reject_reason(e.target.value)}
-                                    className="min-h-[120px] border-2 border-gray-100 focus:border-red-500 rounded-2xl p-4 font-medium"
-                                />
-                            </div>
-                            <div className="grid grid-cols-2 gap-4 pt-2">
-                                <Button
-                                    variant="outline"
-                                    onClick={() => set_is_reject_modal_open(false)}
-                                    className="border-2 border-gray-100 hover:bg-gray-50 text-gray-500 font-bold uppercase tracking-widest text-[10px] h-12 rounded-2xl"
-                                >
-                                    Cancel
-                                </Button>
-                                <Button
-                                    onClick={handle_reject_category}
-                                    disabled={is_rejecting || !reject_reason.trim()}
-                                    className="bg-red-600 hover:bg-red-700 text-white font-black uppercase tracking-widest text-[10px] h-12 rounded-2xl shadow-xl shadow-red-600/20"
-                                >
-                                    {is_rejecting ? <Loader2 className="h-3 w-3 animate-spin mr-2" /> : null}
-                                    Confirm Rejection
-                                </Button>
-                            </div>
-                        </div>
+                        <DialogFooter>
+                            <Button
+                                variant="ghost"
+                                onClick={() => set_is_reject_modal_open(false)}
+                                disabled={is_rejecting}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                onClick={handle_reject_category}
+                                disabled={is_rejecting || !reject_reason.trim()}
+                                className="bg-rose-600 hover:bg-rose-700 text-white"
+                            >
+                                {is_rejecting ? (
+                                    <>
+                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                        Rejecting...
+                                    </>
+                                ) : (
+                                    "Reject and notify client"
+                                )}
+                            </Button>
+                        </DialogFooter>
                     </DialogContent>
                 </Dialog>
             </div>

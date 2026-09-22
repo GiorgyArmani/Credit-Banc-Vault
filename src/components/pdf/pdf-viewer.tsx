@@ -10,6 +10,79 @@ import { Button } from '@/components/ui/button'
 import { Download, FileText, X, ExternalLink, Pencil } from 'lucide-react'
 import { documentFileUrl, downloadDocument } from '@/lib/document-download'
 import { OfficeFileViewer, detectOfficeKind } from '@/components/office-file-viewer'
+import { cn } from '@/lib/utils'
+
+interface DocumentPreviewBodyProps {
+    documentId: string
+    docName: string
+    fileType?: string
+    className?: string
+    /**
+     * Hide the browser's built-in PDF toolbar. Default false: inline previews
+     * need the zoom and page controls to be readable, so they open fit-to-width
+     * with the toolbar available. The modal passes true to keep its chrome.
+     */
+    hide_toolbar?: boolean
+}
+
+export function DocumentPreviewBody({
+    documentId,
+    docName,
+    fileType,
+    className,
+    hide_toolbar = false,
+}: DocumentPreviewBodyProps) {
+    // There is nothing to mint client-side any more: the preview URL is a
+    // stable app route that authorises the caller and 302s to a short-lived
+    // signed URL. Keeping a fetch-then-setState here would only add a spinner
+    // in front of a string we already know.
+    const previewUrl = documentId ? documentFileUrl(documentId) : null
+
+    const isImage = fileType?.startsWith('image/') ||
+                   docName.toLowerCase().endsWith('.png') ||
+                   docName.toLowerCase().endsWith('.jpg') ||
+                   docName.toLowerCase().endsWith('.jpeg') ||
+                   docName.toLowerCase().endsWith('.webp')
+
+    // Spreadsheets and Word files render in-app. Browsers cannot display them
+    // in an iframe — the old path silently downloaded the file instead of
+    // previewing it, which read as a broken button.
+    const officeKind = detectOfficeKind(docName, fileType)
+
+    return (
+        <div className={cn("flex-1 bg-slate-900/50 relative flex items-center justify-center overflow-hidden", className)}>
+            {previewUrl ? (
+                isImage ? (
+                    <div className="w-full h-full p-4 flex items-center justify-center overflow-auto">
+                        <img
+                            src={previewUrl}
+                            alt={docName}
+                            className="max-w-full max-h-full object-contain shadow-2xl rounded-lg"
+                        />
+                    </div>
+                ) : officeKind ? (
+                    <OfficeFileViewer
+                        kind={officeKind}
+                        url={previewUrl}
+                        name={docName}
+                        downloadUrl={documentFileUrl(documentId, { download: true })}
+                    />
+                ) : (
+                    <iframe
+                        src={`${previewUrl}${hide_toolbar ? '#toolbar=0' : '#view=FitH&pagemode=none'}`}
+                        className="w-full h-full border-none"
+                        title={docName}
+                    />
+                )
+            ) : (
+                <div className="text-center p-8">
+                    <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">Unable to load secure preview</p>
+                    <p className="text-slate-500 text-sm mt-2">Try downloading the file directly.</p>
+                </div>
+            )}
+        </div>
+    )
+}
 
 interface DocumentPreviewModalProps {
     isOpen: boolean
@@ -39,17 +112,6 @@ export default function DocumentPreviewModal({
     // signed URL. Keeping a fetch-then-setState here would only add a spinner
     // in front of a string we already know.
     const previewUrl = isOpen && documentId ? documentFileUrl(documentId) : null
-
-    const isImage = fileType?.startsWith('image/') || 
-                   docName.toLowerCase().endsWith('.png') || 
-                   docName.toLowerCase().endsWith('.jpg') || 
-                   docName.toLowerCase().endsWith('.jpeg') ||
-                   docName.toLowerCase().endsWith('.webp')
-
-    // Spreadsheets and Word files render in-app. Browsers cannot display them
-    // in an iframe — the old path silently downloaded the file instead of
-    // previewing it, which read as a broken button.
-    const officeKind = detectOfficeKind(docName, fileType)
 
     return (
         <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -113,37 +175,14 @@ export default function DocumentPreviewModal({
                     </div>
                 </DialogHeader>
 
-                <div className="flex-1 bg-slate-900/50 relative flex items-center justify-center overflow-hidden">
-                    {previewUrl ? (
-                        isImage ? (
-                            <div className="w-full h-full p-4 flex items-center justify-center overflow-auto">
-                                <img
-                                    src={previewUrl}
-                                    alt={docName}
-                                    className="max-w-full max-h-full object-contain shadow-2xl rounded-lg"
-                                />
-                            </div>
-                        ) : officeKind ? (
-                            <OfficeFileViewer
-                                kind={officeKind}
-                                url={previewUrl}
-                                name={docName}
-                                downloadUrl={documentFileUrl(documentId, { download: true })}
-                            />
-                        ) : (
-                            <iframe
-                                src={`${previewUrl}#toolbar=0`}
-                                className="w-full h-full border-none"
-                                title={docName}
-                            />
-                        )
-                    ) : (
-                        <div className="text-center p-8">
-                            <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">Unable to load secure preview</p>
-                            <p className="text-slate-500 text-sm mt-2">Try downloading the file directly.</p>
-                        </div>
-                    )}
-                </div>
+                <DocumentPreviewBody
+                    documentId={documentId}
+                    docName={docName}
+                    fileType={fileType}
+                    // The modal has its own header and Open Original, so it keeps
+                    // today's toolbar-less iframe — appearance unchanged.
+                    hide_toolbar
+                />
             </DialogContent>
         </Dialog>
     )

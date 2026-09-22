@@ -259,6 +259,23 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     }
   }
 
+  // 4.5 Open this business's pipeline. The stage is per business (the client
+  //     file reads history rows by business_profile_id), so without an entry
+  //     row a new business shows "created" even with documents already asked
+  //     for. Stamped on the new round; best-effort, never blocks creation.
+  if (funding_deal?.id) {
+    const { recordPipelineTransition } = await import("@/lib/pipeline-core");
+    const opening = await recordPipelineTransition({
+      clientVaultId: id,
+      newStatus: docCodes.length > 0 ? "documents_requested" : "created",
+      note: `Business added: ${business.company_name}`,
+      actorUserId: ctx.actorUserId,
+      actorRole: ctx.role,
+      fundingDealId: funding_deal.id,
+    });
+    if (!opening.success) console.error("Opening pipeline step failed (non-fatal):", opening.error);
+  }
+
   // 5. Notify the client + advisor (+ followers) by email. Best-effort: a
   //    send failure must not roll back the business creation. The client gets
   //    To:, advisor + followers get CC: so everyone is in the loop.

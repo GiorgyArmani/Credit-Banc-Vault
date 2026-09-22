@@ -35,6 +35,9 @@ export interface BusinessTab {
   active_deal_funded_at?: string | null;
   /** How many rounds this business has had, for the "Round N" label. */
   deal_count?: number;
+  /** When the business was added — a second business's pipeline clock starts
+   *  here, not at the vault's creation. */
+  created_at?: string | null;
 }
 
 interface BusinessTabStripProps {

@@ -881,6 +881,7 @@ export async function POST(request: Request) {
     await attachAdminOversightToPartnerDeal(supabase_admin, {
       vaultId: vault_id,
       creatorIsExternal: advisor_row.is_external === true,
+      creatorUserId: session_user.id,
       clientName: body.client_name,
       companyName: body.company_name,
       partnerName: attributed_partner?.name ?? body.advisor_name,

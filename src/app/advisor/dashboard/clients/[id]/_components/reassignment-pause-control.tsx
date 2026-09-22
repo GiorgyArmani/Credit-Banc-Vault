@@ -115,13 +115,15 @@ export function ReassignmentPauseControl({ clientId, paused_until, compact = fal
 
     if (is_paused) {
         return (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-sky-700">
-                <PauseCircle className="h-3.5 w-3.5" />
-                Auto-reassign paused · until {format_date(pausedUntil!)}
+            <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-sky-700">
+                <span className="inline-flex items-center gap-1.5">
+                    <PauseCircle className="h-3.5 w-3.5" />
+                    Auto-reassign paused until {format_date(pausedUntil!)}
+                </span>
                 <button
                     onClick={() => apply(null)}
                     disabled={busy}
-                    className="ml-1 inline-flex items-center gap-1 text-sky-600 hover:text-sky-900 disabled:opacity-50"
+                    className="inline-flex items-center gap-1 font-semibold text-emerald-700 hover:underline disabled:opacity-50"
                     title="Resume auto-reassignment now"
                 >
                     {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <PlayCircle className="h-3.5 w-3.5" />}
@@ -138,15 +140,15 @@ export function ReassignmentPauseControl({ clientId, paused_until, compact = fal
                     disabled={busy}
                     title="Pause auto-reassignment to the catch-all advisor"
                     className={clsx(
-                        "inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-500 hover:border-sky-300 hover:text-sky-700 transition-colors disabled:opacity-50"
+                        "inline-flex h-8 items-center gap-1.5 rounded-lg border border-black/10 bg-white px-3 text-xs font-semibold text-cb-ink transition-colors hover:bg-cb-cream disabled:opacity-50"
                     )}
                 >
-                    {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <PauseCircle className="h-3.5 w-3.5" />}
+                    {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PauseCircle className="h-3.5 w-3.5" />}
                     Pause auto-reassign
                 </button>
             </PopoverTrigger>
             <PopoverContent className="w-48 p-1.5" align="start">
-                <p className="px-2 py-1 text-[10px] font-black uppercase tracking-widest text-slate-400">Pause for…</p>
+                <p className="px-2 py-1 text-xs text-cb-ink/40">Pause for…</p>
                 {PRESETS.map((p) => (
                     <button
                         key={p.days}

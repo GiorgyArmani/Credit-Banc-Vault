@@ -17,7 +17,15 @@ import clsx from "clsx";
 const CLOSED_DEAL_MAX_AGE_DAYS = 90;
 
 export interface PipelineDeal {
+  /** The client VAULT id — links, pause control, prev/next all key on it. */
   id: string;
+  /** Unique per card. A client with several businesses gets one card per
+   *  business (`vault:business`); otherwise it equals `id`. Drag/drop and
+   *  React keys use this. */
+  card_key: string;
+  /** The business this card tracks, and its current round. */
+  business_profile_id?: string | null;
+  funding_deal_id?: string | null;
   user_id: string;
   advisor_id: string | null;
   client_name: string;
@@ -114,7 +122,8 @@ export function PipelineBoard({
     for (const stage of STAGE_MAP) {
       for (const d of visibleDeals) if (d.pipeline_status === stage.status) ids.push(d.id);
     }
-    return ids;
+    // A client with two business cards is still one file to step through.
+    return Array.from(new Set(ids));
   }, [visibleDeals]);
 
   const stashNavIds = () => {
@@ -264,9 +273,9 @@ export function PipelineBoard({
                 >
                   {stageDeals.map(deal => (
                     <PipelineDealCard
-                      key={deal.id}
+                      key={deal.card_key}
                       deal={deal}
-                      detailHref={`${detailHrefBase}${deal.id}?from=pipeline`}
+                      detailHref={`${detailHrefBase}${deal.id}?from=pipeline${deal.business_profile_id ? `&business=${deal.business_profile_id}` : ""}`}
                       onOpen={stashNavIds}
                       onDragStart={handleDragStart}
                     />

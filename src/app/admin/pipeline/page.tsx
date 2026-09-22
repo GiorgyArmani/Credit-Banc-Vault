@@ -150,11 +150,14 @@ export default function AdminPipelinePage() {
     return out;
   }, [deals, scope, advisorFilter, partnerFilter, activityFilter, searchQuery, myAdvisorId]);
 
-  const handleDrop = async (dealId: string, newStatus: LoanStatus) => {
+  const handleDrop = async (cardKey: string, newStatus: LoanStatus) => {
+    // One card per business: move only that business's round.
+    const card = deals.find(d => d.card_key === cardKey);
+    if (!card) return;
     const old = [...deals];
-    setDeals(prev => prev.map(d => (d.id === dealId ? { ...d, pipeline_status: newStatus } : d)));
+    setDeals(prev => prev.map(d => (d.card_key === cardKey ? { ...d, pipeline_status: newStatus } : d)));
     try {
-      const result = await updateLoanStatus(dealId, newStatus, "Moved in Pipeline");
+      const result = await updateLoanStatus(card.id, newStatus, "Moved in Pipeline", card.funding_deal_id);
       if (!result.success) throw new Error(result.error);
       toast.success("Deal status updated");
     } catch (error: any) {

@@ -16,6 +16,8 @@ import { fetchNotifications, markNotificationAsRead, markAllNotificationsAsRead 
 import { formatDistanceToNow } from "date-fns";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { createClient } from "@/lib/supabase/client";
+import { isAuthRetryableFetchError } from "@supabase/supabase-js";
 
 interface Notification {
     id: string;
@@ -44,14 +46,41 @@ export function NotificationBell({ clientBasePath }: NotificationBellProps = {})
     const [unread_count, set_unread_count] = useState(0);
     const [is_loading, set_is_loading] = useState(false);
 
+    // Once the session expires, the proxy redirects this background server
+    // action to /auth/login and the action call throws. Uncaught, that surfaced
+    // the global "Something went wrong" dialog on every poll. Instead, confirm
+    // the session is really gone and send the user to log in. A plain network
+    // failure also throws, but getUser() then fails with a retryable fetch
+    // error, so nobody is logged out by a blip.
+    const redirect_if_signed_out = async () => {
+        try {
+            const { data, error } = await createClient().auth.getUser();
+            // A retryable fetch error means the network, not the session.
+            // Anything else with no user (missing session, dead refresh
+            // token) means signed out.
+            if (!data.user && !isAuthRetryableFetchError(error)) {
+                window.location.assign("/auth/login");
+            }
+        } catch {
+            // Can't tell — stay put; the next poll tries again.
+        }
+    };
+
     const load_notifications = async () => {
         set_is_loading(true);
-        const res = await fetchNotifications();
-        if (res.success && res.notifications) {
-            set_notifications(res.notifications as Notification[]);
-            set_unread_count((res.notifications as Notification[]).filter(n => !n.is_read).length);
+        try {
+            const res = await fetchNotifications();
+            if (res.success && res.notifications) {
+                set_notifications(res.notifications as Notification[]);
+                set_unread_count((res.notifications as Notification[]).filter(n => !n.is_read).length);
+            } else if (res.error === "Unauthorized") {
+                await redirect_if_signed_out();
+            }
+        } catch {
+            await redirect_if_signed_out();
+        } finally {
+            set_is_loading(false);
         }
-        set_is_loading(false);
     };
 
     useEffect(() => {

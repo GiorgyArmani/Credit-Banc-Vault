@@ -24,6 +24,10 @@ export interface PipelineStatusEntry {
   changed_by_role: string | null;
   note: string | null;
   created_at: string;
+  /** The business/round the step belongs to. NULL on legacy and client-level
+   *  rows, which read as the primary business's. */
+  business_profile_id?: string | null;
+  funding_deal_id?: string | null;
 }
 
 /**
@@ -75,6 +79,41 @@ export async function getBulkLatestStatus(
     }
   }
   return result;
+}
+
+/**
+ * Every history row for a set of vaults, oldest first, with the business each
+ * step belongs to — the pipeline board derives one stage PER BUSINESS from it
+ * (see client-file/pipeline-scope.ts). Same RLS as getBulkLatestStatus.
+ */
+export async function getBulkPipelineHistory(
+  clientVaultIds: string[]
+): Promise<
+  { client_vault_id: string; status: LoanStatus; created_at: string; business_profile_id: string | null }[]
+> {
+  if (clientVaultIds.length === 0) return [];
+
+  const supabase = await createClient();
+  // Paged: PostgREST caps a response at 1000 rows, and the admin board asks for
+  // every vault's full history. A silent cap would drop the NEWEST steps.
+  const PAGE = 1000;
+  const rows: any[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("loan_status_history")
+      .select("client_vault_id, status, created_at, business_profile_id")
+      .in("client_vault_id", clientVaultIds)
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) {
+      console.error("[pipeline] getBulkPipelineHistory error:", error);
+      return [];
+    }
+    rows.push(...(data || []));
+    if (!data || data.length < PAGE) break;
+  }
+  return rows;
 }
 
 /**

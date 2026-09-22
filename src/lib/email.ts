@@ -5437,3 +5437,87 @@ export async function send_staff_invite(data: StaffInviteData) {
     html: generate_staff_invite_html(data),
   });
 }
+
+/**
+ * ============================================================================
+ * NEW PARTNER DEAL (internal)
+ * ============================================================================
+ * Tells the partner-program contact (Luigi) that an external advisor — a
+ * referral partner on the deal desk, or a Partner+ rep — just created a file.
+ * Admins already get an in-app notice for this (partner-deal-oversight.ts);
+ * this is the email he asked for on top of it.
+ *
+ * Recipients: PARTNER_DEAL_NOTIFY_EMAILS (comma list) when set, otherwise the
+ * program contact named in the partner welcome emails.
+ */
+export interface PartnerDealCreatedData {
+  client_name: string;
+  company_name?: string | null;
+  partner_name: string;
+  detail_url: string;
+}
+
+export function generate_partner_deal_created_html(data: PartnerDealCreatedData): string {
+  data = escape_email_strings(data);
+  const { client_name, partner_name, detail_url } = data;
+  const company_name = data.company_name || '';
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>New partner deal</title></head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f6f9fc;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse;">
+    <tr><td align="center" style="padding: 40px 0;">
+      <table role="presentation" style="width: 600px; max-width: 100%; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+        <tr><td style="background-color: #0f172a; padding: 20px; text-align: center;">
+          <h1 style="margin: 0; color: #ffffff; font-size: 18px; letter-spacing: 0.04em;">New Deal From a Partner</h1>
+        </td></tr>
+        <tr><td style="padding: 28px;">
+          <p style="margin: 0 0 16px; color: #334155; font-size: 14px; line-height: 1.6;">
+            <strong>${partner_name}</strong> just submitted a new file.
+          </p>
+          <table role="presentation" style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+            <tr>
+              <td style="padding: 8px 12px; border-bottom: 1px solid #e2e8f0; color: #64748b; font-size: 13px; width: 120px;">Client</td>
+              <td style="padding: 8px 12px; border-bottom: 1px solid #e2e8f0; font-weight: 600; color: #0f172a;">${client_name}</td>
+            </tr>${company_name ? `
+            <tr>
+              <td style="padding: 8px 12px; border-bottom: 1px solid #e2e8f0; color: #64748b; font-size: 13px;">Business</td>
+              <td style="padding: 8px 12px; border-bottom: 1px solid #e2e8f0; font-weight: 600; color: #0f172a;">${company_name}</td>
+            </tr>` : ''}
+            <tr>
+              <td style="padding: 8px 12px; border-bottom: 1px solid #e2e8f0; color: #64748b; font-size: 13px;">Submitted by</td>
+              <td style="padding: 8px 12px; border-bottom: 1px solid #e2e8f0; font-weight: 600; color: #0f172a;">${partner_name}</td>
+            </tr>
+          </table>
+          <a href="${detail_url}" style="display: inline-block; background-color: #10b981; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; font-size: 14px;">Open the file</a>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}
+
+export async function send_partner_deal_created_notification(data: PartnerDealCreatedData) {
+  const configured = (process.env.PARTNER_DEAL_NOTIFY_EMAILS || '')
+    .split(',')
+    .map((e) => e.trim())
+    .filter((e) => e.includes('@'));
+  const recipients = configured.length ? configured : [REFERRAL_WELCOME_CONTACT.email];
+
+  const transporter = create_smtp_transporter();
+  const from_email = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  const from_name = process.env.SMTP_FROM_NAME || 'Credit Banc Vault';
+
+  const label = data.company_name ? `${data.client_name} (${data.company_name})` : data.client_name;
+
+  return await transporter.sendMail({
+    from: `${from_name} <${from_email}>`,
+    to: recipients,
+    subject: `New partner deal: ${label} from ${data.partner_name}`,
+    html: generate_partner_deal_created_html(data),
+    text: `${data.partner_name} just submitted a new file: ${label}.\n\nOpen it: ${data.detail_url}`,
+  });
+}

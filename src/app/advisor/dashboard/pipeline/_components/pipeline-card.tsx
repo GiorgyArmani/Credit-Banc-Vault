@@ -8,6 +8,8 @@ import { ReassignmentPauseControl } from "@/app/advisor/dashboard/clients/[id]/_
 interface PipelineCardProps {
   deal: {
     id: string;
+    /** Drag identity — one per business card. */
+    card_key: string;
     client_name: string;
     company_name: string;
     capital_requested: number;
@@ -44,7 +46,7 @@ export function PipelineDealCard({ deal, detailHref, onOpen, onDragStart }: Pipe
   return (
     <div
       draggable
-      onDragStart={(e) => onDragStart(e, deal.id)}
+      onDragStart={(e) => onDragStart(e, deal.card_key)}
       className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3 shadow-sm hover:shadow-lg hover:border-emerald-500/40 transition-all duration-200 cursor-grab active:cursor-grabbing group select-none"
     >
       {/* Title row */}

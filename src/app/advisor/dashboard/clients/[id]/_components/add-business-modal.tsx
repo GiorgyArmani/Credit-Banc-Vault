@@ -9,6 +9,7 @@ import { FUNDING_OPTIONS } from "@/data/loan-types";
 import { packageForLoanTypes, FALLBACK_DOCUMENT_PACKAGE } from "@/data/program-document-packages";
 import { formatPhoneInput } from "@/lib/phone";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { NaicsCombobox } from "@/components/ui/naics-combobox";
 
 interface AddBusinessModalProps {
   client_vault_id: string;
@@ -307,7 +308,12 @@ export function AddBusinessModal({ client_vault_id, open, on_close, on_created }
                 </Select>
               </Field>
               <Field label="Industry">
-                <input type="text" value={industry} onChange={(e) => set_industry(e.target.value)} className={input_cls} placeholder="Retail, Construction, …" />
+                <NaicsCombobox
+                  value={industry}
+                  onChange={(val) => set_industry(val)}
+                  placeholder="Select NAICS industry…"
+                  triggerClassName="h-auto rounded-lg border-slate-200 bg-white px-3 py-2 text-sm font-normal"
+                />
               </Field>
               <Field label="Business Start Date">
                 <input type="date" value={business_start_date} onChange={(e) => set_business_start_date(e.target.value)} className={input_cls} />

@@ -45,8 +45,21 @@ interface UserDocument {
     storage_path: string;
     /** Set on files filed into a group within their own field. */
     document_group_id?: string | null;
-    /** Carries metadata.original_file_name, which dates a periodic file. */
+    /** Carries metadata.original_file_name, which dates a periodic file, and
+     *  metadata.rejection_reason once staff reject the category. */
     metadata?: any;
+    /** 'rejected' after rejectDocumentCategory; a replacement upload arrives
+     *  with its own non-rejected status. */
+    status?: string | null;
+}
+
+/**
+ * A category is rejected while every file in it is rejected, i.e. the client
+ * hasn't sent a replacement yet. One fresh upload puts it back in review (the
+ * approve action clears the old rejected rows).
+ */
+export function isCategoryRejected(category_docs: { status?: string | null }[]): boolean {
+    return category_docs.length > 0 && category_docs.every((d) => d.status === "rejected");
 }
 
 interface DocumentUploadStatusProps {
@@ -80,6 +93,11 @@ interface DocumentUploadStatusProps {
     on_rename: (doc: UserDocument) => void;
     /** Whole packet as one archive. Omit to hide the button. */
     on_download_packet?: () => void;
+    /** Inside the client file's Documents tab, whose header and tiles already
+     *  carry the title, completion count and Request docs action: drops the
+     *  card title, complete pill, Request Doc button and progress bar for a
+     *  slim "n of m approved" toolbar. Default false keeps today's markup. */
+    embedded?: boolean;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -111,56 +129,60 @@ function DocumentFileRow({
     on_delete: () => void;
 }) {
     return (
-        <div className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-100 hover:border-slate-200 transition-colors group">
-            <div className="flex items-center gap-3 min-w-0">
-                <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0">
-                    <FileText className="h-4 w-4 text-slate-400" />
+        <div className="group flex items-center justify-between gap-3 rounded-xl border border-black/5 bg-white p-2.5 transition-colors hover:border-black/10">
+            <div className="flex min-w-0 items-center gap-3">
+                <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-black/[0.03]">
+                    <FileText className="h-4 w-4 text-cb-ink/40" />
                 </div>
                 <div className="min-w-0">
-                    <p className="text-sm font-semibold text-slate-800 truncate flex items-center gap-1.5">
+                    <p className="flex items-center gap-1.5 truncate text-sm font-medium text-cb-ink">
                         {doc.custom_label || doc.name}
                         {/* Statement month, when the bank's own filename gave it
                             up. A hint only — most rows won't have one. */}
                         {(() => {
                             const period = getDocumentPeriod(doc);
                             return period ? (
-                                <span className="shrink-0 rounded bg-indigo-50 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-indigo-500">
+                                <span className="shrink-0 rounded-full bg-black/5 px-1.5 text-[11px] font-medium text-cb-ink/60">
                                     {period.label}
                                 </span>
                             ) : null;
                         })()}
                         {doc.is_favorite && <Star className="h-3 w-3 text-amber-400 fill-amber-400 flex-shrink-0" />}
                     </p>
-                    <p className="text-[11px] text-slate-400">
+                    <p className="text-xs text-cb-ink/40">
                         {format_file_size(doc.size)} · Uploaded {format_date(doc.upload_date)}
                     </p>
                 </div>
             </div>
-            <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="flex flex-shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
                 <button
+                    type="button"
                     onClick={on_preview}
-                    className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"
+                    className="flex h-8 w-8 items-center justify-center rounded-lg text-cb-ink/40 transition-colors hover:bg-black/5 hover:text-cb-ink"
                     title="Preview"
                 >
                     <Eye className="h-3.5 w-3.5" />
                 </button>
                 <button
+                    type="button"
                     onClick={on_rename}
-                    className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                    className="flex h-8 w-8 items-center justify-center rounded-lg text-cb-ink/40 transition-colors hover:bg-black/5 hover:text-cb-ink"
                     title="Rename"
                 >
                     <Pencil className="h-3.5 w-3.5" />
                 </button>
                 <button
+                    type="button"
                     onClick={on_download}
-                    className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                    className="flex h-8 w-8 items-center justify-center rounded-lg text-cb-ink/40 transition-colors hover:bg-black/5 hover:text-cb-ink"
                     title="Download"
                 >
                     <Download className="h-3.5 w-3.5" />
                 </button>
                 <button
+                    type="button"
                     onClick={on_delete}
-                    className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                    className="flex h-8 w-8 items-center justify-center rounded-lg text-cb-ink/40 transition-colors hover:bg-rose-50 hover:text-rose-600"
                     title="Delete"
                 >
                     <Trash2 className="h-3.5 w-3.5" />
@@ -225,8 +247,14 @@ function DocCategoryRow({
     // Local month picker for re-requesting bank statements (advisor may need a
     // different period than the original request).
     const [again_months, set_again_months] = useState(12);
-    const status: "approved" | "uploaded" | "pending" = is_approved
+    const is_rejected = !is_approved && isCategoryRejected(category_docs);
+    const rejection_reason: string | null = is_rejected
+        ? category_docs.find((d) => d.metadata?.rejection_reason)?.metadata?.rejection_reason ?? null
+        : null;
+    const status: "approved" | "rejected" | "uploaded" | "pending" = is_approved
         ? "approved"
+        : is_rejected
+        ? "rejected"
         : has_docs
         ? "uploaded"
         : "pending";
@@ -234,21 +262,27 @@ function DocCategoryRow({
     const status_config = {
         approved: {
             border: "border-l-emerald-500",
-            icon_bg: "bg-emerald-100 text-emerald-700",
-            label: "Advisor Approved",
-            label_color: "text-emerald-600",
+            icon_bg: "text-emerald-600",
+            label: "Approved",
+            label_color: "text-emerald-700",
+        },
+        rejected: {
+            border: "border-l-rose-400",
+            icon_bg: "text-rose-600",
+            label: "Rejected · waiting for a replacement",
+            label_color: "text-rose-700",
         },
         uploaded: {
             border: "border-l-amber-400",
-            icon_bg: "bg-amber-100 text-amber-700",
-            label: "Ready for Review",
-            label_color: "text-amber-600",
+            icon_bg: "text-amber-600",
+            label: "Ready for review",
+            label_color: "text-amber-700",
         },
         pending: {
-            border: "border-l-slate-200",
-            icon_bg: "bg-slate-100 text-slate-400",
-            label: "Awaiting Upload",
-            label_color: "text-slate-400",
+            border: "border-l-black/10",
+            icon_bg: "text-cb-ink/30",
+            label: "Awaiting upload",
+            label_color: "text-cb-ink/40",
         },
     };
     const config = status_config[status];
@@ -257,70 +291,80 @@ function DocCategoryRow({
         <div
             id={`category-${doc_type.code}`}
             className={clsx(
-                "bg-white rounded-2xl border border-slate-100 border-l-4 shadow-sm overflow-hidden transition-all",
+                "overflow-hidden rounded-2xl border border-black/5 border-l-2 bg-white transition-all",
                 config.border
             )}
         >
-            {/* Header row */}
+            {/* Header row. Below sm the title/status block takes the full
+                first line and the actions wrap onto a second one, so a long
+                label is never squeezed a word per line; the chevron stays
+                top-right. From sm up it's one line: title left, actions right. */}
             <div
-                className="flex items-center justify-between px-5 py-4 cursor-pointer hover:bg-slate-50/50 transition-colors"
+                className="flex cursor-pointer items-start gap-3 px-4 py-3 transition-colors hover:bg-black/[0.02] sm:items-center sm:px-5"
                 onClick={on_toggle_expand}
             >
-                <div className="flex items-center gap-4">
-                    <div className={clsx("w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0", config.icon_bg)}>
-                        {status === "approved" ? (
-                            <ShieldCheck className="h-5 w-5" />
-                        ) : status === "uploaded" ? (
-                            <CheckCircle2 className="h-5 w-5" />
-                        ) : (
-                            <AlertCircle className="h-5 w-5" />
-                        )}
-                    </div>
-                    <div>
-                        <p className="text-sm font-bold text-slate-900">{doc_type.label}</p>
-                        <div className="flex items-center gap-2 mt-0.5">
-                            <span className={clsx("text-[10px] font-black uppercase tracking-wider", config.label_color)}>
-                                {config.label}
-                            </span>
-                            {has_docs && (
-                                <>
-                                    <div className="w-1 h-1 rounded-full bg-slate-300" />
-                                    <span className="text-[10px] font-bold text-slate-500">
-                                        {category_docs.length} file{category_docs.length > 1 ? "s" : ""}
-                                    </span>
-                                </>
-                            )}
-                        </div>
-                    </div>
+                <div className={clsx("flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-black/[0.03]", config.icon_bg)}>
+                    {status === "approved" ? (
+                        <ShieldCheck className="h-4 w-4" />
+                    ) : status === "rejected" ? (
+                        <XCircle className="h-4 w-4" />
+                    ) : status === "uploaded" ? (
+                        <CheckCircle2 className="h-4 w-4" />
+                    ) : (
+                        <AlertCircle className="h-4 w-4" />
+                    )}
                 </div>
 
-                <div className="flex items-center gap-2 flex-shrink-0">
-                    {/* Approve / Reject */}
+                <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                    <div className="min-w-0">
+                        <p className="break-words text-sm font-semibold text-cb-ink">{doc_type.label}</p>
+                        <p className="mt-0.5 text-xs">
+                            <span className={config.label_color}>{config.label}</span>
+                            {has_docs && (
+                                <span className="text-cb-ink/40">
+                                    <span aria-hidden className="mx-1.5 text-cb-ink/25">·</span>
+                                    {category_docs.length} file{category_docs.length > 1 ? "s" : ""}
+                                </span>
+                            )}
+                        </p>
+                        {rejection_reason && (
+                            <p className="mt-0.5 break-words text-xs text-cb-ink/50">Reason: {rejection_reason}</p>
+                        )}
+                    </div>
+
+                <div className="flex flex-wrap items-center gap-2 sm:flex-shrink-0 sm:flex-nowrap">
+                    {/* Approve / Reject. A rejected category keeps Approve so a
+                        mistaken reject can be undone without a re-upload. */}
+                    {(status === "uploaded" || status === "rejected") && (
+                        <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); on_approve(); }}
+                            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 text-xs font-semibold text-white transition-colors hover:bg-emerald-700"
+                        >
+                            <ShieldCheck className="h-3.5 w-3.5" />
+                            Approve
+                        </button>
+                    )}
                     {status === "uploaded" && (
-                        <div className="flex items-center gap-1.5">
+                        <>
                             <button
-                                onClick={(e) => { e.stopPropagation(); on_approve(); }}
-                                className="h-8 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[9px] font-black uppercase tracking-widest transition-colors flex items-center gap-1"
-                            >
-                                <ShieldCheck className="h-3 w-3" />
-                                Approve
-                            </button>
-                            <button
+                                type="button"
                                 onClick={(e) => { e.stopPropagation(); on_reject(); }}
-                                className="h-8 px-3 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded-lg text-[9px] font-black uppercase tracking-widest transition-colors flex items-center gap-1"
+                                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 text-xs font-semibold text-rose-600 transition-colors hover:bg-rose-50"
                             >
-                                <XCircle className="h-3 w-3" />
+                                <XCircle className="h-3.5 w-3.5" />
                                 Reject
                             </button>
-                        </div>
+                        </>
                     )}
 
                     {/* Upload for advisor */}
                     <button
+                        type="button"
                         onClick={(e) => { e.stopPropagation(); on_upload(); }}
-                        className="h-8 px-3 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-[9px] font-black uppercase tracking-widest transition-colors flex items-center gap-1"
+                        className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-black/10 bg-white px-3 text-xs font-semibold text-cb-ink transition-colors hover:bg-cb-cream"
                     >
-                        <UploadCloud className="h-3 w-3" />
+                        <UploadCloud className="h-3.5 w-3.5" />
                         Upload
                     </button>
 
@@ -333,7 +377,7 @@ function DocCategoryRow({
                             value={again_months}
                             onClick={(e) => e.stopPropagation()}
                             onChange={(e) => set_again_months(parseInt(e.target.value))}
-                            className="h-8 text-[10px] font-bold border border-slate-200 rounded-lg px-2 bg-white text-slate-600 shrink-0"
+                            className="h-8 shrink-0 rounded-lg border border-black/10 bg-white px-2 text-xs font-medium text-cb-ink"
                             title="Months to request"
                         >
                             {[6, 12, 18, 24].map((m) => (
@@ -342,59 +386,64 @@ function DocCategoryRow({
                         </select>
                     )}
                     <button
+                        type="button"
                         onClick={(e) => { e.stopPropagation(); on_request_again(is_bank_statements ? again_months : undefined); }}
                         disabled={is_requesting_again}
-                        className="h-8 px-3 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg text-[9px] font-black uppercase tracking-widest transition-colors flex items-center gap-1 disabled:opacity-60"
+                        className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-black/10 bg-white px-3 text-xs font-semibold text-cb-ink transition-colors hover:bg-cb-cream disabled:opacity-60"
                         title="Re-request this document from the client"
                     >
                         {is_requesting_again ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
                         ) : (
-                            <RefreshCw className="h-3 w-3" />
+                            <RefreshCw className="h-3.5 w-3.5" />
                         )}
-                        Request Again
+                        Request again
                     </button>
 
                     {/* Remove request (only if no docs) */}
                     {!has_docs && (
                         <button
+                            type="button"
                             onClick={(e) => { e.stopPropagation(); on_remove_request(); }}
-                            className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                            className="flex h-8 w-8 items-center justify-center rounded-lg text-cb-ink/40 transition-colors hover:bg-black/5 hover:text-cb-ink"
                             title="Remove request"
                         >
                             <X className="h-3.5 w-3.5" />
                         </button>
                     )}
+                </div>
+                </div>
 
-                    {/* Expand toggle */}
-                    <div className="w-px h-5 bg-slate-200 mx-1" />
+                {/* Expand toggle */}
+                <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-cb-ink/40">
                     {is_expanded ? (
-                        <ChevronUp className="h-4 w-4 text-slate-400" />
+                        <ChevronUp className="h-4 w-4" />
                     ) : (
-                        <ChevronDown className="h-4 w-4 text-slate-400" />
+                        <ChevronDown className="h-4 w-4" />
                     )}
                 </div>
             </div>
 
             {/* Expanded file list */}
             {is_expanded && has_docs && (
-                <div className="px-5 pb-5 space-y-2 border-t border-slate-100 pt-4">
+                <div className="space-y-2 border-t border-black/5 px-4 pb-4 pt-3 sm:px-5">
                     {category_docs.length > 1 && (
-                        <div className="flex justify-end mb-1">
+                        <div className="flex justify-end">
                             <button
+                                type="button"
                                 onClick={() => on_download_all(category_docs)}
                                 disabled={!!zipping}
-                                className="text-[10px] font-black uppercase tracking-widest text-blue-600 hover:text-blue-700 flex items-center gap-1 px-3 py-1 rounded-lg hover:bg-blue-50 transition-colors disabled:opacity-50"
+                                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-black/10 bg-white px-3 text-xs font-semibold text-cb-ink transition-colors hover:bg-cb-cream disabled:opacity-50"
                             >
                                 {zipping ? (
                                     <>
-                                        <Loader2 className="h-3 w-3 animate-spin" />
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
                                         {zipping.completed}/{zipping.total}
                                     </>
                                 ) : (
                                     <>
-                                        <Download className="h-3 w-3" />
-                                        Zip All ({category_docs.length})
+                                        <Download className="h-3.5 w-3.5" />
+                                        Zip all ({category_docs.length})
                                     </>
                                 )}
                             </button>
@@ -410,35 +459,36 @@ function DocCategoryRow({
                             <div
                                 key={group.key}
                                 className={clsx(
-                                    "rounded-xl border overflow-hidden",
+                                    "overflow-hidden rounded-xl border",
                                     group.key === UNGROUPED_KEY
-                                        ? "border-dashed border-slate-200 bg-slate-50/60"
-                                        : "border-slate-100"
+                                        ? "border-dashed border-black/10"
+                                        : "border-black/5"
                                 )}
                             >
-                                <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-slate-100">
+                                <div className="flex items-center justify-between gap-2 border-b border-black/5 px-3 py-2">
                                     <div className="min-w-0">
-                                        <p className="text-xs font-bold text-slate-700 truncate">{group.label}</p>
-                                        <p className="text-[10px] font-bold text-slate-400">
+                                        <p className="truncate text-xs font-semibold text-cb-ink">{group.label}</p>
+                                        <p className="text-xs text-cb-ink/40">
                                             {group.documents.length} file{group.documents.length === 1 ? "" : "s"}
                                         </p>
                                     </div>
                                     {group.documents.length > 1 && (
                                         <button
+                                            type="button"
                                             onClick={() => on_download_all(group.documents)}
                                             disabled={!!zipping}
-                                            className="shrink-0 text-[10px] font-black uppercase tracking-widest text-blue-600 hover:text-blue-700 flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-blue-50 transition-colors disabled:opacity-50"
+                                            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold text-cb-ink/60 transition-colors hover:bg-black/5 hover:text-cb-ink disabled:opacity-50"
                                         >
                                             {zipping ? (
-                                                <Loader2 className="h-3 w-3 animate-spin" />
+                                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
                                             ) : (
-                                                <Download className="h-3 w-3" />
+                                                <Download className="h-3.5 w-3.5" />
                                             )}
                                             Zip {group.documents.length}
                                         </button>
                                     )}
                                 </div>
-                                <div className="p-3 space-y-2">
+                                <div className="space-y-2 p-2.5">
                                     {group.documents.map((doc) => (
                                         <DocumentFileRow
                                             key={doc.id}
@@ -492,6 +542,7 @@ export function DocumentUploadStatus({
     on_delete_file,
     on_rename,
     on_download_packet,
+    embedded = false,
 }: DocumentUploadStatusProps) {
     const total = required_docs.length;
     const completed = required_docs.filter((d) => approvals.has(d.code)).length;
@@ -501,30 +552,63 @@ export function DocumentUploadStatus({
     );
 
     return (
-        <section className="bg-white rounded-2xl shadow-sm border border-slate-100 p-8">
+        <section
+            className={
+                embedded
+                    ? "rounded-2xl border border-black/5 bg-white p-4 sm:p-5 shadow-sm"
+                    : "rounded-2xl border border-black/5 bg-white p-8 shadow-sm"
+            }
+        >
+            {embedded ? (
+            <div className="mb-4 flex items-center justify-between gap-3">
+                <p className="text-sm text-cb-ink/60">{completed} of {total} approved</p>
+                {on_download_packet && documents.length > 1 && (
+                    <button
+                        type="button"
+                        onClick={on_download_packet}
+                        disabled={!!zipping}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-black/10 bg-white px-3 text-xs font-semibold text-cb-ink hover:bg-cb-cream disabled:opacity-50"
+                    >
+                        {zipping ? (
+                            <>
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                {zipping.completed}/{zipping.total}
+                            </>
+                        ) : (
+                            <>
+                                <Download className="h-3.5 w-3.5" />
+                                Download all ({documents.length})
+                            </>
+                        )}
+                    </button>
+                )}
+            </div>
+            ) : (
+            <>
             {/* Section header */}
             <div className="flex items-center justify-between mb-6">
                 <div>
-                    <h3 className="text-base font-extrabold text-slate-900">Document Upload Status</h3>
-                    <p className="text-xs text-slate-400 mt-0.5">{completed} of {total} categories approved</p>
+                    <h3 className="font-manrope text-base font-bold text-cb-ink">Document upload status</h3>
+                    <p className="mt-0.5 text-xs text-cb-ink/40">{completed} of {total} categories approved</p>
                 </div>
                 <div className="flex items-center gap-3">
                     <span className={clsx(
-                        "px-2.5 py-1 text-[10px] font-black uppercase tracking-widest rounded-full",
+                        "rounded-full px-2.5 py-1 text-xs font-medium",
                         completion_percentage >= 100 ? "bg-emerald-100 text-emerald-700" :
                             completion_percentage >= 50 ? "bg-amber-100 text-amber-700" :
                                 "bg-red-100 text-red-700"
                     )}>
-                        {completed}/{total} Complete
+                        {completed}/{total} complete
                     </span>
                     {/* Whole packet in one archive — the per-category buttons
                         below each cover one section, which on a full file means
                         15 separate zips to merge by hand. */}
                     {on_download_packet && documents.length > 1 && (
                         <button
+                            type="button"
                             onClick={on_download_packet}
                             disabled={!!zipping}
-                            className="flex items-center gap-1.5 px-3 py-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-[10px] font-black uppercase tracking-widest rounded-xl transition-colors disabled:opacity-50"
+                            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-black/10 bg-white px-3 text-xs font-semibold text-cb-ink transition-colors hover:bg-cb-cream disabled:opacity-50"
                         >
                             {zipping ? (
                                 <>
@@ -534,17 +618,18 @@ export function DocumentUploadStatus({
                             ) : (
                                 <>
                                     <Download className="h-3.5 w-3.5" />
-                                    Zip Packet ({documents.length})
+                                    Zip packet ({documents.length})
                                 </>
                             )}
                         </button>
                     )}
                     <button
+                        type="button"
                         onClick={on_request_docs}
-                        className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-colors shadow-lg shadow-emerald-600/20"
+                        className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 text-xs font-semibold text-white transition-colors hover:bg-emerald-700"
                     >
                         <Plus className="h-3.5 w-3.5" />
-                        Request Doc
+                        Request doc
                     </button>
                 </div>
             </div>
@@ -560,6 +645,8 @@ export function DocumentUploadStatus({
                     style={{ width: `${Math.min(completion_percentage, 100)}%` }}
                 />
             </div>
+            </>
+            )}
 
             {/* Required document categories */}
             <div className="space-y-3">
@@ -590,8 +677,8 @@ export function DocumentUploadStatus({
 
             {/* Additional documents */}
             {additional_docs.length > 0 && (
-                <div className="mt-8 pt-6 border-t border-slate-100">
-                    <h4 className="text-xs font-black uppercase tracking-widest text-slate-400 mb-3">Additional Documents</h4>
+                <div className="mt-6 border-t border-black/5 pt-5">
+                    <h4 className="mb-3 font-manrope text-sm font-bold text-cb-ink">Additional documents</h4>
                     <div className="space-y-2">
                         {additional_docs.map((doc) => (
                             <DocumentFileRow
@@ -609,11 +696,7 @@ export function DocumentUploadStatus({
 
             {/* Empty state */}
             {documents.length === 0 && (
-                <div className="text-center py-12">
-                    <FileText className="h-10 w-10 text-slate-300 mx-auto mb-3" />
-                    <p className="text-sm font-semibold text-slate-500">No documents uploaded yet</p>
-                    <p className="text-xs text-slate-400 mt-1">The client will see their required documents in their vault</p>
-                </div>
+                <p className="py-3 text-sm text-cb-ink/40">No documents uploaded yet</p>
             )}
         </section>
     );

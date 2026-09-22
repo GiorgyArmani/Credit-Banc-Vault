@@ -65,11 +65,11 @@ export function ClientNotesCard({
     };
 
     return (
-        <section className="p-6">
+        <section className="p-5">
             {/* Section A — Signup Notes (inline editable) */}
-            <div className="space-y-4">
+            <div className="divide-y divide-black/5">
                 <SignupNoteField
-                    label="Loan Purpose"
+                    label="Loan purpose"
                     description="Captured during client signup"
                     value={loan_purpose}
                     is_editing={editing === "loan_purpose"}
@@ -81,7 +81,7 @@ export function ClientNotesCard({
                     on_cancel={cancel_edit}
                 />
                 <SignupNoteField
-                    label="Additional Notes"
+                    label="Additional notes"
                     description="Captured during client signup"
                     value={additional_notes}
                     is_editing={editing === "additional_notes"}
@@ -94,52 +94,27 @@ export function ClientNotesCard({
                 />
             </div>
 
-            {/* Divider */}
-            <div className="my-6 border-t border-slate-100" />
-
             {/* Section B — File Notes Timeline */}
-            <div className="flex items-center gap-2 mb-4">
-                <h4 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider">
-                    File Notes
-                </h4>
-                <span className="text-[10px] font-black text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
+            <div className="mt-2 flex items-center gap-2 border-t border-black/5 pt-4">
+                <h4 className="text-sm font-semibold text-cb-ink">File notes</h4>
+                <span className="rounded-full bg-black/5 px-1.5 text-[11px] text-cb-ink/60 tabular-nums">
                     {file_notes.length}
                 </span>
             </div>
 
-            <div className="space-y-3 max-h-[320px] overflow-y-auto pr-1 mb-4">
+            <div className="mb-3 max-h-[320px] divide-y divide-black/5 overflow-y-auto pr-1">
                 {file_notes.length === 0 ? (
-                    <div className="text-sm text-slate-400 italic py-6 text-center">
-                        No file notes yet. Add the first one below.
-                    </div>
+                    <p className="py-3 text-sm text-cb-ink/40">No file notes yet</p>
                 ) : (
                     file_notes.map((note) => (
-                        <div
-                            key={note.id}
-                            className="bg-slate-50 border border-slate-100 rounded-xl p-3.5"
-                        >
-                            <div className="flex items-center gap-2 mb-1.5">
-                                <div className="w-6 h-6 rounded-full bg-emerald-700 text-white flex items-center justify-center text-[9px] font-black">
-                                    {note.author_name
-                                        .split(" ")
-                                        .map((n) => n[0])
-                                        .join("")
-                                        .toUpperCase()
-                                        .slice(0, 2)}
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                    <p className="text-xs font-bold text-slate-800 leading-tight">
-                                        {note.author_name}
-                                        <span className="font-normal text-slate-400 ml-1 capitalize">
-                                            · {note.author_role}
-                                        </span>
-                                    </p>
-                                    <p className="text-[10px] text-slate-400">
-                                        {format(new Date(note.created_at), "MMM d, h:mm a")}
-                                    </p>
-                                </div>
-                            </div>
-                            <p className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">
+                        <div key={note.id} className="py-3">
+                            <p className="text-xs text-cb-ink/40">
+                                <span className="font-medium text-cb-ink/60">{note.author_name}</span>
+                                <span className="capitalize"> · {note.author_role}</span>
+                                {" · "}
+                                {format(new Date(note.created_at), "MMM d, h:mm a")}
+                            </p>
+                            <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-cb-ink">
                                 {note.content}
                             </p>
                         </div>
@@ -148,13 +123,13 @@ export function ClientNotesCard({
             </div>
 
             {/* Add note input */}
-            <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
+            <div className="space-y-2">
                 <textarea
                     value={new_file_note}
                     onChange={(e) => on_new_file_note_change(e.target.value)}
                     placeholder="Add a note to this client file..."
                     rows={3}
-                    className="w-full bg-transparent border-none outline-none resize-none text-sm text-slate-700 placeholder:text-slate-400 focus:ring-0"
+                    className="w-full resize-none rounded-xl border border-black/10 bg-white p-3 text-sm text-cb-ink outline-none placeholder:text-cb-ink/40 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
                     onKeyDown={(e) => {
                         if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                             e.preventDefault();
@@ -162,18 +137,18 @@ export function ClientNotesCard({
                         }
                     }}
                 />
-                <div className="flex justify-end items-center pt-2 border-t border-slate-200">
+                <div className="flex items-center justify-end">
                     <button
                         onClick={on_add_file_note}
                         disabled={is_adding_file_note || !new_file_note.trim()}
-                        className="flex items-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-black uppercase tracking-widest rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-emerald-700/20"
+                        className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 text-xs font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                         {is_adding_file_note ? (
                             <Loader2 className="h-3.5 w-3.5 animate-spin" />
                         ) : (
                             <Send className="h-3.5 w-3.5" />
                         )}
-                        {is_adding_file_note ? "Adding…" : "Add Note"}
+                        {is_adding_file_note ? "Adding…" : "Add note"}
                     </button>
                 </div>
             </div>
@@ -207,18 +182,15 @@ function SignupNoteField({
     on_cancel,
 }: SignupNoteFieldProps) {
     return (
-        <div className="border border-slate-100 rounded-xl p-4 bg-slate-50/50">
-            <div className="flex items-start justify-between gap-3 mb-2">
-                <div>
-                    <p className="text-xs font-black uppercase tracking-wider text-slate-700">
-                        {label}
-                    </p>
-                    <p className="text-[10px] text-slate-400 mt-0.5">{description}</p>
-                </div>
+        <div className="py-3 first:pt-0">
+            <div className="flex items-start justify-between gap-3">
+                <p className="text-xs text-cb-ink/50" title={description}>
+                    {label}
+                </p>
                 {!is_editing && (
                     <button
                         onClick={on_edit}
-                        className="flex items-center gap-1.5 text-xs font-bold text-emerald-700 hover:text-emerald-800 px-2 py-1 rounded-lg hover:bg-emerald-50 transition-colors"
+                        className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:underline"
                     >
                         {value ? (
                             <>
@@ -234,20 +206,20 @@ function SignupNoteField({
             </div>
 
             {is_editing ? (
-                <div className="space-y-2">
+                <div className="mt-2 space-y-2">
                     <textarea
                         value={draft}
                         onChange={(e) => on_draft_change(e.target.value)}
                         rows={4}
                         autoFocus
-                        className="w-full bg-white border border-slate-200 rounded-lg p-3 text-sm text-slate-700 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 resize-y"
+                        className="w-full resize-y rounded-xl border border-black/10 bg-white p-3 text-sm text-cb-ink outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
                         placeholder={`Enter ${label.toLowerCase()}...`}
                     />
                     <div className="flex items-center justify-end gap-2">
                         <button
                             onClick={on_cancel}
                             disabled={saving}
-                            className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-50"
+                            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-black/10 bg-white px-3 text-xs font-semibold text-cb-ink transition-colors hover:bg-cb-cream disabled:opacity-50"
                         >
                             <X className="h-3.5 w-3.5" />
                             Cancel
@@ -255,7 +227,7 @@ function SignupNoteField({
                         <button
                             onClick={on_save}
                             disabled={saving}
-                            className="flex items-center gap-1 px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition-colors disabled:opacity-50"
+                            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 text-xs font-semibold text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
                         >
                             {saving ? (
                                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -269,11 +241,11 @@ function SignupNoteField({
             ) : (
                 <p
                     className={clsx(
-                        "text-sm whitespace-pre-wrap leading-relaxed",
-                        value ? "text-slate-700" : "text-slate-400 italic"
+                        "mt-0.5 whitespace-pre-wrap text-sm leading-relaxed",
+                        value ? "text-cb-ink" : "text-cb-ink/40"
                     )}
                 >
-                    {value || `No ${label.toLowerCase()} captured.`}
+                    {value || "—"}
                 </p>
             )}
         </div>
