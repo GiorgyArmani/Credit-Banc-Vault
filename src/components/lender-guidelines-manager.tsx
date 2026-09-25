@@ -3,6 +3,8 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "@/lib/toast";
+import { useConnectedLenders } from "@/components/lender-api/use-connected-lenders";
+import { connectedLender } from "@/lib/lender-api/connected";
 import { LOAN_TYPES } from "@/data/loan-types";
 import {
   AlertDialog,
@@ -81,7 +83,7 @@ function programLabel(p: Pick<Lender, "specialty" | "tier_label">): string {
   return p.tier_label ? `${spec} · ${p.tier_label}` : spec;
 }
 
-type StatusFilter = "all" | "complete" | "missing" | "due";
+type StatusFilter = "all" | "complete" | "missing" | "due" | "api";
 
 interface GroupedLender {
   name: string;
@@ -341,6 +343,8 @@ export default function LenderGuidelinesManager() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  // Lenders we can submit to by API in this environment (badge + filter tile).
+  const connectedLenders = useConnectedLenders();
   const [editingGroup, setEditingGroup] = useState<EditingGroup | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   // Pending destructive actions, held so they can be confirmed in-app rather
@@ -384,6 +388,7 @@ export default function LenderGuidelinesManager() {
     let completeLenders = 0;
     let missingLenders = 0;
     let dueLenders = 0;
+    let apiLenders = 0;
     let totalPrograms = 0;
     let completePrograms = 0;
     for (const g of allGroups) {
@@ -392,6 +397,7 @@ export default function LenderGuidelinesManager() {
       if (g.programs.every(programComplete)) completeLenders++;
       else missingLenders++;
       if (groupReview(g).isDue) dueLenders++;
+      if (connectedLender(connectedLenders, g.name)) apiLenders++;
     }
     return {
       totalLenders: allGroups.length,
@@ -401,10 +407,11 @@ export default function LenderGuidelinesManager() {
       completeLenders,
       missingLenders,
       dueLenders,
+      apiLenders,
     };
     // groupReview is a stable function declaration; safe to omit from deps.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allGroups]);
+  }, [allGroups, connectedLenders]);
 
   const groupedLenders = useMemo(() => {
     const term = searchTerm.toLowerCase();
@@ -418,11 +425,12 @@ export default function LenderGuidelinesManager() {
       if (statusFilter === "complete") return allComplete;
       if (statusFilter === "missing") return !allComplete;
       if (statusFilter === "due") return groupReview(g).isDue;
+      if (statusFilter === "api") return connectedLender(connectedLenders, g.name) !== null;
       return true;
     });
     // groupReview is a stable function declaration; safe to omit from deps.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allGroups, searchTerm, statusFilter]);
+  }, [allGroups, searchTerm, statusFilter, connectedLenders]);
 
   // Deep-link: /...lender-guidelines?edit=<lender_name> — used by the "Add
   // guidelines" shortcut on Incomplete cards in Lender Match — auto-opens that
@@ -756,13 +764,14 @@ export default function LenderGuidelinesManager() {
 
       {/* Guideline-coverage metrics. The Complete / Missing / Due tiles double as
           filters — click one to narrow the grid, click again to clear. */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         {([
           { key: "all", label: "Lenders", value: metrics.totalLenders, sub: `${metrics.totalPrograms} programs`, tone: "slate", filter: "all" as StatusFilter },
           { key: "programs", label: "Programs", value: metrics.totalPrograms, sub: `${metrics.completePrograms} complete`, tone: "slate", filter: "all" as StatusFilter },
           { key: "complete", label: "Complete", value: metrics.completeLenders, sub: "all programs set", tone: "emerald", filter: "complete" as StatusFilter },
           { key: "missing", label: "Missing Guidelines", value: metrics.missingLenders, sub: "needs data", tone: "rose", filter: "missing" as StatusFilter },
           { key: "due", label: "Due for Review", value: metrics.dueLenders, sub: "6+ months old", tone: "amber", filter: "due" as StatusFilter },
+          { key: "api", label: "API Connected", value: metrics.apiLenders, sub: "submit by API", tone: "sky", filter: "api" as StatusFilter },
         ]).map(tile => {
           const active = statusFilter === tile.filter && tile.filter !== "all";
           const toneRing: Record<string, string> = {
@@ -770,12 +779,14 @@ export default function LenderGuidelinesManager() {
             emerald: active ? "border-emerald-400 ring-2 ring-emerald-100" : "hover:border-emerald-300",
             rose: active ? "border-rose-400 ring-2 ring-rose-100" : "hover:border-rose-300",
             amber: active ? "border-amber-400 ring-2 ring-amber-100" : "hover:border-amber-300",
+            sky: active ? "border-sky-400 ring-2 ring-sky-100" : "hover:border-sky-300",
           };
           const toneText: Record<string, string> = {
             slate: "text-slate-900",
             emerald: "text-emerald-600",
             rose: metrics.missingLenders > 0 ? "text-rose-600" : "text-slate-400",
             amber: metrics.dueLenders > 0 ? "text-amber-600" : "text-slate-400",
+            sky: metrics.apiLenders > 0 ? "text-sky-600" : "text-slate-400",
           };
           const isFilterTile = tile.filter !== "all";
           return (
@@ -796,7 +807,7 @@ export default function LenderGuidelinesManager() {
       {statusFilter !== "all" && (
         <div className="flex items-center gap-2 text-xs">
           <span className="font-mono text-slate-500">
-            Filtered by <span className="font-bold text-slate-700">{statusFilter}</span> · {groupedLenders.length} shown
+            Filtered by <span className="font-bold text-slate-700">{statusFilter === "api" ? "API connected" : statusFilter}</span> · {groupedLenders.length} shown
           </span>
           <button
             onClick={() => setStatusFilter("all")}
@@ -840,6 +851,14 @@ export default function LenderGuidelinesManager() {
                         ) : (
                           <span className="flex-shrink-0 text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded bg-rose-100 text-rose-700">
                             {group.programs.length - completeCount} missing
+                          </span>
+                        )}
+                        {connectedLender(connectedLenders, group.name) && (
+                          <span
+                            title="Deals can be submitted to this lender directly by API"
+                            className="flex-shrink-0 text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded bg-sky-100 text-sky-700"
+                          >
+                            ⚡ API connected
                           </span>
                         )}
                       </div>

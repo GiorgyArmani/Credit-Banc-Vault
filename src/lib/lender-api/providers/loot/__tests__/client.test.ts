@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { __testing, isLootConfigured, submitCustomerApplication } from "../client";
-import { loot, lootSignature } from "../index";
+import { loot, lootDuplicateExplanation, lootSignature } from "../index";
 import { providerForLender } from "@/lib/lender-api/registry";
 import type { OutboundDocument } from "@/lib/lender-api/types";
 
@@ -86,8 +86,26 @@ describe("loot client", () => {
   it("reports a 400 as a clean rejection with Loot's message", async () => {
     fetchMock
       .mockResolvedValueOnce(tokenOk())
-      .mockResolvedValueOnce(json(400, { statusCode: 400, status: "Email already exists", error: "Email already exists", message: "Email already exists" }));
-    expect(await loot.createApplication({})).toEqual({ ok: false, error: "Email already exists", status: 400 });
+      .mockResolvedValueOnce(json(400, { statusCode: 400, message: "requestingAmount must be a number" }));
+    expect(await loot.createApplication({})).toEqual({ ok: false, error: "requestingAmount must be a number", status: 400 });
+  });
+
+  it.each([
+    "Email already exists",
+    "User has been previously funded or has active advance",
+    "Duplicate EIN",
+    "A deal with this EIN already exists",
+  ])("explains a duplicate rejection (%s) and keeps Loot's words", async (message) => {
+    fetchMock.mockResolvedValueOnce(tokenOk()).mockResolvedValueOnce(json(400, { statusCode: 400, message }));
+    const r = await loot.createApplication({});
+    expect(r.ok).toBe(false);
+    expect(r.status).toBe(400);
+    expect(r.error).toContain("Loot already has this business");
+    expect(r.error).toContain(`Loot said: ${message}`);
+  });
+
+  it("does not read an EIN format error as a duplicate", () => {
+    expect(lootDuplicateExplanation("ein must be 9 digits")).toBeNull();
   });
 
   it("reports a 5xx and a network failure as uncertain", async () => {

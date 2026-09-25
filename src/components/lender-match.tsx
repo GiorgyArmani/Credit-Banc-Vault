@@ -16,6 +16,8 @@ import {
 } from "@/lib/lender-history";
 import { notifyAdminsOfLenderMatchSaved } from "@/app/actions/lender-match-notifications";
 import { toast } from "@/lib/toast";
+import { useConnectedLenders } from "@/components/lender-api/use-connected-lenders";
+import { compareLenderMatches, connectedLender } from "@/lib/lender-api/connected";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -781,6 +783,10 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
     fetchLenders();
   }, []);
 
+  // Lenders we can submit to by API get a badge and rank first among the
+  // eligible — never above a lender that passes when they don't.
+  const connectedLenders = useConnectedLenders();
+
   const { viableResults, incompleteResults } = useMemo(() => {
     const viable: MatchResult[] = [];
     const incomplete: MatchResult[] = [];
@@ -794,15 +800,17 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
       }
     });
 
-    viable.sort((a, b) => {
-      if (a.passed !== b.passed) return a.passed ? -1 : 1;
-      return a.flags.length - b.flags.length;
+    const rank = (r: MatchResult) => ({
+      passed: r.passed,
+      flagCount: r.flags.length,
+      api: connectedLender(connectedLenders, r.lender.lender_name) !== null,
     });
+    viable.sort((a, b) => compareLenderMatches(rank(a), rank(b)));
 
     incomplete.sort((a, b) => a.lender.lender_name.localeCompare(b.lender.lender_name));
 
     return { viableResults: viable, incompleteResults: incomplete };
-  }, [deal, lenderData]);
+  }, [deal, lenderData, connectedLenders]);
 
   const passedCount = viableResults.filter((r) => r.passed).length;
   const disqualifiedCount = viableResults.length - passedCount;
@@ -1481,6 +1489,14 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-sm font-semibold text-slate-900 font-mono">{result.lender.lender_name}</span>
+              {connectedLender(connectedLenders, result.lender.lender_name) && (
+                <span
+                  title="Submits directly by API from the client file"
+                  className="text-[10px] font-mono font-bold uppercase tracking-wider border rounded px-1.5 py-0.5 bg-sky-50 text-sky-700 border-sky-300"
+                >
+                  ⚡ API
+                </span>
+              )}
               <span className={`text-[10px] font-mono font-bold uppercase tracking-wider border rounded px-1.5 py-0.5 ${statusPill.cls}`}>
                 {statusPill.text}
               </span>

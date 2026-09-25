@@ -32,6 +32,30 @@ export function lootSignature(secret: string, nonce: string, eventType: string, 
   return createHmac("sha512", secret).update(`${nonce}${eventType}${createdAt}`).digest("hex");
 }
 
+/**
+ * Loot hard-rejects duplicates: EIN (confirmed by Loot, 2026-09-25), email, and
+ * an owner with an active or previous advance (seen in sandbox). Every one is a
+ * clean 4xx — no deal is created — but the raw text reads like a data error, so
+ * UW would fix fields and resend into the same wall. A new application can never
+ * get past it; the path forward is with Loot, about the deal they already hold.
+ *
+ * Returns the explanation, with Loot's own words appended, or null when the
+ * rejection is something else. An EIN FORMAT error must stay null: "ein" alone
+ * is not a duplicate.
+ */
+export function lootDuplicateExplanation(lootMessage: string): string | null {
+  const m = lootMessage.toLowerCase();
+  const duplicate =
+    /duplicate|previously funded|active advance/.test(m) ||
+    /already (exists|exist|submitted|registered|in use|on file)/.test(m);
+  if (!duplicate) return null;
+  return (
+    "Loot already has this business (they reject a second application for the same EIN, email or owner). " +
+    "Resending won't get through — if an earlier attempt timed out, that deal is probably ours; " +
+    `ask your Loot rep to update the existing deal. Loot said: ${lootMessage}`
+  );
+}
+
 function timingSafeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;
@@ -59,9 +83,12 @@ export const loot: LenderApiProvider = {
     const res = await submitCustomerApplication(payload as LootApplicationForm);
     const dealId = res.data?.data?.deal?.deal_id;
     if (res.ok && dealId) return { ok: true, externalId: String(dealId) };
+    const error = res.error ?? "Loot did not return a deal id";
+    // Only a clean 4xx can be a duplicate verdict; a 5xx/timeout stays uncertain.
+    const isRejection = res.status >= 400 && res.status < 500;
     return {
       ok: false,
-      error: res.error ?? "Loot did not return a deal id",
+      error: (isRejection && lootDuplicateExplanation(error)) || error,
       status: res.status,
     };
   },
