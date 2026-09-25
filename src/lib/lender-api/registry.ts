@@ -7,8 +7,11 @@
 import type { LenderApiProvider } from "./types";
 import { forwardFinancing } from "./providers/forward-financing";
 import { credibly } from "./providers/credibly";
+import { bitty } from "./providers/bitty";
+import { loot } from "./providers/loot";
+import { fundkite } from "./providers/fundkite";
 
-const PROVIDERS: readonly LenderApiProvider[] = [forwardFinancing, credibly];
+const PROVIDERS: readonly LenderApiProvider[] = [forwardFinancing, credibly, bitty, loot, fundkite];
 
 export function providerForLender(lenderName: string | null | undefined): LenderApiProvider | null {
   if (!lenderName) return null;

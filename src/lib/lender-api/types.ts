@@ -9,7 +9,7 @@
 
 import type { ResolvedVaultFields, SourceVault, VaultField } from "./vault-fields";
 
-export type ProviderId = "forward_financing" | "credibly";
+export type ProviderId = "forward_financing" | "credibly" | "bitty" | "loot" | "fundkite";
 
 export type AssignmentStatus =
   | "pending"
@@ -56,6 +56,12 @@ export interface SourceDeal {
 export interface SourceAnalysis {
   avg_revenue: number | null;
   avg_monthly_deposits: number | null;
+  fico?: number | null;
+  total_neg_days?: number | null;
+  has_bankruptcy?: boolean | null;
+  /** The bank-analysis grid: per account, 12 calendar-month slots (index 0 = January). */
+  accounts_data?: unknown;
+  created_at?: string | null;
 }
 
 export interface SourcePosition {
@@ -146,6 +152,14 @@ export interface CreateApplicationResult {
   error?: string;
   /** The lender HTTP status, when known — lets the engine tell a rejection (4xx) from an uncertain failure (0/5xx). */
   status?: number;
+  /** Inline-document providers: what happened to each file sent with the application. */
+  attachments?: OutboundDocumentResult[];
+  /**
+   * A lender that decides at submission returns its answer here, in the same
+   * shape interpretStatus reads. The engine records and applies it exactly
+   * as it would a fetched status.
+   */
+  initialStatus?: unknown;
 }
 
 export interface FetchStatusResult {
@@ -164,12 +178,25 @@ export interface LenderApiProvider {
   suggestPicks(source: LenderApiSource): Record<string, string | null>;
   buildApplication(source: LenderApiSource, picks: Picks, ctx: { referenceId: string }): BuiltApplication;
   tagsForDocCode(docCode: string | null): string[];
-  createApplication(payload: unknown): Promise<CreateApplicationResult>;
+  /**
+   * The lender takes files only inside the application itself (no upload
+   * endpoint afterwards): the engine prepares the chosen documents first and
+   * hands them to createApplication, which reports per-file results.
+   */
+  documentsInline?: boolean;
+  createApplication(payload: unknown, ctx?: { documents: OutboundDocument[] }): Promise<CreateApplicationResult>;
   uploadDocuments(externalId: string, docs: OutboundDocument[]): Promise<OutboundDocumentResult[]>;
-  fetchStatus(externalId: string): Promise<FetchStatusResult>;
+  /** Absent when the lender has no status API — Refresh then re-applies the stored status. */
+  fetchStatus?(externalId: string): Promise<FetchStatusResult>;
   interpretStatus(raw: unknown): NormalizedStatus;
   webhook?: {
     verify(req: Request): Promise<boolean>;
     extractExternalId(body: unknown): string | null;
+    /**
+     * Only for a lender with NO status API (no fetchStatus): the status carried
+     * by a verified webhook, in the shape interpretStatus reads, or null when
+     * the event carries none. Everyone else is re-fetched, never believed.
+     */
+    statusFromBody?(body: unknown): unknown | null;
   };
 }

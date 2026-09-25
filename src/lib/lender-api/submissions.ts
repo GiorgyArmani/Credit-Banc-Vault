@@ -14,7 +14,13 @@ import {
   submitGuard,
   type TransitionActor,
 } from "@/lib/lender-assignment-transitions";
-import type { LenderApiProvider, LenderApiSource, NormalizedStatus, OutboundDocumentResult } from "./types";
+import type {
+  LenderApiProvider,
+  LenderApiSource,
+  NormalizedStatus,
+  OutboundDocument,
+  OutboundDocumentResult,
+} from "./types";
 import { loadLenderApiSource, type AdminClient } from "./source";
 import { listSubmittableDocuments, prepareOutboundDocuments } from "./documents";
 import { applyVaultUpdates } from "./vault-updates";
@@ -278,7 +284,7 @@ export async function submitApplication(args: {
       document_ids: documentIds,
       created_by: actor.id,
     })
-    .select("id")
+    .select("id, created_at")
     .single();
 
   if (insertError || !inserted) {
@@ -291,7 +297,21 @@ export async function submitApplication(args: {
     };
   }
 
-  const created = await provider.createApplication(built.payload);
+  // A lender that only takes files inside the application gets them now, not
+  // in after(). Nothing has reached the lender yet, so a failure here is clean.
+  let inline: { docs: OutboundDocument[]; failures: OutboundDocumentResult[] } | null = null;
+  if (provider.documentsInline) {
+    try {
+      inline = await prepareOutboundDocuments(admin, source, provider, documentIds);
+    } catch (err) {
+      console.error("lender-api inline documents error:", err instanceof Error ? err.message : "unknown");
+      const error = "Could not prepare the documents — nothing was sent. Try again.";
+      await updateSubmission(admin, inserted.id, { status: "failed", error });
+      return { httpStatus: 500, body: { error, submission_id: inserted.id } };
+    }
+  }
+
+  const created = await provider.createApplication(built.payload, inline ? { documents: inline.docs } : undefined);
   if (!created.ok || !created.externalId) {
     // Only a 4xx is a clean rejection. No status, 0 (network/timeout), a 5xx,
     // or a 2xx that came back without a lead id all mean we don't know whether
@@ -320,8 +340,20 @@ export async function submitApplication(args: {
   // else. A failure to record it must not be swallowed: the caller must not
   // resend (it would duplicate the lead), so retry the write once and, if it
   // still fails, stop here without flipping the assignment or sending files.
-  let recorded = await updateSubmission(admin, inserted.id, { status: "lead_created", external_id: created.externalId });
-  if (!recorded) recorded = await updateSubmission(admin, inserted.id, { status: "lead_created", external_id: created.externalId });
+  const inlineResults = inline ? mergeAttachmentResults([], [...(created.attachments ?? []), ...inline.failures]) : null;
+  const recordPatch: Record<string, unknown> = inlineResults
+    ? {
+        status: submissionStatusFromResults(documentIds, inlineResults),
+        external_id: created.externalId,
+        attachments: inlineResults,
+      }
+    : { status: "lead_created", external_id: created.externalId };
+  if (created.initialStatus !== undefined) {
+    recordPatch.last_status = created.initialStatus;
+    recordPatch.last_status_at = new Date().toISOString();
+  }
+  let recorded = await updateSubmission(admin, inserted.id, recordPatch);
+  if (!recorded) recorded = await updateSubmission(admin, inserted.id, recordPatch);
   if (!recorded) {
     console.error("lender_api_submissions: could not record external_id", {
       reference_id: referenceId,
@@ -343,9 +375,26 @@ export async function submitApplication(args: {
     : `Sent to ${provider.displayName}, but the assignment could not be marked submitted (${marked.error}). Use Retry.`;
   if (warning) await updateSubmission(admin, inserted.id, { error: warning });
 
-  const submission = { id: inserted.id, external_id: created.externalId, document_ids: documentIds, attachments: [] };
-  const sourceForDocs = source;
-  after(() => sendDocuments(admin, provider, submission, sourceForDocs, documentIds));
+  if (!inline) {
+    const submission = { id: inserted.id, external_id: created.externalId, document_ids: documentIds, attachments: [] };
+    const sourceForDocs = source;
+    after(() => sendDocuments(admin, provider, submission, sourceForDocs, documentIds));
+  }
+
+  // The lender answered in the same call: record the verdict now, exactly as a
+  // status refresh would. Its failure is not the send's failure — Refresh
+  // re-applies the stored status.
+  let lenderStatus: unknown = null;
+  if (created.initialStatus !== undefined) {
+    const applied = await applyLenderStatus(
+      admin,
+      provider,
+      { id: inserted.id, assignment_id: assignmentId, created_at: inserted.created_at },
+      created.initialStatus,
+      null
+    );
+    lenderStatus = applied.body.status ?? null;
+  }
 
   return {
     httpStatus: 201,
@@ -353,7 +402,9 @@ export async function submitApplication(args: {
       submission_id: inserted.id,
       external_id: created.externalId,
       reference_id: referenceId,
-      documents_queued: documentIds.length,
+      documents_queued: inline ? 0 : documentIds.length,
+      documents_accepted: inlineResults ? inlineResults.filter((r) => r.accepted).length : undefined,
+      lender_status: lenderStatus,
       warning,
     },
   };
@@ -490,17 +541,57 @@ export async function refreshSubmissionStatus(
     return { httpStatus: 409, body: { error: "This submission never reached the lender." } };
   }
 
+  // No status API: the lender's answer arrived with the submission. Re-apply
+  // what is stored — a verdict write that failed the first time lands now,
+  // and an unchanged status never re-notifies.
+  if (!provider.fetchStatus) {
+    if (submission.last_status == null) {
+      return {
+        httpStatus: 409,
+        body: { error: `${provider.displayName} has not reported a decision yet — it will arrive on its own.` },
+      };
+    }
+    return applyLenderStatus(admin, provider, submission, submission.last_status, submission.last_status);
+  }
+
   const fetched = await provider.fetchStatus(submission.external_id);
   if (!fetched.ok) return { httpStatus: 502, body: { error: fetched.error ?? "Could not fetch status." } };
 
-  const normalized = provider.interpretStatus(fetched.raw);
+  return applyLenderStatus(admin, provider, submission, fetched.raw, submission.last_status);
+}
+
+/**
+ * A status pushed by a lender that has no status API (verified webhook body).
+ * Applied exactly like a refresh; an unchanged status never re-notifies.
+ */
+export async function applyPushedStatus(
+  admin: AdminClient,
+  provider: LenderApiProvider,
+  submission: SubmissionRow,
+  raw: unknown
+): Promise<EngineResult> {
+  if (!submission.external_id) {
+    return { httpStatus: 409, body: { error: "This submission never reached the lender." } };
+  }
+  return applyLenderStatus(admin, provider, submission, raw, submission.last_status);
+}
+
+/** Records a lender status on the submission and applies it to the assignment (verdict / needs-info). */
+async function applyLenderStatus(
+  admin: AdminClient,
+  provider: LenderApiProvider,
+  submission: { id: string; assignment_id: string; created_at: string },
+  raw: unknown,
+  previousRaw: unknown
+): Promise<EngineResult> {
+  const normalized = provider.interpretStatus(raw);
   // Compare by meaning, not raw JSON: the lender's raw payload can carry
   // volatile fields (timestamps, ids) that change on every poll without the
   // status itself changing, which would otherwise fire "needs info" every time.
-  const previous = submission.last_status == null ? null : provider.interpretStatus(submission.last_status);
+  const previous = previousRaw == null ? null : provider.interpretStatus(previousRaw);
   const statusChanged = previous === null || !sameNormalizedStatus(previous, normalized);
   await updateSubmission(admin, submission.id, {
-    last_status: fetched.raw ?? null,
+    last_status: raw ?? null,
     last_status_at: new Date().toISOString(),
   });
 

@@ -4,11 +4,15 @@
 // for state: we take only the external id, then fetch the status from the
 // lender with our own credentials and apply it (same path as "Refresh status").
 // Provider.verify() gates the caller (FF: source IP allow-list, no signature).
+//
+// The one exception is a lender with no status API at all (Loot): there is
+// nothing to re-fetch, so the status comes from the body — and only after
+// verify() has checked its signature.
 
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getProvider } from "@/lib/lender-api/registry";
-import { findSubmissionByExternalId, refreshSubmissionStatus } from "@/lib/lender-api/submissions";
+import { applyPushedStatus, findSubmissionByExternalId, refreshSubmissionStatus } from "@/lib/lender-api/submissions";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 150;
@@ -38,7 +42,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
   if (!submission) return NextResponse.json({ ok: true });
 
   try {
-    const result = await refreshSubmissionStatus(admin, provider, submission);
+    let result;
+    if (provider.fetchStatus) {
+      result = await refreshSubmissionStatus(admin, provider, submission);
+    } else {
+      const pushed = provider.webhook.statusFromBody?.(body) ?? null;
+      // An event that carries no decision (e.g. draw information) — nothing to apply.
+      if (pushed === null) return NextResponse.json({ ok: true });
+      result = await applyPushedStatus(admin, provider, submission, pushed);
+    }
     if (result.httpStatus >= 400) {
       console.error(`lender-api webhook: refresh for ${provider.id} returned ${result.httpStatus}`);
     }

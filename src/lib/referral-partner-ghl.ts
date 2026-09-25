@@ -25,6 +25,7 @@ import {
   ghlAddTags,
   ghlRemoveTags,
   ghlSearchContacts,
+  extractGhlDuplicateContactId,
 } from "@/lib/ghl-api";
 import { generatePartnerPortalMagicLink } from "@/lib/magic-link";
 import { partnerReferralUrl } from "@/lib/referral-partners";
@@ -355,6 +356,62 @@ export async function syncReferralPartnerToGhl(
     return { synced: true, contactId, wroteFields };
   } catch (err: any) {
     console.error(`[partner-ghl] sync failed for ${email}:`, err);
+    return { ...empty, error: err?.message || String(err) };
+  }
+}
+
+/**
+ * Follow an admin's email change into the CRM: move the partner's contact to
+ * the new address, then re-stamp both link fields. The dashboard link is minted
+ * FOR an address, so once the login has moved the old stamp signs nobody in —
+ * GHL automations would keep mailing a dead link.
+ *
+ * The contact is found by stored id, else by the OLD address (searching the new
+ * one would miss it). None found: skipped — the next invite's upsert creates it
+ * on the new address. If GHL refuses because another contact already holds the
+ * new address, that contact becomes the partner's from here on.
+ *
+ * NEVER THROWS, and callers run it in after(): the login and the partner row
+ * have already moved, and GHL being slow or down must not fail or stall that.
+ * Tier-blind on purpose (see refreshPartnerLinkFields) — an email fix must not
+ * fire a tier welcome automation.
+ */
+export async function movePartnerGhlEmail(
+  partner: PartnerGhlInput,
+  oldEmail: string | null
+): Promise<PartnerGhlResult> {
+  const empty: PartnerGhlResult = { synced: false, contactId: null, wroteFields: [] };
+
+  const locationId = process.env.GHL_LOCATION_ID;
+  if (!locationId) return { ...empty, skipReason: "no GHL_LOCATION_ID" };
+
+  const newEmail = (partner.email ?? "").trim().toLowerCase();
+  if (!newEmail) return { ...empty, skipReason: "no email on file" };
+  const previous = (oldEmail ?? "").trim().toLowerCase();
+
+  try {
+    let contactId = partner.ghl_contact_id ?? null;
+    if (!contactId && previous) {
+      const found = await ghlSearchContacts({ email: previous, locationId });
+      contactId = found[0]?.id ?? null;
+    }
+    if (!contactId) return { ...empty, skipReason: "no GHL contact yet" };
+
+    try {
+      await ghlUpdateContact(contactId, { email: newEmail });
+    } catch (updateErr: any) {
+      const holderId = extractGhlDuplicateContactId(updateErr?.message || "");
+      if (!holderId) throw updateErr;
+      console.warn(
+        `[partner-ghl] ${newEmail} already belongs to GHL contact ${holderId} — using it instead of ${contactId}`
+      );
+      contactId = holderId;
+    }
+
+    const refreshed = await refreshPartnerLinkFields(contactId, { ...partner, tier: undefined });
+    return { ...refreshed, contactId };
+  } catch (err: any) {
+    console.error(`[partner-ghl] email move ${previous || "?"} → ${newEmail} failed:`, err);
     return { ...empty, error: err?.message || String(err) };
   }
 }

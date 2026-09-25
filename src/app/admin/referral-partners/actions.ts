@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { backfillPartnerW9Pdf, signedPartnerDocUrl } from "@/lib/partner-onboarding";
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import {
   normalizePartnerSlug,
   partnerSlugFromName,
@@ -18,6 +19,7 @@ import {
   syncReferralPartnerToGhl,
   applyPartnerTierPromotion,
   removeAllPartnerTags,
+  movePartnerGhlEmail,
 } from "@/lib/referral-partner-ghl";
 
 async function requireAdminUser() {
@@ -44,6 +46,93 @@ type ActionResult = {
   name?: string;
   slug?: string;
 };
+
+type AdminDb = ReturnType<typeof createAdminClient>;
+
+/**
+ * Move a partner's LOGIN to a new address — auth.users AND public.users.
+ * Returns an error message, or null when the login now answers to `newEmail`.
+ *
+ * Every partner email change goes through here BEFORE the partner row is
+ * written. public.users.email is not the login: moving only that left
+ * auth.users on the old address, the magic link minted for the new one
+ * matched no login, and Supabase created a second, role-less account on click
+ * that the proxy then forced into client /onboarding (Frank Mason,
+ * 2026-09-24). An address already held by another account is refused, so the
+ * caller rejects the whole edit instead of half-applying it.
+ */
+async function movePartnerLogin(
+  db: AdminDb,
+  userId: string,
+  newEmail: string
+): Promise<string | null> {
+  const email = newEmail.trim().toLowerCase();
+
+  const { data: holders, error: lookupErr } = await db
+    .from("users")
+    .select("id, email, role")
+    .ilike("email", email);
+  if (lookupErr) return lookupErr.message;
+  // ilike treats `_` as a wildcard; only an exact (case-insensitive) match clashes.
+  const clash = (holders ?? []).find(
+    (u) => u.id !== userId && (u.email ?? "").toLowerCase() === email
+  );
+  if (clash) return `${email} already belongs to another ${clash.role} account`;
+
+  const { data: authUser, error: authReadErr } = await db.auth.admin.getUserById(userId);
+  if (authReadErr || !authUser?.user) {
+    return authReadErr?.message || "Partner login not found";
+  }
+  if ((authUser.user.email ?? "").toLowerCase() !== email) {
+    const { error: moveErr } = await db.auth.admin.updateUserById(userId, {
+      email,
+      email_confirm: true,
+    });
+    if (moveErr) return `Could not move the login to ${email}: ${moveErr.message}`;
+  }
+
+  const { error: rowErr } = await db.from("users").update({ email }).eq("id", userId);
+  if (rowErr) return `Login moved, but the users row did not: ${rowErr.message}`;
+  return null;
+}
+
+/**
+ * Follow a partner email change into GHL — after the response, never in it.
+ * The login and partner row are already moved; this is CRM bookkeeping, so it
+ * can't fail or slow the admin's save, and a failure is only logged.
+ */
+function scheduleGhlEmailMove(
+  db: AdminDb,
+  partner: {
+    id: string;
+    name: string | null;
+    email: string;
+    phone?: string | null;
+    slug?: string | null;
+    company?: string | null;
+    ghl_contact_id?: string | null;
+  },
+  oldEmail: string | null
+) {
+  after(async () => {
+    try {
+      const result = await movePartnerGhlEmail(partner, oldEmail);
+      if (result.contactId && result.contactId !== partner.ghl_contact_id) {
+        await db
+          .from("referral_partners")
+          .update({ ghl_contact_id: result.contactId })
+          .eq("id", partner.id);
+      }
+      if (!result.synced) {
+        console.warn(
+          `[referral-partners] GHL email move skipped for ${partner.email}: ${result.skipReason || result.error}`
+        );
+      }
+    } catch (err) {
+      console.error("[referral-partners] GHL email move threw:", err);
+    }
+  });
+}
 
 /**
  * Add a new INTERNAL referral partner (admin only). Trims + collapses whitespace,
@@ -282,10 +371,48 @@ export async function updateReferralPartnerProfile(
     }
   }
 
+  // Set when the address actually changes: the login moves before the row is
+  // written (a clash rejects the whole save), and GHL follows after the response.
+  let emailChange: {
+    oldEmail: string | null;
+    newEmail: string;
+    partner: {
+      name: string | null;
+      slug: string | null;
+      phone: string | null;
+      company: string | null;
+      user_id: string | null;
+      ghl_contact_id: string | null;
+    };
+  } | null = null;
+
   if (input.email !== undefined) {
     const email = (input.email ?? "").trim().toLowerCase();
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return { success: false, error: "That email doesn't look right" };
+    }
+
+    const { data: current, error: currentErr } = await db
+      .from("referral_partners")
+      .select("email, name, slug, phone, company, user_id, ghl_contact_id")
+      .eq("id", id)
+      .maybeSingle();
+    if (currentErr || !current) return { success: false, error: "Partner not found" };
+
+    const oldEmail = (current.email ?? "").trim().toLowerCase() || null;
+    if (email !== (oldEmail ?? "")) {
+      if (current.user_id) {
+        // A login can't exist without an address to sign in with.
+        if (!email) {
+          return {
+            success: false,
+            error: "This partner has a login — replace the email rather than clearing it",
+          };
+        }
+        const moveErr = await movePartnerLogin(db, current.user_id, email);
+        if (moveErr) return { success: false, error: moveErr };
+      }
+      if (email) emailChange = { oldEmail, newEmail: email, partner: current };
     }
     patch.email = email || null;
   }
@@ -322,8 +449,26 @@ export async function updateReferralPartnerProfile(
 
   const { error } = await db.from("referral_partners").update(patch).eq("id", id);
   if (error) {
+    // The login already moved — put it back so it keeps matching the row.
+    if (emailChange?.partner.user_id && emailChange.oldEmail) {
+      const revertErr = await movePartnerLogin(db, emailChange.partner.user_id, emailChange.oldEmail);
+      if (revertErr) console.error("[referral-partners] login revert failed:", revertErr);
+    }
     if (error.code === "23505") return { success: false, error: "That link name is taken" };
     return { success: false, error: error.message };
+  }
+
+  if (emailChange) {
+    scheduleGhlEmailMove(
+      db,
+      {
+        id,
+        ...emailChange.partner,
+        slug: (patch.slug !== undefined ? patch.slug : emailChange.partner.slug) ?? null,
+        email: emailChange.newEmail,
+      },
+      emailChange.oldEmail
+    );
   }
 
   // A deal-desk partner has a mirrored `advisors` row, and THAT is the row the
@@ -447,6 +592,13 @@ async function provisionPartnerPortal(
         userId = created.user.id;
       }
     }
+
+    // The edit paths already move the login with the address; this is the
+    // backstop for a login that drifted before they did (or any path that
+    // writes referral_partners.email directly). No-op when already in step.
+    if (!userId) return { success: false, error: "Could not resolve the partner login" };
+    const loginErr = await movePartnerLogin(db, userId, email);
+    if (loginErr) return { success: false, error: `${partner.name}: ${loginErr}` };
 
     const [firstName, ...restName] = (partner.name || "").split(/\s+/);
 
@@ -901,7 +1053,9 @@ export async function preparePartnerInvites(
   const db = createAdminClient();
   const { data: partners, error: readErr } = await db
     .from("referral_partners")
-    .select("id, name, slug, email, active, portal_enabled, deal_desk_enabled");
+    .select(
+      "id, name, slug, email, phone, company, active, portal_enabled, deal_desk_enabled, user_id, ghl_contact_id"
+    );
 
   if (readErr || !partners) {
     return { ...empty, error: readErr?.message || "Could not read the partner list" };
@@ -956,15 +1110,47 @@ export async function preparePartnerInvites(
       if (parsed.phone) patch.phone = parsed.phone;
       if (parsed.company) patch.company = parsed.company;
 
+      // Same rule as the row edit: the login moves with the address, before the
+      // row, and a clash rejects this line rather than half-applying it.
+      const oldEmail = (partner.email ?? "").trim().toLowerCase() || null;
+      const emailChanged = !!parsed.email && parsed.email !== oldEmail;
+      if (emailChanged && partner.user_id) {
+        const moveErr = await movePartnerLogin(db, partner.user_id, parsed.email!);
+        if (moveErr) {
+          invalid.push(`${line}  — ${moveErr}`);
+          continue;
+        }
+      }
+
       const { error: updErr } = await db
         .from("referral_partners")
         .update(patch)
         .eq("id", partner.id);
       if (updErr) {
+        if (emailChanged && partner.user_id && oldEmail) {
+          const revertErr = await movePartnerLogin(db, partner.user_id, oldEmail);
+          if (revertErr) console.error("[referral-partners] login revert failed:", revertErr);
+        }
         invalid.push(`${line}  — ${updErr.message}`);
         continue;
       }
       updated += 1;
+
+      if (emailChanged) {
+        scheduleGhlEmailMove(
+          db,
+          {
+            id: partner.id,
+            name: partner.name,
+            email: parsed.email!,
+            phone: parsed.phone || partner.phone,
+            slug: partner.slug,
+            company: parsed.company || partner.company,
+            ghl_contact_id: partner.ghl_contact_id,
+          },
+          oldEmail
+        );
+      }
 
       // Replacing an address that was already there is a different act from
       // filling in a blank; surface it rather than letting a stale paste

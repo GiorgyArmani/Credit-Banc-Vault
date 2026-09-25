@@ -57,7 +57,14 @@ export function LenderApiSubmitPanel({
   const [sending, setSending] = useState(false);
   const [serverGaps, setServerGaps] = useState<Gap[] | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]> | null>(null);
-  const [result, setResult] = useState<{ external_id: string; reference_id: string; warning: string | null } | null>(null);
+  const [result, setResult] = useState<{
+    external_id: string;
+    reference_id: string;
+    warning: string | null;
+    /** Set when the lender decided inside the submission (e.g. Bitty). */
+    lender_status: { kind: string; stage: string; note?: string } | null;
+    documents_queued: number;
+  } | null>(null);
   const [confirmResend, setConfirmResend] = useState(false);
   const [serverConfirmError, setServerConfirmError] = useState<string | null>(null);
 
@@ -177,7 +184,13 @@ export function LenderApiSubmitPanel({
         toast.error(json.error || "Submission failed");
         return;
       }
-      setResult({ external_id: json.external_id, reference_id: json.reference_id, warning: json.warning ?? null });
+      setResult({
+        external_id: json.external_id,
+        reference_id: json.reference_id,
+        warning: json.warning ?? null,
+        lender_status: json.lender_status ?? null,
+        documents_queued: json.documents_queued ?? 0,
+      });
       toast.success(`Sent to ${preview.provider.displayName}`);
       await onSubmitted();
     } catch {
@@ -232,8 +245,28 @@ export function LenderApiSubmitPanel({
           <div className="space-y-4 py-6">
             <div className="flex items-center gap-2 text-emerald-700">
               <CheckCircle2 className="h-5 w-5" />
-              <p className="font-bold">Application created — documents are uploading in the background.</p>
+              <p className="font-bold">
+                {result.documents_queued > 0
+                  ? "Application created — documents are uploading in the background."
+                  : "Application created."}
+              </p>
             </div>
+            {result.lender_status && (
+              <div
+                className={
+                  result.lender_status.kind === "approved"
+                    ? "rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900"
+                    : result.lender_status.kind === "declined"
+                      ? "rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900"
+                      : "rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"
+                }
+              >
+                <p className="font-bold">
+                  {preview.provider.displayName}: {result.lender_status.stage}
+                </p>
+                {result.lender_status.note && <p className="mt-1 whitespace-pre-line">{result.lender_status.note}</p>}
+              </div>
+            )}
             <div className="rounded-lg border border-slate-200 p-4 text-sm space-y-1">
               <p>Lead ID: <span className="font-mono">{result.external_id}</span></p>
               <p>Business: {preview.business_name}</p>

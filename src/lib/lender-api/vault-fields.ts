@@ -49,7 +49,7 @@ export const VAULT_SOURCE_COLUMNS = [
   "owner_1_name", "owner_1_ownership_pct", "owner_1_dob", "owner_1_home_phone",
   "home_address", "owner_1_street", "owner_1_city", "owner_1_state", "owner_1_zip",
   "owner_2_name", "owner_2_ownership_pct",
-  "avg_monthly_deposits", "capital_requested", "loan_purpose",
+  "avg_monthly_deposits", "capital_requested", "loan_purpose", "credit_score",
 ].join(", ");
 
 export interface SourceVault {
@@ -84,6 +84,8 @@ export interface SourceVault {
   avg_monthly_deposits: number | null;
   capital_requested: number | null;
   loan_purpose: string | null;
+  /** Free text (a number or a band) — only ever a fallback for a lender's FICO field. */
+  credit_score?: string | null;
 }
 
 export interface ResolvedVaultFields {

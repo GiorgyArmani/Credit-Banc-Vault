@@ -63,6 +63,8 @@ const STATE_NAMES: Record<string, string> = {
   "west virginia": "WV", wisconsin: "WI", wyoming: "WY",
 };
 const STATE_CODES = new Set(Object.values(STATE_NAMES));
+/** Two-letter codes for the 50 states, DC and PR — for lender state dropdowns. */
+export const US_STATE_CODES: readonly string[] = Array.from(STATE_CODES).sort();
 // Longest first so "west virginia" wins over "virginia".
 const STATE_NAME_KEYS = Object.keys(STATE_NAMES).sort((a, b) => b.length - a.length);
 

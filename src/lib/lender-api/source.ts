@@ -69,7 +69,7 @@ export async function loadLenderApiSource(
 
   let analysisQuery = admin
     .from("bank_analysis_results")
-    .select("avg_revenue, avg_monthly_deposits")
+    .select("avg_revenue, avg_monthly_deposits, fico, total_neg_days, has_bankruptcy, accounts_data, created_at")
     .eq("client_id", assignment.client_id);
   if (deal) {
     analysisQuery = analysisQuery.eq("funding_deal_id", deal.id);
