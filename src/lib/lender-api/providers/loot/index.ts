@@ -33,24 +33,24 @@ export function lootSignature(secret: string, nonce: string, eventType: string, 
 }
 
 /**
- * Loot hard-rejects duplicates: EIN (confirmed by Loot, 2026-09-25), email, and
- * an owner with an active or previous advance (seen in sandbox). Every one is a
- * clean 4xx — no deal is created — but the raw text reads like a data error, so
- * UW would fix fields and resend into the same wall. A new application can never
- * get past it; the path forward is with Loot, about the deal they already hold.
- *
- * Returns the explanation, with Loot's own words appended, or null when the
- * rejection is something else. An EIN FORMAT error must stay null: "ein" alone
- * is not a duplicate.
+ * Loot hard-rejects duplicates, matched on EIN, business email and owner email
+ * (confirmed by Loot, 2026-09-28). A duplicate is always HTTP 400 with
+ * `error: "DUPLICATE_SUBMISSION"`, and `message` is the explanation Loot wants
+ * shown to underwriters. No deal is created, but the raw text reads like a data
+ * error, so UW would fix fields and resend into the same wall. A new
+ * application can never get past it; the path forward is with Loot, about the
+ * deal they already hold.
  */
-export function lootDuplicateExplanation(lootMessage: string): string | null {
-  const m = lootMessage.toLowerCase();
-  const duplicate =
-    /duplicate|previously funded|active advance/.test(m) ||
-    /already (exists|exist|submitted|registered|in use|on file)/.test(m);
-  if (!duplicate) return null;
+export const LOOT_DUPLICATE_ERROR_CODE = "DUPLICATE_SUBMISSION";
+
+export function isLootDuplicate(data: unknown): boolean {
+  return !!data && typeof data === "object" && (data as Record<string, unknown>).error === LOOT_DUPLICATE_ERROR_CODE;
+}
+
+/** The underwriter-facing explanation, with Loot's own message appended. */
+export function lootDuplicateExplanation(lootMessage: string): string {
   return (
-    "Loot already has this business (they reject a second application for the same EIN, email or owner). " +
+    "Loot already has this business (they reject a second application with the same EIN, business email or owner email). " +
     "Resending won't get through — if an earlier attempt timed out, that deal is probably ours; " +
     `ask your Loot rep to update the existing deal. Loot said: ${lootMessage}`
   );
@@ -84,13 +84,9 @@ export const loot: LenderApiProvider = {
     const dealId = res.data?.data?.deal?.deal_id;
     if (res.ok && dealId) return { ok: true, externalId: String(dealId) };
     const error = res.error ?? "Loot did not return a deal id";
-    // Only a clean 4xx can be a duplicate verdict; a 5xx/timeout stays uncertain.
-    const isRejection = res.status >= 400 && res.status < 500;
-    return {
-      ok: false,
-      error: (isRejection && lootDuplicateExplanation(error)) || error,
-      status: res.status,
-    };
+    // Match on Loot's error code, never the wording; a 5xx/timeout stays uncertain.
+    const duplicate = res.status === 400 && isLootDuplicate(res.data);
+    return { ok: false, error: duplicate ? lootDuplicateExplanation(error) : error, status: res.status };
   },
 
   async uploadDocuments(externalId, docs: OutboundDocument[]) {

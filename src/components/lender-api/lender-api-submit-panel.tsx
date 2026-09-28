@@ -1,7 +1,7 @@
 // src/components/lender-api/lender-api-submit-panel.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Copy, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -32,6 +32,9 @@ interface Preview {
   submissions: Array<{ status: string; error: string | null; updated_at: string }>;
 }
 
+/** Gaps fixed in Edit profile, not in this panel. */
+const isProfileGap = (field: string) => field.startsWith("business:") || field.startsWith("owner:");
+
 const OWNER_FIELDS: VaultField[] = [
   "owner_1_name", "ssn", "owner_1_dob", "client_phone",
   "owner_1_street", "owner_1_city", "owner_1_state", "owner_1_zip",
@@ -43,11 +46,17 @@ export function LenderApiSubmitPanel({
   onOpenChange,
   assignmentId,
   onSubmitted,
+  onEditProfile,
+  refreshKey,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   assignmentId: string;
   onSubmitted: () => void | Promise<void>;
+  /** Opens the client's Edit profile modal; omitted on hosts that don't have one. */
+  onEditProfile?: () => void;
+  /** A change re-fetches the preview (e.g. after a profile save). */
+  refreshKey?: number;
 }) {
   const [preview, setPreview] = useState<Preview | null>(null);
   const [loading, setLoading] = useState(false);
@@ -68,36 +77,82 @@ export function LenderApiSubmitPanel({
   const [confirmResend, setConfirmResend] = useState(false);
   const [serverConfirmError, setServerConfirmError] = useState<string | null>(null);
 
+  // Distinguishes a real (re)open (or a switch to a different assignment) from
+  // a `refreshKey` bump on a panel that's already open. Sentinels (false / null)
+  // guarantee the very first run — whatever `open` starts as — counts as fresh.
+  const prevOpenRef = useRef(false);
+  const prevAssignmentIdRef = useRef<string | null>(null);
+  // Read inside the effect without adding `sending` as a dependency — a refresh
+  // guard, not a refresh trigger; a send starting/finishing must not itself
+  // re-run this effect (that would refetch on every send, not just on refresh).
+  const sendingRef = useRef(sending);
+  sendingRef.current = sending;
+
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      prevOpenRef.current = false;
+      return;
+    }
+    // A refreshKey bump means "re-validate after an edit made outside this panel
+    // (e.g. a profile save while the Sheet is still open)" — it is NOT the user
+    // opening the panel. Only a fresh open / assignment switch may reset the
+    // form; a refresh must preserve whatever the user already typed, picked, or
+    // selected, or saving the profile mid-review would silently wipe it.
+    const isFreshOpen = !prevOpenRef.current || prevAssignmentIdRef.current !== assignmentId;
+    prevOpenRef.current = true;
+    prevAssignmentIdRef.current = assignmentId;
+
+    // A send is already talking to the server; don't race it with a refetch.
+    if (!isFreshOpen && sendingRef.current) return;
+
     let cancelled = false;
-    setLoading(true);
-    setPreview(null);
-    setResult(null);
-    setConfirmResend(false);
-    setServerConfirmError(null);
-    setServerGaps(null);
-    setFieldErrors(null);
-    setEdits({});
+    if (isFreshOpen) {
+      setLoading(true);
+      setPreview(null);
+      setResult(null);
+      setConfirmResend(false);
+      setServerConfirmError(null);
+      setServerGaps(null);
+      setFieldErrors(null);
+      setEdits({});
+    }
     fetch(`/api/lender-assignments/${assignmentId}/lender-api/preview`, { cache: "no-store" })
       .then(async (res) => {
         const json = await res.json().catch(() => ({}));
         if (cancelled) return;
         if (!res.ok) {
           toast.error(json.error || "Could not load the submission preview");
-          onOpenChange(false);
+          if (isFreshOpen) onOpenChange(false);
           return;
         }
         const p = json as Preview;
         setPreview(p);
-        setPicks(Object.fromEntries(Object.entries(p.suggested_picks).filter(([, v]) => !!v)) as Record<string, string>);
-        setSelected(new Set(p.documents.filter((d) => d.preselected).map((d) => d.id)));
+        if (isFreshOpen) {
+          setPicks(Object.fromEntries(Object.entries(p.suggested_picks).filter(([, v]) => !!v)) as Record<string, string>);
+          setSelected(new Set(p.documents.filter((d) => d.preselected).map((d) => d.id)));
+        } else {
+          // Gaps are re-derived from the fresh preview below (openGaps reads
+          // `preview.gaps` once serverGaps is cleared); a prior send attempt's
+          // server-validation list is stale now. Edits, selected documents,
+          // confirmResend and result are left untouched — only a pick the user
+          // hasn't set yet gets filled from the new suggestion.
+          setServerGaps(null);
+          setPicks((prev) => {
+            const merged = { ...prev };
+            for (const [k, v] of Object.entries(p.suggested_picks)) {
+              if (v && !(k in prev)) merged[k] = v;
+            }
+            return merged;
+          });
+        }
       })
-      .finally(() => !cancelled && setLoading(false));
+      .finally(() => {
+        if (!cancelled && isFreshOpen) setLoading(false);
+      });
     return () => {
       cancelled = true;
     };
-  }, [open, assignmentId, onOpenChange]);
+  }, [open, assignmentId, onOpenChange, refreshKey]);
 
   const value = (field: VaultField) =>
     field in edits ? edits[field] ?? "" : field === "ssn" ? "" : preview?.vault.values[field] ?? "";
@@ -300,7 +355,18 @@ export function LenderApiSubmitPanel({
                 <p className="flex items-center gap-2 font-bold"><AlertTriangle className="h-4 w-4" /> Needed before sending</p>
                 <ul className="mt-1 list-disc pl-5">
                   {openGaps.map((g) => (
-                    <li key={g.field}>{g.label}{g.kind === "invalid" ? " (invalid)" : ""}</li>
+                    <li key={g.field}>
+                      {g.label}{g.kind === "invalid" && !isProfileGap(g.field) ? " (invalid)" : ""}
+                      {isProfileGap(g.field) && onEditProfile && (
+                        <button
+                          type="button"
+                          onClick={onEditProfile}
+                          className="ml-2 font-bold underline underline-offset-2 hover:text-amber-900"
+                        >
+                          Fix in profile
+                        </button>
+                      )}
+                    </li>
                   ))}
                 </ul>
               </div>

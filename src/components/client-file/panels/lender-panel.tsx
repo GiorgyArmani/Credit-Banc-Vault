@@ -89,6 +89,10 @@ export type LenderPanelProps = {
     client_id: string;
     business_profile_id: string | null;
     on_lender_added: () => void;
+    /** Opens the client's Edit profile modal from a lender-send gap; omitted on hosts that don't have one. */
+    onEditProfile?: () => void;
+    /** A change re-fetches the lender-send panel's preview (e.g. after a profile save). */
+    refreshKey?: number;
 };
 
 /**
@@ -114,6 +118,8 @@ export function LenderPanel({
     client_id,
     business_profile_id,
     on_lender_added,
+    onEditProfile,
+    refreshKey,
 }: LenderPanelProps) {
     const ready_count = assignments.filter(a => derive_lender_row_state(a) === 'ready_to_submit').length;
     const submitted_count = assignments.filter(a => derive_lender_row_state(a) === 'submitted').length;
@@ -244,6 +250,8 @@ export function LenderPanel({
                                         assignmentStatus={assign.status}
                                         summary={api_summaries[assign.id]}
                                         onChanged={on_api_changed}
+                                        onEditProfile={onEditProfile}
+                                        refreshKey={refreshKey}
                                     />
                                     {row_state === 'ready_to_submit' && (
                                         <Button

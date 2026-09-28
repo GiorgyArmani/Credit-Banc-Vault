@@ -10,8 +10,9 @@ import { credibly } from "./providers/credibly";
 import { bitty } from "./providers/bitty";
 import { loot } from "./providers/loot";
 import { fundkite } from "./providers/fundkite";
+import { smartbiz } from "./providers/smartbiz";
 
-const PROVIDERS: readonly LenderApiProvider[] = [forwardFinancing, credibly, bitty, loot, fundkite];
+const PROVIDERS: readonly LenderApiProvider[] = [forwardFinancing, credibly, bitty, loot, fundkite, smartbiz];
 
 export function providerForLender(lenderName: string | null | undefined): LenderApiProvider | null {
   if (!lenderName) return null;

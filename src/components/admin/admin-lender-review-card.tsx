@@ -68,6 +68,10 @@ const LENDER_STATUS_PILL: Record<
 
 interface Props {
     clientId: string;
+    /** Opens the client's Edit profile modal from a lender-send gap; omitted on hosts that don't have one. */
+    onEditProfile?: () => void;
+    /** A change re-fetches the lender-send panel's preview (e.g. after a profile save). */
+    refreshKey?: number;
 }
 
 /**
@@ -86,7 +90,7 @@ interface Props {
  *   • "Remove", to take a mistaken pick off the list. That is list-keeping, not
  *     a veto: nothing waits on it and nothing is pending without it.
  */
-export function AdminLenderReviewCard({ clientId }: Props) {
+export function AdminLenderReviewCard({ clientId, onEditProfile, refreshKey }: Props) {
     const supabase = createClient();
     const [assignments, set_assignments] = useState<LenderAssignment[]>([]);
     const [is_loading, set_is_loading] = useState(true);
@@ -517,6 +521,8 @@ export function AdminLenderReviewCard({ clientId }: Props) {
                                         onChanged={async () => {
                                             await Promise.all([fetch_assignments(), reload_lender_api()]);
                                         }}
+                                        onEditProfile={onEditProfile}
+                                        refreshKey={refreshKey}
                                     />
 
                                     {/* Action row — only for a lender that hasn't gone out yet.

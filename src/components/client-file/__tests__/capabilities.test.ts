@@ -113,13 +113,14 @@ describe("getClientFileCapabilities", () => {
   it("underwriting's menu carries the packet tools and no client-account items", () => {
     const menu = caps("underwriting").menuItems;
     expect(menu).toEqual([
+      "edit_profile",
       "add_doc_type",
       "upload_for_client",
       "upload_funding_app",
       "zip_packet",
       "archive_slack",
     ]);
-    expect(menu).not.toContain("edit_profile");
+    expect(menu).toContain("edit_profile");
     expect(menu).not.toContain("delete_vault");
   });
 

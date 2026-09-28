@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { __testing, isLootConfigured, submitCustomerApplication } from "../client";
-import { loot, lootDuplicateExplanation, lootSignature } from "../index";
+import { loot, lootSignature } from "../index";
 import { providerForLender } from "@/lib/lender-api/registry";
 import type { OutboundDocument } from "@/lib/lender-api/types";
 
@@ -90,13 +90,11 @@ describe("loot client", () => {
     expect(await loot.createApplication({})).toEqual({ ok: false, error: "requestingAmount must be a number", status: 400 });
   });
 
-  it.each([
-    "Email already exists",
-    "User has been previously funded or has active advance",
-    "Duplicate EIN",
-    "A deal with this EIN already exists",
-  ])("explains a duplicate rejection (%s) and keeps Loot's words", async (message) => {
-    fetchMock.mockResolvedValueOnce(tokenOk()).mockResolvedValueOnce(json(400, { statusCode: 400, message }));
+  it("explains a DUPLICATE_SUBMISSION rejection and keeps Loot's message", async () => {
+    const message = "User has been previously funded or has active advance.";
+    fetchMock.mockResolvedValueOnce(tokenOk()).mockResolvedValueOnce(
+      json(400, { statusCode: 400, status: message, message, error: "DUPLICATE_SUBMISSION", data: {} })
+    );
     const r = await loot.createApplication({});
     expect(r.ok).toBe(false);
     expect(r.status).toBe(400);
@@ -104,8 +102,11 @@ describe("loot client", () => {
     expect(r.error).toContain(`Loot said: ${message}`);
   });
 
-  it("does not read an EIN format error as a duplicate", () => {
-    expect(lootDuplicateExplanation("ein must be 9 digits")).toBeNull();
+  it("does not read duplicate-sounding wording without the code as a duplicate", async () => {
+    fetchMock
+      .mockResolvedValueOnce(tokenOk())
+      .mockResolvedValueOnce(json(400, { statusCode: 400, message: "Duplicate owner index", error: "Bad Request" }));
+    expect(await loot.createApplication({})).toEqual({ ok: false, error: "Duplicate owner index", status: 400 });
   });
 
   it("reports a 5xx and a network failure as uncertain", async () => {

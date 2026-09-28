@@ -15,6 +15,9 @@ import { send_file_reassignment_notification } from "@/lib/email";
 import { resolvePartnerByName } from "@/lib/referral-partners";
 import { partnerAssignedCustomFields } from "@/lib/referral-partner-attribution";
 import { markLabelAsManual } from "@/lib/group-assignment";
+import { canEditClientProfile } from "@/lib/auth/profile-edit-access";
+import { loadClientOwners, saveClientOwners, maskOwner, resolveOwner1Address, legacyOwnerDrafts } from "@/lib/owners";
+import type { OwnerInput, Owner1Input } from "@/lib/owners";
 
 /**
  * Owner OR follower check. Admin flow isn't covered here (advisor-persona actions).
@@ -46,6 +49,28 @@ async function hasClientAccess(
         .eq("advisor_id", advisorId)
         .maybeSingle();
     return !!follower;
+}
+
+/** Profile edits: admin + underwriting on any client; advisors must own or follow. */
+async function assertCanEditProfile(supabase: any, userId: string, clientVaultId: string, ownerAdvisorId: string | null) {
+    const [{ data: userRow }, { data: advisorRow }] = await Promise.all([
+        supabase.from("users").select("role").eq("id", userId).maybeSingle(),
+        supabase.from("advisors").select("id").eq("user_id", userId).maybeSingle(),
+    ]);
+    const advisorId: string | null = advisorRow?.id ?? null;
+    let isFollower = false;
+    if (advisorId) {
+        const { data: follower } = await supabase
+            .from("client_followers")
+            .select("id")
+            .eq("client_vault_id", clientVaultId)
+            .eq("advisor_id", advisorId)
+            .maybeSingle();
+        isFollower = !!follower;
+    }
+    if (!canEditClientProfile({ role: userRow?.role, advisorId, ownerAdvisorId, isFollower })) {
+        throw new Error("Access denied: You do not have access to this client");
+    }
 }
 
 /**
@@ -584,16 +609,7 @@ export async function updateClientProfile(clientId: string, data: any) {
             throw new Error("Client not found");
         }
 
-        // Verify advisor ownership via advisor record
-        const { data: advisorData } = await supabase
-            .from("advisors")
-            .select("id")
-            .eq("user_id", advisorUser.id)
-            .single();
-
-        if (!advisorData || !(await hasClientAccess(supabase, advisorData.id, clientId, client.advisor_id))) {
-            throw new Error("Access denied: You do not have access to this client");
-        }
+        await assertCanEditProfile(supabase, advisorUser.id, clientId, client.advisor_id);
 
         const supabaseAdmin = createAdminClient();
         const newEmail = data.client_email.trim().toLowerCase();
@@ -642,6 +658,7 @@ export async function updateClientProfile(clientId: string, data: any) {
                 funding_eta: data.funding_eta,
                 employees_count: data.employees_count,
                 is_home_based: data.is_home_based,
+                industry: data.industry || null,
                 updated_at: new Date().toISOString()
             })
             .eq("id", clientId);
@@ -659,8 +676,40 @@ export async function updateClientProfile(clientId: string, data: any) {
             phone: newPhone,
             city: data.company_city,
             state: data.company_state,
-            zipCode: data.company_zip_code
+            zipCode: data.company_zip_code,
+            industry: data.industry || undefined
         });
+
+        // syncUnifiedClientData writes `industry` onto the is_primary row, but
+        // it does NOT write employees_count — the lender engine reads the
+        // business row, so carry both over explicitly (industry as an explicit
+        // null when cleared, so a cleared NAICS never lingers on the business).
+        // A failure here is surfaced as a warning, not just logged: the vault
+        // saved, but lenders would still read the stale business values.
+        let primaryBizWarning: string | null = null;
+        const { data: primaryBiz } = await supabaseAdmin
+            .from("business_profiles")
+            .select("id")
+            .eq("client_vault_id", clientId)
+            .order("is_primary", { ascending: false })
+            .order("display_order", { ascending: true })
+            .order("created_at", { ascending: true })
+            .limit(1)
+            .maybeSingle();
+        if (primaryBiz) {
+            const { error: pbErr } = await supabaseAdmin
+                .from("business_profiles")
+                .update({
+                    employees_count: data.employees_count ?? null,
+                    industry: data.industry || null,
+                    updated_at: new Date().toISOString(),
+                })
+                .eq("id", primaryBiz.id);
+            if (pbErr) {
+                console.error("updateClientProfile primary business sync error:", pbErr.message);
+                primaryBizWarning = `Profile saved, but the business record (employees / industry) could not be updated: ${pbErr.message}`;
+            }
+        }
 
         // 4b. Sync email to Supabase Auth (so client can log in with new email)
         const { error: authUpdateError } = await supabaseAdmin.auth.admin.updateUserById(
@@ -723,7 +772,7 @@ export async function updateClientProfile(clientId: string, data: any) {
         // 6. Revalidate
         revalidatePath(`/advisor/dashboard/clients/${clientId}`);
 
-        return { success: true };
+        return primaryBizWarning ? { success: true, warning: primaryBizWarning } : { success: true };
     } catch (error: any) {
         console.error("Exception in updateClientProfile:", error);
         return { success: false, error: error.message || "An unexpected error occurred" };
@@ -758,12 +807,7 @@ export async function updateBusinessProfile(clientId: string, businessProfileId:
             .single();
         if (clientError || !client) throw new Error("Client not found");
 
-        // Access: admin bypasses (hasClientAccess), advisors must own/follow.
-        const { data: advisorData } = await supabase
-            .from("advisors").select("id").eq("user_id", advisorUser.id).maybeSingle();
-        if (!(await hasClientAccess(supabase, advisorData?.id ?? "", clientId, client.advisor_id))) {
-            throw new Error("Access denied: You do not have access to this client");
-        }
+        await assertCanEditProfile(supabase, advisorUser.id, clientId, client.advisor_id);
 
         const supabaseAdmin = createAdminClient();
 
@@ -800,6 +844,7 @@ export async function updateBusinessProfile(clientId: string, businessProfileId:
                 avg_monthly_deposits: num(data.avg_monthly_deposits),
                 avg_annual_revenue: num(data.avg_annual_revenue),
                 employees_count: num(data.employees_count),
+                industry: data.industry || null,
                 is_home_based: data.is_home_based ?? false,
                 // Legacy mirror columns.
                 city: data.company_city || null,
@@ -1767,5 +1812,90 @@ export async function generateMagicLink(clientId: string) {
     } catch (error: any) {
         console.error("Exception in generateMagicLink:", error);
         return { success: false, error: error.message || "An unexpected error occurred" };
+    }
+}
+
+/**
+ * getClientOwners / updateClientOwners
+ *
+ * Load and save a client's beneficial owners for the Edit profile modal.
+ * Owner 1 lives on client_data_vault (owner_1_* + ssn + home address);
+ * owners 2-5 live in business_owners, one list per client shared across
+ * every business (see src/lib/owners.ts). SSNs never leave the server —
+ * getClientOwners returns only last-4, and updateClientOwners never logs
+ * `input`.
+ */
+export async function getClientOwners(clientId: string) {
+    try {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error("Unauthorized");
+        const { data: client } = await supabase
+            .from("client_data_vault").select("advisor_id").eq("id", clientId).single();
+        if (!client) throw new Error("Client not found");
+        await assertCanEditProfile(supabase, user.id, clientId, client.advisor_id);
+
+        const admin = createAdminClient();
+        const [{ available, owners }, { data: v }] = await Promise.all([
+            loadClientOwners(admin, clientId),
+            admin.from("client_data_vault")
+                .select(
+                    "owner_1_ownership_pct, owner_1_dob, ssn, owner_1_street, owner_1_city, owner_1_state, owner_1_zip, home_address, " +
+                    "owner_2_name, owner_2_ownership_pct, owner_3_name, owner_3_ownership_pct, " +
+                    "owner_4_name, owner_4_ownership_pct, owner_5_name, owner_5_ownership_pct"
+                )
+                .eq("id", clientId).single(),
+        ]);
+        const vault = (v ?? {}) as Record<string, any>;
+        const ssn = String(vault.ssn ?? "").replace(/\D/g, "");
+        // Show the address every lender actually sees: structured columns, else
+        // parsed from onboarding's free-text home_address (most vaults). An
+        // unchanged address then saves as a no-op instead of erasing it.
+        const address = resolveOwner1Address({
+            ssn: null,
+            owner_1_street: vault.owner_1_street ?? null,
+            owner_1_city: vault.owner_1_city ?? null,
+            owner_1_state: vault.owner_1_state ?? null,
+            owner_1_zip: vault.owner_1_zip ?? null,
+            home_address: vault.home_address ?? null,
+        });
+        // Co-owners that exist only on the legacy owner_N_* columns are shown
+        // as drafts, so the next save keeps them rather than clearing them.
+        const drafts = available ? legacyOwnerDrafts(vault, owners) : [];
+        return {
+            success: true as const,
+            available,
+            owners: [...owners.map(maskOwner), ...drafts].sort((a, b) => a.position - b.position),
+            owner1: {
+                ownership_pct: vault.owner_1_ownership_pct ?? null,
+                dob: vault.owner_1_dob ?? null,
+                ssn_last4: ssn.length === 9 ? ssn.slice(-4) : null,
+                street: address.street,
+                city: address.city,
+                state: address.state,
+                zip: address.zip,
+            },
+        };
+    } catch (error: any) {
+        return { success: false as const, error: error.message || "Could not load owners" };
+    }
+}
+
+export async function updateClientOwners(clientId: string, input: { owner1?: Owner1Input; owners: OwnerInput[] }) {
+    try {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error("Unauthorized");
+        const { data: client } = await supabase
+            .from("client_data_vault").select("advisor_id").eq("id", clientId).single();
+        if (!client) throw new Error("Client not found");
+        await assertCanEditProfile(supabase, user.id, clientId, client.advisor_id);
+
+        const res = await saveClientOwners(createAdminClient(), clientId, input);
+        if (!res.ok) return { success: false as const, error: res.error, unavailable: res.unavailable };
+        revalidatePath(`/advisor/dashboard/clients/${clientId}`);
+        return { success: true as const };
+    } catch (error: any) {
+        return { success: false as const, error: error.message || "Could not save owners" };
     }
 }

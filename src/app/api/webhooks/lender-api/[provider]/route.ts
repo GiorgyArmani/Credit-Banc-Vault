@@ -33,8 +33,23 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
     return NextResponse.json({ error: "Bad request" }, { status: 400 });
   }
 
-  const externalId = provider.webhook.extractExternalId(body);
-  if (!externalId) return NextResponse.json({ error: "Bad request" }, { status: 400 });
+  let externalId: string | null;
+  if (provider.webhook.resolveExternalId) {
+    // A lookup against the lender: a throw means the lookup itself failed
+    // (their API down / erroring) — answer 5xx so the lender retries. null
+    // means nothing on their side maps to a submission: acknowledge it, the
+    // same as an unknown id below, so they don't retry forever.
+    try {
+      externalId = await provider.webhook.resolveExternalId(body);
+    } catch (err) {
+      console.error(`lender-api webhook: ${provider.id} id lookup failed:`, err instanceof Error ? err.message : "unknown");
+      return NextResponse.json({ error: "Retry later" }, { status: 503 });
+    }
+    if (!externalId) return NextResponse.json({ ok: true });
+  } else {
+    externalId = provider.webhook.extractExternalId(body);
+    if (!externalId) return NextResponse.json({ error: "Bad request" }, { status: 400 });
+  }
 
   const admin = createAdminClient();
   const submission = await findSubmissionByExternalId(admin, provider.id, externalId);
@@ -54,8 +69,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
     if (result.httpStatus >= 400) {
       console.error(`lender-api webhook: refresh for ${provider.id} returned ${result.httpStatus}`);
     }
+    // Our own failure: answer 5xx so the lender retries (Loot: 3 tries at
+    // 1/2/4 min). Applying is idempotent — an unchanged status never
+    // re-notifies and an already-recorded verdict is a no-op. A 4xx (e.g. the
+    // assignment is gone) would fail the same way every time, so ack it.
+    if (result.httpStatus >= 500) return NextResponse.json({ error: "Retry later" }, { status: 503 });
   } catch (err) {
     console.error("lender-api webhook refresh error:", err instanceof Error ? err.message : "unknown");
+    return NextResponse.json({ error: "Retry later" }, { status: 503 });
   }
   return NextResponse.json({ ok: true });
 }

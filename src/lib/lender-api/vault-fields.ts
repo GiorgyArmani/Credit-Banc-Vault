@@ -49,6 +49,7 @@ export const VAULT_SOURCE_COLUMNS = [
   "owner_1_name", "owner_1_ownership_pct", "owner_1_dob", "owner_1_home_phone",
   "home_address", "owner_1_street", "owner_1_city", "owner_1_state", "owner_1_zip",
   "owner_2_name", "owner_2_ownership_pct",
+  "owner_3_name", "owner_3_ownership_pct", "owner_4_name", "owner_4_ownership_pct", "owner_5_name", "owner_5_ownership_pct",
   "avg_monthly_deposits", "capital_requested", "loan_purpose", "credit_score",
 ].join(", ");
 
@@ -81,6 +82,12 @@ export interface SourceVault {
   owner_1_zip: string | null;
   owner_2_name: string | null;
   owner_2_ownership_pct: number | null;
+  owner_3_name?: string | null;
+  owner_3_ownership_pct?: number | null;
+  owner_4_name?: string | null;
+  owner_4_ownership_pct?: number | null;
+  owner_5_name?: string | null;
+  owner_5_ownership_pct?: number | null;
   avg_monthly_deposits: number | null;
   capital_requested: number | null;
   loan_purpose: string | null;

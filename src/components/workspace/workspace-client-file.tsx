@@ -478,6 +478,8 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
 
     // Edit Profile state
     const [is_edit_modal_open, set_is_edit_modal_open] = useState(false);
+    // Bumped whenever the profile is saved, so the lender send panel's preview re-fetches.
+    const [lender_panel_refresh, set_lender_panel_refresh] = useState(0);
 
     // Admin-only: reassign advisor state
     const [is_reassign_modal_open, set_is_reassign_modal_open] = useState(false);
@@ -829,6 +831,7 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
           funding_eta,
           employees_count,
           is_home_based,
+          industry,
           referral_partner,
           advisor_name,
           reassignment_paused_until,
@@ -2243,7 +2246,11 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
                                 label: "Lenders",
                                 content: (
                                     <PanelCard title="Lenders & responses">
-                                        <AdminLenderReviewCard clientId={client_profile.id} />
+                                        <AdminLenderReviewCard
+                                            clientId={client_profile.id}
+                                            onEditProfile={() => set_is_edit_modal_open(true)}
+                                            refreshKey={lender_panel_refresh}
+                                        />
                                     </PanelCard>
                                 ),
                             });
@@ -2902,18 +2909,35 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
                             avg_monthly_deposits: active_business!.avg_monthly_deposits ?? 0,
                             avg_annual_revenue: active_business!.avg_annual_revenue ?? 0,
                             employees_count: active_business!.employees_count ?? 0,
+                            industry: active_business!.industry || "",
                             is_home_based: active_business!.is_home_based ?? false,
                             capital_requested: active_business!.capital_requested ?? 0,
                             proposed_loan_type: active_business!.proposed_loan_type ?? "",
                             loan_purpose: active_business!.loan_purpose ?? "",
                             funding_eta: active_business!.funding_eta ?? "",
                         }
-                        : client_profile;
+                        : {
+                            // Primary tab: client_data_vault is the source of
+                            // truth, but the vault's `industry` column can be
+                            // empty while the primary business_profiles row
+                            // already has one (same drift the rail tile at
+                            // ~2276 already guards against). Fall back to the
+                            // business row so an untouched save never nulls
+                            // out a value that's only stored there.
+                            ...client_profile,
+                            industry: active_business?.industry || client_profile.industry || "",
+                            // Same drift for employees_count: the lender engine reads
+                            // the business row, so prefill from it.
+                            employees_count: active_business?.employees_count ?? client_profile.employees_count ?? undefined,
+                        };
                     return (
                     <EditProfileModal
                         isOpen={is_edit_modal_open}
                         onClose={() => set_is_edit_modal_open(false)}
-                        onSuccess={fetch_client_details}
+                        onSuccess={() => {
+                            fetch_client_details();
+                            set_lender_panel_refresh((n) => n + 1);
+                        }}
                         clientData={edit_data}
                         businessProfileId={on_business ? active_business!.id : null}
                         isPrimary={!on_business}

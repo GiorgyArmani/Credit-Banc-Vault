@@ -11,6 +11,7 @@ import { generateOnboardingMagicLink, pushMagicLinkToGhl } from '@/lib/magic-lin
 import { linkAffiliateLeadToVault } from '@/lib/affiliates';
 import { attributeReferralPartnerToVault, resolvePartnerAssignedFieldId } from '@/lib/referral-partner-attribution';
 import { attachAdminOversightToPartnerDeal } from '@/lib/partner-deal-oversight';
+import { saveClientOwners } from '@/lib/owners';
 
 /**
  * Supabase admin client with elevated privileges
@@ -200,6 +201,16 @@ function is_valid_email(email: string): boolean {
 function is_valid_positive_number(value: any): boolean {
   const num = parseFloat(value);
   return !isNaN(num) && num > 0;
+}
+
+/**
+ * A co-owner share as sent by the form: blank/missing → null (a required
+ * field, reported by validateOwners), otherwise the number — possibly NaN,
+ * which validateOwners also reports rather than coercing to 0.
+ */
+function blankToNullPct(value: unknown): number | null {
+  if (value === null || value === undefined || String(value).trim() === '') return null;
+  return Number(value);
 }
 
 /**
@@ -850,6 +861,46 @@ export async function POST(request: Request) {
       console.log(`✅ Data saved to client_data_vault: ${vault_id}`);
     }
 
+    // Co-owners → business_owners (full data). Fail-soft: never blocks signup,
+    // but the failure must not be silent — owner_details_warning rides along
+    // on the success response so the form can surface it to the advisor.
+    // saveClientOwners validates the co-owner batch as a whole, so this is
+    // also the backstop if a bad field somehow reaches here despite the
+    // form's own pre-submit checks.
+    let owner_details_warning: string | null = null;
+    if (body.number_of_owners === 'More than one') {
+      try {
+        const details = Array.isArray(body.owner_details) ? body.owner_details : [];
+        const owners = [2, 3, 4, 5]
+          .filter((n) => String(body[`owner_${n}_name`] ?? '').trim())
+          .map((n) => {
+            const d = details.find((x: any) => Number(x?.position) === n) ?? {};
+            return {
+              dob: d.dob, ssn: d.ssn, street: d.street, city: d.city, state: d.state,
+              zip: d.zip, email: d.email, phone: d.phone,
+              // position, name and share come from the form's own fields, never from details
+              position: n,
+              full_name: String(body[`owner_${n}_name`]).trim(),
+              // A blank share goes through as null so validateOwners reports
+              // "ownership % is required" (via owner_details_warning) instead
+              // of it being saved as 0% and silently dropped by lenders.
+              ownership_pct: blankToNullPct(body[`owner_${n}_ownership_pct`]) as number,
+            };
+          });
+        if (owners.length) {
+          const saved = await saveClientOwners(supabase_admin, vault_id, { owners });
+          if (!saved.ok) {
+            console.error('client-signup: co-owner save skipped:', saved.error);
+            owner_details_warning = saved.error;
+          }
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'unknown';
+        console.error('client-signup: co-owner save error:', msg);
+        owner_details_warning = 'Co-owner details could not be saved — please add them via Edit profile.';
+      }
+    }
+
     // If this client came in through an affiliate referral link, link the
     // pending affiliate lead to this vault so the funded-payout hook can credit
     // the affiliate. Best-effort — never blocks signup.
@@ -1275,7 +1326,11 @@ export async function POST(request: Request) {
         vault_id: vault_id,
         user_id: user_id,
         ghl_contact_id: ghl_contact_id,
-        tags_applied: tags_to_apply
+        tags_applied: tags_to_apply,
+        // Non-blocking: the client was created either way. Names + % were
+        // saved via the normal vault columns regardless — this only covers
+        // the optional DOB/SSN/address/email/phone detail rows.
+        owner_details_warning: owner_details_warning
       },
       credentials: {
         email: body.client_email.toLowerCase(),

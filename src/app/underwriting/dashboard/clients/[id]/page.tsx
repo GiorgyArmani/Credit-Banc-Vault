@@ -22,6 +22,7 @@ import {
     Send,
     Search,
     Archive,
+    UserCog,
 } from "lucide-react";
 import {
     AlertDialog,
@@ -79,6 +80,7 @@ import { InternalCommunication } from "@/app/advisor/dashboard/clients/[id]/_com
 import { addManualFundingApplication } from "@/app/advisor/dashboard/clients/[id]/actions";
 import { BankAnalysisViewer } from "@/components/admin/bank-analysis-viewer";
 import type { BusinessTab } from "@/app/advisor/dashboard/clients/[id]/_components/business-tab-strip";
+import { EditProfileModal } from "@/app/advisor/dashboard/clients/[id]/edit-profile-modal";
 import { matchesActiveBusiness, matchesActiveDeal, normalizeSupabaseJoin, formatRequirementLabel } from "@/lib/document-scope";
 // The shared client-file shell (phase 1). Everything below is presentational:
 // this page keeps its state, fetching, handlers and dialogs and fills the slots.
@@ -467,6 +469,11 @@ export default function UnderwritingClientDetailsPage() {
 
     // Inline bank analysis viewer modal
     const [is_bank_analysis_viewer_open, set_is_bank_analysis_viewer_open] = useState(false);
+
+    // Edit Profile modal (also opened from Task 8's lender send panel)
+    const [is_edit_modal_open, set_is_edit_modal_open] = useState(false);
+    // Bumped whenever the profile is saved, so the lender send panel's preview re-fetches.
+    const [lender_panel_refresh, set_lender_panel_refresh] = useState(0);
 
     const [is_notify_modal_open, set_is_notify_modal_open] = useState(false);
     const [selected_missing_docs, set_selected_missing_docs] = useState<string[]>([]);
@@ -2118,6 +2125,8 @@ export default function UnderwritingClientDetailsPage() {
                         destructive: true,
                     }]
                     : [];
+            case "edit_profile":
+                return [{ id, label: "Edit profile", icon: UserCog, onSelect: () => set_is_edit_modal_open(true) }];
             default:
                 return [];
         }
@@ -2330,6 +2339,8 @@ export default function UnderwritingClientDetailsPage() {
                                 client_id={client_id}
                                 business_profile_id={active_business_id}
                                 on_lender_added={fetch_lender_assignments}
+                                onEditProfile={() => set_is_edit_modal_open(true)}
+                                refreshKey={lender_panel_refresh}
                             />
                         </PanelCard>
                         <PanelCard title="Open positions (previous debt)">
@@ -2493,6 +2504,58 @@ export default function UnderwritingClientDetailsPage() {
                 // Review runs full width: the workbench needs the pixels, and the rail's facts are one tab away.
                 rail={active_tab === "review" ? null : rail}
             />
+
+            {/* Edit Profile Modal — gated on open so defaultValues refresh
+                each time (and when switching business tabs). On a non-primary
+                tab it edits THAT business (business_profiles + funding_deals);
+                on the primary tab it edits the client_data_vault row. */}
+            {client_profile && is_edit_modal_open && (() => {
+                const active_business = businesses.find((b) => b.id === active_business_id);
+                const on_business = !!active_business && !active_business.is_primary;
+                // Raw (non-"—") business values for editing; client identity
+                // fields stay from client_profile (shared across businesses).
+                const edit_data = on_business
+                    ? {
+                        ...client_profile,
+                        company_name: active_business!.company_name || "",
+                        company_city: active_business!.company_city || "",
+                        company_state: active_business!.company_state || "",
+                        company_zip_code: active_business!.company_zip_code || "",
+                        legal_entity_type: active_business!.legal_entity_type || "",
+                        business_start_date: active_business!.business_start_date || "",
+                        avg_monthly_deposits: active_business!.avg_monthly_deposits ?? 0,
+                        avg_annual_revenue: active_business!.avg_annual_revenue ?? 0,
+                        employees_count: active_business!.employees_count ?? 0,
+                        industry: active_business!.industry || "",
+                        is_home_based: active_business!.is_home_based ?? false,
+                        capital_requested: active_business!.capital_requested ?? 0,
+                        proposed_loan_type: active_business!.proposed_loan_type ?? "",
+                        loan_purpose: active_business!.loan_purpose ?? "",
+                        funding_eta: active_business!.funding_eta ?? "",
+                    }
+                    // Primary tab: client_data_vault is the source of truth, but its
+                    // `industry` column can be empty while the primary business_profiles
+                    // row already has one, so an untouched save must not null it out.
+                    // Same for employees_count (the lender engine reads the business row).
+                    : {
+                        ...client_profile,
+                        industry: active_business?.industry || client_profile.industry || "",
+                        employees_count: active_business?.employees_count ?? client_profile.employees_count ?? undefined,
+                    };
+                return (
+                <EditProfileModal
+                    isOpen={is_edit_modal_open}
+                    onClose={() => set_is_edit_modal_open(false)}
+                    onSuccess={() => {
+                        fetch_client_details();
+                        set_lender_panel_refresh((n) => n + 1);
+                    }}
+                    clientData={edit_data}
+                    businessProfileId={on_business ? active_business!.id : null}
+                    isPrimary={!on_business}
+                />
+                );
+            })()}
 
             {/* Modals that used to hang off the old header row. */}
             <div>

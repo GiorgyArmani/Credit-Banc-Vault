@@ -5,13 +5,14 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getActiveDeal } from "@/lib/funding-deals";
+import { loadClientOwners } from "@/lib/owners";
 import type { LenderApiSource, SourceBusiness, SourceDeal } from "./types";
 import { resolveVaultFields, scopeResolvedToBusiness, VAULT_SOURCE_COLUMNS, type SourceVault } from "./vault-fields";
 
 export type AdminClient = ReturnType<typeof createAdminClient>;
 
 const BUSINESS_COLUMNS =
-  "id, is_primary, business_name, company_name, legal_entity_type, industry, business_start_date, phone, company_city, company_state, company_zip_code, avg_monthly_deposits";
+  "id, is_primary, business_name, company_name, legal_entity_type, industry, business_start_date, phone, company_city, company_state, company_zip_code, avg_monthly_deposits, avg_annual_revenue, employees_count";
 const DEAL_COLUMNS = "id, capital_requested, loan_purpose, file_synopsis";
 
 export async function loadLenderApiSource(
@@ -87,6 +88,8 @@ export async function loadLenderApiSource(
     .select("lender_name, current_balance, payment_amount, payment_frequency, business_profile_id")
     .eq("client_vault_id", assignment.client_id);
 
+  const ownerLoad = await loadClientOwners(admin, assignment.client_id);
+
   const typedVault = vault as unknown as SourceVault;
 
   return {
@@ -105,5 +108,7 @@ export async function loadLenderApiSource(
         payment_amount: p.payment_amount,
         payment_frequency: p.payment_frequency,
       })),
+    owners: ownerLoad.owners,
+    ownersAvailable: ownerLoad.available,
   };
 }

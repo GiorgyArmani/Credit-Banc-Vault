@@ -12,6 +12,8 @@ type Overrides = {
   deal?: Partial<NonNullable<LenderApiSource["deal"]>> | null;
   analysis?: Partial<NonNullable<LenderApiSource["analysis"]>> | null;
   openPositions?: LenderApiSource["openPositions"];
+  owners?: LenderApiSource["owners"];
+  ownersAvailable?: boolean;
 };
 
 export function makeSource(o: Overrides = {}): LenderApiSource {
@@ -65,6 +67,8 @@ export function makeSource(o: Overrides = {}): LenderApiSource {
           company_state: "FL",
           company_zip_code: "33101",
           avg_monthly_deposits: 42000,
+          avg_annual_revenue: 540000,
+          employees_count: 6,
           ...o.business,
         };
   return {
@@ -90,5 +94,7 @@ export function makeSource(o: Overrides = {}): LenderApiSource {
         : { id: "deal-1", capital_requested: 50000, loan_purpose: "working capital", file_synopsis: null, ...o.deal },
     analysis: o.analysis === null ? null : { avg_revenue: 45000, avg_monthly_deposits: 42000, ...o.analysis },
     openPositions: o.openPositions ?? [],
+    owners: o.owners ?? [],
+    ownersAvailable: o.ownersAvailable ?? true,
   };
 }

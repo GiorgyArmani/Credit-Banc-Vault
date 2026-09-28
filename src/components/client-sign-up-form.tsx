@@ -37,6 +37,7 @@ import { toast } from "@/lib/toast";
 import { FollowersPicker } from "@/components/followers-picker";
 import { FUNDING_OPTIONS, LOAN_TYPES } from "@/data/loan-types";
 import { packageForLoanTypes, FALLBACK_DOCUMENT_PACKAGE } from "@/data/program-document-packages";
+import { digitsOnly, toIsoDate, toStateCode, toZip5 } from "@/lib/lender-api/normalize";
 
 
 // Estados de EE.UU.
@@ -186,6 +187,133 @@ export default function ClientSignupForm() {
   const [owner_4_ownership_pct, set_owner_4_ownership_pct] = useState("");
   const [owner_5_name, set_owner_5_name] = useState("");
   const [owner_5_ownership_pct, set_owner_5_ownership_pct] = useState("");
+
+  // Optional extra co-owner details (DOB/SSN/address/email/phone) for owners
+  // 2-5, keyed by position. Fully optional — collected here or later via
+  // Edit profile.
+  type OwnerDetailFields = {
+    dob?: string;
+    ssn?: string;
+    email?: string;
+    phone?: string;
+    street?: string;
+    city?: string;
+    state?: string;
+    zip?: string;
+  };
+  const [owner_details, set_owner_details] = useState<Record<number, OwnerDetailFields>>({});
+  const update_owner_detail = (position: number, field: keyof OwnerDetailFields, value: string) => {
+    set_owner_details((prev) => ({
+      ...prev,
+      [position]: { ...prev[position], [field]: value },
+    }));
+  };
+
+  // Renders the optional DOB/SSN/address/email/phone fields shared by owners
+  // 2-5. Kept as one function so every owner card stays in sync.
+  const render_owner_extra_fields = (n: number) => {
+    const d = owner_details[n] || {};
+    return (
+      <div className="mt-4 space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <Label htmlFor={`owner_${n}_dob`} className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Date of Birth</Label>
+            <Input
+              id={`owner_${n}_dob`}
+              type="date"
+              value={d.dob || ""}
+              onChange={(e) => update_owner_detail(n, "dob", e.target.value)}
+              className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
+            />
+          </div>
+          <div>
+            <Label htmlFor={`owner_${n}_ssn`} className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">SSN</Label>
+            <Input
+              id={`owner_${n}_ssn`}
+              type="password"
+              autoComplete="off"
+              value={d.ssn || ""}
+              onChange={(e) => update_owner_detail(n, "ssn", e.target.value)}
+              className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
+              placeholder="xxx-xx-xxxx"
+            />
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <Label htmlFor={`owner_${n}_email`} className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Email</Label>
+            <Input
+              id={`owner_${n}_email`}
+              type="email"
+              value={d.email || ""}
+              onChange={(e) => update_owner_detail(n, "email", e.target.value)}
+              className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
+              placeholder="jane@example.com"
+            />
+          </div>
+          <div>
+            <Label htmlFor={`owner_${n}_phone`} className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Phone</Label>
+            <Input
+              id={`owner_${n}_phone`}
+              type="tel"
+              value={d.phone || ""}
+              onChange={(e) => update_owner_detail(n, "phone", e.target.value)}
+              className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
+              placeholder="(555) 555-5555"
+            />
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <Label htmlFor={`owner_${n}_street`} className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Home Street Address</Label>
+            <Input
+              id={`owner_${n}_street`}
+              value={d.street || ""}
+              onChange={(e) => update_owner_detail(n, "street", e.target.value)}
+              className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
+              placeholder="123 Main St"
+            />
+          </div>
+          <div>
+            <Label htmlFor={`owner_${n}_city`} className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">City</Label>
+            <Input
+              id={`owner_${n}_city`}
+              value={d.city || ""}
+              onChange={(e) => update_owner_detail(n, "city", e.target.value)}
+              className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
+              placeholder="City"
+            />
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <Label htmlFor={`owner_${n}_state`} className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">State</Label>
+            <Input
+              id={`owner_${n}_state`}
+              value={d.state || ""}
+              onChange={(e) => update_owner_detail(n, "state", e.target.value)}
+              className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
+              placeholder="CA"
+              maxLength={2}
+            />
+          </div>
+          <div>
+            <Label htmlFor={`owner_${n}_zip`} className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-900/40 mb-2 block ml-1">Zip Code</Label>
+            <Input
+              id={`owner_${n}_zip`}
+              value={d.zip || ""}
+              onChange={(e) => update_owner_detail(n, "zip", e.target.value)}
+              className="h-14 rounded-2xl border-emerald-100 bg-white/50 focus:bg-white transition-all font-bold px-6"
+              placeholder="90210"
+            />
+          </div>
+        </div>
+        <p className="text-[10px] font-bold text-emerald-600/60 ml-1 italic">
+          Optional — you can add these later in Edit profile.
+        </p>
+      </div>
+    );
+  };
 
   // ===== PASO 5: Crédito y Situaciones Especiales =====
   const [credit_score, set_credit_score] = useState("");
@@ -396,6 +524,9 @@ export default function ClientSignupForm() {
   const [show_success, set_show_success] = useState(false);
   const [created_client_email, set_created_client_email] = useState("");
   const [created_client_name, set_created_client_name] = useState("");
+  // Fail-soft co-owner save warning, repeated inside the success modal so it
+  // can't be missed behind the modal backdrop.
+  const [owner_details_warning, set_owner_details_warning] = useState<string | null>(null);
 
   // ===== Already Signed Funding Application =====
   const [has_already_signed, set_has_already_signed] = useState(false);
@@ -496,6 +627,59 @@ export default function ClientSignupForm() {
     return Math.abs(total - 100) < 0.01;
   };
 
+  // Format-checks the optional co-owner detail fields (owners 2-5) before
+  // submit, using the exact same rules saveClientOwners applies server-side
+  // (src/lib/owners.ts validateOwners / src/lib/lender-api/normalize.ts).
+  // saveClientOwners validates the whole co-owner batch as one unit, so a
+  // single malformed optional field silently drops EVERY co-owner's details
+  // with only a server log — catching it here, per owner, is what keeps that
+  // failure visible to the advisor instead of silent.
+  const validate_owner_details = (): string[] => {
+    const errors: string[] = [];
+    const names: Record<number, string> = {
+      2: owner_2_name,
+      3: owner_3_name,
+      4: owner_4_name,
+      5: owner_5_name,
+    };
+    const pcts: Record<number, string> = {
+      2: owner_2_ownership_pct,
+      3: owner_3_ownership_pct,
+      4: owner_4_ownership_pct,
+      5: owner_5_ownership_pct,
+    };
+    [2, 3, 4, 5].forEach((n) => {
+      if (!names[n]?.trim()) return; // no owner in this slot — nothing to check
+      const d = owner_details[n] || {};
+      const label = `Owner ${n}`;
+      if (d.ssn && digitsOnly(d.ssn).length !== 9) {
+        errors.push(`${label}: SSN must be 9 digits.`);
+      }
+      if (d.dob && !toIsoDate(d.dob)) {
+        errors.push(`${label}: date of birth is not a valid date.`);
+      }
+      if (d.state && !(/^[A-Za-z]{2}$/.test(d.state.trim()) && toStateCode(d.state))) {
+        errors.push(`${label}: state must be a 2-letter code.`);
+      }
+      if (d.zip && !toZip5(d.zip)) {
+        errors.push(`${label}: zip must be 5 digits.`);
+      }
+      if (d.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.email)) {
+        errors.push(`${label}: email is not valid.`);
+      }
+      // Same rule as the server (normalizeOwnerPhone): 10 digits, or 11 with a leading 1.
+      if (d.phone && d.phone.trim() && !isValidUsPhone(d.phone)) {
+        errors.push(`${label}: phone must be 10 digits.`);
+      }
+      // A named co-owner needs a share: blank would pass the 100% sum check
+      // (owner 1 at 100%) and be saved as 0%, silently dropped by lenders.
+      if (number_of_owners === "More than one" && !String(pcts[n] ?? "").trim()) {
+        errors.push(`${label} (${names[n].trim()}): ownership % is required.`);
+      }
+    });
+    return errors;
+  };
+
   // Helper function to generate GHL (Go High Level) tags based on application flags
   // These tags help categorize and flag risk factors in the CRM
   const generate_ghl_tags = () => {
@@ -585,6 +769,7 @@ export default function ClientSignupForm() {
     } else if (n === 4) {
       require("Owner 1 name", owner_1_name);
       if (!validate_ownership()) errors.push("Ownership percentages must sum to 100%.");
+      errors.push(...validate_owner_details());
     } else if (n === 5) {
       require("Credit score range", credit_score);
       // Positions are only checked when the client claims existing loans — an
@@ -701,6 +886,16 @@ export default function ClientSignupForm() {
         owner_5_name: owner_5_name || null,
         owner_5_ownership_pct: owner_5_ownership_pct || null,
 
+        // Optional co-owner details (DOB/SSN/address/email/phone), only for
+        // owners that have a name. Position/name/% still come from the
+        // owner_N_* fields above — never from this array.
+        owner_details: [2, 3, 4, 5]
+          .filter((n) => {
+            const name = ({ 2: owner_2_name, 3: owner_3_name, 4: owner_4_name, 5: owner_5_name } as Record<number, string>)[n];
+            return !!name?.trim();
+          })
+          .map((n) => ({ position: n, ...owner_details[n] })),
+
         // Crédito y situaciones especiales
         credit_score,
         has_existing_loans,
@@ -782,6 +977,19 @@ export default function ClientSignupForm() {
 
       const result = await res.json();
 
+      // Fail-soft co-owner detail save (server-side backstop): the vault was
+      // created either way, but if business_owners rejected the optional
+      // DOB/SSN/address/email/phone rows (or the table isn't migrated yet),
+      // that must not pass silently — surface it via the same toast style
+      // used for step errors.
+      if (result?.data?.owner_details_warning) {
+        set_owner_details_warning(result.data.owner_details_warning);
+        toast.warning("Client created, but co-owner details weren't saved", {
+          description: result.data.owner_details_warning,
+          duration: 15000,
+        });
+      }
+
       // If already signed, upload the document
       if (has_already_signed && signed_document_file && result.data.vault_id) {
         const formData = new FormData();
@@ -853,6 +1061,15 @@ export default function ClientSignupForm() {
                 </div>
               </div>
             </div>
+
+            {owner_details_warning && (
+              <div role="alert" className="bg-amber-50 border border-amber-200 rounded-[2rem] p-6 mb-8 relative z-10">
+                <p className="text-sm font-black text-amber-900 mb-1">Co-owner details weren&apos;t saved</p>
+                <p className="text-sm font-bold text-amber-800">
+                  {owner_details_warning} Add them from the client&apos;s Edit profile.
+                </p>
+              </div>
+            )}
 
             <div className="bg-emerald-950 rounded-[2rem] p-6 mb-10 relative z-10">
               <p className="text-sm font-bold text-emerald-50/60 leading-relaxed text-center">
@@ -1353,6 +1570,7 @@ export default function ClientSignupForm() {
                             />
                           </div>
                         </div>
+                        {render_owner_extra_fields(2)}
                       </div>
 
                       {/* Owner 3 */}
@@ -1384,6 +1602,7 @@ export default function ClientSignupForm() {
                             />
                           </div>
                         </div>
+                        {render_owner_extra_fields(3)}
                       </div>
 
                       {/* Owner 4 */}
@@ -1415,6 +1634,7 @@ export default function ClientSignupForm() {
                             />
                           </div>
                         </div>
+                        {render_owner_extra_fields(4)}
                       </div>
 
                       {/* Owner 5 */}
@@ -1446,6 +1666,7 @@ export default function ClientSignupForm() {
                             />
                           </div>
                         </div>
+                        {render_owner_extra_fields(5)}
                       </div>
                     </>
                   )}

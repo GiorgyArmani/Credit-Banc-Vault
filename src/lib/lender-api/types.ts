@@ -9,7 +9,7 @@
 
 import type { ResolvedVaultFields, SourceVault, VaultField } from "./vault-fields";
 
-export type ProviderId = "forward_financing" | "credibly" | "bitty" | "loot" | "fundkite";
+export type ProviderId = "forward_financing" | "credibly" | "bitty" | "loot" | "fundkite" | "smartbiz";
 
 export type AssignmentStatus =
   | "pending"
@@ -44,6 +44,9 @@ export interface SourceBusiness {
   company_state: string | null;
   company_zip_code: string | null;
   avg_monthly_deposits: number | null;
+  /** Headcount; 0 is the fast-form placeholder, so treat it as unknown. */
+  employees_count?: number | null;
+  avg_annual_revenue?: number | null;
 }
 
 export interface SourceDeal {
@@ -71,6 +74,21 @@ export interface SourcePosition {
   payment_frequency: string | null;
 }
 
+/** A co-owner (positions 2–5) from business_owners. `ssn` is real digits — server only. */
+export interface SourceOwner {
+  position: number;
+  full_name: string;
+  ownership_pct: number;
+  dob: string | null;
+  ssn: string | null;
+  street: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  email: string | null;
+  phone: string | null;
+}
+
 /** Everything a provider may map from. Identical for every provider. */
 export interface LenderApiSource {
   assignment: SourceAssignment;
@@ -81,6 +99,10 @@ export interface LenderApiSource {
   deal: SourceDeal | null;
   analysis: SourceAnalysis | null;
   openPositions: SourcePosition[];
+  /** Owners 2–5. Never sent to the browser. */
+  owners: SourceOwner[];
+  /** false = business_owners unreadable (migration not applied yet): co-owners are unknown, not absent. */
+  ownersAvailable: boolean;
 }
 
 /**
@@ -192,6 +214,16 @@ export interface LenderApiProvider {
   webhook?: {
     verify(req: Request): Promise<boolean>;
     extractExternalId(body: unknown): string | null;
+    /**
+     * For a lender whose callback doesn't carry the id we store (SmartBiz
+     * sends the business id + our reference): look it up, e.g. through the
+     * lender's search API. When present the route uses this instead of
+     * extractExternalId. The body is still only a signal to re-fetch.
+     * Resolves null when nothing maps to a submission (the route acks 200);
+     * THROWS when the lookup itself failed (the route answers 503 so the
+     * lender retries).
+     */
+    resolveExternalId?(body: unknown): Promise<string | null>;
     /**
      * Only for a lender with NO status API (no fetchStatus): the status carried
      * by a verified webhook, in the shape interpretStatus reads, or null when

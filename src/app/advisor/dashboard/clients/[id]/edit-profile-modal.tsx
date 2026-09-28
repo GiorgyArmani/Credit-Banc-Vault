@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm, SubmitHandler, Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -35,9 +35,22 @@ import {
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
+import { NaicsCombobox } from "@/components/ui/naics-combobox";
 import { Loader2, UserCog, Building2, DollarSign, MapPin, CreditCard, Clock } from "lucide-react";
-import { updateClientProfile, updateBusinessProfile } from "./actions";
+import { updateClientProfile, updateBusinessProfile, getClientOwners, updateClientOwners } from "./actions";
 import { toast } from "@/lib/toast";
+import { OwnersEditor, findOwnersDraftErrors, type OwnersDraft } from "./_components/owners-editor";
+import type { OwnerInput, Owner1Input } from "@/lib/owners";
+
+const EMPTY_OWNERS_DRAFT: OwnersDraft = {
+    owner1: { ownership_pct: null, dob: "", ssn: "", ssn_last4: null, street: "", city: "", state: "", zip: "" },
+    owners: [],
+};
+
+function stripUi<T extends { ssn_last4?: string | null }>(o: T): Omit<T, "ssn_last4"> {
+    const { ssn_last4, ...rest } = o;
+    return rest;
+}
 
 // Constants from signup form for consistency
 const US_STATES = [
@@ -78,6 +91,7 @@ const formSchema = z.object({
     funding_eta: z.string().default(""),
     employees_count: z.coerce.number().nonnegative().default(0),
     is_home_based: z.boolean().default(false),
+    industry: z.string().optional().default(""),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -114,6 +128,7 @@ interface EditProfileModalProps {
         funding_eta?: string;
         employees_count?: number;
         is_home_based?: boolean | null;
+        industry?: string;
     };
 }
 
@@ -121,6 +136,51 @@ export function EditProfileModal({ isOpen, onClose, onSuccess, clientData, busin
     const [isSubmitting, setIsSubmitting] = useState(false);
     const router = useRouter();
     const editingBusiness = !isPrimary && !!businessProfileId;
+
+    // Tri-state so submit can never race the fetch: "loading" blocks the owners
+    // save (and disables Save) instead of silently sending an empty/blank draft
+    // that would delete co-owners and null out Owner 1's stored fields.
+    const [ownersStatus, setOwnersStatus] = useState<"loading" | "ready" | "error">("loading");
+    const [ownersDraft, setOwnersDraft] = useState<OwnersDraft>(EMPTY_OWNERS_DRAFT);
+    const [ownersAvailable, setOwnersAvailable] = useState(true);
+    const [ownersLoadError, setOwnersLoadError] = useState<string | null>(null);
+    // Owners save rejected after the profile itself saved (M5): shown inline
+    // until the next successful save, so it can't be missed.
+    const [ownersSaveError, setOwnersSaveError] = useState<string | null>(null);
+
+    useEffect(() => {
+        // Reset synchronously (before the await, and on close) so a stale draft
+        // from a previous open/client — possibly with typed SSN digits — never
+        // lingers on screen while the fresh fetch is in flight.
+        setOwnersStatus("loading");
+        setOwnersLoadError(null);
+        setOwnersSaveError(null);
+        setOwnersDraft(EMPTY_OWNERS_DRAFT);
+        if (!isOpen) return;
+
+        let cancelled = false;
+        (async () => {
+            const result = await getClientOwners(clientData.id);
+            if (cancelled) return;
+            if (!result.success) {
+                setOwnersLoadError(result.error || "Could not load owners");
+                setOwnersDraft(EMPTY_OWNERS_DRAFT);
+                setOwnersAvailable(false);
+                setOwnersStatus("error");
+                return;
+            }
+            setOwnersLoadError(null);
+            setOwnersAvailable(result.available);
+            setOwnersDraft({
+                owner1: { ...result.owner1, ssn: "" },
+                owners: result.owners.map((o) => ({ ...o, ssn: "", dob: o.dob ?? "" })),
+            });
+            setOwnersStatus("ready");
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [isOpen, clientData.id]);
 
     const form = useForm<FormValues>({
         resolver: zodResolver(formSchema) as Resolver<FormValues>,
@@ -145,10 +205,28 @@ export function EditProfileModal({ isOpen, onClose, onSuccess, clientData, busin
             funding_eta: clientData.funding_eta || "",
             employees_count: clientData.employees_count || 0,
             is_home_based: !!clientData.is_home_based,
+            industry: clientData.industry ?? "",
         },
     });
 
     const onSubmit: SubmitHandler<FormValues> = async (values) => {
+        // Defense in depth: the Save button is disabled while owners are loading,
+        // but a keyboard Enter submit could still bypass that — never send a
+        // profile save that would be followed by an owners save racing the fetch.
+        if (ownersStatus === "loading") {
+            toast.error("Owners are still loading — please wait a moment and try again.");
+            return;
+        }
+        // A blank ownership % is a required field, not a silent 0% — block
+        // submit entirely (same as any other invalid field) before it ever
+        // reaches the profile or owners save.
+        if (ownersStatus === "ready") {
+            const ownersDraftErrors = findOwnersDraftErrors(ownersDraft, ownersAvailable);
+            if (ownersDraftErrors.length) {
+                toast.error(ownersDraftErrors.join(" "));
+                return;
+            }
+        }
         setIsSubmitting(true);
         try {
             // Serialize proposed_loan_types array back to comma-separated string
@@ -161,12 +239,47 @@ export function EditProfileModal({ isOpen, onClose, onSuccess, clientData, busin
                 ? await updateBusinessProfile(clientData.id, businessProfileId!, submissionValues)
                 : await updateClientProfile(clientData.id, submissionValues);
             if (result.success) {
+                // If owners failed to load, the draft is empty/blank — saving it would
+                // null out Owner 1's stored details and delete co-owners, so skip the
+                // owners save entirely rather than writing over data we never loaded.
+                // ("loading" is already rejected above, so this is only "ready"/"error".)
+                let ownersSkippedDueToError = false;
+                if (ownersStatus === "ready") {
+                    const ownersResult = await updateClientOwners(clientData.id, {
+                        owner1: stripUi(ownersDraft.owner1) as Owner1Input,
+                        owners: ownersAvailable ? (ownersDraft.owners.map(stripUi) as OwnerInput[]) : [],
+                    });
+                    if (!ownersResult.success) {
+                        // The profile DID save: refresh the page + lender panel so
+                        // they reflect it, but keep the modal open with the owners
+                        // error visible so the draft can be fixed and re-saved.
+                        const msg = ownersResult.error || "Failed to save owners";
+                        setOwnersSaveError(msg);
+                        const profileWarning = (result as any).warning as string | undefined;
+                        if (profileWarning) toast.warning(profileWarning, { duration: 8000 });
+                        toast.error(`Profile updated, but owners were not saved: ${msg}`);
+                        if (onSuccess) onSuccess();
+                        router.refresh();
+                        return;
+                    }
+                    setOwnersSaveError(null);
+                } else {
+                    ownersSkippedDueToError = true;
+                }
+
                 // A partial save (e.g. the funding ask skipped because the
                 // business's latest round is already funded) reports itself
                 // rather than passing as a clean success.
                 const warning = (result as any).warning as string | undefined;
                 if (warning) {
                     toast.warning(warning, { duration: 8000 });
+                } else if (ownersSkippedDueToError) {
+                    // Never let an owners-save skip pass silently — the rest of the
+                    // profile did save, but owners explicitly did not.
+                    toast.warning(
+                        `Profile updated, but owners were not saved: ${ownersLoadError || "owners failed to load"}`,
+                        { duration: 8000 }
+                    );
                 } else {
                     toast.success(editingBusiness ? "Business updated successfully" : "Client profile updated successfully");
                 }
@@ -527,6 +640,25 @@ export function EditProfileModal({ isOpen, onClose, onSuccess, clientData, busin
                                         </FormItem>
                                     )}
                                 />
+                                <FormField
+                                    control={form.control}
+                                    name="industry"
+                                    render={({ field }) => (
+                                        <FormItem className="col-span-2">
+                                            <FormLabel className="text-[10px] font-black uppercase tracking-widest text-emerald-900/60 ml-1">Industry (NAICS)</FormLabel>
+                                            <FormControl>
+                                                <NaicsCombobox
+                                                    id="industry"
+                                                    value={field.value ?? ""}
+                                                    onChange={(val) => field.onChange(val)}
+                                                    placeholder="Select NAICS industry…"
+                                                    triggerClassName="h-12 rounded-xl border-emerald-100 bg-emerald-50/30 focus:bg-white font-bold"
+                                                />
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
                             </div>
                             <FormField
                                 control={form.control}
@@ -562,6 +694,20 @@ export function EditProfileModal({ isOpen, onClose, onSuccess, clientData, busin
                             />
                         </div>
 
+                        {/* 6. Owners */}
+                        <OwnersEditor
+                            value={ownersDraft}
+                            onChange={setOwnersDraft}
+                            available={ownersAvailable}
+                            error={ownersLoadError}
+                            loading={ownersStatus === "loading"}
+                        />
+                        {ownersSaveError && (
+                            <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-bold text-red-700">
+                                The profile was saved, but the owners were not: {ownersSaveError} Fix the owner details above and save again.
+                            </p>
+                        )}
+
                         <DialogFooter className="pt-4 gap-3">
                             <Button
                                 type="button"
@@ -574,13 +720,18 @@ export function EditProfileModal({ isOpen, onClose, onSuccess, clientData, busin
                             </Button>
                             <Button
                                 type="submit"
-                                disabled={isSubmitting}
+                                disabled={isSubmitting || ownersStatus === "loading"}
                                 className="h-12 px-10 bg-emerald-500 hover:bg-emerald-600 text-white font-black rounded-xl shadow-lg shadow-emerald-500/20 transition-all active:scale-95 uppercase tracking-widest text-[10px]"
                             >
                                 {isSubmitting ? (
                                     <>
                                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                                         Synchronizing...
+                                    </>
+                                ) : ownersStatus === "loading" ? (
+                                    <>
+                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                        Loading Owners...
                                     </>
                                 ) : (
                                     "Update Profile"

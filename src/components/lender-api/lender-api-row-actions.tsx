@@ -27,6 +27,8 @@ export function LenderApiRowActions({
   summary,
   onChanged,
   className,
+  onEditProfile,
+  refreshKey,
 }: {
   assignmentId: string;
   assignmentStatus: string;
@@ -34,6 +36,10 @@ export function LenderApiRowActions({
   onChanged: () => void | Promise<void>;
   /** Classes for an outer wrapper; no wrapper is rendered when there is no summary. */
   className?: string;
+  /** Opens the client's Edit profile modal; omitted on hosts that don't have one. */
+  onEditProfile?: () => void;
+  /** A change re-fetches the send-panel preview (e.g. after a profile save). */
+  refreshKey?: number;
 }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<"refresh" | "retry" | null>(null);
@@ -143,7 +149,14 @@ export function LenderApiRowActions({
         </div>
       )}
 
-      <LenderApiSubmitPanel open={open} onOpenChange={setOpen} assignmentId={assignmentId} onSubmitted={onChanged} />
+      <LenderApiSubmitPanel
+        open={open}
+        onOpenChange={setOpen}
+        assignmentId={assignmentId}
+        onSubmitted={onChanged}
+        onEditProfile={onEditProfile}
+        refreshKey={refreshKey}
+      />
     </div>
   );
 

@@ -98,12 +98,14 @@ const MATRIX: Record<ClientFilePortal, Omit<ClientFileCapabilities, "portal">> =
   underwriting: {
     tabs: ["overview", "documents", "review", "lenders", "notes"],
     headerActions: ["notify_advisor", "slack", "decline", "funded"],
-    // Packet tools are the UW packet-building menu; no client-account items
-    // here since underwriting doesn't own the client account.
+    // Underwriting edits the profile once a file is theirs (they correct
+    // entity, industry, headcount before lender submission). The other
+    // client-account items (magic link, credentials, delete) stay advisor-side.
     // bank_analysis / match_tool are deliberately absent: LenderPanel's own
     // toolbar on the Lenders tab owns them, and duplicating them in the ⋯ menu
     // gave the same two tools two homes on one surface.
     menuItems: [
+      "edit_profile",
       "add_doc_type",
       "upload_for_client",
       "upload_funding_app",
