@@ -35,8 +35,35 @@ describe("smartbiz provider", () => {
 
   it("creates the business, then the submission on it; the submission id is the external id", async () => {
     fetchMock.mockResolvedValueOnce(json(201, { data: { id: "b-1" } })).mockResolvedValueOnce(json(201, { data: { id: "s-1" } }));
-    expect(await smartbiz.createApplication(app)).toEqual({ ok: true, externalId: "s-1" });
+    expect(await smartbiz.createApplication(app)).toEqual({ ok: true, externalId: "s-1", providerState: { business_id: "b-1" } });
     expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({ business_id: "b-1", client_reference_id: "ref-1" });
+  });
+
+  it("reuses a known business: submission only, no second business", async () => {
+    fetchMock.mockResolvedValueOnce(json(201, { data: { id: "s-2" } }));
+    const r = await smartbiz.createApplication(app, { priorState: { business_id: "b-1" } });
+    expect(r).toEqual({ ok: true, externalId: "s-2", providerState: { business_id: "b-1" } });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toContain("/v3/submission/");
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ business_id: "b-1" });
+  });
+
+  it("a known business SmartBiz doesn't recognise (404) is created afresh", async () => {
+    fetchMock
+      .mockResolvedValueOnce(json(404, { errors: [{ title: "Not Found" }] }))
+      .mockResolvedValueOnce(json(201, { data: { id: "b-9" } }))
+      .mockResolvedValueOnce(json(201, { data: { id: "s-9" } }));
+    const r = await smartbiz.createApplication(app, { priorState: { business_id: "b-stale" } });
+    expect(r).toEqual({ ok: true, externalId: "s-9", providerState: { business_id: "b-9" } });
+    expect(fetchMock.mock.calls[1][0]).toContain("/v3/business/");
+  });
+
+  it("a submission rejected on a known business keeps the business and never creates another", async () => {
+    fetchMock.mockResolvedValueOnce(json(422, { errors: [{ title: "Input validation errors", detail: "amount" }] }));
+    const r = await smartbiz.createApplication(app, { priorState: { business_id: "b-1" } });
+    expect(r).toMatchObject({ ok: false, status: 422, providerState: { business_id: "b-1" } });
+    expect(r.error).toContain("b-1");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("a duplicate business is a clean rejection with an actionable message", async () => {
@@ -52,7 +79,7 @@ describe("smartbiz provider", () => {
       .mockResolvedValueOnce(json(201, { data: { id: "b-77" } }))
       .mockResolvedValueOnce(json(422, { errors: [{ status: 422, title: "Input validation errors", detail: "amount" }] }));
     const r = await smartbiz.createApplication(app);
-    expect(r).toMatchObject({ ok: false, status: 422 });
+    expect(r).toMatchObject({ ok: false, status: 422, providerState: { business_id: "b-77" } });
     expect(r.error).toContain("b-77");
   });
 
@@ -61,6 +88,7 @@ describe("smartbiz provider", () => {
     const r = await smartbiz.createApplication(app);
     expect(r.status).toBe(0);
     expect(r.error).toContain("b-78");
+    expect(r.providerState).toEqual({ business_id: "b-78" });
   });
 
   it("a 2xx business without an id is uncertain", async () => {

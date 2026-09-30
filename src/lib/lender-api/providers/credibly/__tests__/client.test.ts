@@ -147,23 +147,23 @@ describe("credibly webhook", () => {
     });
   }
 
-  it("accepts a signature of iso_token + the raw body", async () => {
-    vi.stubEnv("CREDIBLY_WEBHOOK_TOKEN", "iso-token");
+  it("accepts a signature of iso_token (the API key) + the raw body", async () => {
+    vi.stubEnv("CREDIBLY_API_KEY", "iso-token");
     expect(await credibly.webhook!.verify(req(crediblySignature("iso-token", body)))).toBe(true);
   });
 
   it("rejects a wrong signature, a missing header, and an unset token", async () => {
-    vi.stubEnv("CREDIBLY_WEBHOOK_TOKEN", "iso-token");
+    vi.stubEnv("CREDIBLY_API_KEY", "iso-token");
     expect(await credibly.webhook!.verify(req("deadbeef"))).toBe(false);
     expect(await credibly.webhook!.verify(req(null))).toBe(false);
     // Hashing the body WITHOUT the token must not pass either.
     expect(await credibly.webhook!.verify(req(crediblySignature("", body)))).toBe(false);
-    vi.stubEnv("CREDIBLY_WEBHOOK_TOKEN", "");
+    vi.stubEnv("CREDIBLY_API_KEY", "");
     expect(await credibly.webhook!.verify(req(crediblySignature("iso-token", body)))).toBe(false);
   });
 
   it("leaves the body readable for the route", async () => {
-    vi.stubEnv("CREDIBLY_WEBHOOK_TOKEN", "iso-token");
+    vi.stubEnv("CREDIBLY_API_KEY", "iso-token");
     const r = req(crediblySignature("iso-token", body));
     await credibly.webhook!.verify(r);
     await expect(r.json()).resolves.toEqual({ submission_id: "7872A8A2", status: "Submitted" });

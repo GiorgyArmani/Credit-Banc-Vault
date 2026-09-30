@@ -4,10 +4,11 @@
 // Spec: https://api-uat.credibly.com/docs/openapi/openapi.json ("ISO API")
 //
 // REQUIRED ENV:
-//   CREDIBLY_API_KEY — the ISO API key, sent as X-API-KEY to mint a JWT
+//   CREDIBLY_API_KEY — the ISO API key, sent as X-API-KEY to mint a JWT. It is
+//                      ALSO the "iso_token" their webhook X-Signature is built
+//                      from (confirmed by Credibly support, 2026-09-30).
 // OPTIONAL ENV:
-//   CREDIBLY_API_BASE       — defaults to UAT. Production is https://api.credibly.com
-//   CREDIBLY_WEBHOOK_TOKEN  — the "iso_token" their X-Signature is built from
+//   CREDIBLY_API_BASE — defaults to UAT. Production is https://api.credibly.com
 //
 // AUTH IS TWO-STEP, and not what their onboarding email describes: the key is
 // an API KEY on a GET (not a bearer token on a POST).

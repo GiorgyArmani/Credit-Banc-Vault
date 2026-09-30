@@ -182,7 +182,16 @@ export interface CreateApplicationResult {
    * as it would a fetched status.
    */
   initialStatus?: unknown;
+  /**
+   * Lender-side ids the provider must keep for LATER sends on the same
+   * business (SmartBiz: the business id, which they can't look up again).
+   * Recorded on the submission row whether or not the send succeeded — a
+   * business created before a failed submission must still be remembered.
+   */
+  providerState?: ProviderState;
 }
+
+export type ProviderState = Record<string, unknown>;
 
 export interface FetchStatusResult {
   ok: boolean;
@@ -206,7 +215,16 @@ export interface LenderApiProvider {
    * hands them to createApplication, which reports per-file results.
    */
   documentsInline?: boolean;
-  createApplication(payload: unknown, ctx?: { documents: OutboundDocument[] }): Promise<CreateApplicationResult>;
+  /**
+   * The provider returns providerState and wants the newest one recorded for
+   * this business (same provider + business profile) back on the next send,
+   * as ctx.priorState.
+   */
+  reusesProviderState?: boolean;
+  createApplication(
+    payload: unknown,
+    ctx?: { documents?: OutboundDocument[]; priorState?: ProviderState | null }
+  ): Promise<CreateApplicationResult>;
   uploadDocuments(externalId: string, docs: OutboundDocument[]): Promise<OutboundDocumentResult[]>;
   /** Absent when the lender has no status API — Refresh then re-applies the stored status. */
   fetchStatus?(externalId: string): Promise<FetchStatusResult>;

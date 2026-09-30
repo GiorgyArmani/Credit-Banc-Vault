@@ -173,11 +173,12 @@ export const credibly: LenderApiProvider = {
 
   webhook: {
     async verify(req) {
-      const token = process.env.CREDIBLY_WEBHOOK_TOKEN;
+      // Credibly's iso_token IS the API key used to mint the JWT — one secret.
+      const token = process.env.CREDIBLY_API_KEY?.trim();
       // No token configured = we cannot tell a real callback from a stranger.
       // Refuse rather than accept: the engine polls status anyway.
       if (!token) {
-        console.error("credibly: CREDIBLY_WEBHOOK_TOKEN is not set — rejecting callback");
+        console.error("credibly: CREDIBLY_API_KEY is not set — rejecting callback");
         return false;
       }
       const header = req.headers.get("x-signature")?.trim();

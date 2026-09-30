@@ -88,8 +88,35 @@ export const smartbiz: LenderApiProvider = {
   tagsForDocCode: smartBizTagsForDocCode,
   interpretStatus: interpretSmartBizStatus,
 
-  async createApplication(payload) {
+  // SmartBiz refuses a second business with the same email/EIN and can't look
+  // one up, so the business id is kept (provider_state) and reused on every
+  // later send for the same business — a new round, or a resend after the
+  // submission failed.
+  reusesProviderState: true,
+
+  async createApplication(payload, ctx) {
     const app = payload as SmartBizApplication;
+
+    const prior = ctx?.priorState?.business_id;
+    const knownBusinessId = typeof prior === "string" && prior ? prior : null;
+    if (knownBusinessId) {
+      const sub = await createSubmission({ ...app.submission, business_id: knownBusinessId });
+      const submissionId = sub.data?.data?.id;
+      const providerState = { business_id: knownBusinessId };
+      if (sub.ok && submissionId) return { ok: true, externalId: submissionId, providerState };
+      // 404 = SmartBiz doesn't know that business (e.g. an id from their
+      // sandbox): fall through and create it as a first send would.
+      if (sub.status !== 404) {
+        const why = sub.error ?? "SmartBiz did not return a submission id";
+        return {
+          ok: false,
+          status: sub.ok ? 0 : sub.status,
+          error: `SmartBiz did not take the submission on existing business ${knownBusinessId}: ${why}`,
+          fieldErrors: sub.fieldErrors,
+          providerState,
+        };
+      }
+    }
 
     const biz = await createBusiness(app.business);
     const businessId = biz.data?.data?.id;
@@ -102,18 +129,20 @@ export const smartbiz: LenderApiProvider = {
       return { ok: false, status: biz.ok ? 0 : biz.status, error, fieldErrors: biz.fieldErrors };
     }
 
+    const providerState = { business_id: businessId };
     const sub = await createSubmission({ ...app.submission, business_id: businessId });
     const submissionId = sub.data?.data?.id;
-    if (sub.ok && submissionId) return { ok: true, externalId: submissionId };
+    if (sub.ok && submissionId) return { ok: true, externalId: submissionId, providerState };
 
-    // The business now exists at SmartBiz and they can't give its id back:
-    // it must be in the message, whatever went wrong.
+    // The business now exists at SmartBiz and they can't give its id back: it
+    // is recorded (providerState) so a resend submits on it, and named here.
     const why = sub.error ?? "SmartBiz did not return a submission id";
     return {
       ok: false,
       status: sub.ok ? 0 : sub.status,
-      error: `SmartBiz created business ${businessId} but not the submission: ${why}. Give ${businessId} to your SmartBiz rep before resending.`,
+      error: `SmartBiz created business ${businessId} but not the submission: ${why}. A resend will use the same business.`,
       fieldErrors: sub.fieldErrors,
+      providerState,
     };
   },
 

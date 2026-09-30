@@ -20,6 +20,7 @@ import type {
   NormalizedStatus,
   OutboundDocument,
   OutboundDocumentResult,
+  ProviderState,
 } from "./types";
 import { loadLenderApiSource, type AdminClient } from "./source";
 import { listSubmittableDocuments, prepareOutboundDocuments } from "./documents";
@@ -115,6 +116,33 @@ async function updateSubmission(admin: AdminClient, id: string, patch: Record<st
     return false;
   }
   return true;
+}
+
+/**
+ * The newest provider_state recorded for this business at this lender — the
+ * same business profile, or, when the assignment has none, the client's rows
+ * that have none either. `ok: false` only when the read itself failed.
+ */
+async function loadPriorProviderState(
+  admin: AdminClient,
+  providerId: string,
+  assignment: { client_id: string; business_profile_id: string | null }
+): Promise<{ ok: true; state: ProviderState | null } | { ok: false }> {
+  let query = admin
+    .from(TABLE)
+    .select("provider_state")
+    .eq("provider", providerId)
+    .not("provider_state", "is", null);
+  query = assignment.business_profile_id
+    ? query.eq("business_profile_id", assignment.business_profile_id)
+    : query.eq("client_id", assignment.client_id).is("business_profile_id", null);
+  const { data, error } = await query.order("created_at", { ascending: false }).limit(1).maybeSingle();
+  if (error) {
+    console.error("lender_api_submissions provider_state read error:", error.message);
+    return { ok: false };
+  }
+  const state = (data as { provider_state?: unknown } | null)?.provider_state;
+  return { ok: true, state: state && typeof state === "object" ? (state as ProviderState) : null };
 }
 
 /** Clears one specific warning, only while it is still the row's error — a newer failure is kept. */
@@ -268,6 +296,20 @@ export async function submitApplication(args: {
     return { httpStatus: 400, body: { error: "Some required information is missing.", gaps: built.gaps } };
   }
 
+  // Before anything is recorded or sent: a lender that remembers ids across
+  // sends must get them back, or it creates a duplicate it then refuses.
+  let priorState: ProviderState | null = null;
+  if (provider.reusesProviderState) {
+    const prior = await loadPriorProviderState(admin, provider.id, source.assignment);
+    if (!prior.ok) {
+      return {
+        httpStatus: 500,
+        body: { error: `Could not read earlier ${provider.displayName} records for this business — nothing was sent.` },
+      };
+    }
+    priorState = prior.state;
+  }
+
   const { data: inserted, error: insertError } = await admin
     .from(TABLE)
     .insert({
@@ -311,20 +353,27 @@ export async function submitApplication(args: {
     }
   }
 
-  const created = await provider.createApplication(built.payload, inline ? { documents: inline.docs } : undefined);
+  const created = await provider.createApplication(built.payload, {
+    ...(inline ? { documents: inline.docs } : {}),
+    ...(provider.reusesProviderState ? { priorState } : {}),
+  });
+  // Kept on failures too: a lender-side record made before the failure (a
+  // SmartBiz business) is what the next send must reuse.
+  const statePatch = created.providerState ? { provider_state: created.providerState } : {};
   if (!created.ok || !created.externalId) {
     // Only a 4xx is a clean rejection. No status, 0 (network/timeout), a 5xx,
     // or a 2xx that came back without a lead id all mean we don't know whether
     // the lender created the application — never say "rejected" for those.
     if (isUncertainCreateFailure(created.status)) {
       const error = `Uncertain: the lender may have received this application (reference ${referenceId}). Confirm with the lender before resending.`;
-      await updateSubmission(admin, inserted.id, { status: "failed", error });
+      await updateSubmission(admin, inserted.id, { status: "failed", error, ...statePatch });
       return { httpStatus: 502, body: { error, submission_id: inserted.id } };
     }
     await updateSubmission(admin, inserted.id, {
       status: "failed",
       error: created.error ?? "The lender rejected the application.",
       field_errors: created.fieldErrors ?? null,
+      ...statePatch,
     });
     return {
       httpStatus: 422,
@@ -348,6 +397,7 @@ export async function submitApplication(args: {
         attachments: inlineResults,
       }
     : { status: "lead_created", external_id: created.externalId };
+  Object.assign(recordPatch, statePatch);
   if (created.initialStatus !== undefined) {
     recordPatch.last_status = created.initialStatus;
     recordPatch.last_status_at = new Date().toISOString();
