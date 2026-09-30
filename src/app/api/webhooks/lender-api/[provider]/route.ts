@@ -25,6 +25,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
   if (!(await provider.webhook.verify(request))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+  // Proof of delivery when validating a new lender's webhook. No body: it can carry PII.
+  console.info(`lender-api webhook: ${provider.id} callback verified`);
 
   let body: unknown;
   try {
