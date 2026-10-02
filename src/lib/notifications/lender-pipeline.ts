@@ -357,7 +357,11 @@ export async function notifyLenderResponseNoteRecorded(
 }
 
 /**
- * Slack-only announcement that the deal FUNDED, posted into the deal channel.
+ * Slack-only announcement that the deal FUNDED, posted into the deal channel
+ * (when the file has one) AND the company-wide funded-deals channel
+ * (SLACK_FUNDED_CHANNEL_ID, when set). The two are independent: most funded
+ * files never had a deal channel opened, and gating the funded-deals post on
+ * one meant the announcement silently never went out.
  *
  * The funded event was the one hole in the lender lifecycle's Slack coverage:
  * submitted / approved / declined all post, but funding — the outcome the
@@ -390,7 +394,8 @@ export async function notifyDealFundedToSlack(
       .maybeSingle();
 
     const channel_id = (client_row as any)?.slack_channel_id as string | null;
-    if (!channel_id) return;
+    const funded_channel_id = process.env.SLACK_FUNDED_CHANNEL_ID || null;
+    if (!channel_id && !funded_channel_id) return;
 
     const company_name =
       (client_row as any)?.company_name || (client_row as any)?.client_name || 'this file';
@@ -415,12 +420,27 @@ export async function notifyDealFundedToSlack(
       ? `🎉 *FUNDED* — ${company_name} funded by *${details.lender_name}*.`
       : `🎉 *FUNDED* — ${company_name}.`;
 
-    await slackPostMessage(
-      channel_id,
-      `${mentions ? mentions + ' ' : ''}${headline}` +
-        `${lines.length ? `\n${lines.join('\n')}` : ''}\n` +
-        `${baseUrl}/admin/clients/${client_id}`
-    );
+    const body =
+      `${headline}${lines.length ? `\n${lines.join('\n')}` : ''}\n` +
+      `${baseUrl}/admin/clients/${client_id}`;
+
+    if (channel_id) {
+      await slackPostMessage(channel_id, `${mentions ? mentions + ' ' : ''}${body}`);
+    }
+
+    // No @-mentions in the shared channel: it is an announcement feed, and
+    // pinging approvers + the advisor on every funding there is noise — the
+    // deal channel above is where they get tagged.
+    if (funded_channel_id) {
+      const ok = await slackPostMessage(funded_channel_id, body);
+      if (!ok) {
+        console.error(
+          `notifyDealFundedToSlack: post dropped — SLACK_FUNDED_CHANNEL_ID=${funded_channel_id} was rejected. ` +
+            `channel_not_found normally means the channel is private and the bot was never invited, ` +
+            `the channel was archived, or the id belongs to a different workspace in the Grid.`
+        );
+      }
+    }
   } catch (err) {
     console.error('notifyDealFundedToSlack error (non-fatal):', err);
   }

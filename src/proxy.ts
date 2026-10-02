@@ -95,6 +95,9 @@ export async function proxy(request: NextRequest) {
     "/api/reset-password",
     "/api/support",
     "/api/share/", // token-gated lender file access
+    // Post-funding email opt-out — public by signed token, opened from an inbox.
+    "/unsubscribe/",
+    "/api/unsubscribe/",
     // Called by outside systems that authenticate with a shared secret or
     // signature, never with a session cookie. Redirecting these to /auth/login
     // would break GHL, SignWell, Mailgun and Telzio silently.

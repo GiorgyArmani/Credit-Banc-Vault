@@ -2,7 +2,7 @@
 "use server";
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { send_advisor_document_notification, send_loan_funded_notification, send_client_funded_email } from "@/lib/email";
+import { send_advisor_document_notification, send_loan_funded_notification } from "@/lib/email";
 import { createClient } from "@/lib/supabase/server";
 import { ghlUpdateContact, ghlAddTags } from "@/lib/ghl-api";
 import { updateLoanStatus } from "@/app/actions/pipeline";
@@ -418,31 +418,6 @@ export async function fundLoanAction(clientId: string, data: {
             // Non-fatal, let it succeed
         }
 
-        // 5.5 Send the "Approved. Funded. Done." email to the CLIENT.
-        //
-        //     Separate try/catch from the advisor send above on purpose: these
-        //     are two different recipients and one failing must not swallow the
-        //     other. Both are best-effort — the funding is the thing being
-        //     recorded here, and no mail failure may undo it.
-        try {
-            const advisor = client.advisors as any;
-            if (client.client_email) {
-                await send_client_funded_email({
-                    client_name: client.client_name,
-                    client_email: client.client_email,
-                    advisor_name: advisor ? `${advisor.first_name} ${advisor.last_name || ""}`.trim() : null,
-                    advisor_phone: advisor?.phone ?? null,
-                    advisor_photo_url: advisor?.profile_pic_url ?? null,
-                });
-                console.log("fundLoanAction: Funded email sent to client.");
-            } else {
-                console.warn("fundLoanAction Warning: No client email on the vault; funded email skipped.");
-            }
-        } catch (clientEmailError) {
-            console.error("fundLoanAction Error: Failed to send client funded email:", clientEmailError);
-            // Non-fatal
-        }
-
         // 6. Persist the funded figures onto the active business's funding_deal.
         //    This is the in-vault source of truth (powers the admin funded-$ KPI
         //    and renewal tracking). GHL above is the signaling layer; this is the
@@ -503,6 +478,22 @@ export async function fundLoanAction(clientId: string, data: {
             } catch (dealError) {
                 console.error("fundLoanAction Error: Failed to persist funding_deal:", dealError);
                 // Non-fatal
+            }
+        }
+
+        // 6.5 Email 1 of the post-funding client sequence ("You're funded"),
+        //     signed by the advisor. Needs the funded round from step 6 — the
+        //     sequence is keyed by it. Best-effort: a failure here is retried by
+        //     /api/cron/post-funding-emails within Email 1's 7-day window, and no
+        //     mail failure may undo the funding. See src/lib/post-funding/.
+        if (fundedDealId) {
+            try {
+                const { runPostFundingSequence } = await import("@/lib/post-funding/sequence");
+                const [res] = await runPostFundingSequence(supabaseAdmin, { onlyDealId: fundedDealId });
+                if (res?.sent) console.log(`fundLoanAction: post-funding Email ${res.step} sent to client.`);
+                else console.warn("fundLoanAction: post-funding Email 1 not sent:", res?.error ?? res?.skipReason);
+            } catch (sequenceError) {
+                console.error("fundLoanAction Error: post-funding sequence failed (non-fatal):", sequenceError);
             }
         }
 
