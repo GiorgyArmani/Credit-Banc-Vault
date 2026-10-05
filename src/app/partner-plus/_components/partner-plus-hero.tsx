@@ -22,7 +22,7 @@ import { EASE } from "@/lib/motion";
 // made. No invented volume or approval claims.
 const FACTS = [
   { value: "$100", label: "Per month" },
-  { value: "1", label: "Login per plan" },
+  { value: "1", label: "Login" },
   { value: "Anytime", label: "Cancel" },
 ];
 
@@ -48,11 +48,13 @@ export function PartnerPlusHero({ form }: { form: ReactNode }) {
           transition={{ duration: 0.7, ease: EASE }}
           className="mt-7 font-headline text-[clamp(2.4rem,6vw,4.5rem)] font-extrabold leading-[0.95] tracking-tighter text-cb-navy"
         >
-          Bring us the deals
+          Got a deal?
           <br />
           {/* The brand's signature device: white type on a mint block that
-              wipes in from the left, after the headline has landed. */}
-          <span className="relative isolate mt-2 inline-block px-3 text-white">
+              wipes in from the left, after the headline has landed. The bottom
+              padding is for descenders: at leading-[0.95] the line box ends
+              above the tail of a "g", which then hung out under the block. */}
+          <span className="relative isolate mt-2 inline-block px-3 pb-[0.2em] text-white">
             <motion.span
               aria-hidden
               className="absolute inset-y-1 left-0 right-0 -z-10 rounded-sm bg-cb-mint"
@@ -61,7 +63,7 @@ export function PartnerPlusHero({ form }: { form: ReactNode }) {
               transition={{ duration: 0.7, delay: 0.5, ease: EASE }}
               style={{ originX: 0 }}
             />
-            that don&apos;t fit.
+            Bring it here.
           </span>
         </motion.h1>
 
@@ -71,8 +73,9 @@ export function PartnerPlusHero({ form }: { form: ReactNode }) {
           transition={{ duration: 0.7, delay: 0.15, ease: EASE }}
           className="mt-8 max-w-xl text-lg leading-relaxed text-on-surface-variant"
         >
-          Submit your own files into the Credit Banc vault. Our underwriting team and lender network
-          work the back end with you.
+          Partner Plus gives you full access to the Credit Banc Vault, plus the team, technology, and
+          lender network behind it. Send us the file. We&apos;ll help figure out where it fits and work it
+          with you from there.
         </motion.p>
       </div>
 

@@ -1,6 +1,7 @@
 // src/components/marketing/brand-chrome.tsx
 //
-// The shared creditbanc.io section grammar: sticky cream header, navy footer,
+// The shared creditbanc.io section grammar: sticky cream header, navy footer
+// (mirrors the live creditbanc.io footer),
 // and the cream + aurora page shell. /affiliate and /terms had hand-rolled
 // copies of all three; every public surface now imports these instead so the
 // grammar only has to be corrected in one place.
@@ -10,6 +11,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import type { ReactNode } from "react";
+import { Facebook, Instagram, Linkedin, Mail, Star, Youtube, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -71,46 +73,161 @@ export function BrandHeader({
   );
 }
 
-/** Navy footer with the mint hairline glow. Navy is reserved for this. */
-export function BrandFooter() {
-  return (
-    <footer className="bg-cb-navy text-white py-16 relative overflow-hidden">
-      <div
-        aria-hidden
-        className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-cb-mint/30 to-transparent"
-      />
+/**
+ * The creditbanc.io footer, mirrored from the live site (Oct 2026): brand
+ * column (logo, blurb, socials) + Programs / Company / Resources link columns,
+ * then a hairline and a bottom bar. Links point at creditbanc.io — this app has
+ * no pages of its own for them — except Terms, which is ours (/terms).
+ * Navy is reserved for this.
+ */
+const FOOTER_SITE = "https://www.creditbanc.io";
 
-      <div className="max-w-6xl mx-auto px-4 relative z-10 flex flex-col sm:flex-row items-center justify-between gap-6">
-        <div className="flex flex-col sm:flex-row items-center gap-4 sm:gap-8">
-          <p className="text-white/30 text-xs font-bold uppercase tracking-[0.3em] text-center sm:text-left">
-            © {new Date().getFullYear()} Credit Banc. All rights reserved.
-          </p>
-          <div className="flex items-center gap-6">
-            <Link
-              href="/terms"
-              className="text-white/50 hover:text-white text-xs font-bold uppercase tracking-[0.3em] transition-colors"
-            >
-              Terms
-            </Link>
+const FOOTER_COLUMNS: { title: string; links: { label: string; href: string }[] }[] = [
+  {
+    title: "Programs",
+    links: [
+      { label: "SBA Loans", href: `${FOOTER_SITE}/sba-loans` },
+      { label: "Real Estate Loans", href: `${FOOTER_SITE}/real-estate-financing` },
+      { label: "Small Business Funding", href: `${FOOTER_SITE}/small-business-funding` },
+      { label: "Our Process", href: `${FOOTER_SITE}/about#process` },
+    ],
+  },
+  {
+    title: "Company",
+    links: [
+      { label: "About Us", href: `${FOOTER_SITE}/about` },
+      { label: "In the Spotlight", href: `${FOOTER_SITE}/about#spotlight` },
+      { label: "Call Us — 321-334-5099", href: "tel:+13213345099" },
+    ],
+  },
+  {
+    title: "Resources",
+    links: [
+      { label: "Blog", href: `${FOOTER_SITE}/blog` },
+      { label: "Apply for Funding", href: `${FOOTER_SITE}/apply-now` },
+      { label: "Privacy Policy", href: `${FOOTER_SITE}/privacypolicy` },
+    ],
+  },
+];
+
+const FOOTER_SOCIALS: { label: string; href: string; icon: LucideIcon }[] = [
+  { label: "Facebook", href: "https://www.facebook.com/creditbanc", icon: Facebook },
+  { label: "Instagram", href: "https://www.instagram.com/credit_banc/", icon: Instagram },
+  { label: "LinkedIn", href: "https://www.linkedin.com/company/credit-banc", icon: Linkedin },
+  { label: "YouTube", href: "https://www.youtube.com/@Credit_Banc", icon: Youtube },
+  { label: "Trustpilot", href: "https://www.trustpilot.com/review/creditbanc.io", icon: Star },
+];
+
+/** External links open in a new tab; tel:/mailto: and in-app paths don't. */
+function FooterLink({ href, className, children }: { href: string; className: string; children: ReactNode }) {
+  if (href.startsWith("/")) {
+    return (
+      <Link href={href} className={className}>
+        {children}
+      </Link>
+    );
+  }
+  const external = href.startsWith("http");
+  return (
+    <a
+      href={href}
+      className={className}
+      {...(external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+    >
+      {children}
+    </a>
+  );
+}
+
+export function BrandFooter() {
+  const link = "text-sm text-slate-400 transition-colors hover:text-white";
+  const fine = "text-[13px] text-slate-400 transition-colors hover:text-white";
+
+  return (
+    <footer className="relative overflow-hidden bg-cb-navy text-white">
+      <div className="relative z-10 mx-auto max-w-6xl px-4 pt-16 sm:pt-20">
+        <div className="grid gap-12 sm:grid-cols-2 lg:grid-cols-4 lg:gap-8">
+          <div>
             <a
-              href="https://www.creditbanc.io/privacypolicy"
+              href={FOOTER_SITE}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-white/50 hover:text-white text-xs font-bold uppercase tracking-[0.3em] transition-colors"
+              aria-label="creditbanc.io"
+              className="inline-flex transition-opacity hover:opacity-80"
             >
-              Privacy
+              <Image src="/CBLOGOWHITE.png" alt="Credit Banc" width={1000} height={200} className="h-8 w-auto" />
             </a>
+            <p className="mt-6 max-w-xs text-sm leading-relaxed text-slate-400">
+              Credit Banc helps business owners compare financing options across working capital, SBA, and real
+              estate, with Advisors who guide the process from start to finish.
+            </p>
+            <p className="mt-6 text-xs font-bold uppercase tracking-[0.1em] text-white">Follow us</p>
+            <div className="mt-4 flex gap-3">
+              {FOOTER_SOCIALS.map(({ label, href, icon: Icon }) => (
+                <a
+                  key={label}
+                  href={href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label={label}
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-white/5 text-slate-300 transition-colors hover:bg-cb-mint hover:text-cb-navy"
+                >
+                  <Icon className="h-4 w-4" />
+                </a>
+              ))}
+            </div>
+          </div>
+
+          {FOOTER_COLUMNS.map((col) => (
+            <div key={col.title}>
+              <p className="text-xs font-bold uppercase tracking-[0.1em] text-white">{col.title}</p>
+              <ul className="mt-6 space-y-4">
+                {col.links.map((l) => (
+                  <li key={l.label}>
+                    <FooterLink href={l.href} className={link}>
+                      {l.label}
+                    </FooterLink>
+                  </li>
+                ))}
+                {col.title === "Resources" && (
+                  <li>
+                    <a
+                      href="mailto:support@creditbanc.io"
+                      className={`${link} inline-flex items-center gap-2.5`}
+                    >
+                      <Mail className="h-4 w-4 text-cb-mint" />
+                      support@creditbanc.io
+                    </a>
+                  </li>
+                )}
+              </ul>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-16 flex flex-col gap-4 border-t border-white/10 py-8 lg:flex-row lg:items-center lg:justify-between">
+          <p className="text-[13px] text-slate-400">
+            Need to contact us? Please email the team at{" "}
+            <a href="mailto:support@creditbanc.io" className="font-semibold text-white hover:text-cb-mint">
+              support@creditbanc.io
+            </a>
+            .
+          </p>
+          <div className="flex flex-wrap items-center gap-x-8 gap-y-2">
+            <FooterLink href="/terms" className={fine}>
+              Terms
+            </FooterLink>
+            <FooterLink href={`${FOOTER_SITE}/privacypolicy`} className={fine}>
+              Privacy Policy
+            </FooterLink>
+            <FooterLink href={`${FOOTER_SITE}/apply-now`} className={fine}>
+              Apply for Funding
+            </FooterLink>
+            <p className="text-[13px] text-slate-400">
+              Copyright {new Date().getFullYear()}. Credit Banc. All Rights Reserved.
+            </p>
           </div>
         </div>
-        <a
-          href="https://creditbanc.io"
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="creditbanc.io"
-          className="group inline-flex items-center transition-opacity hover:opacity-80"
-        >
-          <Image src="/CBLOGOWHITE.png" alt="Credit Banc" width={1000} height={200} className="h-8 w-auto" />
-        </a>
       </div>
     </footer>
   );
