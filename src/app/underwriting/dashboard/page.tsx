@@ -16,7 +16,6 @@ import {
   ArrowDownNarrowWide,
   ArrowUpNarrowWide,
 } from "lucide-react";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import clsx from "clsx";
 import { getBulkLatestStatus, type LoanStatus } from "@/app/actions/pipeline";
 import { normalizeSupabaseJoin } from "@/lib/document-scope";
@@ -38,12 +37,14 @@ const BUCKET_META: {
   label: string;
   icon: typeof ShieldCheck;
   tile: string;
+  /** Selected state. /15 /35 etc. don't exist on this Tailwind — stay on /10 steps. */
+  selected: string;
   value: string;
 }[] = [
-  { key: "ready", label: "Ready", icon: ShieldCheck, tile: "bg-primary-container/15 border-primary/25", value: "text-primary-fixed" },
-  { key: "active", label: "Vaults", icon: Clock, tile: "bg-blue-400/10 border-blue-400/25", value: "text-blue-300" },
-  { key: "funded", label: "Funded", icon: CheckCircle2, tile: "bg-violet-400/10 border-violet-400/25", value: "text-violet-300" },
-  { key: "declined", label: "Declined", icon: AlertCircle, tile: "bg-rose-400/10 border-rose-400/25", value: "text-rose-300" },
+  { key: "ready", label: "Ready", icon: ShieldCheck, tile: "bg-primary-container/10 border-primary/25", selected: "bg-primary-container/20 border-primary ring-1 ring-primary", value: "text-primary-fixed" },
+  { key: "active", label: "Vaults", icon: Clock, tile: "bg-blue-400/10 border-blue-400/25", selected: "bg-blue-400/20 border-blue-300 ring-1 ring-blue-300", value: "text-blue-300" },
+  { key: "funded", label: "Funded", icon: CheckCircle2, tile: "bg-violet-400/10 border-violet-400/25", selected: "bg-violet-400/20 border-violet-300 ring-1 ring-violet-300", value: "text-violet-300" },
+  { key: "declined", label: "Declined", icon: AlertCircle, tile: "bg-rose-400/10 border-rose-400/25", selected: "bg-rose-400/20 border-rose-300 ring-1 ring-rose-300", value: "text-rose-300" },
 ];
 
 export default function UnderwritingDashboardPage() {
@@ -340,15 +341,26 @@ export default function UnderwritingDashboardPage() {
             </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+          {/* The bucket tiles ARE the tabs — one control instead of the same four
+              counts shown twice. No tile is selected while a group chip is. */}
+          <div role="tablist" aria-label="Queue buckets" className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
             {BUCKET_META.map(meta => {
               const Icon = meta.icon;
+              const selected = !active_group_id && active_tab === meta.key;
               return (
-                <div
+                <button
                   key={meta.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={selected}
+                  onClick={() => {
+                    set_active_tab(meta.key);
+                    set_active_group_id(null);
+                  }}
                   className={clsx(
-                    "flex items-center justify-between gap-3 rounded-xl border p-3.5 backdrop-blur-md",
-                    meta.tile
+                    "flex items-center justify-between gap-3 rounded-xl border p-3.5 text-left backdrop-blur-md transition",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60",
+                    selected ? meta.selected : clsx(meta.tile, "opacity-70 hover:opacity-100")
                   )}
                 >
                   <div>
@@ -359,41 +371,16 @@ export default function UnderwritingDashboardPage() {
                       {byBucket[meta.key].length}
                     </p>
                   </div>
-                  <Icon className="h-6 w-6 text-white/25" aria-hidden />
-                </div>
+                  <Icon className={clsx("h-6 w-6", selected ? meta.value : "text-white/25")} aria-hidden />
+                </button>
               );
             })}
           </div>
         </div>
       </section>
 
-      {/* Tabs + search */}
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <Tabs
-          value={active_group_id ? "" : active_tab}
-          onValueChange={v => {
-            set_active_tab(v as LeadBucket);
-            set_active_group_id(null);
-          }}
-        >
-          <TabsList className="h-11 rounded-xl border border-outline-variant/30 bg-white p-1">
-            {BUCKET_META.map(meta => {
-              const Icon = meta.icon;
-              return (
-                <TabsTrigger
-                  key={meta.key}
-                  value={meta.key}
-                  className="gap-1.5 rounded-lg px-4 text-xs font-semibold text-on-surface-variant data-[state=active]:bg-on-secondary-fixed data-[state=active]:text-primary-fixed data-[state=active]:shadow-none"
-                >
-                  <Icon className="h-3.5 w-3.5" aria-hidden />
-                  {meta.label}
-                  <span className="tabular-nums opacity-70">{byBucket[meta.key].length}</span>
-                </TabsTrigger>
-              );
-            })}
-          </TabsList>
-        </Tabs>
-
+      {/* Sort + search */}
+      <div className="flex justify-end">
         <div className="flex w-full items-center gap-2 lg:max-w-md">
           {/* Ready renders cards, which have no column headers to click, so age
               order needs its own control. age desc = oldest file first. */}

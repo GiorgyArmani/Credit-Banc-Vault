@@ -11,8 +11,9 @@ import { bitty } from "./providers/bitty";
 import { loot } from "./providers/loot";
 import { fundkite } from "./providers/fundkite";
 import { smartbiz } from "./providers/smartbiz";
+import { onewest } from "./providers/onewest";
 
-const PROVIDERS: readonly LenderApiProvider[] = [forwardFinancing, credibly, bitty, loot, fundkite, smartbiz];
+const PROVIDERS: readonly LenderApiProvider[] = [forwardFinancing, credibly, bitty, loot, fundkite, smartbiz, onewest];
 
 export function providerForLender(lenderName: string | null | undefined): LenderApiProvider | null {
   if (!lenderName) return null;
