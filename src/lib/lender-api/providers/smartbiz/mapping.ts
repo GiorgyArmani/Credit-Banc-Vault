@@ -321,8 +321,17 @@ export function buildSmartBizApplication(source: LenderApiSource, picks: Picks, 
   const annualRevenue =
     toInt(b?.avg_annual_revenue) ||
     (analysis?.avg_revenue ? Math.round(analysis.avg_revenue * 12) : null) ||
-    (b?.avg_monthly_deposits ? Math.round(b.avg_monthly_deposits * 12) : null);
-  if (!annualRevenue) gaps.push({ field: "annual_revenue", label: "Annual revenue (edit the client profile)", kind: "missing" });
+    (b?.avg_monthly_deposits ? Math.round(b.avg_monthly_deposits * 12) : null) ||
+    // Deposits often live only on the vault (the profile header reads them from
+    // there). Like the other vault fields, they describe the primary business.
+    (isPrimaryBusiness && v.avg_monthly_deposits ? Math.round(v.avg_monthly_deposits * 12) : null);
+  if (!annualRevenue) {
+    gaps.push({
+      field: "annual_revenue",
+      label: "Annual revenue (set monthly deposits on the client profile, or run the bank analysis)",
+      kind: "missing",
+    });
+  }
 
   const requested = toInt(d?.capital_requested ?? v.capital_requested);
   if (!requested || requested <= 0) {

@@ -1097,6 +1097,9 @@ export default function UnderwritingClientDetailsPage() {
 
     async function fetch_lender_assignments() {
         set_is_loading_assignments(true);
+        // The API-send info is keyed by assignment id, so a newly added lender
+        // has no "Send to <lender>" button until it is re-fetched too.
+        void reload_lender_api();
         try {
             const { data, error } = await supabase
                 .from("client_lender_assignments")
@@ -2322,7 +2325,7 @@ export default function UnderwritingClientDetailsPage() {
                                 assignments={active_round_assignments}
                                 api_summaries={lender_api_summaries}
                                 on_api_changed={async () => {
-                                    await Promise.all([fetch_lender_assignments(), reload_lender_api()]);
+                                    await fetch_lender_assignments();
                                 }}
                                 response_panel_epoch={response_panel_epoch}
                                 submitting_assignment_id={submitting_assignment_id}

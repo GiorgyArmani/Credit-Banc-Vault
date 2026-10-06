@@ -13,6 +13,8 @@ import {
   ShieldCheck,
   CheckCircle2,
   Clock,
+  ArrowDownNarrowWide,
+  ArrowUpNarrowWide,
 } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import clsx from "clsx";
@@ -121,6 +123,18 @@ export default function UnderwritingDashboardPage() {
     } else {
       set_sort_key(key);
       set_sort_dir(key === "company" ? "asc" : "desc");
+    }
+  }
+
+  const ageOrderLabel =
+    sort_key !== "age" ? "Sort by age" : sort_dir === "desc" ? "Oldest first" : "Newest first";
+
+  function toggleAgeOrder() {
+    if (sort_key !== "age") {
+      set_sort_key("age");
+      set_sort_dir("desc");
+    } else {
+      set_sort_dir(d => (d === "desc" ? "asc" : "desc"));
     }
   }
 
@@ -380,18 +394,36 @@ export default function UnderwritingDashboardPage() {
           </TabsList>
         </Tabs>
 
-        <div className="relative w-full lg:max-w-sm">
-          <Search
-            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-outline"
-            aria-hidden
-          />
-          <Input
-            type="search"
-            placeholder="Search name, company, advisor..."
-            value={search_query}
-            onChange={e => set_search_query(e.target.value)}
-            className="h-11 rounded-xl border-outline-variant/30 bg-white pl-9 text-sm"
-          />
+        <div className="flex w-full items-center gap-2 lg:max-w-md">
+          {/* Ready renders cards, which have no column headers to click, so age
+              order needs its own control. age desc = oldest file first. */}
+          <Button
+            type="button"
+            variant="outline"
+            onClick={toggleAgeOrder}
+            title="Sort by file age"
+            className="h-11 shrink-0 gap-1.5 rounded-xl border-outline-variant/30 bg-white px-3 text-xs font-semibold text-on-surface-variant"
+          >
+            {sort_key === "age" && sort_dir === "asc" ? (
+              <ArrowUpNarrowWide className="h-4 w-4" aria-hidden />
+            ) : (
+              <ArrowDownNarrowWide className="h-4 w-4" aria-hidden />
+            )}
+            {ageOrderLabel}
+          </Button>
+          <div className="relative w-full">
+            <Search
+              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-outline"
+              aria-hidden
+            />
+            <Input
+              type="search"
+              placeholder="Search name, company, advisor..."
+              value={search_query}
+              onChange={e => set_search_query(e.target.value)}
+              className="h-11 rounded-xl border-outline-variant/30 bg-white pl-9 text-sm"
+            />
+          </div>
         </div>
       </div>
 

@@ -117,6 +117,29 @@ describe("smartbiz application", () => {
     expect(app.business.profile.annual_revenue).toBe(540000); // 45,000 × 12
   });
 
+  it("falls back to 12x the vault's monthly deposits when the business and analysis have none", () => {
+    const { built, app } = build(
+      makeSource({
+        business: { industry: PLUMBING, avg_annual_revenue: null, avg_monthly_deposits: null },
+        analysis: null,
+        vault: { avg_monthly_deposits: 83000 },
+      })
+    );
+    expect(built.gaps.map((g) => g.field)).not.toContain("annual_revenue");
+    expect(app.business.profile.annual_revenue).toBe(996000);
+  });
+
+  it("a second business never borrows the vault's deposits", () => {
+    const { built } = build(
+      makeSource({
+        business: { industry: PLUMBING, is_primary: false, avg_annual_revenue: null, avg_monthly_deposits: null },
+        analysis: null,
+        vault: { avg_monthly_deposits: 83000 },
+      })
+    );
+    expect(built.gaps.map((g) => g.field)).toContain("annual_revenue");
+  });
+
   const BO = {
     position: 2, full_name: "Bo Roe", ownership_pct: 40, dob: "1979-07-08", ssn: "987654321",
     street: "5 Oak Rd", city: "Miami", state: "FL", zip: "33133", email: "bo@example.com", phone: "(305) 555-0111",

@@ -107,6 +107,9 @@ export function AdminLenderReviewCard({ clientId, onEditProfile, refreshKey }: P
 
     async function fetch_assignments() {
         set_is_loading(true);
+        // The API-send info is keyed by assignment id, so a newly added lender
+        // has no "Send to <lender>" button until it is re-fetched too.
+        void reload_lender_api();
         // Two queries: one for the visible list, one for the set of lender
         // names the picker should hide. Both exclude REMOVED rows — a removed
         // lender is off the list but back on offer, because removing is now a
@@ -519,7 +522,7 @@ export function AdminLenderReviewCard({ clientId, onEditProfile, refreshKey }: P
                                         assignmentStatus={a.status}
                                         summary={lender_api_summaries[a.id]}
                                         onChanged={async () => {
-                                            await Promise.all([fetch_assignments(), reload_lender_api()]);
+                                            await fetch_assignments();
                                         }}
                                         onEditProfile={onEditProfile}
                                         refreshKey={refreshKey}
