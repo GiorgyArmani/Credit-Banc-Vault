@@ -166,8 +166,8 @@ export function BulkOnboarding({
                   invalidate();
                 }}
                 icon={<LinkIcon className="h-3.5 w-3.5" />}
-                label="Referral partner"
-                sub="Tier 1"
+                label="Tier 1"
+                sub="Refers clients"
               />
               <TierButton
                 active={tier === "deal_desk"}
@@ -176,20 +176,22 @@ export function BulkOnboarding({
                   invalidate();
                 }}
                 icon={<Briefcase className="h-3.5 w-3.5" />}
-                label="Deal desk partner"
-                sub="Tier 2"
+                label="Tier 2"
+                sub="Submits deals"
               />
             </div>
             <p className="mt-2 text-xs text-slate-500 leading-relaxed">
               {withDealDesk ? (
                 <>
-                  They get the deal-desk email and a partner workspace, and sign
-                  a W-9 and add a voided check before the desk opens. Anyone
-                  already on the desk is skipped — a partner already invited as
-                  tier 1 is <b>included</b>, which is how you promote them.
+                  Tier 2 partners are invited to the vault to submit their own
+                  deals. They get the Tier 2 email and sign a W-9 and add a
+                  voided check before they can submit. Anyone already on Tier 2
+                  is skipped — a partner already invited as Tier 1 is{" "}
+                  <b>included</b>, which is how you promote them.
                 </>
               ) : (
                 <>
+                  Tier 1 partners are invited to the vault to send referrals.
                   They get the activation email and a dashboard for the clients
                   they refer. No paperwork. Anyone already on the portal is
                   skipped — use <b>Re-send link</b> on their row instead.
@@ -327,7 +329,7 @@ export function BulkOnboarding({
                       <Send className="h-4 w-4" />
                     )}
                     {withDealDesk
-                      ? `Send ${ready.length} deal-desk invite${ready.length === 1 ? "" : "s"}`
+                      ? `Send ${ready.length} Tier 2 invite${ready.length === 1 ? "" : "s"}`
                       : `Send ${ready.length} invite${ready.length === 1 ? "" : "s"}`}
                   </button>
                   {progress && (

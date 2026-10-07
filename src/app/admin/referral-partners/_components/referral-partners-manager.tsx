@@ -202,8 +202,8 @@ export function ReferralPartnersManager({
           invited = true;
           setNotice(
             withDealDesk
-              ? `${stored} created and invited as a deal desk partner — they'll sign a W-9 and add a voided check before the desk opens.`
-              : `${stored} created and invited — sign-in link sent to ${email}.`
+              ? `${stored} created and invited as a Tier 2 partner — they'll sign a W-9 and add a voided check before they can submit deals.`
+              : `${stored} created and invited as a Tier 1 partner — sign-in link sent to ${email}.`
           );
         } else {
           setError(
@@ -328,8 +328,8 @@ export function ReferralPartnersManager({
       });
       setNotice(
         withDealDesk
-          ? `${r.name} invited as a deal desk partner — they'll sign a W-9 and add a voided check before the desk opens.`
-          : `Invite sent to ${r.email}.`
+          ? `${r.name} invited as a Tier 2 partner — they'll sign a W-9 and add a voided check before they can submit deals.`
+          : `${r.name} invited as a Tier 1 partner — sign-in link sent to ${r.email}.`
       );
     });
   }
@@ -353,14 +353,14 @@ export function ReferralPartnersManager({
     startTransition(async () => {
       const res = await setPartnerDealDesk(r.id, enabled);
       if (!res.success) {
-        setError(res.error || "Could not update the deal desk");
+        setError(res.error || "Could not change the partner tier");
         return;
       }
       patchRow(r.id, { deal_desk_enabled: enabled });
       setNotice(
         enabled
-          ? `${r.name} can now create and work their own deals.`
-          : `${r.name} is back to referrals only.`
+          ? `${r.name} is now Tier 2 — they can submit their own deals.`
+          : `${r.name} is back to Tier 1 — referrals only.`
       );
     });
   }
@@ -466,7 +466,7 @@ export function ReferralPartnersManager({
             disabled={isPending || !newName.trim() || !newEmail.trim()}
             title={
               newEmail.trim()
-                ? "Create, then email a sign-in link"
+                ? "Create, then invite to the vault as Tier 1 (sends referrals)"
                 : "Add an email to invite"
             }
             className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl transition-colors disabled:opacity-50"
@@ -476,7 +476,7 @@ export function ReferralPartnersManager({
             ) : (
               <Mail className="h-4 w-4" />
             )}
-            Add &amp; invite
+            Add &amp; invite as Tier 1
           </button>
 
           {/* The same thing, for the partner we already know will submit deals.
@@ -489,7 +489,7 @@ export function ReferralPartnersManager({
             disabled={isPending || !newName.trim() || !newEmail.trim()}
             title={
               newEmail.trim()
-                ? "Create, invite, and open the deal desk — they sign a W-9 and add a voided check before it unlocks"
+                ? "Create and invite to the vault as Tier 2 (submits deals) — they sign a W-9 and add a voided check first"
                 : "Add an email to invite"
             }
             className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold rounded-xl transition-colors disabled:opacity-50"
@@ -499,7 +499,7 @@ export function ReferralPartnersManager({
             ) : (
               <Briefcase className="h-4 w-4" />
             )}
-            Add &amp; invite as deal desk
+            Add &amp; invite as Tier 2
           </button>
 
           <span className="text-[11px] text-slate-400">
@@ -527,7 +527,7 @@ export function ReferralPartnersManager({
           {(
             [
               ["all", "All"],
-              ["portal", "Portal on"],
+              ["portal", "Invited"],
               ["no-link", "No link"],
               ["unpriced", "Unpriced"],
             ] as [Filter, string][]
@@ -549,7 +549,7 @@ export function ReferralPartnersManager({
 
       <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
         <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">
-          {activeCount} active · {portalCount} with portal · {rows.length} total
+          {activeCount} active · {portalCount} invited · {rows.length} total
         </p>
         {filtered.length > 0 && (
           <p className="text-[11px] font-semibold text-slate-400">
@@ -676,7 +676,7 @@ export function ReferralPartnersManager({
                       {r.portal_enabled &&
                         (r.password_set_at ? (
                           <span className="hidden sm:inline px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide rounded-full bg-emerald-50 text-emerald-600">
-                            Portal
+                            {r.deal_desk_enabled ? "Tier 2" : "Tier 1"}
                           </span>
                         ) : (
                           <span
@@ -960,10 +960,10 @@ function PartnerDetail({
               onClick={onInvite}
               disabled={isPending || !row.email}
               className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg disabled:opacity-50"
-              title={row.email ? "Create the login and email a sign-in link" : "Add an email first"}
+              title={row.email ? "Invite to the vault as Tier 1 (sends referrals)" : "Add an email first"}
             >
               <Mail className="h-4 w-4" />
-              Invite to portal
+              Invite as Tier 1
             </button>
             {/* Skips the invite → toggle two-step for a partner we already know
                 will be submitting files. Same provisioning, one click earlier. */}
@@ -973,12 +973,12 @@ function PartnerDetail({
               className="inline-flex items-center gap-1.5 px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold rounded-lg disabled:opacity-50"
               title={
                 row.email
-                  ? "Invite and open the deal desk — they sign a W-9 and add a voided check before it unlocks"
+                  ? "Invite to the vault as Tier 2 (submits deals) — they sign a W-9 and add a voided check first"
                   : "Add an email first"
               }
             >
               <Briefcase className="h-4 w-4" />
-              Invite as deal desk
+              Invite as Tier 2
             </button>
           </>
         )}
@@ -1002,7 +1002,7 @@ function PartnerDetail({
           <div className="min-w-[240px] flex-1">
             <div className="flex items-center gap-2">
               <Briefcase className="h-4 w-4 text-violet-600" />
-              <span className="text-sm font-bold text-slate-900">Deal desk</span>
+              <span className="text-sm font-bold text-slate-900">Tier 2 — submits deals</span>
               {row.deal_desk_enabled && (
                 <span className="rounded-md bg-violet-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-violet-800">
                   Enabled
@@ -1017,7 +1017,7 @@ function PartnerDetail({
             {!row.portal_enabled && (
               <p className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-semibold text-amber-600">
                 <Link2Off className="h-3.5 w-3.5" />
-                Invite them to the portal first — the deal desk lives inside it
+                Invite them as Tier 1 first, then move them up to Tier 2
               </p>
             )}
           </div>
@@ -1033,7 +1033,7 @@ function PartnerDetail({
             title={
               row.portal_enabled
                 ? undefined
-                : "Invite this partner to the portal before enabling the deal desk"
+                : "Invite this partner as Tier 1 before moving them to Tier 2"
             }
           >
             {isPending ? (
@@ -1041,7 +1041,7 @@ function PartnerDetail({
             ) : (
               <Briefcase className="h-4 w-4" />
             )}
-            {row.deal_desk_enabled ? "Turn off deal desk" : "Enable deal desk"}
+            {row.deal_desk_enabled ? "Move back to Tier 1" : "Move up to Tier 2"}
           </button>
         </div>
 
@@ -1216,7 +1216,7 @@ function PartnerCompliance({ row }: { row: PartnerRow }) {
           </span>
         ) : (
           <span className="rounded-md bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800">
-            Desk locked
+            Awaiting paperwork
           </span>
         )}
       </div>
@@ -1279,7 +1279,7 @@ function PartnerCompliance({ row }: { row: PartnerRow }) {
 
       {grandfathered && (
         <p className="mt-2 text-[11px] text-amber-600">
-          Had the desk before the paperwork gate existed — chase the W-9 and voided
+          Was on Tier 2 before the paperwork gate existed — chase the W-9 and voided
           check by hand.
         </p>
       )}

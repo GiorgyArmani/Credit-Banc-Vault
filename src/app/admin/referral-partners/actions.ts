@@ -819,7 +819,7 @@ export async function setPartnerDealDesk(
   if (!partner.user_id) {
     return {
       success: false,
-      error: "Invite this partner to the portal first — the deal desk lives inside it.",
+      error: "Invite this partner as Tier 1 first, then move them up to Tier 2.",
     };
   }
 
@@ -856,7 +856,7 @@ async function applyDealDesk(
     if (enabled) {
       const email = (partner.email ?? "").trim().toLowerCase();
       if (!email) {
-        return { success: false, error: "Add an email address before enabling the deal desk" };
+        return { success: false, error: "Add an email address before moving this partner to Tier 2" };
       }
 
       const [firstName, ...restName] = (partner.name || "").split(/\s+/);
@@ -957,7 +957,7 @@ async function applyDealDesk(
     return { success: true, name: partner.name ?? undefined };
   } catch (err: any) {
     console.error("[referral-partners] applyDealDesk threw:", err);
-    return { success: false, error: err?.message || "Could not update the deal desk" };
+    return { success: false, error: err?.message || "Could not change the partner tier" };
   }
 }
 
@@ -1171,11 +1171,11 @@ export async function preparePartnerInvites(
       continue;
     }
     if (withDealDesk && partner.deal_desk_enabled === true) {
-      skipped.push({ name: partner.name, reason: "already on the deal desk" });
+      skipped.push({ name: partner.name, reason: "already Tier 2" });
       continue;
     }
     if (!withDealDesk && partner.portal_enabled === true) {
-      skipped.push({ name: partner.name, reason: "already has portal access" });
+      skipped.push({ name: partner.name, reason: "already invited" });
       continue;
     }
 

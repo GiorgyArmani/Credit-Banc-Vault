@@ -118,7 +118,7 @@ async function requireDealDeskPartner(): Promise<
   if (!partner) return { error: "This account isn't linked to a referral partner." };
   if (partner.portal_enabled === false) return { error: "Portal access is paused for this account." };
   if (!partner.deal_desk_enabled) {
-    return { error: "This step is only for partners with the deal desk enabled." };
+    return { error: "This step is only for Tier 2 partners." };
   }
 
   return { partner };

@@ -213,7 +213,7 @@ export function PartnerOnboardingWizard({
             </h2>
             <p className="mt-2 text-sm leading-relaxed text-cb-ink/60">
               {isDealDesk
-                ? "Your paperwork is on file. The deal desk is open — start a client whenever you're ready."
+                ? "Your paperwork is on file. You can now submit deals in the vault — start a client whenever you're ready."
                 : "Your account is ready. Share your link and we'll take it from there."}
             </p>
           </div>

@@ -40,7 +40,7 @@ export function PartnerOnboardingScreen({
     <div className="mx-auto max-w-xl px-4 py-14 md:py-20">
       <div className="rounded-3xl border border-black/5 bg-white p-8 shadow-sm md:p-10">
         <p className="mb-3 text-xs font-bold uppercase tracking-[0.2em] text-cb-mint">
-          Referral Partner Program
+          {isDealDesk ? "Referral Partner · Tier 2" : "Referral Partner · Tier 1"}
         </p>
         <h1 className="font-manrope text-3xl font-extrabold tracking-tight text-cb-ink">
           Welcome, {firstName}.
@@ -73,7 +73,7 @@ export function PartnerOnboardingScreen({
               </li>
               <li className="flex gap-2.5">
                 <span className="font-bold text-cb-mint">2.</span>
-                Work the deal through your own desk — documents, lenders, pipeline.
+                Submit and work the deal in the vault — documents, lenders, pipeline.
               </li>
               <li className="flex gap-2.5">
                 <span className="font-bold text-cb-mint">3.</span>
