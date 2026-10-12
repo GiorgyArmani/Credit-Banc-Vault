@@ -46,6 +46,7 @@ import {
   submissionStatusFromResults,
   type SubmissionStatus,
 } from "./rules";
+import { recordStatusEvent, type StatusEventSource } from "./status-events";
 
 export interface SubmissionRow {
   id: string;
@@ -441,7 +442,8 @@ export async function submitApplication(args: {
       provider,
       { id: inserted.id, assignment_id: assignmentId, created_at: inserted.created_at },
       created.initialStatus,
-      null
+      null,
+      "send"
     );
     lenderStatus = applied.body.status ?? null;
   }
@@ -585,7 +587,9 @@ async function notifyLenderNeedsInfo(
 export async function refreshSubmissionStatus(
   admin: AdminClient,
   provider: LenderApiProvider,
-  submission: SubmissionRow
+  submission: SubmissionRow,
+  /** How this refresh was triggered — recorded on the status timeline. */
+  source: StatusEventSource = "refresh"
 ): Promise<EngineResult> {
   if (!submission.external_id) {
     return { httpStatus: 409, body: { error: "This submission never reached the lender." } };
@@ -601,13 +605,13 @@ export async function refreshSubmissionStatus(
         body: { error: `${provider.displayName} has not reported a decision yet — it will arrive on its own.` },
       };
     }
-    return applyLenderStatus(admin, provider, submission, submission.last_status, submission.last_status);
+    return applyLenderStatus(admin, provider, submission, submission.last_status, submission.last_status, source);
   }
 
   const fetched = await provider.fetchStatus(submission.external_id);
   if (!fetched.ok) return { httpStatus: 502, body: { error: fetched.error ?? "Could not fetch status." } };
 
-  return applyLenderStatus(admin, provider, submission, fetched.raw, submission.last_status);
+  return applyLenderStatus(admin, provider, submission, fetched.raw, submission.last_status, source);
 }
 
 /**
@@ -623,7 +627,7 @@ export async function applyPushedStatus(
   if (!submission.external_id) {
     return { httpStatus: 409, body: { error: "This submission never reached the lender." } };
   }
-  return applyLenderStatus(admin, provider, submission, raw, submission.last_status);
+  return applyLenderStatus(admin, provider, submission, raw, submission.last_status, "webhook");
 }
 
 /** Records a lender status on the submission and applies it to the assignment (verdict / needs-info). */
@@ -632,9 +636,14 @@ async function applyLenderStatus(
   provider: LenderApiProvider,
   submission: { id: string; assignment_id: string; created_at: string },
   raw: unknown,
-  previousRaw: unknown
+  previousRaw: unknown,
+  source: StatusEventSource
 ): Promise<EngineResult> {
   const normalized = provider.interpretStatus(raw);
+  // The timeline entry is written whatever happens below — the lender said
+  // this even when it could not be applied to the file.
+  const record = (applied: string) =>
+    recordStatusEvent(admin, { submissionId: submission.id, providerId: provider.id, status: normalized, source, applied });
   // Compare by meaning, not raw JSON: the lender's raw payload can carry
   // volatile fields (timestamps, ids) that change on every poll without the
   // status itself changing, which would otherwise fire "needs info" every time.
@@ -650,7 +659,10 @@ async function applyLenderStatus(
     .select("id, client_id, status, submitted_at")
     .eq("id", submission.assignment_id)
     .maybeSingle();
-  if (!assignment) return { httpStatus: 404, body: { error: "Assignment not found." } };
+  if (!assignment) {
+    await record("none");
+    return { httpStatus: 404, body: { error: "Assignment not found." } };
+  }
 
   // Manually re-submitted after this lead was created: the lead's (old) verdict
   // must not overwrite the new submission. last_status is still stored above.
@@ -668,6 +680,7 @@ async function applyLenderStatus(
     });
     if (!recorded.ok) {
       if (recorded.httpStatus !== 409) {
+        await record("none");
         return { httpStatus: recorded.httpStatus, body: { error: recorded.error, status: normalized } };
       }
       // Already resolved by hand (or by a racing poll) — not an error, just nothing new applied.
@@ -682,6 +695,7 @@ async function applyLenderStatus(
     });
   }
 
+  await record(applied);
   return { httpStatus: 200, body: { status: normalized, applied } };
 }
 

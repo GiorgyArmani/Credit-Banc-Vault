@@ -47,7 +47,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
       console.error(`lender-api webhook: ${provider.id} id lookup failed:`, err instanceof Error ? err.message : "unknown");
       return NextResponse.json({ error: "Retry later" }, { status: 503 });
     }
-    if (!externalId) return NextResponse.json({ ok: true });
+    if (!externalId) {
+      console.info(`lender-api webhook: ${provider.id} callback matched nothing at the lender — ignored`);
+      return NextResponse.json({ ok: true });
+    }
   } else {
     externalId = provider.webhook.extractExternalId(body);
     if (!externalId) return NextResponse.json({ error: "Bad request" }, { status: 400 });
@@ -56,12 +59,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
   const admin = createAdminClient();
   const submission = await findSubmissionByExternalId(admin, provider.id, externalId);
   // Unknown id: acknowledge so the lender doesn't retry forever; reveal nothing.
-  if (!submission) return NextResponse.json({ ok: true });
+  if (!submission) {
+    // Ids are the lender's own, not personal data — and without this line a
+    // callback for a deal we don't hold is indistinguishable from one applied.
+    console.info(`lender-api webhook: ${provider.id} callback for ${externalId} — not one of our submissions, ignored`);
+    return NextResponse.json({ ok: true });
+  }
 
   try {
     let result;
     if (provider.fetchStatus) {
-      result = await refreshSubmissionStatus(admin, provider, submission);
+      result = await refreshSubmissionStatus(admin, provider, submission, "webhook");
     } else {
       const pushed = provider.webhook.statusFromBody?.(body) ?? null;
       // An event that carries no decision (e.g. draw information) — nothing to apply.
@@ -70,6 +78,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
     }
     if (result.httpStatus >= 400) {
       console.error(`lender-api webhook: refresh for ${provider.id} returned ${result.httpStatus}`);
+    } else {
+      // Stage + what we did with it: the only trace of what a callback changed.
+      const applied = result.body as { status?: { kind?: string; stage?: string }; applied?: string } | undefined;
+      console.info(
+        `lender-api webhook: ${provider.id} ${externalId} is ${applied?.status?.stage ?? "unknown"} ` +
+          `(${applied?.status?.kind ?? "unknown"}), applied: ${applied?.applied ?? "none"}`
+      );
     }
     // Our own failure: answer 5xx so the lender retries (Loot: 3 tries at
     // 1/2/4 min). Applying is idempotent — an unchanged status never

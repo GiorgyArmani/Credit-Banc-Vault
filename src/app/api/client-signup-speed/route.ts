@@ -27,6 +27,7 @@ import { generateOnboardingMagicLink, pushMagicLinkToGhl } from '@/lib/magic-lin
 import { linkAffiliateLeadToVault } from '@/lib/affiliates';
 import { attributeReferralPartnerToVault, resolvePartnerAssignedFieldId } from '@/lib/referral-partner-attribution';
 import { attachAdminOversightToPartnerDeal } from '@/lib/partner-deal-oversight';
+import { attachStandingFollowers } from '@/lib/standing-followers';
 
 const supabase_admin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -798,6 +799,13 @@ export async function POST(request: Request) {
       partnerName: attributed_partner?.name ?? advisor_name,
     });
 
+    // Standing followers of the creator (e.g. Matt on everything the booking
+    // agent opens). Keyed by advisor_id — the same value written to created_by.
+    const standing_follower_emails = await attachStandingFollowers(supabase_admin, {
+      vaultId: vault_id,
+      creatorAdvisorId: advisor_id,
+    });
+
     // ========== STEP 4.5: SEED INITIAL PIPELINE STATUS ==========
     await supabase_admin.from('loan_status_history').insert({
       client_vault_id: vault_id,
@@ -867,6 +875,7 @@ export async function POST(request: Request) {
         advisor_email: advisor_email || 'support@creditbanc.io',
         advisor_phone: advisor_phone || undefined,
         advisor_cc_email: advisor_email || undefined,
+        advisor_cc_emails: standing_follower_emails,
         requested_documents: [],
         login_url: `${process.env.NEXT_PUBLIC_APP_URL}/auth/login`,
       });

@@ -4,7 +4,8 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "@/lib/toast";
 import { useConnectedLenders } from "@/components/lender-api/use-connected-lenders";
-import { connectedLender } from "@/lib/lender-api/connected";
+import { LenderApiActivityDialog } from "@/components/lender-api/lender-api-activity-dialog";
+import { connectedLender, type ConnectedLender } from "@/lib/lender-api/connected";
 import { LOAN_TYPES } from "@/data/loan-types";
 import {
   AlertDialog,
@@ -345,6 +346,7 @@ export default function LenderGuidelinesManager() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   // Lenders we can submit to by API in this environment (badge + filter tile).
   const connectedLenders = useConnectedLenders();
+  const [apiActivityLender, setApiActivityLender] = useState<ConnectedLender | null>(null);
   const [editingGroup, setEditingGroup] = useState<EditingGroup | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   // Pending destructive actions, held so they can be confirmed in-app rather
@@ -854,12 +856,14 @@ export default function LenderGuidelinesManager() {
                           </span>
                         )}
                         {connectedLender(connectedLenders, group.name) && (
-                          <span
-                            title="Deals can be submitted to this lender directly by API"
-                            className="flex-shrink-0 text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded bg-sky-100 text-sky-700"
+                          <button
+                            type="button"
+                            onClick={() => setApiActivityLender(connectedLender(connectedLenders, group.name))}
+                            title="Deals can be submitted to this lender directly by API — click to see the deals sent and their status"
+                            className="flex-shrink-0 text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded bg-sky-100 text-sky-700 hover:bg-sky-200 transition-colors"
                           >
-                            ⚡ API connected
-                          </span>
+                            ⚡ API deals
+                          </button>
                         )}
                       </div>
                       <div className="flex flex-wrap gap-1 mt-2">
@@ -1150,6 +1154,15 @@ export default function LenderGuidelinesManager() {
             </div>
           </div>
         </div>
+      )}
+
+      {apiActivityLender && (
+        <LenderApiActivityDialog
+          providerId={apiActivityLender.provider_id}
+          displayName={apiActivityLender.display_name}
+          open
+          onOpenChange={(open) => { if (!open) setApiActivityLender(null); }}
+        />
       )}
 
       {/* Remove one program from the lender being edited. Applied on save, so the

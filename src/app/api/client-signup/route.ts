@@ -12,6 +12,7 @@ import { linkAffiliateLeadToVault } from '@/lib/affiliates';
 import { attributeReferralPartnerToVault, resolvePartnerAssignedFieldId } from '@/lib/referral-partner-attribution';
 import { attachAdminOversightToPartnerDeal } from '@/lib/partner-deal-oversight';
 import { saveClientOwners } from '@/lib/owners';
+import { getStandingFollowerIds } from '@/lib/standing-followers';
 
 /**
  * Supabase admin client with elevated privileges
@@ -1214,14 +1215,17 @@ export async function POST(request: Request) {
     }
 
     // ========== STEP 6.4: SAVE FOLLOWERS (additional advisors that should get all client emails) ==========
-    // Excludes the primary advisor and de-dupes the requested ids.
-    const requested_follower_ids: string[] = Array.isArray(body.follower_advisor_ids)
-      ? Array.from(new Set(
-          body.follower_advisor_ids.filter(
+    // Excludes the primary advisor and de-dupes the requested ids. The creator's
+    // standing followers are merged in so they get the same treatment (DB row,
+    // GHL follower + tag, welcome-email CC) as the ones picked on the form.
+    const requested_follower_ids: string[] = Array.from(new Set([
+      ...(Array.isArray(body.follower_advisor_ids)
+        ? body.follower_advisor_ids.filter(
             (id: any) => typeof id === 'string' && id && id !== body.advisor_id,
-          ),
-        ))
-      : [];
+          )
+        : []),
+      ...getStandingFollowerIds(advisor_row.id),
+    ]));
 
     let follower_emails: string[] = [];
     if (requested_follower_ids.length > 0) {
