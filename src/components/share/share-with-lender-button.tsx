@@ -375,8 +375,9 @@ export function ShareWithLenderButton({
                   Keep this link up to date
                 </span>
                 <span className="mt-0.5 block text-[11px] leading-relaxed text-slate-500">
-                  New files in these same categories are added as they&apos;re
-                  uploaded. Anything you untick above stays out.
+                  Every new file uploaded to this business&apos;s vault is
+                  added automatically — any document type. Anything you untick
+                  above stays out.
                 </span>
               </span>
             </label>

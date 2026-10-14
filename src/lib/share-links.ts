@@ -43,13 +43,12 @@ export interface ShareLinkRow {
   /** Specific file ids this link exposes. Takes precedence over codes when set;
    *  null = fall back to selected_doc_codes (or all approved). */
   selected_document_ids: string[] | null;
-  /** Opt-in: files uploaded AFTER this link was minted join it automatically,
-   *  bounded by the two arrays below. See migration 20260813. */
+  /** Files uploaded AFTER this link was minted join it automatically — any
+   *  category, any group. See migration 20260813. */
   auto_include_new: boolean;
-  /** Categories eligible for auto-inclusion. NULL/empty disables it. */
+  /** Legacy scope from when auto-inclusion was limited to the shared
+   *  categories/groups. Still on old rows, no longer read or written. */
   auto_include_doc_codes: string[] | null;
-  /** Document groups eligible for auto-inclusion of new files (the accounts for
-   *  statements, the years for tax returns…). NULL = no group restriction. */
   auto_include_group_ids: string[] | null;
   /** Stamp every file on this link with the Credit Banc mark. Default true. */
   watermark_enabled: boolean;
@@ -209,58 +208,6 @@ export function generateShareToken(): string {
   return randomBytes(32).toString("base64url");
 }
 
-/**
- * Work out what "new files like these" means for a link, from the files staff
- * actually ticked.
- *
- * Runs at mint time rather than at resolve time on purpose: the answer has to
- * reflect the intent expressed WHEN THE LINK WAS MADE. Deriving it live would
- * let today's document set redefine what a link sent last week is allowed to
- * expose.
- *
- * Returns doc codes plus the groups involved. The group list is null — meaning
- * "no restriction" — whenever any shared file was UNGROUPED, because staff
- * sharing unsorted files have not expressed a group intent and narrowing to
- * whichever ones happened to be sorted would quietly drop the rest.
- */
-async function deriveAutoIncludeScope(
-  supabase: ReturnType<typeof createAdminClient>,
-  document_ids: string[]
-): Promise<{ doc_codes: string[]; group_ids: string[] | null }> {
-  if (document_ids.length === 0) return { doc_codes: [], group_ids: null };
-
-  const { data, error } = await supabase
-    .from("user_documents")
-    .select("doc_code, category, document_group_id")
-    .in("id", document_ids);
-
-  if (error) {
-    console.error("deriveAutoIncludeScope error:", error);
-    // Empty codes disable auto-inclusion. Failing CLOSED is the only safe
-    // direction here — a broken lookup must never widen a link.
-    return { doc_codes: [], group_ids: null };
-  }
-
-  const doc_codes = new Set<string>();
-  const group_ids = new Set<string>();
-  let shares_ungrouped_file = false;
-
-  for (const d of (data ?? []) as any[]) {
-    const code = (d.doc_code ?? d.category ?? null) as string | null;
-    if (!code) continue;
-    doc_codes.add(code);
-
-    if (d.document_group_id) group_ids.add(d.document_group_id as string);
-    else shares_ungrouped_file = true;
-  }
-
-  return {
-    doc_codes: Array.from(doc_codes),
-    group_ids:
-      shares_ungrouped_file || group_ids.size === 0 ? null : Array.from(group_ids),
-  };
-}
-
 export async function createShareLink(params: {
   client_id: string;
   business_profile_id: string | null;
@@ -271,7 +218,7 @@ export async function createShareLink(params: {
   /** Exact file ids to expose. Always set by the share modal; null only on
    *  legacy rows, which fall back to "every approved doc". */
   selected_document_ids: string[] | null;
-  /** Opt-in: keep the link current as new files land in the shared categories. */
+  /** Keep the link current: every file uploaded after mint joins it. */
   auto_include_new?: boolean;
   /** Stamp every file with the CB mark. Defaults to true when omitted. */
   watermark_enabled?: boolean;
@@ -282,12 +229,7 @@ export async function createShareLink(params: {
     Date.now() + params.expires_in_days * 24 * 60 * 60 * 1000
   ).toISOString();
 
-  // Only compute the scope when the flag is on — otherwise the columns stay
-  // NULL and the link is a pure snapshot, byte-identical to pre-feature rows.
   const auto_include_new = params.auto_include_new === true;
-  const scope = auto_include_new
-    ? await deriveAutoIncludeScope(supabase, params.selected_document_ids ?? [])
-    : null;
 
   const { data, error } = await supabase
     .from("document_share_links")
@@ -301,8 +243,6 @@ export async function createShareLink(params: {
       expires_at,
       selected_document_ids: params.selected_document_ids,
       auto_include_new,
-      auto_include_doc_codes: scope?.doc_codes ?? null,
-      auto_include_group_ids: scope?.group_ids ?? null,
       // Only an explicit false turns stamping off — an omitted or malformed
       // field leaves the link protected.
       watermark_enabled: params.watermark_enabled !== false,
@@ -446,7 +386,7 @@ export async function listShareableFiles(
  * after the link was made still isn't shared; a doc shared before approval
  * stays shared). Legacy links with no stored selection fall back to the old
  * "every approved doc for this business" behavior. Files uploaded AFTER the
- * link was minted join it only when auto-include is on.
+ * link was minted — of any type — join it only when auto-include is on.
  *
  * Returns null when the token is unknown, revoked, or expired.
  */
@@ -533,14 +473,11 @@ async function loadShareContext(
     (required ?? []).map((r: any) => [r.code as string, r.label as string])
   );
 
-  // Auto-inclusion scope. Empty codes means the link is a snapshot even if the
-  // flag somehow got set — deriveAutoIncludeScope fails closed to exactly that.
+  // Live links follow the vault: every file uploaded after mint joins,
+  // whatever its category or group. auto_include_doc_codes / _group_ids are
+  // still on older rows but no longer narrow anything — links were deliberately
+  // widened so a newly requested document type reaches lenders too.
   const auto_include_new = link.auto_include_new === true;
-  const auto_codes = (link.auto_include_doc_codes as string[] | null) ?? null;
-  const auto_code_set =
-    auto_include_new && auto_codes && auto_codes.length > 0 ? new Set(auto_codes) : null;
-  const auto_groups = (link.auto_include_group_ids as string[] | null) ?? null;
-  const auto_group_set = auto_groups ? new Set(auto_groups) : null;
   const link_created_ms = new Date(link.created_at as string).getTime();
 
   // The client's uploaded files, narrowed to this business tab and then to the
@@ -555,26 +492,18 @@ async function loadShareContext(
   /**
    * Does this file join the link through auto-inclusion?
    *
-   * Four conditions, all required:
-   *   1. the link opted in and named at least one category;
-   *   2. the file is in one of those categories;
-   *   3. it was uploaded AFTER the link was minted — a file that existed at mint
-   *      time and was NOT ticked was deliberately withheld, and must stay
-   *      withheld forever. This is the condition that keeps auto-include from
-   *      quietly undoing staff's unticking;
-   *   4. it sits in one of the shared groups (when the link recorded a group
-   *      restriction at all).
+   * Two conditions, both required:
+   *   1. the link opted in;
+   *   2. the file was uploaded AFTER the link was minted — a file that existed
+   *      at mint time and was NOT ticked was deliberately withheld, and must
+   *      stay withheld forever. This is the condition that keeps auto-include
+   *      from quietly undoing staff's unticking.
+   * Business scope and the rejected filter are applied by the caller.
    */
-  function joins_by_auto_include(d: any, code: string): boolean {
-    if (!auto_code_set || !auto_code_set.has(code)) return false;
+  function joins_by_auto_include(d: any): boolean {
+    if (!auto_include_new) return false;
     const uploaded_ms = d.upload_date ? new Date(d.upload_date).getTime() : NaN;
-    if (!Number.isFinite(uploaded_ms) || uploaded_ms <= link_created_ms) return false;
-    if (auto_group_set) {
-      // An ungrouped file has no group to match, so a link that named groups
-      // does not pick it up. It reaches the lender once someone files it.
-      if (!d.document_group_id || !auto_group_set.has(d.document_group_id)) return false;
-    }
-    return true;
+    return Number.isFinite(uploaded_ms) && uploaded_ms > link_created_ms;
   }
 
   const eligible = (docs ?? []).filter((d: any) => {
@@ -589,11 +518,11 @@ async function loadShareContext(
     if (d.status === "rejected") return false;
 
     // The stored file list is the whole gate for what existed at mint time...
-    if (id_set) return id_set.has(d.id) || joins_by_auto_include(d, code);
+    if (id_set) return id_set.has(d.id) || joins_by_auto_include(d);
 
     // ...legacy links keep their category-level behaviour, plus auto-include if
     // it was ever switched on for one.
-    if (joins_by_auto_include(d, code)) return true;
+    if (joins_by_auto_include(d)) return true;
     if (!approved_codes.has(code)) return false;
     if (code_set) return code_set.has(code);
     return true;

@@ -62,9 +62,8 @@ export async function POST(request: Request) {
       );
     }
 
-    // Opt-in only, and only meaningful alongside an explicit file selection —
-    // the categories that stay live are derived from what was picked, so a
-    // legacy-shaped request with no document_ids has nothing to derive from.
+    // Only meaningful alongside an explicit file selection: "new" means
+    // uploaded after mint, and the picked list is what existed at mint.
     const auto_include_new = body?.auto_include_new === true && !!selected_document_ids;
 
     const link = await createShareLink({

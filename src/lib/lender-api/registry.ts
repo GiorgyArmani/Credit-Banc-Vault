@@ -13,8 +13,10 @@ import { fundkite } from "./providers/fundkite";
 import { smartbiz } from "./providers/smartbiz";
 import { onewest } from "./providers/onewest";
 import { idea } from "./providers/idea";
+import { vital } from "./providers/vital";
+import { arf } from "./providers/arf";
 
-const PROVIDERS: readonly LenderApiProvider[] = [forwardFinancing, credibly, bitty, loot, fundkite, smartbiz, onewest, idea];
+const PROVIDERS: readonly LenderApiProvider[] = [forwardFinancing, credibly, bitty, loot, fundkite, smartbiz, onewest, idea, vital, arf];
 
 export function providerForLender(lenderName: string | null | undefined): LenderApiProvider | null {
   if (!lenderName) return null;
