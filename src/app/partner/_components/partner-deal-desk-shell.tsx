@@ -29,6 +29,8 @@ export function PartnerDealDeskShell({ children }: { children: React.ReactNode }
       // as an extra item rather than being part of the standard set.
       extraNavItems={[
         { label: "My Referrals", href: "/partner/dashboard", icon: "handshake" },
+        // Recordings of live partner sessions; Tier 1 reaches it from the header.
+        { label: "Webinars", href: "/partner/webinars", icon: "smart_display" },
       ]}
     >
       {children}

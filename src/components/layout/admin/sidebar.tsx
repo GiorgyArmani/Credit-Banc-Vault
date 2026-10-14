@@ -22,6 +22,7 @@ import {
   Handshake,
   UserPlus,
   CreditCard,
+  MonitorPlay,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { Badge } from '@/components/ui/badge'
@@ -161,6 +162,19 @@ export function Sidebar({
             )}>
               <Handshake className={clsx('h-5 w-5 shrink-0', pathname?.startsWith('/admin/referral-partners') ? 'text-emerald-500' : '')} />
               {!collapsed && <span className="text-sm font-semibold">Referral Partners</span>}
+            </div>
+          </Link>
+
+          {/* Partner webinar library — recordings Tier 1 + Tier 2 watch at /partner/webinars. */}
+          <Link href="/admin/webinars" onClick={onMobileClose} title={collapsed ? 'Webinars' : undefined}>
+            <div className={clsx(
+              'flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200 cursor-pointer',
+              pathname?.startsWith('/admin/webinars')
+                ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50'
+            )}>
+              <MonitorPlay className={clsx('h-5 w-5 shrink-0', pathname?.startsWith('/admin/webinars') ? 'text-emerald-500' : '')} />
+              {!collapsed && <span className="text-sm font-semibold">Webinars</span>}
             </div>
           </Link>
 

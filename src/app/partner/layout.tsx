@@ -28,6 +28,7 @@ import { createClient } from '@/lib/supabase/server'
 import { LogoutButton } from '@/components/logout-button'
 import { Toaster } from 'sonner'
 import { PartnerDealDeskShell } from './_components/partner-deal-desk-shell'
+import { PartnerHeaderNav } from './_components/partner-header-nav'
 import { isExternalAdvisor } from '@/lib/auth/roles'
 import { getPartnerOnboardingState, syncPartnerW9 } from '@/lib/partner-onboarding'
 import { isValidUsPhone } from '@/lib/phone'
@@ -148,6 +149,7 @@ export default async function PartnerLayout({ children }: { children: React.Reac
           </Link>
 
           <div className="flex items-center gap-4">
+            <PartnerHeaderNav />
             <span className="hidden sm:inline text-[10px] font-bold uppercase tracking-[0.18em] text-cb-gray">
               Referral Partner
             </span>
