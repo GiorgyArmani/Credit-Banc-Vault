@@ -6,8 +6,6 @@
 
 export const WEBINARS_BUCKET = "webinars";
 export const MAX_WEBINAR_BYTES = 2 * 1024 * 1024 * 1024;
-// Supabase's resumable endpoint requires exactly 6 MB chunks.
-export const TUS_CHUNK_BYTES = 6 * 1024 * 1024;
 // Long enough to pause a 90-minute session and come back to it.
 export const PLAYBACK_URL_TTL_SECONDS = 4 * 60 * 60;
 export const TITLE_MAX = 200;
@@ -34,6 +32,20 @@ export type AdminWebinarView = WebinarRow & {
   video_url: string | null;
   thumbnail_url: string | null;
 };
+
+/**
+ * Where the browser uploads a webinar file: one request to Supabase's DIRECT
+ * storage host (<ref>.storage.supabase.co), which skips the API gateway.
+ * Measured 2026-10-14 on 60 MB: 15.3 MB/s this way vs 3.2 MB/s through the
+ * resumable (6 MB chunk) endpoint, so the user chose speed over resume.
+ * Custom domains / local dev keep the host they were given.
+ */
+export function webinarUploadUrl(supabaseUrl: string, objectPath: string): string {
+  const base = supabaseUrl
+    .replace(/\/+$/, "")
+    .replace(/^https:\/\/([a-z0-9]+)\.supabase\.co$/, "https://$1.storage.supabase.co");
+  return `${base}/storage/v1/object/${WEBINARS_BUCKET}/${objectPath}`;
+}
 
 export function webinarVideoPath(id: string): string {
   return `videos/${id}.mp4`;
@@ -121,14 +133,14 @@ export function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-/** Turn a tus / storage error into something an admin can act on. */
+/** Turn a storage upload error into something an admin can act on. */
 export function describeUploadError(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
   if (/\b413\b|payload too large|maximum allowed size|exceeded the maximum/i.test(msg)) {
     return "Supabase is rejecting files this large — raise the Storage file size limit in the Supabase dashboard (Storage → Settings) to at least 2 GB.";
   }
   if (/\b40[13]\b/.test(msg)) {
-    return "Your session expired or you don't have permission — sign in again and resume the upload.";
+    return "Your session expired or you don't have permission — sign in again and re-upload.";
   }
   if (/\b409\b/.test(msg)) {
     return "A file with this id already exists — cancel and start the upload again.";

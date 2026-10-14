@@ -97,6 +97,8 @@ describe("describeUploadError", () => {
   });
   it("explains an expired session on 401/403", () => {
     expect(describeUploadError(new Error("response code: 401"))).toMatch(/sign in again/i);
+    // Uploads are single-request now: nothing to resume.
+    expect(describeUploadError(new Error("response code: 401"))).not.toMatch(/resume/i);
   });
   it("flags a duplicate object", () => {
     expect(describeUploadError(new Error("response code: 409"))).toMatch(/already exists/i);
@@ -104,5 +106,23 @@ describe("describeUploadError", () => {
   it("falls back to the raw message", () => {
     expect(describeUploadError(new Error("boom"))).toBe("Upload failed: boom");
     expect(describeUploadError("weird")).toBe("Upload failed: weird");
+  });
+});
+
+describe("webinarUploadUrl", () => {
+  it("targets the direct storage host for a standard project URL", async () => {
+    const { webinarUploadUrl } = await import("@/lib/webinars-shared");
+    expect(webinarUploadUrl("https://abcdefghijklmnop.supabase.co/", "videos/x.mp4")).toBe(
+      "https://abcdefghijklmnop.storage.supabase.co/storage/v1/object/webinars/videos/x.mp4"
+    );
+  });
+  it("keeps the given host for custom domains and local dev", async () => {
+    const { webinarUploadUrl } = await import("@/lib/webinars-shared");
+    expect(webinarUploadUrl("https://api.creditbanc.io", "videos/x.mp4")).toBe(
+      "https://api.creditbanc.io/storage/v1/object/webinars/videos/x.mp4"
+    );
+    expect(webinarUploadUrl("http://127.0.0.1:54321", "videos/x.mp4")).toBe(
+      "http://127.0.0.1:54321/storage/v1/object/webinars/videos/x.mp4"
+    );
   });
 });

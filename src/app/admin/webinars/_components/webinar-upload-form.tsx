@@ -17,7 +17,7 @@ import {
   webinarThumbnailPath,
 } from "@/lib/webinars-shared";
 import { createWebinar } from "../actions";
-import { useTusUpload } from "./use-tus-upload";
+import { useDirectUpload } from "./use-direct-upload";
 import { captureThumbnail } from "./capture-thumbnail";
 
 export function WebinarUploadForm() {
@@ -30,9 +30,10 @@ export function WebinarUploadForm() {
   const [sessionDate, setSessionDate] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const { state, start, pause, resume, cancel, reset: resetUpload } = useTusUpload();
+  const { state, start, cancel, reset: resetUpload } = useDirectUpload();
 
-  const busy = state.status === "uploading" || state.status === "paused" || state.status === "error" || saving;
+  // An error is NOT busy: the fields stay editable and Upload retries with a fresh id.
+  const busy = state.status === "uploading" || saving;
   const pct = state.bytesTotal ? Math.round((state.bytesSent / state.bytesTotal) * 100) : 0;
 
   function onPick(f: File | null) {
@@ -64,7 +65,7 @@ export function WebinarUploadForm() {
     const thumbPromise = captureThumbnail(file);
 
     const ok = await start(file, id);
-    if (!ok) return; // cancelled — the hook already reset its state
+    if (!ok) return; // failed (error shown in the progress panel) or cancelled
 
     setSaving(true);
     try {
@@ -155,15 +156,12 @@ export function WebinarUploadForm() {
           <Progress value={pct} />
           <p className="text-xs text-cb-gray">
             {pct}% · {formatBytes(state.bytesSent)} of {formatBytes(state.bytesTotal)}
-            {state.status === "paused" && " · paused"}
           </p>
           {state.error && <p className="text-xs font-semibold text-red-600">{state.error}</p>}
           <div className="flex gap-2">
-            {state.status === "uploading" && <Button type="button" variant="outline" size="sm" onClick={pause}>Pause</Button>}
-            {(state.status === "paused" || state.status === "error") && (
-              <Button type="button" variant="outline" size="sm" onClick={resume}>Resume</Button>
-            )}
-            <Button type="button" variant="ghost" size="sm" onClick={cancel}>Cancel</Button>
+            <Button type="button" variant="ghost" size="sm" onClick={cancel}>
+              {state.status === "error" ? "Dismiss" : "Cancel"}
+            </Button>
           </div>
         </div>
       )}
