@@ -2788,7 +2788,7 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
                             <div className="border rounded-lg overflow-hidden flex flex-col flex-1">
                                 <div className="overflow-y-auto p-4 space-y-3 max-h-[300px]">
                                     {all_doc_types
-                                        .filter(type => !required_docs.some(r => r.code === type.code))
+                                        .filter(type => !scoped_required_docs.some(r => r.code === type.code))
                                         .filter(type =>
                                             type.label.toLowerCase().includes(request_search_query.toLowerCase()) ||
                                             type.code.toLowerCase().includes(request_search_query.toLowerCase())
@@ -2831,7 +2831,7 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
                                         ))
                                     }
 
-                                    {all_doc_types.filter(type => !required_docs.some(r => r.code === type.code)).length === 0 && (
+                                    {all_doc_types.filter(type => !scoped_required_docs.some(r => r.code === type.code)).length === 0 && (
                                         <div className="text-center py-8">
                                             <p className="text-sm text-gray-500">
                                                 All available document types have already been requested.
@@ -2839,9 +2839,9 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
                                         </div>
                                     )}
 
-                                    {all_doc_types.filter(type => !required_docs.some(r => r.code === type.code)).length > 0 &&
+                                    {all_doc_types.filter(type => !scoped_required_docs.some(r => r.code === type.code)).length > 0 &&
                                         all_doc_types.filter(type =>
-                                            !required_docs.some(r => r.code === type.code) &&
+                                            !scoped_required_docs.some(r => r.code === type.code) &&
                                             (type.label.toLowerCase().includes(request_search_query.toLowerCase()) ||
                                                 type.code.toLowerCase().includes(request_search_query.toLowerCase()))
                                         ).length === 0 && (
