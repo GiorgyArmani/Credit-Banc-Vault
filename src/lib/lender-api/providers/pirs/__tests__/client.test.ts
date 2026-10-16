@@ -15,10 +15,14 @@ function doc(id: string, filename: string, docCode: string): OutboundDocument {
   return { documentId: id, filename, url: `https://storage.example/${id}`, docCode, stamped: false };
 }
 
-function route(handlers: Record<string, () => Response>) {
+/** A file of `bytes` behind every storage URL, unless a test routes its HEAD itself. */
+function route(handlers: Record<string, () => Response>, bytes = 1000) {
   fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
     const key = `${init?.method ?? "GET"} ${String(url).replace(API, "")}`;
     const h = handlers[key];
+    if (!h && key.startsWith("HEAD https://storage.example/")) {
+      return new Response(null, { status: 200, headers: { "Content-Length": String(bytes) } });
+    }
     if (!h) throw new Error(`unexpected ${key}`);
     return h();
   });
@@ -99,8 +103,9 @@ describe("uploadDocuments", () => {
     });
     const out = await pirs.uploadDocuments("190841", [doc("d1", "Jan.pdf", "bank_statement"), doc("d2", "App.pdf", "signed_application")]);
     expect(out.map((r) => r.accepted)).toEqual([true, true]);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual([
+    const posts = fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
+    expect(posts).toHaveLength(2);
+    expect(JSON.parse(posts[0][1].body)).toEqual([
       { fileName: "Jan.pdf", description: "Bank statement", url: "https://storage.example/d1" },
     ]);
   });
@@ -109,6 +114,22 @@ describe("uploadDocuments", () => {
     route({ "POST /api/Attachments/Create?fundId=5": () => json(200, [{ fileName: "a.pdf", url: "", exception: "Could not download" }]) });
     const [r] = await pirs.uploadDocuments("5", [doc("d1", "a.pdf", "bank_statement")]);
     expect(r).toMatchObject({ accepted: false, error: "Could not download" });
+  });
+
+  it("never sends a file over PIRS's 25 MB limit", async () => {
+    route({}, 25 * 1024 * 1024 + 1);
+    const [r] = await pirs.uploadDocuments("5", [doc("d1", "big.pdf", "bank_statement")]);
+    expect(r).toMatchObject({ accepted: false, unavailable: true, error: expect.stringContaining("25 MB") });
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+  });
+
+  it("sends a file whose size can't be read and lets PIRS decide", async () => {
+    route({
+      "HEAD https://storage.example/d1": () => new Response(null, { status: 403 }),
+      "POST /api/Attachments/Create?fundId=5": () => json(201, [{ fileName: "a.pdf", url: "" }]),
+    });
+    const [r] = await pirs.uploadDocuments("5", [doc("d1", "a.pdf", "bank_statement")]);
+    expect(r.accepted).toBe(true);
   });
 });
 

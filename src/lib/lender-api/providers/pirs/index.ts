@@ -8,13 +8,16 @@
 // 2026-10-15). BinaryUpload is not used — it renames every file to a GUID.
 //
 // Status: GET Application/Get, plus Application/Options once the deal is
-// approved (the terms). PIRS PUSHES changes to the callbackUrl we send with
-// each application; the push is UNSIGNED, so the URL carries our own secret
-// (?token=…) and verify() checks it. The body is only a signal to re-fetch.
+// approved (the terms; empty until PIRS's underwriter saves approved options,
+// at Offer or later). PIRS can PUSH changes to the callbackUrl we send with
+// each application, but callbacks are DISABLED in production with no ETA
+// (2026-10-16) — PIRS says poll every 15–30 min and stop at Funded, Rejected
+// or MerchantRejected. The push, if it returns, is UNSIGNED, so the URL
+// carries our own secret (?token=…) and verify() checks it.
 
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { LenderApiProvider, OutboundDocument, OutboundDocumentResult } from "../../types";
-import { PIRS_DISPLAY_NAME } from "./constants";
+import { PIRS_DISPLAY_NAME, PIRS_MAX_FILE_BYTES } from "./constants";
 import {
   PIRS_PICKS,
   PIRS_REQUIRED_VAULT_FIELDS,
@@ -27,7 +30,15 @@ import {
   suggestPirsPicks,
   type PirsApplication,
 } from "./mapping";
-import { createApplication, createAttachments, getApplication, getOptions, isPirsConfigured, readPirsModelState } from "./client";
+import {
+  createApplication,
+  createAttachments,
+  getApplication,
+  getOptions,
+  isPirsConfigured,
+  readPirsModelState,
+  remoteFileSize,
+} from "./client";
 
 /** "PIRS", "PIRS Capital", "Pirs Portal" — however the lender row spells it. */
 export function isPirsLenderName(lenderName: string): boolean {
@@ -89,6 +100,11 @@ export const pirs: LenderApiProvider = {
     const results: OutboundDocumentResult[] = [];
     for (const d of docs) {
       const base = { documentId: d.documentId, filename: d.filename, stamped: d.stamped };
+      const size = await remoteFileSize(d.url);
+      if (size !== null && size > PIRS_MAX_FILE_BYTES) {
+        results.push({ ...base, accepted: false, unavailable: true, error: "PIRS takes files up to 25 MB — upload this one in the Pirs Portal" });
+        continue;
+      }
       const res = await createAttachments(externalId, [
         { fileName: d.filename.trim(), description: pirsAttachmentDescription(d.docCode), url: d.url },
       ]);

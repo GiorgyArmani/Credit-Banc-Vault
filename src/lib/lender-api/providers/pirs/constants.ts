@@ -25,25 +25,33 @@ export const PIRS_COMPANY_TYPES = [
   "Estates_And_Trusts",
 ] as const;
 
-/** owner1–owner4: the API has four owner slots. */
+/** owner1–owner4: the API has four owner slots. PIRS stores 3 and 4 but echoes only 1–2 (confirmed 2026-10-16). */
 export const PIRS_MAX_OWNERS = 4;
 
 /**
- * Statuses, as the portal's own deal-list filters group them (sandbox,
- * 2026-10-15). The API returned "Submitted" for a new deal — the same enum
- * name the filters use — so the API is read with these names. Anything not
- * listed reads as in progress.
+ * Statuses. PIRS's complete list (their email, 2026-10-16): PreSubmitted,
+ * Submitted, PreUnderwriting, ReadyForUnderwriting,
+ * ReadyForUnderwriting_Verification, Verification, Rejected, Offer,
+ * MerchantRejected, RequestContract, ContractSent, ContractOut,
+ * SignedContractUploaded, ContractProcessing, MissingStips,
+ * MissingStipsSubmitted, FinalReview, Funded. Approved = Offer or anything
+ * after it (stips are post-offer conditions). Anything not listed reads as in
+ * progress.
  */
 export const PIRS_APPROVED_STATUSES: readonly string[] = [
   "Offer",
+  "RequestContract",
   "ContractSent",
+  "ContractOut",
   "SignedContractUploaded",
   "FinalReview",
   "ContractProcessing",
   "MissingStips",
+  "MissingStipsSubmitted",
   "Funded",
 ];
 export const PIRS_DECLINED_STATUSES: readonly string[] = ["Rejected"];
+/** Portal deal-list filter names, absent from PIRS's API list; kept in case they surface. */
 export const PIRS_MISSING_INFO_STATUSES: readonly string[] = [
   "MissingInfo_Submitted",
   "MissingInfo_Underwriting",
@@ -52,16 +60,19 @@ export const PIRS_MISSING_INFO_STATUSES: readonly string[] = [
 /** The merchant turned PIRS's offer down — not a lender decision. */
 export const PIRS_MERCHANT_REJECTED_STATUS = "MerchantRejected";
 
+/** PIRS's per-file limit (their email, 2026-10-16). No file-type or file-count limit. */
+export const PIRS_MAX_FILE_BYTES = 25 * 1024 * 1024;
+
 /** Display names the portal dashboard uses for the in-progress groups. */
 export const PIRS_STAGE_LABELS: Record<string, string> = {
   Saved: "Saved (not submitted)",
   PreSubmitted: "Submitted",
   Submitted: "Submitted",
   MissingInfoSubmitted_Submitted: "Submitted (missing info sent)",
+  PreUnderwriting: "Pre-underwriting",
   ReadyForUnderwriting: "Underwriting",
   ReadyForUnderwriting_Verification: "Underwriting",
   Verification: "Pre-underwriting",
   MissingInfoSubmitted_Verification: "Pre-underwriting (missing info sent)",
   MissingInfoSubmitted_Underwriting: "Underwriting (missing info sent)",
-  MissingStipsSubmitted: "Pre-underwriting (stips sent)",
 };

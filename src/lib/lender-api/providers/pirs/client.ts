@@ -12,6 +12,10 @@
 //   PIRS_WEBHOOK_TOKEN — the secret WE put in the callbackUrl sent with each
 //                        application (PIRS's pushes are unsigned; see index.ts).
 //                        Unset = no callbackUrl, statuses arrive by Refresh only.
+//                        PIRS has callbacks DISABLED in production, no ETA
+//                        (2026-10-16): there, statuses arrive by Refresh only.
+//
+// RATE LIMIT: 200 requests/minute per IP; no other hard limits (2026-10-16).
 //
 // AUTH: HTTP Basic on every request. JSON in and out.
 //
@@ -153,4 +157,20 @@ export function createAttachments(fundId: string, attachments: PirsAttachment[])
     `/api/Attachments/Create?fundId=${encodeURIComponent(fundId)}`,
     attachments
   );
+}
+
+/**
+ * The file's size in bytes from a HEAD on our own signed URL, or null when
+ * unknown (no Content-Length, or the HEAD failed) — the caller then sends it
+ * and lets PIRS decide.
+ */
+export async function remoteFileSize(url: string): Promise<number | null> {
+  try {
+    const res = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(15_000) });
+    if (!res.ok) return null;
+    const n = Number(res.headers.get("content-length"));
+    return Number.isFinite(n) && n > 0 ? n : null;
+  } catch {
+    return null;
+  }
 }

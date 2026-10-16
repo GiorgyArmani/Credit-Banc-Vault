@@ -187,6 +187,27 @@ describe("status", () => {
     });
   });
 
+  it("reads every status from PIRS's official list (2026-10-16)", () => {
+    for (const status of ["PreSubmitted", "Submitted", "PreUnderwriting", "ReadyForUnderwriting", "ReadyForUnderwriting_Verification", "Verification"]) {
+      expect(interpretPirsStatus({ status }).kind).toBe("in_progress");
+    }
+    for (const status of [
+      "Offer",
+      "RequestContract",
+      "ContractSent",
+      "ContractOut",
+      "SignedContractUploaded",
+      "ContractProcessing",
+      "MissingStips",
+      "MissingStipsSubmitted",
+      "FinalReview",
+      "Funded",
+    ]) {
+      expect(interpretPirsStatus({ status }).kind).toBe("approved");
+    }
+    expect(interpretPirsStatus({ status: "PreUnderwriting" })).toEqual({ kind: "in_progress", stage: "Pre-underwriting" });
+  });
+
   it("never reads a merchant walking away as a lender decline", () => {
     expect(interpretPirsStatus({ status: "MerchantRejected" }).kind).toBe("in_progress");
   });
