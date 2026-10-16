@@ -9,7 +9,13 @@
 // the API: a job only ever says whether the packet reached ARF.
 
 import type { LenderApiProvider, OutboundDocument, OutboundDocumentResult } from "../../types";
-import { ARF_DISPLAY_NAME } from "./constants";
+import {
+  ARF_ALLOWED_EXTENSIONS,
+  ARF_DISPLAY_NAME,
+  ARF_MAX_FILE_BYTES,
+  ARF_MAX_FILES,
+  ARF_MAX_REQUEST_BYTES,
+} from "./constants";
 import {
   ARF_PICKS,
   ARF_REQUIRED_VAULT_FIELDS,
@@ -29,17 +35,51 @@ export function isArfLenderName(lenderName: string): boolean {
 
 const base = (d: OutboundDocument) => ({ documentId: d.documentId, filename: d.filename, stamped: d.stamped });
 
-/** Reads every document; a file we can't read is reported, never silently dropped. */
-async function readFiles(docs: OutboundDocument[]) {
+function extensionOf(filename: string): string {
+  const m = /\.([a-z0-9]+)$/i.exec(filename.trim());
+  return m ? m[1].toLowerCase() : "";
+}
+
+/**
+ * Reads every document ARF can take, then packs them under the per-request
+ * limits (guide §8) — the application first when there is one. A file ARF can
+ * never take is terminal (unavailable); one that only missed the packet stays
+ * retryable through /deal-documents. Nothing is silently dropped.
+ */
+async function packFiles(docs: OutboundDocument[]) {
   const files: ArfFile[] = [];
   const included: OutboundDocument[] = [];
   const failed: OutboundDocumentResult[] = [];
-  for (const d of docs) {
+  const ordered = [...docs.filter((d) => isArfApplication(d.docCode)), ...docs.filter((d) => !isArfApplication(d.docCode))];
+  let total = 0;
+  for (const d of ordered) {
+    if (!ARF_ALLOWED_EXTENSIONS.includes(extensionOf(d.filename))) {
+      failed.push({
+        ...base(d),
+        accepted: false,
+        unavailable: true,
+        error: "ARF takes PDF, JPEG, PNG, TIFF, GIF or BMP only — convert this file to PDF and upload it again",
+      });
+      continue;
+    }
     const file = await fetchFileBytes(d.url);
     if ("error" in file) {
       failed.push({ ...base(d), accepted: false, error: file.error });
       continue;
     }
+    if (file.bytes.length > ARF_MAX_FILE_BYTES) {
+      failed.push({ ...base(d), accepted: false, unavailable: true, error: "ARF takes files up to 25 MB — split or compress this file" });
+      continue;
+    }
+    if (files.length >= ARF_MAX_FILES || total + file.bytes.length > ARF_MAX_REQUEST_BYTES) {
+      failed.push({
+        ...base(d),
+        accepted: false,
+        error: "Didn't fit in this ARF request (30 files / 150 MB) — use Retry failed files once ARF has finished processing",
+      });
+      continue;
+    }
+    total += file.bytes.length;
     files.push({ filename: d.filename, bytes: file.bytes });
     included.push(d);
   }
@@ -66,15 +106,17 @@ export const arf: LenderApiProvider = {
 
   async createApplication(payload, ctx) {
     const { referenceId } = payload as ArfSubmission;
-    const { files, included, failed } = await readFiles(ctx?.documents ?? []);
+    const { files, included, failed } = await packFiles(ctx?.documents ?? []);
 
     // Nothing has been sent yet, so this is a clean "no".
     if (!included.some((d) => isArfApplication(d.docCode))) {
+      const appProblem = failed.find((f) => isArfApplication(ctx?.documents?.find((d) => d.documentId === f.documentId)?.docCode ?? null));
       return {
         ok: false,
         status: 422,
-        error:
-          "ARF reads the deal from the signed application, and it isn't among the files. Select the signed application and send again.",
+        error: appProblem
+          ? `ARF reads the deal from the signed application, and it can't be sent: ${appProblem.error}`
+          : "ARF reads the deal from the signed application, and it isn't among the files. Select the signed application and send again.",
       };
     }
 
@@ -97,7 +139,7 @@ export const arf: LenderApiProvider = {
 
   /** Files that missed the original packet go to the same deal through /deal-documents. */
   async uploadDocuments(externalId, docs: OutboundDocument[]) {
-    const { files, included, failed } = await readFiles(docs);
+    const { files, included, failed } = await packFiles(docs);
     if (files.length === 0) return failed;
 
     const res = await sendDealDocuments(externalId, files);

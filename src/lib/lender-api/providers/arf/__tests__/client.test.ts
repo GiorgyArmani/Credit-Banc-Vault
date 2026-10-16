@@ -211,3 +211,70 @@ describe("arf status", () => {
     expect(arf.webhook).toBeUndefined();
   });
 });
+
+describe("arf packet limits (guide §8)", () => {
+  /** Storage answers `size` bytes per file; ARF answers 202. */
+  function serve(size: (id: string) => number) {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (String(url).startsWith("https://storage.example/")) {
+        const id = String(url).split("/").pop() as string;
+        return new Response(Buffer.alloc(size(id)), { status: 200 });
+      }
+      return json(202, { jobId: JOB, status: "queued" });
+    });
+  }
+  const sentNames = async () => {
+    const call = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/deal-submission"));
+    return (await partsOf(call![1])).map(([, v]) => v.split(":")[0]);
+  };
+
+  it("never sends a file type ARF rejects, and never fetches it", async () => {
+    serve(() => 10);
+    const r = await arf.createApplication({ referenceId: "r" }, { documents: [APP, doc("x", "pl.xlsx"), doc("h", "IMG_1.HEIC")] });
+    expect(r.ok).toBe(true);
+    expect(await sentNames()).toEqual(["application.pdf"]);
+    expect(r.attachments?.filter((a) => !a.accepted).every((a) => a.unavailable && /convert this file to PDF/.test(a.error ?? ""))).toBe(true);
+    expect(fetchMock.mock.calls.some(([url]) => /\/(x|h)$/.test(String(url)))).toBe(false);
+  });
+
+  it("accepts every image type in the guide, any case", async () => {
+    serve(() => 10);
+    const names = ["a.JPG", "b.jpeg", "c.png", "d.tif", "e.TIFF", "f.gif", "g.bmp"];
+    const r = await arf.createApplication({ referenceId: "r" }, { documents: [APP, ...names.map((n, i) => doc(`i${i}`, n))] });
+    expect(r.attachments?.every((a) => a.accepted)).toBe(true);
+  });
+
+  it("refuses a file over 25 MB as terminal", async () => {
+    serve((id) => (id === "big" ? 25 * 1024 * 1024 + 1 : 10));
+    const r = await arf.createApplication({ referenceId: "r" }, { documents: [APP, doc("big", "big.pdf")] });
+    expect(r.attachments?.[1]).toMatchObject({ accepted: false, unavailable: true, error: expect.stringContaining("25 MB") });
+  });
+
+  it("puts the application first and leaves what doesn't fit in 30 files retryable", async () => {
+    serve(() => 10);
+    const statements = Array.from({ length: 30 }, (_, i) => doc(`s${i}`, `s${i}.pdf`));
+    const r = await arf.createApplication({ referenceId: "r" }, { documents: [...statements, APP] });
+    const names = await sentNames();
+    expect(names).toHaveLength(30);
+    expect(names[0]).toBe("application.pdf");
+    const left = r.attachments?.filter((a) => !a.accepted) ?? [];
+    expect(left).toHaveLength(1);
+    expect(left[0].unavailable).toBeUndefined();
+    expect(left[0].error).toContain("Retry failed files");
+  });
+
+  it("keeps a request under 150 MB", async () => {
+    serve((id) => (id === "app" ? 10 : 20 * 1024 * 1024));
+    const statements = Array.from({ length: 8 }, (_, i) => doc(`s${i}`, `s${i}.pdf`));
+    const r = await arf.createApplication({ referenceId: "r" }, { documents: [APP, ...statements] });
+    expect(await sentNames()).toHaveLength(8); // app + 7 × 20 MB = 140 MB; the 8th would pass 150
+    expect(r.attachments?.filter((a) => !a.accepted)).toHaveLength(1);
+  });
+
+  it("a non-PDF application is refused before calling ARF", async () => {
+    serve(() => 10);
+    const r = await arf.createApplication({ referenceId: "r" }, { documents: [doc("app", "application.docx", "signed_application")] });
+    expect(r).toMatchObject({ ok: false, status: 422, error: expect.stringContaining("convert this file to PDF") });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
