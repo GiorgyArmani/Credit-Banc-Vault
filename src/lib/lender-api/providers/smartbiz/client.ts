@@ -3,18 +3,19 @@
 // SmartBiz partner API client. Server-only — holds the partner token.
 // Docs: https://partner-api-service.smartbizloans.com/redoc
 //
-// REQUIRED ENV: SMARTBIZ_PARTNER_ID, SMARTBIZ_TOKEN
-// OPTIONAL ENV: SMARTBIZ_API_BASE (default below; trimmed, https:// added if
+// REQUIRED ENV: SMARTBIZ_TOKEN — the finished credential SmartBiz issues
+//               (already base64; sent verbatim, a pasted "Basic " prefix is stripped)
+// OPTIONAL ENV: SMARTBIZ_PARTNER_ID (informational only), SMARTBIZ_API_BASE (default below; trimmed, https:// added if
 //               missing), SMARTBIZ_WEBHOOK_SECRET (returned once by POST /v3/webhook)
 //
-// Auth: Authorization: Basic base64(partner_id:token) on every request.
+// Auth: Authorization: Basic <SMARTBIZ_TOKEN> on every request. SmartBiz hands
+// out the encoded value — never re-encode it.
 // NEVER LOG BODIES: business + owner payloads carry SSNs.
 
 import { SMARTBIZ_DEFAULT_API_BASE, SMARTBIZ_WEBHOOK_EVENT } from "./constants";
 import type { SmartBizBusinessRequest, SmartBizSubmissionRequest } from "./mapping";
 
 export interface SmartBizConfig {
-  partnerId: string;
   token: string;
   apiBase: string;
 }
@@ -27,10 +28,9 @@ function normalizeBase(raw: string | undefined): string {
 }
 
 export function getSmartBizConfig(): SmartBizConfig | null {
-  const partnerId = process.env.SMARTBIZ_PARTNER_ID?.trim();
-  const token = process.env.SMARTBIZ_TOKEN?.trim();
-  if (!partnerId || !token) return null;
-  return { partnerId, token, apiBase: normalizeBase(process.env.SMARTBIZ_API_BASE) };
+  const token = process.env.SMARTBIZ_TOKEN?.trim().replace(/^basic\s+/i, "");
+  if (!token) return null;
+  return { token, apiBase: normalizeBase(process.env.SMARTBIZ_API_BASE) };
 }
 
 export function isSmartBizConfigured(): boolean {
@@ -87,7 +87,7 @@ async function smartBizRequest<T = unknown>(
   if (!cfg) return { ok: false, status: 0, data: null, error: "SmartBiz is not configured" };
 
   const headers: Record<string, string> = {
-    Authorization: `Basic ${Buffer.from(`${cfg.partnerId}:${cfg.token}`).toString("base64")}`,
+    Authorization: `Basic ${cfg.token}`,
     Accept: "application/json, application/vnd.api+json",
   };
   let body: BodyInit | undefined;

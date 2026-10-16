@@ -27,9 +27,17 @@ afterEach(() => {
 });
 
 describe("smartbiz config", () => {
-  it("needs both partner id and token", () => {
+  it("needs the token", () => {
     vi.stubEnv("SMARTBIZ_TOKEN", "");
     expect(isSmartBizConfigured()).toBe(false);
+  });
+  it("does not need the partner id", () => {
+    vi.stubEnv("SMARTBIZ_PARTNER_ID", "");
+    expect(isSmartBizConfigured()).toBe(true);
+  });
+  it("strips a pasted Basic prefix", () => {
+    vi.stubEnv("SMARTBIZ_TOKEN", " Basic  dGVzdA== ");
+    expect(getSmartBizConfig()?.token).toBe("dGVzdA==");
   });
   it("defaults to the documented host", () => {
     expect(getSmartBizConfig()?.apiBase).toBe("https://partner-api-service.smartbizloans.com");
@@ -41,12 +49,12 @@ describe("smartbiz config", () => {
 });
 
 describe("smartbiz requests", () => {
-  it("sends Basic base64(partner_id:token) — their documented example", async () => {
+  it("sends the issued credential verbatim after Basic", async () => {
     fetchMock.mockResolvedValueOnce(json(201, { data: { id: "b-1" } }));
     await createBusiness({} as never);
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://partner-api-service.smartbizloans.com/v3/business/");
-    expect(init.headers.Authorization).toBe("Basic MTIzOnRlc3QxdGVzdDF0ZXN0MQ==");
+    expect(init.headers.Authorization).toBe("Basic test1test1test1");
     expect(init.headers["Content-Type"]).toBe("application/json");
   });
 
