@@ -23,6 +23,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
   if (!provider?.webhook) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   if (!(await provider.webhook.verify(request))) {
+    // Without this a lender calling from an unlisted IP (e.g. a staging
+    // environment) looks exactly like a callback that never arrived.
+    const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+    console.warn(`lender-api webhook: ${providerId} callback REJECTED by verify (source ip ${ip})`);
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   // Proof of delivery when validating a new lender's webhook. No body: it can carry PII.
