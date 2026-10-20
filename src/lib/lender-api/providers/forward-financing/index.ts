@@ -73,7 +73,13 @@ export const forwardFinancing: LenderApiProvider = {
       // engine never trusts the body anyway (it re-fetches deal_status itself).
       if (process.env.FORWARD_FINANCING_WEBHOOK_IP_CHECK === "off") return true;
       const ip = firstForwardedIp(req);
-      return !!ip && (FF_WEBHOOK_IPS as readonly string[]).includes(ip);
+      // FF staging calls from IPs outside its documented list (seen: 52.200.204.149),
+      // so extra sources are env-configured, comma-separated, never hardcoded.
+      const extra = (process.env.FORWARD_FINANCING_WEBHOOK_EXTRA_IPS ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      return !!ip && [...FF_WEBHOOK_IPS, ...extra].includes(ip);
     },
     extractExternalId(body) {
       const id = (body as unknown as Record<string, unknown>)?.lead_id;
