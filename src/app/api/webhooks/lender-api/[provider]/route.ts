@@ -34,6 +34,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
   } catch {
     return NextResponse.json({ error: "Bad request" }, { status: 400 });
   }
+  // The lender's event label (FF: Approved / Declined / Waiting on ISO) — not
+  // personal data, and the only record of WHICH event arrived.
+  const rawEvent = (body as Record<string, unknown> | null)?.event_type;
+  const eventLabel = typeof rawEvent === "string" && rawEvent ? ` [event: ${rawEvent.slice(0, 60)}]` : "";
 
   let externalId: string | null;
   if (provider.webhook.resolveExternalId) {
@@ -62,7 +66,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
   if (!submission) {
     // Ids are the lender's own, not personal data — and without this line a
     // callback for a deal we don't hold is indistinguishable from one applied.
-    console.info(`lender-api webhook: ${provider.id} callback for ${externalId} — not one of our submissions, ignored`);
+    console.info(`lender-api webhook: ${provider.id} callback for ${externalId}${eventLabel} — not one of our submissions, ignored`);
     return NextResponse.json({ ok: true });
   }
 
@@ -82,7 +86,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
       // Stage + what we did with it: the only trace of what a callback changed.
       const applied = result.body as { status?: { kind?: string; stage?: string }; applied?: string } | undefined;
       console.info(
-        `lender-api webhook: ${provider.id} ${externalId} is ${applied?.status?.stage ?? "unknown"} ` +
+        `lender-api webhook: ${provider.id} ${externalId}${eventLabel} is ${applied?.status?.stage ?? "unknown"} ` +
           `(${applied?.status?.kind ?? "unknown"}), applied: ${applied?.applied ?? "none"}`
       );
     }

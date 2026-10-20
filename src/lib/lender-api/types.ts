@@ -103,6 +103,8 @@ export interface LenderApiSource {
   owners: SourceOwner[];
   /** false = business_owners unreadable (migration not applied yet): co-owners are unknown, not absent. */
   ownersAvailable: boolean;
+  /** Email of the file's assigned advisor (our sales rep on the deal); null when unassigned. */
+  salesRepEmail?: string | null;
 }
 
 /**

@@ -15,7 +15,7 @@ import type {
 } from "../../types";
 import { VAULT_FIELD_LABELS, type VaultField } from "../../vault-fields";
 import { digitsOnly, nonEmpty, splitName, toInt, toIsoDate } from "../../normalize";
-import { FF_ENTITY_TYPES, FF_INDUSTRIES, FF_LOAN_USES, FF_REVENUE_BUCKETS } from "./constants";
+import { FF_ENTITY_TYPES, FF_INDUSTRIES, FF_LEGACY_PICK_VALUES, FF_LOAN_USES, FF_REVENUE_BUCKETS } from "./constants";
 
 interface FfAddress {
   street1: string;
@@ -60,6 +60,7 @@ export interface FfLeadRequest {
       owner_2_percent_ownership?: number;
       reference_id: string;
       notes?: string;
+      sales_rep_email?: string;
     };
   };
 }
@@ -90,9 +91,9 @@ function compact<T extends Record<string, unknown>>(o: T): T {
 export function mapFfEntityType(v: string | null | undefined): string | null {
   const s = (v ?? "").toLowerCase().replace(/[^a-z]/g, "");
   if (!s) return null;
-  if (s === "llc") return "LLC";
-  if (s === "llp" || s === "limitedliabilitypartnership") return "Limited Liability Partnership";
-  if (s === "lp" || s === "limitedpartnership") return "Limited Partnership";
+  if (s === "llc" || s === "limitedliabilitycompany") return "Limited Liability Company (LLC)";
+  if (s === "llp" || s === "limitedliabilitypartnership") return "Limited Liability Partnership (LLP)";
+  if (s === "lp" || s === "limitedpartnership") return "Limited Partnership (LP)";
   if (s === "partnership" || s === "generalpartnership" || s === "gp") return "General Partnership";
   if (["scorp", "ccorp", "corp", "corporation", "inc"].includes(s)) return "Corporation";
   if (["soleprop", "soleproprietor", "soleproprietorship"].includes(s)) return "Sole Proprietor";
@@ -113,39 +114,44 @@ export function bucketMonthlyRevenue(amount: number | null | undefined): string 
 // ("Electrical Contractors" must hit HVAC before "contractor").
 const INDUSTRY_RULES: Array<[RegExp, (typeof FF_INDUSTRIES)[number]]> = [
   [/account|\bcpa\b|tax prep|bookkeep/i, "Accounting & Tax Services"],
-  [/electric|plumb|hvac|heating|air condition/i, "Electricians/Plumbing/HVAC"],
+  [/electric|plumb|hvac|heating|air condition/i, "Electricians, Plumbing & HVAC"],
   [/truck|freight|transport|logistic|towing/i, "Trucking & Transportation"],
-  [/auto|mechanic|car sales|rv dealer|vehicle|motor/i, "Automotive"],
+  [/auto|mechanic|car sales|rv dealer|vehicle|motor/i, "Automotive Services"],
   [/restaurant|\bbar\b|catering|food service|cafe/i, "Restaurants & Bars"],
-  [/gas station/i, "Gas Stations"],
-  [/convenience/i, "Convenience Stores"],
+  [/gas station/i, "Gas Stations & Fuel Services"],
+  [/convenience/i, "Convenience Stores, Markets & Delis/Bakeries"],
   [/pharmac/i, "Pharmacies"],
-  [/home health/i, "Home Healthcare"],
-  [/health|medical|dental|dentist|clinic|physician/i, "Medical"],
-  [/farm|agricultur|soil|planting|crop/i, "Farming"],
+  [/home health/i, "Home-healthcare / Senior Care"],
+  [/health|medical|dental|dentist|clinic|physician/i, "Medical Professionals"],
+  [/farm|agricultur|soil|planting|crop/i, "Farming & Agriculture"],
   [/subcontract/i, "Subcontractor"],
   [/construct|contractor|remodel|roofing|painting|restoration|builder/i, "General Contractor"],
-  [/landscap|lawn/i, "Landscaping"],
-  [/janitor|cleaning/i, "Janitorial"],
+  [/landscap|lawn/i, "Landscaping & Lawn Services"],
+  [/janitor|cleaning/i, "Janitorial & Cleaning Services"],
   [/manufactur/i, "Manufacturing"],
   [/wholesale|distribut/i, "Wholesale & Distribution"],
-  [/wine|liquor/i, "Wine & Liquor"],
+  [/wine|liquor/i, "Wine & Liquor Stores"],
   [/jewel/i, "Jewelry"],
-  [/furniture/i, "Furniture"],
+  [/furniture/i, "Furniture & Home Furnishings"],
   [/salon|\bspa\b|barber|beauty/i, "Salons & Spas"],
-  [/\bgym|fitness/i, "Gyms"],
-  [/hotel|motel|hospitality/i, "Hotels/Hospitality"],
-  [/\blaw\b|legal|attorney/i, "Law Firms"],
-  [/real estate|insurance|property/i, "Real Estate/Insurance"],
+  [/\bgym|fitness/i, "Gyms/Fitness"],
+  [/hotel|motel|hospitality/i, "Hotels / Motels / Hospitality"],
+  [/\blaw\b|legal|attorney/i, "Law firms"],
+  [/real estate|insurance|property/i, "Real Estate / Insurance Brokers"],
   [/recycl/i, "Recycling"],
-  [/security guard|security services/i, "Security Guard"],
-  [/staffing|recruit/i, "Staffing"],
-  [/travel/i, "Travel"],
-  [/ticket|concert|venue/i, "Ticket/Concert Venues"],
-  [/school|education|tutor/i, "Education"],
+  [/security guard|security services/i, "Security Guard Services"],
+  [/staffing|recruit/i, "Staffing agencies"],
+  [/travel/i, "Travel Agencies"],
+  [/ticket|concert|venue/i, "Ticket / Concert Venues"],
+  [/school|education|tutor/i, "Education / Schools / Daycare"],
   [/consult|marketing/i, "Consulting"],
-  [/retail|store|shop|e-?commerce|eccomerce/i, "Retail"],
+  [/retail|store|shop|e-?commerce|eccomerce/i, "Retail Businesses"],
 ];
+
+/** A pick saved under FF's old spelling becomes the current one; anything else passes through. */
+export function normalizeFfPick(key: string, value: string | null): string | null {
+  return value ? FF_LEGACY_PICK_VALUES[key]?.[value] ?? value : value;
+}
 
 export function suggestFfIndustry(text: string | null | undefined): string | null {
   const s = nonEmpty(text);
@@ -206,7 +212,7 @@ export function buildFfLead(
 
   const effectivePicks: Record<string, string | null> = { ...suggestFfPicks(source) };
   for (const def of FF_PICKS) {
-    const chosen = nonEmpty(picks[def.key]);
+    const chosen = normalizeFfPick(def.key, nonEmpty(picks[def.key]));
     if (chosen) effectivePicks[def.key] = chosen;
   }
   for (const def of FF_PICKS) {
@@ -252,7 +258,9 @@ export function buildFfLead(
   }
 
   const cell = digitsOnly(r.client_phone);
-  const home = digitsOnly(v.owner_1_home_phone);
+  // We rarely hold a separate home line; the owner's own number is the best
+  // answer FF can get, so it fills home_phone when no landline is on file.
+  const home = [digitsOnly(v.owner_1_home_phone), cell].find((p) => p.length >= 10) ?? "";
 
   const businessAddress =
     r.business_street && r.company_state && r.company_zip_code
@@ -284,6 +292,8 @@ export function buildFfLead(
           first_name: name.first ?? "",
           last_name: name.last ?? "",
           email: nonEmpty(v.client_email) ?? undefined,
+          // applicant_is_owner is always true: the contact is the owner.
+          title: "Owner",
           born_on: r.owner_1_dob ?? undefined,
           cell_phone: cell.length >= 10 ? cell : undefined,
           home_phone: home.length >= 10 ? home : undefined,
@@ -320,6 +330,8 @@ export function buildFfLead(
         owner_2_percent_ownership: toInt(v.owner_2_ownership_pct) ?? undefined,
         reference_id: ctx.referenceId,
         notes: notes || undefined,
+        // The file's advisor — FF's contact for this deal on our side.
+        sales_rep_email: nonEmpty(source.salesRepEmail) ?? undefined,
       }),
     }) as FfLeadRequest["lead"],
   };

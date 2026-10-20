@@ -28,8 +28,10 @@ describe("buildFfLead — complete source", () => {
       first_name: "Jane",
       last_name: "Doe",
       email: "jane@example.com",
+      title: "Owner",
       born_on: "1980-02-03",
       cell_phone: "3055550100",
+      home_phone: "3055550100",
       ssn: "123456789",
       current_address_attributes: { street1: "22 Palm Ave", city: "Miami", state: "FL", zip: "33130" },
     });
@@ -37,14 +39,14 @@ describe("buildFfLead — complete source", () => {
 
   it("maps the business account", () => {
     expect(lead.account_attributes).toMatchObject({
-      entity_type: "LLC",
+      entity_type: "Limited Liability Company (LLC)",
       name: "Doe Plumbing LLC",
       legal_name: "Doe Plumbing LLC",
       started_on: "2018-05-01",
       phone: "3055550199",
       fein: "123456789",
-      industry_name: "Electricians/Plumbing/HVAC",
-      monthly_revenue: "$20,000-$50,000",
+      industry_name: "Electricians, Plumbing & HVAC",
+      monthly_revenue: "$20,000 - $50,000",
       current_address_attributes: { street1: "10 Pipe St", city: "Miami", state: "FL", zip: "33101" },
     });
   });
@@ -64,10 +66,10 @@ describe("buildFfLead — complete source", () => {
 
   it("reports effective picks", () => {
     expect(built.effectivePicks).toEqual({
-      entity_type: "LLC",
-      industry_name: "Electricians/Plumbing/HVAC",
+      entity_type: "Limited Liability Company (LLC)",
+      industry_name: "Electricians, Plumbing & HVAC",
       loan_use: "Working Capital",
-      monthly_revenue: "$20,000-$50,000",
+      monthly_revenue: "$20,000 - $50,000",
     });
   });
 
@@ -100,9 +102,37 @@ describe("buildFfLead — gaps", () => {
     expect((built.payload as FfLeadRequest).lead.account_attributes.industry_name).toBe("Consulting");
   });
 
+  it("a pick saved under FF's old spelling is translated, not flagged", () => {
+    const built = buildFfLead(
+      makeSource(),
+      { industry_name: "Electricians/Plumbing/HVAC", entity_type: "LLC", monthly_revenue: "$5,000-$10,000" },
+      ctx
+    );
+    expect(built.gaps).toEqual([]);
+    expect(built.effectivePicks).toMatchObject({
+      industry_name: "Electricians, Plumbing & HVAC",
+      entity_type: "Limited Liability Company (LLC)",
+      monthly_revenue: "$5,000 - $10,000",
+    });
+  });
+
   it("an out-of-list pick is invalid", () => {
     const built = buildFfLead(makeSource(), { loan_use: "Yachts" }, ctx);
     expect(built.gaps).toEqual([{ field: "pick:loan_use", label: "Use of funds", kind: "invalid" }]);
+  });
+});
+
+describe("buildFfLead — contact extras FF asked for", () => {
+  it("sends the advisor as sales_rep_email, omitted when unassigned", () => {
+    const withRep = buildFfLead({ ...makeSource(), salesRepEmail: "rep@creditbanc.io" }, {}, ctx);
+    expect((withRep.payload as FfLeadRequest).lead.application_attributes.sales_rep_email).toBe("rep@creditbanc.io");
+    const without = buildFfLead(makeSource(), {}, ctx);
+    expect((without.payload as FfLeadRequest).lead.application_attributes).not.toHaveProperty("sales_rep_email");
+  });
+
+  it("prefers a separate home line over the cell number", () => {
+    const built = buildFfLead(makeSource({ vault: { owner_1_home_phone: "(305) 555-0777" } }), {}, ctx);
+    expect((built.payload as FfLeadRequest).lead.contacts_attributes[0].home_phone).toBe("3055550777");
   });
 });
 
@@ -131,30 +161,30 @@ describe("buildFfLead — existing debt and second owner", () => {
 
 describe("suggestions", () => {
   it.each([
-    ["LLC", "LLC"], ["S-Corp", "Corporation"], ["C-Corp", "Corporation"], ["Sole Prop", "Sole Proprietor"],
+    ["LLC", "Limited Liability Company (LLC)"], ["S-Corp", "Corporation"], ["C-Corp", "Corporation"], ["Sole Prop", "Sole Proprietor"],
     ["Other", null], ["", null], [null, null],
   ])("entity %s → %s", (input, expected) => {
     expect(mapFfEntityType(input)).toBe(expected);
   });
 
   it.each([
-    [null, null], [0, null], [4999, "Less than $5,000"], [5000, "$5,000-$10,000"], [19999, "$10,000-$20,000"],
-    [20000, "$20,000-$50,000"], [100000, "$50,000-$100,000"], [100001, "Greater than $100,000"],
+    [null, null], [0, null], [4999, "Less than $5,000"], [5000, "$5,000 - $10,000"], [19999, "$10,000 - $20,000"],
+    [20000, "$20,000 - $50,000"], [100000, "$50,000 - $100,000"], [100001, "Greater than $100,000"],
   ])("revenue %s → %s", (amount, bucket) => {
     expect(bucketMonthlyRevenue(amount as number | null)).toBe(bucket);
   });
 
   it.each([
     ["Offices of Certified Public Accountants", "Accounting & Tax Services"],
-    ["Electrical Contractors and Other Wiring Installation Contractors", "Electricians/Plumbing/HVAC"],
-    ["MECHANIC SHOP", "Automotive"],
+    ["Electrical Contractors and Other Wiring Installation Contractors", "Electricians, Plumbing & HVAC"],
+    ["MECHANIC SHOP", "Automotive Services"],
     ["General Freight Trucking, Long-Distance, Truckload", "Trucking & Transportation"],
     ["Restaurant & Catering Business", "Restaurants & Bars"],
-    ["Soybean Farming", "Farming"],
+    ["Soybean Farming", "Farming & Agriculture"],
     ["Residential Remodelers", "General Contractor"],
     ["Insurance Restoration ", "General Contractor"],
-    ["Healthcarea", "Medical"],
-    ["Retail eccomerce", "Retail"],
+    ["Healthcarea", "Medical Professionals"],
+    ["Retail eccomerce", "Retail Businesses"],
     ["Marketing Consulting Services", "Consulting"],
     ["media/tech", null],
     [null, null],
