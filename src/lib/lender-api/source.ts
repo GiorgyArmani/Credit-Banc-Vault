@@ -93,7 +93,7 @@ export async function loadLenderApiSource(
   const typedVault = vault as unknown as SourceVault;
 
   const { data: advisor } = typedVault.advisor_id
-    ? await admin.from("advisors").select("email").eq("id", typedVault.advisor_id).maybeSingle()
+    ? await admin.from("advisors").select("first_name, last_name, email, phone").eq("id", typedVault.advisor_id).maybeSingle()
     : { data: null };
 
   return {
@@ -114,6 +114,8 @@ export async function loadLenderApiSource(
       })),
     owners: ownerLoad.owners,
     ownersAvailable: ownerLoad.available,
-    salesRepEmail: advisor?.email ?? null,
+    salesRep: advisor
+      ? { firstName: advisor.first_name ?? null, lastName: advisor.last_name ?? null, email: advisor.email ?? null, phone: advisor.phone ?? null }
+      : null,
   };
 }

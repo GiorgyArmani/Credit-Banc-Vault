@@ -124,7 +124,7 @@ describe("buildFfLead — gaps", () => {
 
 describe("buildFfLead — contact extras FF asked for", () => {
   it("sends the advisor as sales_rep_email, omitted when unassigned", () => {
-    const withRep = buildFfLead({ ...makeSource(), salesRepEmail: "rep@creditbanc.io" }, {}, ctx);
+    const withRep = buildFfLead({ ...makeSource(), salesRep: { firstName: "Rae", lastName: "Rep", email: "rep@creditbanc.io", phone: null } }, {}, ctx);
     expect((withRep.payload as FfLeadRequest).lead.application_attributes.sales_rep_email).toBe("rep@creditbanc.io");
     const without = buildFfLead(makeSource(), {}, ctx);
     expect((without.payload as FfLeadRequest).lead.application_attributes).not.toHaveProperty("sales_rep_email");

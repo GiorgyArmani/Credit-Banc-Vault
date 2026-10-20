@@ -76,6 +76,19 @@ export function toStateCode(v: unknown): string | null {
   return STATE_NAMES[cleaned.toLowerCase().replace(/\s+/g, " ")] ?? null;
 }
 
+const STATE_NAME_BY_CODE: Record<string, string> = Object.fromEntries(
+  Object.entries(STATE_NAMES).map(([name, code]) => [
+    code,
+    name.replace(/\b[a-z]/g, (c) => c.toUpperCase()).replace(/\bOf\b/, "of"),
+  ])
+);
+
+/** Full state name ("Alabama", "District of Columbia") from a code or a name. */
+export function toStateName(v: unknown): string | null {
+  const code = toStateCode(v);
+  return code ? STATE_NAME_BY_CODE[code] ?? null : null;
+}
+
 export function toZip5(v: unknown): string | null {
   const d = digitsOnly(v);
   return d.length === 5 || d.length === 9 ? d.slice(0, 5) : null;

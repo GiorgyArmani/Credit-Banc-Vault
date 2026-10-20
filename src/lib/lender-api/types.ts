@@ -9,7 +9,7 @@
 
 import type { ResolvedVaultFields, SourceVault, VaultField } from "./vault-fields";
 
-export type ProviderId = "forward_financing" | "credibly" | "bitty" | "loot" | "fundkite" | "smartbiz" | "onewest" | "idea" | "vital" | "arf" | "pirs";
+export type ProviderId = "forward_financing" | "credibly" | "bitty" | "loot" | "fundkite" | "smartbiz" | "onewest" | "idea" | "vital" | "arf" | "pirs" | "samson";
 
 export type AssignmentStatus =
   | "pending"
@@ -103,8 +103,15 @@ export interface LenderApiSource {
   owners: SourceOwner[];
   /** false = business_owners unreadable (migration not applied yet): co-owners are unknown, not absent. */
   ownersAvailable: boolean;
-  /** Email of the file's assigned advisor (our sales rep on the deal); null when unassigned. */
-  salesRepEmail?: string | null;
+  /** The file's assigned advisor — our sales rep on the deal. Null when unassigned. */
+  salesRep?: SalesRep | null;
+}
+
+export interface SalesRep {
+  firstName: string | null;
+  lastName: string | null;
+  email: string | null;
+  phone: string | null;
 }
 
 /**

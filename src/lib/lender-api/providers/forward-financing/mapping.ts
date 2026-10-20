@@ -331,7 +331,7 @@ export function buildFfLead(
         reference_id: ctx.referenceId,
         notes: notes || undefined,
         // The file's advisor — FF's contact for this deal on our side.
-        sales_rep_email: nonEmpty(source.salesRepEmail) ?? undefined,
+        sales_rep_email: nonEmpty(source.salesRep?.email) ?? undefined,
       }),
     }) as FfLeadRequest["lead"],
   };
