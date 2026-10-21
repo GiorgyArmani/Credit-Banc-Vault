@@ -17,8 +17,9 @@ import { vital } from "./providers/vital";
 import { arf } from "./providers/arf";
 import { pirs } from "./providers/pirs";
 import { samson } from "./providers/samson";
+import { yesLeasing } from "./providers/yes-leasing";
 
-const PROVIDERS: readonly LenderApiProvider[] = [forwardFinancing, credibly, bitty, loot, fundkite, smartbiz, onewest, idea, vital, arf, pirs, samson];
+const PROVIDERS: readonly LenderApiProvider[] = [forwardFinancing, credibly, bitty, loot, fundkite, smartbiz, onewest, idea, vital, arf, pirs, samson, yesLeasing];
 
 export function providerForLender(lenderName: string | null | undefined): LenderApiProvider | null {
   if (!lenderName) return null;

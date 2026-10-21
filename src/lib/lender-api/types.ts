@@ -9,7 +9,7 @@
 
 import type { ResolvedVaultFields, SourceVault, VaultField } from "./vault-fields";
 
-export type ProviderId = "forward_financing" | "credibly" | "bitty" | "loot" | "fundkite" | "smartbiz" | "onewest" | "idea" | "vital" | "arf" | "pirs" | "samson";
+export type ProviderId = "forward_financing" | "credibly" | "bitty" | "loot" | "fundkite" | "smartbiz" | "onewest" | "idea" | "vital" | "arf" | "pirs" | "samson" | "yes_leasing";
 
 export type AssignmentStatus =
   | "pending"
