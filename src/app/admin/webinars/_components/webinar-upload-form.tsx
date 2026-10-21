@@ -1,7 +1,7 @@
 // src/app/admin/webinars/_components/webinar-upload-form.tsx
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2, UploadCloud } from "lucide-react";
@@ -19,10 +19,17 @@ import {
 import { createWebinar } from "../actions";
 import { useDirectUpload } from "./use-direct-upload";
 import { captureThumbnail } from "./capture-thumbnail";
+import { prepareThumbnail } from "./prepare-thumbnail";
 
 export function WebinarUploadForm() {
   const router = useRouter();
   const fileInput = useRef<HTMLInputElement>(null);
+  const thumbInput = useRef<HTMLInputElement>(null);
+  // Optional admin-chosen thumbnail; without one we capture a frame from the video.
+  const [thumbBlob, setThumbBlob] = useState<Blob | null>(null);
+  const [thumbPreview, setThumbPreview] = useState<string | null>(null);
+  const [thumbError, setThumbError] = useState<string | null>(null);
+  const [thumbBusy, setThumbBusy] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [title, setTitle] = useState("");
@@ -34,6 +41,36 @@ export function WebinarUploadForm() {
 
   // An error is NOT busy: the fields stay editable and Upload retries with a fresh id.
   const busy = state.status === "uploading" || saving;
+
+  useEffect(
+    () => () => {
+      if (thumbPreview) URL.revokeObjectURL(thumbPreview);
+    },
+    [thumbPreview]
+  );
+
+  async function onPickThumb(f: File | null) {
+    setThumbError(null);
+    setThumbBlob(null);
+    setThumbPreview(null);
+    if (!f) return;
+    setThumbBusy(true);
+    const res = await prepareThumbnail(f);
+    setThumbBusy(false);
+    if ("error" in res) {
+      setThumbError(res.error);
+      return;
+    }
+    setThumbBlob(res.blob);
+    setThumbPreview(URL.createObjectURL(res.blob));
+  }
+
+  function clearThumb() {
+    setThumbBlob(null);
+    setThumbPreview(null);
+    setThumbError(null);
+    if (thumbInput.current) thumbInput.current.value = "";
+  }
   const pct = state.bytesTotal ? Math.round((state.bytesSent / state.bytesTotal) * 100) : 0;
 
   function onPick(f: File | null) {
@@ -50,6 +87,7 @@ export function WebinarUploadForm() {
     setSessionDate("");
     setFormError(null);
     if (fileInput.current) fileInput.current.value = "";
+    clearThumb();
   }
 
   async function onSubmit(e: React.FormEvent) {
@@ -59,10 +97,13 @@ export function WebinarUploadForm() {
     if (fe) return setFileError(fe);
     const fields = validateWebinarFields({ title, description, session_date: sessionDate });
     if (!fields.ok) return setFormError(fields.error);
+    if (thumbError) return setFormError("Fix or remove the thumbnail image first.");
+    if (thumbBusy) return setFormError("The thumbnail is still being prepared — try again in a moment.");
     setFormError(null);
 
     const id = crypto.randomUUID();
-    const thumbPromise = captureThumbnail(file);
+    const customThumb = thumbBlob;
+    const thumbPromise = customThumb ? Promise.resolve(customThumb) : captureThumbnail(file);
 
     const ok = await start(file, id);
     if (!ok) return; // failed (error shown in the progress panel) or cancelled
@@ -75,8 +116,13 @@ export function WebinarUploadForm() {
         const { error } = await createClient()
           .storage.from(WEBINARS_BUCKET)
           .upload(webinarThumbnailPath(id), thumb, { contentType: "image/jpeg", upsert: false });
-        if (error) toast.warning(`Saved without a thumbnail: ${error.message}`);
-        else has_thumbnail = true;
+        if (error) {
+          toast.warning(
+            customThumb
+              ? `Saved without your thumbnail (${error.message}) — use "Change thumbnail" on the webinar to add it.`
+              : `Saved without a thumbnail: ${error.message}`
+          );
+        } else has_thumbnail = true;
       } else {
         toast.warning("Couldn't capture a thumbnail — the video will show a placeholder.");
       }
@@ -137,6 +183,40 @@ export function WebinarUploadForm() {
         <div className="space-y-1.5">
           <label className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Session date</label>
           <Input type="date" value={sessionDate} onChange={(e) => setSessionDate(e.target.value)} disabled={busy} />
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <label className="text-[11px] font-bold uppercase tracking-widest text-slate-400">
+          Thumbnail image (optional — JPG, PNG or WebP)
+        </label>
+        <div className="flex items-start gap-3">
+          <div className="h-20 w-36 shrink-0 overflow-hidden rounded-lg bg-slate-100">
+            {thumbPreview ? (
+              // eslint-disable-next-line @next/next/no-img-element -- local blob preview
+              <img src={thumbPreview} alt="Thumbnail preview" className="h-full w-full object-cover" />
+            ) : (
+              <div className="flex h-full items-center justify-center px-2 text-center text-[10px] text-cb-gray">
+                {thumbBusy ? "Preparing…" : "A frame from the video"}
+              </div>
+            )}
+          </div>
+          <div className="min-w-0 flex-1 space-y-1">
+            <input
+              ref={thumbInput}
+              type="file"
+              accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+              disabled={busy}
+              onChange={(e) => void onPickThumb(e.target.files?.[0] ?? null)}
+              className="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-slate-200 file:px-3 file:py-2 file:text-sm file:font-semibold"
+            />
+            {(thumbBlob || thumbError) && (
+              <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={clearThumb}>
+                Use a frame from the video instead
+              </Button>
+            )}
+            {thumbError && <p className="text-xs font-semibold text-red-600">{thumbError}</p>}
+          </div>
         </div>
       </div>
 

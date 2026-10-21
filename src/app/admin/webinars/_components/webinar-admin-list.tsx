@@ -1,10 +1,10 @@
 // src/app/admin/webinars/_components/webinar-admin-list.tsx
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Eye, EyeOff, Pencil, PlayCircle, Trash2 } from "lucide-react";
+import { Eye, EyeOff, ImagePlus, Loader2, Pencil, PlayCircle, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -18,7 +18,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { formatBytes, formatSessionDate, type AdminWebinarView } from "@/lib/webinars-shared";
-import { deleteWebinar, setWebinarPublished, updateWebinar } from "../actions";
+import { deleteWebinar, setWebinarPublished, setWebinarThumbnail, updateWebinar } from "../actions";
+import { prepareThumbnail } from "./prepare-thumbnail";
 
 export function WebinarAdminList({ webinars }: { webinars: AdminWebinarView[] }) {
   const router = useRouter();
@@ -27,6 +28,46 @@ export function WebinarAdminList({ webinars }: { webinars: AdminWebinarView[] })
   const [draft, setDraft] = useState({ title: "", description: "", session_date: "" });
   const [editError, setEditError] = useState<string | null>(null);
   const [toDelete, setToDelete] = useState<AdminWebinarView | null>(null);
+  // One hidden picker shared by every row; thumbFor says which webinar it's for.
+  const thumbInput = useRef<HTMLInputElement>(null);
+  const [thumbFor, setThumbFor] = useState<string | null>(null);
+  const [thumbSaving, setThumbSaving] = useState<string | null>(null);
+
+  function pickThumbnail(id: string) {
+    setThumbFor(id);
+    if (thumbInput.current) {
+      thumbInput.current.value = "";
+      thumbInput.current.click();
+    }
+  }
+
+  async function onThumbPicked(file: File | null) {
+    const id = thumbFor;
+    setThumbFor(null);
+    if (!file || !id) return;
+    setThumbSaving(id);
+    try {
+      const prepared = await prepareThumbnail(file);
+      if ("error" in prepared) {
+        toast.error(prepared.error);
+        return;
+      }
+      const form = new FormData();
+      form.append("id", id);
+      form.append("image", prepared.blob, "thumbnail.jpg");
+      const res = await setWebinarThumbnail(form);
+      if (!res.success) {
+        toast.error(res.error ?? "Couldn't save the thumbnail.");
+        return;
+      }
+      toast.success("Thumbnail updated");
+      router.refresh();
+    } catch (err) {
+      toast.error(`Couldn't reach the server: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setThumbSaving(null);
+    }
+  }
 
   function run(fn: () => Promise<{ success: boolean; error?: string }>, ok: string, after?: () => void) {
     startTransition(async () => {
@@ -55,9 +96,21 @@ export function WebinarAdminList({ webinars }: { webinars: AdminWebinarView[] })
 
   return (
     <div className="space-y-3">
+      <input
+        ref={thumbInput}
+        type="file"
+        accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+        className="hidden"
+        onChange={(e) => void onThumbPicked(e.target.files?.[0] ?? null)}
+      />
       {webinars.map((w) => (
         <div key={w.id} className="flex gap-4 rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
-          <div className="h-20 w-36 shrink-0 overflow-hidden rounded-lg bg-cb-navy">
+          <div className="relative h-20 w-36 shrink-0 overflow-hidden rounded-lg bg-cb-navy">
+            {thumbSaving === w.id && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/40 text-white">
+                <Loader2 className="h-5 w-5 animate-spin" />
+              </div>
+            )}
             {w.thumbnail_url ? (
               // eslint-disable-next-line @next/next/no-img-element -- signed URL, not optimizable
               <img src={w.thumbnail_url} alt="" className="h-full w-full object-cover" />
@@ -143,6 +196,15 @@ export function WebinarAdminList({ webinars }: { webinars: AdminWebinarView[] })
                 }}
               >
                 <Pencil className="h-4 w-4" />
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                title="Change thumbnail"
+                disabled={thumbSaving !== null}
+                onClick={() => pickThumbnail(w.id)}
+              >
+                <ImagePlus className="h-4 w-4" />
               </Button>
               <Button
                 size="icon"

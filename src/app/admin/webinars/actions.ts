@@ -11,6 +11,8 @@ import {
   validateWebinarFields,
   webinarVideoPath,
   webinarThumbnailPath,
+  MAX_THUMBNAIL_BYTES,
+  isJpegBytes,
 } from "@/lib/webinars-shared";
 
 type ActionResult = { success: boolean; error?: string };
@@ -121,6 +123,46 @@ export async function updateWebinar(input: {
     .select("id");
   if (error) return { success: false, error: error.message };
   if (!data?.length) return { success: false, error: "That webinar no longer exists." };
+
+  revalidate();
+  return { success: true };
+}
+
+/**
+ * Replace (or add) a webinar's thumbnail with an admin-chosen image, already
+ * re-encoded to JPEG in the browser. Goes through the service role because
+ * admins' storage policy is INSERT-only — overwriting needs more than that.
+ */
+export async function setWebinarThumbnail(formData: FormData): Promise<ActionResult> {
+  if (!(await requireAdminUser())) return { success: false, error: "Only admins can change thumbnails." };
+  const id = formData.get("id");
+  const image = formData.get("image");
+  if (!isWebinarId(id)) return { success: false, error: "Invalid webinar id." };
+  if (!(image instanceof Blob) || image.size === 0) return { success: false, error: "No image was received." };
+  if (image.size > MAX_THUMBNAIL_BYTES) return { success: false, error: "That image is too large." };
+
+  const bytes = new Uint8Array(await image.arrayBuffer());
+  if (!isJpegBytes(bytes)) return { success: false, error: "The image wasn't converted to JPEG — reload the page and try again." };
+
+  const db = createAdminClient();
+  const { data: existing, error: readError } = await db.from("webinars").select("id").eq("id", id).maybeSingle();
+  if (readError) return { success: false, error: readError.message };
+  if (!existing) return { success: false, error: "That webinar no longer exists." };
+
+  const thumb_path = webinarThumbnailPath(id);
+  const { error: upError } = await db.storage
+    .from(WEBINARS_BUCKET)
+    .upload(thumb_path, bytes, { contentType: "image/jpeg", upsert: true });
+  if (upError) {
+    console.error("setWebinarThumbnail upload failed:", upError);
+    return { success: false, error: `Couldn't save the thumbnail: ${upError.message}` };
+  }
+
+  const { error } = await db
+    .from("webinars")
+    .update({ thumbnail_path: thumb_path, updated_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) return { success: false, error: error.message };
 
   revalidate();
   return { success: true };

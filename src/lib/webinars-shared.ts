@@ -55,6 +55,28 @@ export function webinarThumbnailPath(id: string): string {
   return `thumbnails/${id}.jpg`;
 }
 
+/** What an admin may pick as a thumbnail. The browser re-encodes it to JPEG (the bucket takes only MP4 + JPEG). */
+export const THUMBNAIL_SOURCE_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
+export const MAX_THUMBNAIL_SOURCE_BYTES = 20 * 1024 * 1024;
+/** Longest side of the stored JPEG. */
+export const THUMBNAIL_MAX_WIDTH = 1280;
+/** Ceiling on the stored JPEG; a 1280 px frame at q0.85 lands far below it. */
+export const MAX_THUMBNAIL_BYTES = 2 * 1024 * 1024;
+
+export function validateThumbnailSource(f: { name: string; type: string; size: number }): string | null {
+  const byExt = /\.(jpe?g|png|webp)$/i.test(f.name);
+  const ok = (THUMBNAIL_SOURCE_TYPES as readonly string[]).includes(f.type) || (f.type === "" && byExt);
+  if (!ok) return "Thumbnails must be a JPG, PNG or WebP image.";
+  if (f.size <= 0) return "That image is empty.";
+  if (f.size > MAX_THUMBNAIL_SOURCE_BYTES) return "That image is over 20 MB — pick a smaller one.";
+  return null;
+}
+
+/** JPEG files start FF D8 FF — checked server-side so a renamed file can't land in the bucket. */
+export function isJpegBytes(bytes: Uint8Array): boolean {
+  return bytes.length > 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+}
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /** The id doubles as the storage file name, so it must never carry a path. */

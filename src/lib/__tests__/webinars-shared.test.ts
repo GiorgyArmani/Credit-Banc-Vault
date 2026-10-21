@@ -126,3 +126,26 @@ describe("webinarUploadUrl", () => {
     );
   });
 });
+
+describe("thumbnail images", () => {
+  it("accepts JPG, PNG and WebP, by MIME or by extension when the MIME is empty", async () => {
+    const { validateThumbnailSource } = await import("@/lib/webinars-shared");
+    expect(validateThumbnailSource({ name: "a.jpg", type: "image/jpeg", size: 10 })).toBeNull();
+    expect(validateThumbnailSource({ name: "a.png", type: "image/png", size: 10 })).toBeNull();
+    expect(validateThumbnailSource({ name: "a.webp", type: "image/webp", size: 10 })).toBeNull();
+    expect(validateThumbnailSource({ name: "A.JPEG", type: "", size: 10 })).toBeNull();
+  });
+  it("rejects other types, empty files and files over 20 MB", async () => {
+    const { validateThumbnailSource } = await import("@/lib/webinars-shared");
+    expect(validateThumbnailSource({ name: "a.gif", type: "image/gif", size: 10 })).toMatch(/JPG, PNG or WebP/);
+    expect(validateThumbnailSource({ name: "a.svg", type: "image/svg+xml", size: 10 })).toMatch(/JPG, PNG or WebP/);
+    expect(validateThumbnailSource({ name: "a.png", type: "image/png", size: 0 })).toMatch(/empty/);
+    expect(validateThumbnailSource({ name: "a.png", type: "image/png", size: 20 * 1024 * 1024 + 1 })).toMatch(/20 MB/);
+  });
+  it("recognises JPEG bytes by their FF D8 FF signature only", async () => {
+    const { isJpegBytes } = await import("@/lib/webinars-shared");
+    expect(isJpegBytes(new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0]))).toBe(true);
+    expect(isJpegBytes(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0]))).toBe(false);
+    expect(isJpegBytes(new Uint8Array([0xff, 0xd8]))).toBe(false);
+  });
+});

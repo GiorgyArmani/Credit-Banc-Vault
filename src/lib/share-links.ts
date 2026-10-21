@@ -578,6 +578,19 @@ export async function resolveShareFile(
 }
 
 /**
+ * The name the lender page shows. A link belongs to ONE business, but
+ * client_data_vault.company_name is the client's first business — on a
+ * second-business link that told lenders the wrong company.
+ */
+export function shareCompanyName(
+  business: { company_name?: string | null; business_name?: string | null } | null,
+  client: { company_name?: string | null }
+): string {
+  const pick = (v: string | null | undefined) => (v && v.trim() ? v.trim() : null);
+  return pick(business?.company_name) ?? pick(business?.business_name) ?? pick(client.company_name) ?? "Business";
+}
+
+/**
  * Resolve a token into the shared documents for the lender page. Also bumps
  * view tracking.
  */
@@ -654,6 +667,14 @@ export async function resolveShareLink(token: string): Promise<ResolvedShare | n
     });
   }
 
+  const { data: business } = business_profile_id
+    ? await supabase
+        .from("business_profiles")
+        .select("company_name, business_name")
+        .eq("id", business_profile_id)
+        .maybeSingle()
+    : { data: null };
+
   // Fire-and-forget view tracking.
   supabase
     .from("document_share_links")
@@ -667,7 +688,7 @@ export async function resolveShareLink(token: string): Promise<ResolvedShare | n
     });
 
   return {
-    company_name: client.company_name || "Business",
+    company_name: shareCompanyName(business, client),
     client_name: client.client_name ?? null,
     label: link.label ?? null,
     expires_at: link.expires_at,
