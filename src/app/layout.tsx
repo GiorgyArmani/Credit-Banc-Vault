@@ -3,6 +3,7 @@ import type { Metadata } from 'next'
 import { Manrope, Inter } from 'next/font/google'
 import { FloatingSupport } from '@/components/floating-support'
 import { ErrorDialogProvider } from '@/components/error-dialog'
+import { Analytics } from '@vercel/analytics/next'
 
 // Self-hosted + preloaded, so there is no render-blocking Google Fonts request
 // and no FOUT. The variables are consumed by theme.fontFamily in tailwind.config.ts.
@@ -55,6 +56,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           {children}
           <FloatingSupport />
         </ErrorDialogProvider>
+        <Analytics />
       </body>
     </html>
   )
