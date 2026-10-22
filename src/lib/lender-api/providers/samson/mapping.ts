@@ -10,7 +10,13 @@ import type { BuiltApplication, Gap, LenderApiSource, NormalizedStatus, PickDefi
 import { VAULT_FIELD_LABELS, type VaultField } from "../../vault-fields";
 import { digitsOnly, nonEmpty, splitName, toInt, toIsoDate, toStateCode, toStateName, toZip5 } from "../../normalize";
 import { resolveNaics } from "@/data/naics";
-import { SAMSON_DEAL_TYPES, SAMSON_DOC_TYPES, SAMSON_SALES_OFFICE } from "./constants";
+import {
+  SAMSON_DEAL_TYPES,
+  SAMSON_DOC_TYPES,
+  SAMSON_ENTITY_TYPES,
+  SAMSON_INDUSTRIES,
+  SAMSON_SALES_OFFICE,
+} from "./constants";
 
 export interface SamsonAddress {
   addressLine1: string;
@@ -72,11 +78,15 @@ export interface SamsonDocument {
 
 export const SAMSON_PICKS: readonly PickDefinition[] = [
   { key: "deal_type", label: "Deal type", options: SAMSON_DEAL_TYPES, required: true },
+  { key: "entity_type", label: "Entity type", options: SAMSON_ENTITY_TYPES, required: false },
+  { key: "industry", label: "Industry", options: SAMSON_INDUSTRIES, required: false },
 ];
 
 export const SAMSON_REQUIRED_VAULT_FIELDS: readonly VaultField[] = [
   "owner_1_name",
   "ssn",
+  "owner_1_dob",
+  "ein",
   "owner_1_street",
   "owner_1_city",
   "owner_1_state",
@@ -88,8 +98,77 @@ export const SAMSON_REQUIRED_VAULT_FIELDS: readonly VaultField[] = [
   "company_zip_code",
 ];
 
-export function suggestSamsonPicks(): Record<string, string | null> {
-  return { deal_type: "New" };
+/** Our vault's entity spellings (LLC, S-Corp, Sole Prop, ...) → Samson's picklist. */
+export function mapSamsonEntityType(v: string | null | undefined): (typeof SAMSON_ENTITY_TYPES)[number] | null {
+  const s = (v ?? "").toLowerCase().replace(/[^a-z]/g, "");
+  if (!s) return null;
+  if (s === "llc" || s === "limitedliabilitycompany") return "LLC";
+  if (s === "llp" || s === "limitedliabilitypartnership") return "LLP";
+  if (s === "lp" || s === "limitedpartnership") return "Limited Partnership";
+  if (s === "partnership" || s === "generalpartnership" || s === "gp") return "Partnership";
+  if (s === "scorp" || s === "scorporation") return "S-Corp";
+  if (s === "ccorp" || s === "ccorporation") return "C-Corp";
+  if (["corp", "corporation", "inc"].includes(s)) return "Corporation";
+  if (["soleprop", "soleproprietor", "soleproprietorship"].includes(s)) return "Sole Proprietor";
+  return null;
+}
+
+// First match wins, so specific rules precede broad ones
+// ("home health" before "health", "veterinary" before "clinic").
+const INDUSTRY_RULES: Array<[RegExp, (typeof SAMSON_INDUSTRIES)[number]]> = [
+  [/veterinar|animal hospital/i, "Veterinary Clinic"],
+  [/home health|senior care|home care|therap/i, "Health Services"],
+  [/health|medical|dental|dentist|clinic|physician|pharmac/i, "Healthcare"],
+  [/salon|\bspa\b|barber|beauty|nail/i, "Beauty Salon / Spa"],
+  [/restaurant|\bbar\b|catering|cafe|food service/i, "Restaurant/Bar"],
+  [/grocery|bakery|baked|convenience|\bdeli\b|supermarket/i, "Grocery and Baked Goods"],
+  [/food|beverage|liquor|wine|brew/i, "Food & Beverage"],
+  [/hotel|motel|lodging|\binn\b/i, "Hotel, Motel, and Lodging"],
+  [/hospitality/i, "Hospitality"],
+  [/auto|mechanic|car sales|rv dealer|vehicle|bicycle|motor/i, "Automotive/Bicycle"],
+  [/truck|freight|transport|logistic|towing|travel/i, "Travel and Transportation"],
+  [/shipping|courier|delivery/i, "Shipping"],
+  [/garden|nursery/i, "Garden Store / Retail Nursery"],
+  [/landscap|lawn|farm|agricultur|crop|ranch/i, "Agriculture and Landscaping"],
+  [/building material|lumber/i, "Building Materials"],
+  [/electric|plumb|hvac|construct|contractor|remodel|roof|painting|builder|restoration|fire safety/i, "Construction"],
+  [/engineer/i, "Engineering"],
+  [/manufactur|fabricat/i, "Manufacturing"],
+  [/machine/i, "Machinery"],
+  [/wholesale|distribut/i, "Wholesale"],
+  [/laundr|dry clean|garment/i, "Laundry and Garment Services"],
+  [/apparel|clothing|fashion|boutique/i, "Apparel and Accessories"],
+  [/furniture|home furnish/i, "Home Furnishing"],
+  [/insurance/i, "Insurance"],
+  [/\bbank/i, "Banking"],
+  [/financ|lending|mortgage|invest/i, "Finance"],
+  [/consult|marketing/i, "Consulting"],
+  [/school|education|tutor|daycare|training/i, "Education"],
+  [/software|tech|computer|\bit\b|saas/i, "Technology"],
+  [/telecom/i, "Telecommunications"],
+  [/media|publish|advertis/i, "Media"],
+  [/\bgym|fitness|recreation/i, "Recreation"],
+  [/entertain|concert|venue|event/i, "Entertainment"],
+  [/solar|energy|oil\b/i, "Energy"],
+  [/non-?profit|church|charity/i, "Not For Profit"],
+  [/staffing|janitor|cleaning|security|legal|\blaw\b|attorney|account|bookkeep|\bcpa\b|real estate|property/i, "Business Services"],
+  [/retail|store|shop|e-?commerce/i, "Retail Store"],
+];
+
+export function suggestSamsonIndustry(text: string | null | undefined): (typeof SAMSON_INDUSTRIES)[number] | null {
+  const s = nonEmpty(text);
+  if (!s) return null;
+  return INDUSTRY_RULES.find(([re]) => re.test(s))?.[1] ?? null;
+}
+
+export function suggestSamsonPicks(source: LenderApiSource): Record<string, string | null> {
+  const { vault, business } = source;
+  const isPrimary = !business || business.is_primary;
+  return {
+    deal_type: "New",
+    entity_type: mapSamsonEntityType(business?.legal_entity_type ?? (isPrimary ? vault.legal_entity_type : null)),
+    industry: suggestSamsonIndustry(business?.industry ?? (isPrimary ? vault.industry : null)),
+  };
 }
 
 /** "777-123-4567", as their example. */
@@ -141,7 +220,7 @@ export function buildSamsonApplication(source: LenderApiSource, picks: Picks, ct
   const { vault: v, business: b, deal: d } = source;
 
   // ── Picks ────────────────────────────────────────────────────────────────
-  const effectivePicks: Record<string, string | null> = { ...suggestSamsonPicks() };
+  const effectivePicks: Record<string, string | null> = { ...suggestSamsonPicks(source) };
   for (const def of SAMSON_PICKS) {
     const chosen = nonEmpty(picks[def.key]);
     if (chosen) effectivePicks[def.key] = chosen;
@@ -165,7 +244,11 @@ export function buildSamsonApplication(source: LenderApiSource, picks: Picks, ct
   const cell = toSamsonPhone(r.client_phone);
   const home = toSamsonPhone(v.owner_1_home_phone) ?? cell;
   const dob = toIsoDate(r.owner_1_dob);
+  if (!dob) gaps.push({ field: "owner_1_dob", label: VAULT_FIELD_LABELS.owner_1_dob, kind: r.owner_1_dob ? "invalid" : "missing" });
   const pct1 = share(v.owner_1_ownership_pct);
+  if (!pct1) {
+    gaps.push({ field: "owner:1", label: "Owner 1 ownership % (edit the client profile)", kind: v.owner_1_ownership_pct ? "invalid" : "missing" });
+  }
   const homeAddress = address(r.owner_1_street, r.owner_1_city, r.owner_1_state, r.owner_1_zip);
 
   const owners: SamsonOwner[] = [
@@ -209,10 +292,16 @@ export function buildSamsonApplication(source: LenderApiSource, picks: Picks, ct
         gaps.push({ field: `owner:${o.position}`, label: `${label}: missing SSN (9 digits)`, kind: o.ssn ? "invalid" : "missing" });
         continue;
       }
+      // Samson requires DOB, share and home address for EVERY owner.
       const oDob = toIsoDate(o.dob);
-      const oPhone = toSamsonPhone(o.phone);
       const oAddress = address(o.street, o.city, o.state, o.zip);
       const oPct = share(o.ownership_pct);
+      const missing = [!oDob && "date of birth", !oAddress && "home address", !oPct && "ownership %"].filter(Boolean);
+      if (missing.length > 0) {
+        gaps.push({ field: `owner:${o.position}`, label: `${label}: missing ${missing.join(", ")}`, kind: "missing" });
+        continue;
+      }
+      const oPhone = toSamsonPhone(o.phone);
       owners.push({
         ssn: hyphenSsn(oSsn),
         name: nonEmpty(o.full_name) as string,
@@ -239,7 +328,7 @@ export function buildSamsonApplication(source: LenderApiSource, picks: Picks, ct
   const dba = isPrimaryBusiness ? nonEmpty(v.dba) ?? nonEmpty(b?.business_name) : nonEmpty(b?.business_name);
   // r.ein is already null for a non-primary business (scopeResolvedToBusiness).
   const ein = digitsOnly(r.ein);
-  if (r.ein && ein.length !== 9) gaps.push({ field: "ein", label: "EIN (9 digits)", kind: "invalid" });
+  if (ein.length !== 9) gaps.push({ field: "ein", label: "EIN (9 digits)", kind: r.ein ? "invalid" : "missing" });
 
   const phone = toSamsonPhone(b?.phone) ?? cell;
   if (!phone) gaps.push({ field: "client_phone", label: "Phone (10-digit US number)", kind: r.client_phone ? "invalid" : "missing" });
@@ -252,12 +341,17 @@ export function buildSamsonApplication(source: LenderApiSource, picks: Picks, ct
   }
   const bizAddress = address(r.business_street, r.company_city, r.company_state, r.company_zip_code);
 
-  const entityType = nonEmpty(b?.legal_entity_type) ?? (isPrimaryBusiness ? nonEmpty(v.legal_entity_type) : null);
-  const rawIndustry = nonEmpty(b?.industry) ?? (isPrimaryBusiness ? nonEmpty(v.industry) : null);
-  const naics = resolveNaics(rawIndustry);
+  // Entity type and industry go out ONLY as Samson picklist values (the picks);
+  // the vault's free text is just where the suggestion comes from.
+  const entityType = effectivePicks.entity_type;
+  const industry = effectivePicks.industry;
+  const naics = resolveNaics(nonEmpty(b?.industry) ?? (isPrimaryBusiness ? nonEmpty(v.industry) : null));
 
   // ── Deal ─────────────────────────────────────────────────────────────────
   const requested = toInt(d?.capital_requested ?? v.capital_requested);
+  if (!requested || requested <= 0) {
+    gaps.push({ field: "capital_requested", label: "Requested amount (edit the funding deal)", kind: "missing" });
+  }
   const monthly = monthlyRevenueOf(source, isPrimaryBusiness);
   const purpose = nonEmpty(d?.loan_purpose ?? v.loan_purpose);
   const rep = source.salesRep ?? null;
@@ -279,7 +373,7 @@ export function buildSamsonApplication(source: LenderApiSource, picks: Picks, ct
       ...(toStateName(r.company_state) ? { stateOfIncorporation: toStateName(r.company_state) as string } : {}),
       ...(dba && dba !== legalName ? { dba } : {}),
       ...(nonEmpty(v.client_email) ? { email: nonEmpty(v.client_email) as string } : {}),
-      ...(naics ? { industry: naics.title } : rawIndustry ? { industry: rawIndustry } : {}),
+      ...(industry ? { industry } : {}),
       ...(entityType ? { entityType } : {}),
       dealType: effectivePicks.deal_type ?? "",
       ...(naics ? { naicsCode: naics.code } : {}),

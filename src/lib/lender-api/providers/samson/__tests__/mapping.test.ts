@@ -4,7 +4,9 @@ import {
   buildSamsonApplication,
   interpretSamsonStatus,
   readSamsonOpportunityId,
+  mapSamsonEntityType,
   samsonDocType,
+  suggestSamsonIndustry,
   toSamsonPhone,
   type SamsonRecord,
 } from "../mapping";
@@ -17,9 +19,9 @@ describe("buildSamsonApplication — complete source", () => {
   const built = buildSamsonApplication({ ...makeSource(), salesRep: rep }, {}, ctx);
   const p = built.payload as SamsonRecord;
 
-  it("has no gaps and defaults the deal type to New", () => {
+  it("has no gaps; deal type defaults to New, entity and industry come from the vault", () => {
     expect(built.gaps).toEqual([]);
-    expect(built.effectivePicks).toEqual({ deal_type: "New" });
+    expect(built.effectivePicks).toEqual({ deal_type: "New", entity_type: "LLC", industry: "Construction" });
   });
 
   it("maps the business in their formats", () => {
@@ -32,10 +34,10 @@ describe("buildSamsonApplication — complete source", () => {
       dba: "Doe Plumbing",
       email: "jane@example.com",
       entityType: "LLC",
+      industry: "Construction",
       dealType: "New",
       address: { addressLine1: "10 Pipe St", city: "Miami", state: "FL", zipCode: "33101" },
     });
-    expect(p.business.industry).toBeTruthy();
   });
 
   it("maps owner 1 with a hyphenated SSN, home phone falling back to cell", () => {
@@ -83,6 +85,10 @@ describe("buildSamsonApplication — gaps and edges", () => {
     ["no phone", { vault: { client_phone: "" }, business: { phone: null } }, { field: "client_phone", kind: "missing" }],
     ["no start date", { vault: { business_start_date: null }, business: { business_start_date: null } }, { field: "business_start_date", kind: "missing" }],
     ["bad EIN", { vault: { ein: "123" } }, { field: "ein", kind: "invalid" }],
+    ["no EIN", { vault: { ein: null } }, { field: "ein", kind: "missing" }],
+    ["no owner DOB", { vault: { owner_1_dob: null } }, { field: "owner_1_dob", kind: "missing" }],
+    ["no owner share", { vault: { owner_1_ownership_pct: null } }, { field: "owner:1", kind: "missing" }],
+    ["no requested amount", { vault: { capital_requested: null }, deal: { capital_requested: null } }, { field: "capital_requested", kind: "missing" }],
   ] as Array<[string, Record<string, unknown>, { field: string; kind: string }]>)("%s", (_n, overrides, gap) => {
     const built = buildSamsonApplication(makeSource(overrides as Record<string, unknown>), {}, ctx);
     expect(built.gaps).toEqual(expect.arrayContaining([expect.objectContaining(gap)]));
@@ -117,6 +123,32 @@ describe("buildSamsonApplication — gaps and edges", () => {
     expect(built.gaps).toEqual([expect.objectContaining({ field: "owner:3", kind: "missing" })]);
   });
 
+  it("flags a co-owner missing DOB or home address instead of sending them", () => {
+    const built = buildSamsonApplication(
+      makeSource({
+        vault: { owner_1_ownership_pct: 60 },
+        owners: [{ position: 2, full_name: "Co Owner2", ownership_pct: 40, dob: null, ssn: "987654321", street: null, city: null, state: null, zip: null, email: null, phone: null }],
+      }),
+      {},
+      ctx
+    );
+    expect((built.payload as SamsonRecord).owners).toHaveLength(1);
+    expect(built.gaps).toEqual([
+      expect.objectContaining({ field: "owner:2", label: expect.stringContaining("date of birth, home address"), kind: "missing" }),
+    ]);
+  });
+
+  it("only sends picklist values for entity type and industry", () => {
+    const off = buildSamsonApplication(makeSource({ vault: { legal_entity_type: "Other", industry: "zzz" }, business: { legal_entity_type: "Other", industry: "zzz" } }), {}, ctx);
+    expect((off.payload as SamsonRecord).business.entityType).toBeUndefined();
+    expect((off.payload as SamsonRecord).business.industry).toBeUndefined();
+    expect(buildSamsonApplication(makeSource(), { industry: "Plumbing" }, ctx).gaps).toEqual([
+      { field: "pick:industry", label: "Industry", kind: "invalid" },
+    ]);
+    const picked = buildSamsonApplication(makeSource(), { entity_type: "S-Corp", industry: "Healthcare" }, ctx).payload as SamsonRecord;
+    expect(picked.business).toMatchObject({ entityType: "S-Corp", industry: "Healthcare" });
+  });
+
   it("a non-primary business never carries the vault's EIN", () => {
     const built = buildSamsonApplication(
       makeSource({ business: { is_primary: false, company_name: "Second Biz LLC" } }),
@@ -141,10 +173,35 @@ describe("samson helpers", () => {
     expect(toStateName("ZZ")).toBeNull();
   });
 
-  it("maps doc codes to their document types, nothing for unknown codes", () => {
+  it("maps doc codes to Samson document types, nothing for codes they have no type for", () => {
     expect(samsonDocType("business_bank_statements")).toBe("Bank Statements");
+    expect(samsonDocType("funding_application")).toBe("Signed Application");
+    expect(samsonDocType("funding_application_lenders")).toBe("Signed Application");
+    expect(samsonDocType("tax_returns")).toBe("Tax Returns");
+    expect(samsonDocType("personal_tax_returns")).toBe("Tax Returns");
+    expect(samsonDocType("myscoreiq")).toBe("Credit Report");
+    expect(samsonDocType("voided_check")).toBe("VC");
+    expect(samsonDocType("drivers_license")).toBe("DL");
+    expect(samsonDocType("profit_loss")).toBeNull();
     expect(samsonDocType("articles_of_incorporation")).toBeNull();
     expect(samsonDocType(null)).toBeNull();
+  });
+
+  it("maps our entity spellings onto their picklist", () => {
+    expect(mapSamsonEntityType("LLC")).toBe("LLC");
+    expect(mapSamsonEntityType("S-Corp")).toBe("S-Corp");
+    expect(mapSamsonEntityType("C-Corp")).toBe("C-Corp");
+    expect(mapSamsonEntityType("Sole Prop")).toBe("Sole Proprietor");
+    expect(mapSamsonEntityType("Other")).toBeNull();
+  });
+
+  it("suggests an industry from free text", () => {
+    expect(suggestSamsonIndustry("Restaurant & Catering Business")).toBe("Restaurant/Bar");
+    expect(suggestSamsonIndustry("Electrical Contractors and Other Wiring Installation Contractors")).toBe("Construction");
+    expect(suggestSamsonIndustry("General Freight Trucking, Long-Distance, Truckload")).toBe("Travel and Transportation");
+    expect(suggestSamsonIndustry("Home Healthcare")).toBe("Health Services");
+    expect(suggestSamsonIndustry("MECHANIC SHOP")).toBe("Automotive/Bicycle");
+    expect(suggestSamsonIndustry(null)).toBeNull();
   });
 
   it("reads the opportunity id only on Status Success", () => {
