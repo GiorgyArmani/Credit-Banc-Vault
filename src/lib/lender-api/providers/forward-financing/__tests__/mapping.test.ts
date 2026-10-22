@@ -214,15 +214,16 @@ describe("suggestions", () => {
 
 describe("ffTagsForDocCode", () => {
   it.each([
+    // Lead intake accepts only signed_application / bank_statement / other.
     ["business_bank_statements", ["bank_statement"]],
-    ["drivers_license_front", ["drivers_license"]],
-    ["voided_check", ["voided_check"]],
-    ["personal_tax_returns", ["tax_return"]],
-    ["profit_loss", ["balance_sheet_income_statement"]],
-    ["ar_report", ["accounts_receivable_report_invoices"]],
-    ["operating_agreement_bylaws", ["proof_of_ownership"]],
-    ["misc_files", []],
-    [null, []],
+    ["funding_application", ["signed_application"]],
+    ["funding_application_lenders", ["signed_application"]],
+    ["drivers_license", ["other"]],
+    ["voided_check", ["other"]],
+    ["articles_of_incorporation", ["other"]],
+    ["personal_tax_returns", ["other"]],
+    ["misc_files", ["other"]],
+    [null, ["other"]],
   ])("%s → %j", (code, tags) => {
     expect(ffTagsForDocCode(code)).toEqual(tags);
   });

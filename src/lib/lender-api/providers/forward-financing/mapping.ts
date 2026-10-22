@@ -339,23 +339,21 @@ export function buildFfLead(
   return { payload, redacted: redactFfLead(payload), gaps, effectivePicks };
 }
 
-const TAGS: Record<string, string[]> = {
-  business_bank_statements: ["bank_statement"],
-  drivers_license: ["drivers_license"],
-  drivers_license_front: ["drivers_license"],
-  drivers_license_back: ["drivers_license"],
-  voided_check: ["voided_check"],
-  tax_returns: ["tax_return"],
-  personal_tax_returns: ["tax_return"],
-  balance_sheets: ["balance_sheet_income_statement"],
-  profit_loss: ["balance_sheet_income_statement"],
-  ar_report: ["accounts_receivable_report_invoices"],
-  articles_of_incorporation: ["proof_of_ownership"],
-  operating_agreement_bylaws: ["proof_of_ownership"],
+// We upload against a lead_id, where FF accepts ONLY the intake tags
+// signed_application / bank_statement / other. Stipulation tags (drivers_license,
+// voided_check, proof_of_ownership, tax_return, ...) are valid only with a
+// stip uuid — on a lead they fail FF's checks (FF ticket, 2026-10-22). Every file
+// needs at least one tag ("Missing tags" otherwise), so the fallback is "other".
+const TAGS: Record<string, string> = {
+  business_bank_statements: "bank_statement",
+  bank_statement: "bank_statement",
+  funding_application: "signed_application",
+  funding_application_lenders: "signed_application",
+  signed_application: "signed_application",
 };
 
 export function ffTagsForDocCode(code: string | null): string[] {
-  return code ? [...(TAGS[code] ?? [])] : [];
+  return [(code && TAGS[code]) || "other"];
 }
 
 function money(n: unknown): string {
