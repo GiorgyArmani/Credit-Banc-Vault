@@ -10,7 +10,9 @@ export const dynamic = 'force-dynamic';
  * POST /api/webhooks/ghl-tags
  * 
  * Receives notifications from GHL when contact tags change.
- * Syncs dynamic document requirements based on 'requested_*' tags.
+ * Adds dynamic document requirements for new 'requested_*' tags.
+ * Additive only: never deactivates or modifies an existing slot — the vault
+ * owns document requests, GHL tags just trigger GHL workflows.
  */
 export async function POST(request: Request) {
     try {
@@ -132,8 +134,6 @@ export async function POST(request: Request) {
         console.log(`📋 Filtered requested_ tags:`, requestedTags);
 
         // 4. For each requested tag, look up document and insert into client_dynamic_documents
-        const documentIds: string[] = [];
-
         for (const tag of requestedTags) {
             // Look up document in required_documents by ghl_tag
             const { data: docData, error: docError } = await supabase
@@ -151,8 +151,6 @@ export async function POST(request: Request) {
 
             // Only process if document type exists in our database
             if (docData) {
-                documentIds.push(docData.id);
-
                 // Fan-out target list:
                 //   • client-scoped codes (DL/MyScoreIQ/PFS) → one row anchored
                 //     on the primary business. Read paths ignore business_profile_id
@@ -164,6 +162,10 @@ export async function POST(request: Request) {
                     ? [primaryBusinessId]
                     : businesses.map(b => b.id);
 
+                // Insert-only: the vault is the source of truth for document
+                // requests. A slot that already exists — staff-requested,
+                // silent, or one staff deliberately closed — is never touched
+                // from here, so a GHL tag can't reopen or relabel it.
                 for (const businessId of targetBusinessIds) {
                     const { error: insertError } = await supabase
                         .from("client_dynamic_documents")
@@ -177,7 +179,7 @@ export async function POST(request: Request) {
                             },
                             {
                                 onConflict: "business_profile_id,document_id",
-                                ignoreDuplicates: false,
+                                ignoreDuplicates: true,
                             }
                         );
 
@@ -196,33 +198,12 @@ export async function POST(request: Request) {
             }
         }
 
-        // 5. Deactivate any client_dynamic_documents not in current tag list
-        // This handles tag removal in GHL
-        if (documentIds.length > 0) {
-            // PostgREST needs `in` values as a parenthesised list. Passing the
-            // raw JS array made this filter ERROR on every call, so step 5 has
-            // never actually deactivated anything — which is why a contact's
-            // stale requested_* tags left their document rows sitting active on
-            // the vault forever. Verified against prod: the array form returns
-            // an error, the parenthesised form matches.
-            const { error: deactivateError } = await supabase
-                .from("client_dynamic_documents")
-                .update({ is_active: false })
-                .eq("user_id", userId)
-                .not("document_id", "in", `(${documentIds.join(",")})`)
-                .eq("is_active", true);
-
-            if (deactivateError) {
-                console.error(`Error deactivating documents: ${deactivateError.message}`);
-            }
-        } else {
-            // No requested tags, deactivate all
-            await supabase
-                .from("client_dynamic_documents")
-                .update({ is_active: false })
-                .eq("user_id", userId)
-                .eq("is_active", true);
-        }
+        // 5. No deactivation from GHL. This step used to switch off every slot
+        // whose requested_* tag was missing from the payload. Silent staff
+        // slots never carry a tag (by design), so any unrelated tag change on
+        // the contact wiped them and their files fell out of their fields
+        // (2860 Sunrise LLC, 2026-10-23). Slots are opened and closed in the
+        // vault only; GHL tags are an outbound signal for GHL workflows.
 
         // 6. Sync outstanding documents to GHL and Supabase
         // This ensures the outstanding documents list is updated when tags change
