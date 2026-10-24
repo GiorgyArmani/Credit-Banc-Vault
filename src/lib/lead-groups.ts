@@ -137,7 +137,7 @@ export const groupCriteriaSchema = baseCriteria
   .refine(c => rangeIsOrdered(c.ageDaysMin, c.ageDaysMax), {
     message: "Minimum age cannot exceed maximum age",
     path: ["ageDaysMin"],
-  }) as unknown as z.ZodType<GroupCriteria, z.ZodTypeDef, unknown>;
+  }) as unknown as z.ZodType<GroupCriteria, unknown>;
 
 // ─── Emptiness ───────────────────────────────────────────────────────────────
 
