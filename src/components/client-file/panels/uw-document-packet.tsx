@@ -41,6 +41,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DocumentGroupPicker } from "@/components/document-group-picker";
+import { LenderDocumentFolders } from "@/components/client-file/panels/lender-document-folders";
 import type { useDocumentGroups } from "@/hooks/use-document-groups";
 import {
     formatGroupLabel,
@@ -48,6 +49,7 @@ import {
     getDocumentPeriod,
     groupDocuments,
     groupsForDocCode,
+    LENDER_DOCUMENTATION_DOC_CODE,
     offersGrouping,
     UNGROUPED_KEY,
     type DocumentGroup,
@@ -115,7 +117,19 @@ export type UwDocumentPacketProps = {
     on_assign: (target_group_id: string | null) => void;
     on_edit_group: (group: { id: string; label: string;[k: string]: unknown }) => void;
     on_delete_group: (group_id: string, label: string) => void;
+    /** Names offered when adding a Lender Documentation group: this file's
+     *  lenders first, then the lender list. */
+    lender_name_suggestions?: { name: string; hint?: string }[];
+    /** Drag-and-drop move of files into a group (null = Unsorted). */
+    on_move_to_group?: (doc_ids: string[], group_id: string | null) => Promise<void>;
+    /** Upload files straight into a group — a drop from the desktop, or a
+     *  folder's own Upload button. */
+    on_upload_to_group?: (doc_code: string, group_id: string | null, files: File[]) => Promise<void>;
+    /** A lender folder was renamed or deleted: reload groups and files. */
+    on_groups_changed?: () => void;
 };
+
+
 
 function format_file_size(bytes: number): string {
     if (!bytes) return "0 Bytes";
@@ -161,7 +175,12 @@ export function UwDocumentPacket({
     on_assign,
     on_edit_group,
     on_delete_group,
+    lender_name_suggestions,
+    on_move_to_group,
+    on_upload_to_group,
+    on_groups_changed,
 }: UwDocumentPacketProps) {
+
     /**
      * render_document_card: Renders individual document card with download/preview for underwriting
      */
@@ -498,6 +517,31 @@ export function UwDocumentPacket({
      * render_document_category: Renders a category section with its documents for underwriting
      */
     function render_document_category(doc_type: { code: string; label: string }) {
+        if (doc_type.code === LENDER_DOCUMENTATION_DOC_CODE) {
+            return (
+                <LenderDocumentFolders
+                    key={doc_type.code}
+                    documents={documents.filter(d => d.category === doc_type.code)}
+                    document_groups={document_groups}
+                    active_business_id={active_business_id}
+                    can_manage={can_upload && !!on_move_to_group && !!on_upload_to_group}
+                    expanded={expanded_categories.has(doc_type.code)}
+                    on_toggle_expand={() => on_toggle_expand(doc_type.code)}
+                    lender_name_suggestions={lender_name_suggestions}
+                    zipping={zipping}
+                    on_download_all={on_download_all}
+                    on_preview={on_preview}
+                    on_download={on_download}
+                    on_rename={on_rename}
+                    on_delete={on_delete}
+                    on_add_group={on_add_group}
+                    on_groups_changed={on_groups_changed ?? (() => { })}
+                    on_move_to_group={on_move_to_group ?? (async () => { })}
+                    on_upload_to_group={(group_id, files) =>
+                        on_upload_to_group?.(LENDER_DOCUMENTATION_DOC_CODE, group_id, files) ?? Promise.resolve()}
+                />
+            );
+        }
         const category_docs = documents.filter(d => d.category === doc_type.code);
         const has_docs = category_docs.length > 0;
         const is_approved = approvals.has(doc_type.code);

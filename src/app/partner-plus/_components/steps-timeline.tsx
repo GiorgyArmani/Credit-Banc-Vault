@@ -89,7 +89,7 @@ export function StepsTimeline({ steps }: { steps: { title: string; body: string 
               <span
                 className={`relative z-10 flex ${NODE} shrink-0 items-center justify-center rounded-full border-2 font-headline text-xl font-extrabold ring-8 ring-cb-cream transition-all duration-500 ${
                   lit
-                    ? "border-cb-mint bg-cb-mint text-cb-navy shadow-[0_8px_18px_-6px_rgba(85,207,158,0.55)] delay-[600ms]"
+                    ? "border-cb-mint bg-cb-mint text-cb-navy shadow-[0_8px_18px_-6px_rgba(85,207,158,0.55)] [transition-delay:600ms]"
                     : "border-cb-mint/30 bg-white text-cb-gray delay-0"
                 } ${current ? "scale-110" : "scale-100"}`}
               >

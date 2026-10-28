@@ -104,13 +104,13 @@ function formatNoteBlock(label: string, notes: string | null | undefined): strin
  * still goes out on its own — a failed image must never cost the channel the
  * decline reasons.
  *
- * Returns how many images rode along. Never throws.
+ * Returns how many images rode along and whether the post landed. Never throws.
  */
 async function postResponseWithAttachments(
   channel_id: string,
   assignment_id: string,
   text: string
-): Promise<number> {
+): Promise<{ attachments: number; posted: boolean }> {
   let claimed: Awaited<ReturnType<typeof claimUnpostedLenderAttachments>> = [];
   try {
     claimed = await claimUnpostedLenderAttachments(assignment_id);
@@ -119,8 +119,7 @@ async function postResponseWithAttachments(
   }
 
   if (claimed.length === 0) {
-    await slackPostMessage(channel_id, text);
-    return 0;
+    return { attachments: 0, posted: await slackPostMessage(channel_id, text) };
   }
 
   try {
@@ -129,12 +128,11 @@ async function postResponseWithAttachments(
       files: claimed.map((a) => ({ filename: a.file_name, bytes: a.bytes, title: a.file_name })),
       comment: text,
     });
-    return claimed.length;
+    return { attachments: claimed.length, posted: true };
   } catch (err) {
     console.error('postResponseWithAttachments upload failed (falling back to text):', err);
     await releaseLenderAttachments(claimed.map((a) => a.id));
-    await slackPostMessage(channel_id, text);
-    return 0;
+    return { attachments: 0, posted: await slackPostMessage(channel_id, text) };
   }
 }
 
@@ -353,6 +351,81 @@ export async function notifyLenderResponseNoteRecorded(
     );
   } catch (err) {
     console.error('notifyLenderResponseNoteRecorded error (non-fatal):', err);
+  }
+}
+
+/**
+ * Re-posts the CURRENT lender response note into the deal channel as a revision —
+ * the lender sent a new offer (we asked for better terms, or they changed their
+ * mind), so the one already in Slack is stale.
+ *
+ * The automatic note post fires only the FIRST time a note is recorded, so edits
+ * never reach the channel on their own. That suppression is right for typo fixes
+ * and wrong for a revised offer — this is the explicit, button-driven way past it.
+ * Any screenshots not yet posted ride along (same once-only claim as every other
+ * post), so the new offer email lands under the new terms.
+ *
+ * Called from a UW-triggered route, so it reports back rather than swallowing:
+ * `reason` is what to tell the person who pressed the button.
+ */
+export async function sendRevisedLenderResponseToSlack(
+  assignment_id: string
+): Promise<{ ok: boolean; reason?: string; attachments_sent?: number }> {
+  try {
+    const { data: assignment } = await supabase_admin
+      .from('client_lender_assignments')
+      .select('client_id, lender_name, specialty, status, response_notes')
+      .eq('id', assignment_id)
+      .maybeSingle<{
+        client_id: string | null;
+        lender_name: string | null;
+        specialty: string | null;
+        status: string | null;
+        response_notes: string | null;
+      }>();
+
+    const client_id = assignment?.client_id;
+    if (!client_id) return { ok: false, reason: 'Assignment not found.' };
+
+    const status = assignment.status;
+    if (status !== 'approved_by_lender' && status !== 'declined_by_lender') {
+      return { ok: false, reason: 'Record the lender’s verdict before sending a revision.' };
+    }
+
+    const notes = (assignment.response_notes ?? '').trim();
+    if (!notes) return { ok: false, reason: 'Type the revised offer in the note first.' };
+
+    const { data: client_row } = await supabase_admin
+      .from('client_data_vault')
+      .select('company_name, slack_channel_id')
+      .eq('id', client_id)
+      .maybeSingle<{ company_name: string | null; slack_channel_id: string | null }>();
+
+    const channel_id = client_row?.slack_channel_id ?? null;
+    if (!channel_id) return { ok: false, reason: 'This deal has no Slack channel.' };
+
+    const company_name = client_row?.company_name ?? undefined;
+    const lender_label = `${assignment.lender_name ?? 'the lender'}${
+      assignment.specialty ? ` (${assignment.specialty})` : ''
+    }`;
+    const headline =
+      status === 'declined_by_lender'
+        ? `🔄 Updated decline reasons from *${lender_label}*${company_name ? ` — ${company_name}` : ''}.`
+        : `🔄 *Revised offer* from *${lender_label}*${company_name ? ` — ${company_name}` : ''}. This replaces the previous offer.`;
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://vault.creditbanc.io';
+
+    const { attachments, posted } = await postResponseWithAttachments(
+      channel_id,
+      assignment_id,
+      `${headline}${formatNoteBlock(NOTE_LABEL[status], notes)}\n${baseUrl}/admin/clients/${client_id}`
+    );
+    if (!posted) {
+      return { ok: false, reason: 'Slack rejected the post — is the bot still in the channel?' };
+    }
+    return { ok: true, attachments_sent: attachments };
+  } catch (err) {
+    console.error('sendRevisedLenderResponseToSlack error:', err);
+    return { ok: false, reason: 'Slack rejected the post.' };
   }
 }
 

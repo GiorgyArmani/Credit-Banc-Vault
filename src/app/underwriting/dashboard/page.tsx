@@ -25,6 +25,7 @@ import { GroupChipRail, useLeadGroups } from "./_components/group-chip-rail";
 import { ReadyCard } from "./_components/ready-card";
 import { LeadTable } from "./_components/client-row";
 import { daysSince, sortLeads, type SortDir, type SortKey } from "./_components/lead-display";
+import { LENDER_DOCUMENTATION_DOC_CODE } from "@/lib/document-groups";
 
 enum ComponentState {
   LOADING = "LOADING",
@@ -223,7 +224,7 @@ export default function UnderwritingDashboardPage() {
       const dynamicByUser = new Map<string, Set<string>>();
       for (const d of (allDynamicDocs as any[] | null) ?? []) {
         const code = normalizeSupabaseJoin<{ code?: string }>(d.required_documents)?.code;
-        if (!code) continue;
+        if (!code || code === LENDER_DOCUMENTATION_DOC_CODE) continue;
         const set = dynamicByUser.get(d.user_id);
         if (set) set.add(code);
         else dynamicByUser.set(d.user_id, new Set([code]));

@@ -22,6 +22,7 @@ import { LoanPipelineBadge } from "@/components/loan-pipeline-status";
 import { ActivityAgeBadge } from "@/components/advisor/activity-age-badge";
 import { differenceInDays } from "date-fns";
 import { normalizeSupabaseJoin } from "@/lib/document-scope";
+import { LENDER_DOCUMENTATION_DOC_CODE } from "@/lib/document-groups";
 
 function format_currency(amount: number): string {
     return new Intl.NumberFormat("en-US", {
@@ -310,7 +311,7 @@ export function WorkspaceProspects({ basePath }: { basePath: string }) {
             const dynamicByUser = new Map<string, Set<string>>();
             for (const row of (allDynamicDocs as any[] | null) || []) {
                 const code = normalizeSupabaseJoin<{ code?: string }>(row.required_documents)?.code;
-                if (!code) continue;
+                if (!code || code === LENDER_DOCUMENTATION_DOC_CODE) continue;
                 if (!dynamicByUser.has(row.user_id)) dynamicByUser.set(row.user_id, new Set());
                 dynamicByUser.get(row.user_id)!.add(code);
             }

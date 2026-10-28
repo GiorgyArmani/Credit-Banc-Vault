@@ -3,6 +3,7 @@ import { secretsMatch } from "@/lib/secret-compare";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { syncOutstandingDocuments } from "@/lib/outstanding-documents";
 import { isClientScopedDoc } from "@/lib/document-scope";
+import { LENDER_DOCUMENTATION_DOC_CODE } from "@/lib/document-groups";
 
 export const dynamic = 'force-dynamic';
 
@@ -149,8 +150,9 @@ export async function POST(request: Request) {
                 error: docError?.message
             });
 
-            // Only process if document type exists in our database
-            if (docData) {
+            // Only process if document type exists in our database. Lender
+            // Documentation is never a client requirement, whatever GHL says.
+            if (docData && docData.code !== LENDER_DOCUMENTATION_DOC_CODE) {
                 // Fan-out target list:
                 //   • client-scoped codes (DL/MyScoreIQ/PFS) → one row anchored
                 //     on the primary business. Read paths ignore business_profile_id

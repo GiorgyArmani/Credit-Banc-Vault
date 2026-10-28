@@ -25,7 +25,7 @@
  * everything else inherits.
  */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Loader2, Plus, X } from "lucide-react";
 import clsx from "clsx";
 import {
@@ -56,6 +56,20 @@ interface DocumentGroupPickerProps {
   /** Overrides the config's help text. Pass null to suppress it entirely. */
   helpText?: string | null;
   className?: string;
+  /**
+   * Known names to pick from when adding a group — e.g. the lender list for
+   * Lender Documentation. Typed text that matches none of them is still
+   * accepted: the list is a shortcut, never a gate.
+   */
+  nameSuggestions?: { name: string; hint?: string }[];
+  /**
+   * Add-only: no group dropdown, just a "New …" button that opens the add
+   * form. For surfaces where the groups are already on screen as folders and
+   * picking one happens by dropping a file on it.
+   */
+  addOnly?: boolean;
+  /** Button text in add-only mode. Defaults to "New <noun>". */
+  addLabel?: string;
 }
 
 export function DocumentGroupPicker({
@@ -70,6 +84,9 @@ export function DocumentGroupPicker({
   tone = "slate",
   helpText,
   className,
+  nameSuggestions,
+  addOnly = false,
+  addLabel,
 }: DocumentGroupPickerProps) {
   const [is_adding, set_is_adding] = useState(false);
   const [name, set_name] = useState("");
@@ -80,6 +97,22 @@ export function DocumentGroupPicker({
   const [error, set_error] = useState<string | null>(null);
 
   const config = getGroupConfig(docCode);
+
+  // Suggestions narrowed by what's typed, minus names already used as a group
+  // on this field (picking one of those would just re-select the old group).
+  const filtered_suggestions = useMemo(() => {
+    if (!nameSuggestions?.length) return [];
+    const taken = new Set(
+      groupsForDocCode(groups, docCode)
+        .filter((g) => g.is_active)
+        .map((g) => g.name.trim().toLowerCase())
+    );
+    const q = name.trim().toLowerCase();
+    return nameSuggestions
+      .filter((s) => !taken.has(s.name.trim().toLowerCase()))
+      .filter((s) => !q || s.name.toLowerCase().includes(q))
+      .slice(0, 50);
+  }, [nameSuggestions, groups, docCode, name]);
 
   // Retired groups stay out of the picker but keep holding the files already
   // filed under them — see groupDocuments.
@@ -172,13 +205,30 @@ export function DocumentGroupPicker({
 
   return (
     <div className={clsx("space-y-2", className)}>
-      <label
-        className={clsx("block text-[10px] font-black uppercase tracking-widest", accent.label)}
-      >
-        {config.noun}
-      </label>
+      {!addOnly && (
+        <label
+          className={clsx("block text-[10px] font-black uppercase tracking-widest", accent.label)}
+        >
+          {config.noun}
+        </label>
+      )}
 
-      {!is_adding && (
+      {addOnly && !is_adding && (
+        <button
+          type="button"
+          disabled={disabled || (!businessProfileId && !clientVaultId)}
+          onClick={() => {
+            reset_form();
+            set_is_adding(true);
+          }}
+          className="flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-300 bg-white/60 px-4 py-3 text-xs font-semibold text-slate-600 transition-colors hover:border-slate-400 hover:bg-white hover:text-slate-900 disabled:opacity-50"
+        >
+          <Plus className="h-4 w-4" />
+          {addLabel ?? `New ${config.noun.toLowerCase()}`}
+        </button>
+      )}
+
+      {!addOnly && !is_adding && (
         <div className="flex items-center gap-2">
           <select
             value={value ?? ""}
@@ -254,6 +304,40 @@ export function DocumentGroupPicker({
               aria-label={config.nameLabel}
               className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400"
             />
+
+            {nameSuggestions && nameSuggestions.length > 0 && (
+              <div className="max-h-48 overflow-y-auto rounded-lg border border-slate-200 bg-white divide-y divide-slate-100">
+                {filtered_suggestions.length === 0 ? (
+                  <p className="px-3 py-2 text-[11px] text-slate-400">
+                    {name.trim()
+                      ? `Not on the list — "${name.trim()}" will be added as a new ${config.noun.toLowerCase()}.`
+                      : "Every listed name is already added."}
+                  </p>
+                ) : (
+                  filtered_suggestions.map((s) => {
+                    const chosen = s.name.trim().toLowerCase() === name.trim().toLowerCase();
+                    return (
+                      <button
+                        key={`${s.hint ?? ""}:${s.name}`}
+                        type="button"
+                        onClick={() => set_name(s.name)}
+                        className={clsx(
+                          "flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-sm transition-colors",
+                          chosen ? "bg-slate-100 font-semibold text-slate-900" : "text-slate-700 hover:bg-slate-50"
+                        )}
+                      >
+                        <span className="truncate">{s.name}</span>
+                        {s.hint && (
+                          <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                            {s.hint}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            )}
 
             {config.identifier && (
               <input

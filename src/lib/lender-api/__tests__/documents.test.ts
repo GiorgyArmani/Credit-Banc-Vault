@@ -70,6 +70,31 @@ describe("selectSubmittable", () => {
     });
     expect(xlsx).toMatchObject({ stampable: false, tags: ["bank_statement"], label: "BUSINESS_BANK_STATEMENTS", file_name: "pnl.xlsx" });
   });
+
+  it("offers Lender Documentation only to the lender its group names", () => {
+    const groupNames: Record<string, string> = { g_newity: "Newity", g_fora: "Fora" };
+    const rows = [
+      row({ id: "newity-coi", doc_code: "lender_documentation", document_group_id: "g_newity" }),
+      row({ id: "fora-app", doc_code: "lender_documentation", document_group_id: "g_fora" }),
+      row({ id: "unsorted", doc_code: "lender_documentation", document_group_id: null }),
+      row({ id: "stmt" }),
+    ];
+    const pick = (lenderName: string) =>
+      selectSubmittable({
+        ...base,
+        approvals: [],
+        rows,
+        lenderName,
+        groupNameFor: (g) => (g ? groupNames[g] ?? null : null),
+      })
+        .map((d) => d.id)
+        .sort();
+
+    expect(pick("Newity Business Loans")).toEqual(["newity-coi", "stmt"]);
+    // "Fora" must not leak to Forward Financing just because it is a prefix of a word.
+    expect(pick("Forward Financing")).toEqual(["stmt"]);
+    expect(pick("Fora Financial")).toEqual(["fora-app", "stmt"]);
+  });
 });
 
 describe("outboundFilename", () => {

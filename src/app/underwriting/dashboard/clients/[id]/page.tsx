@@ -106,11 +106,13 @@ import {
 import {
     formatGroupLabel,
     getGroupConfig,
+    LENDER_DOCUMENTATION_DOC_CODE,
     UNGROUPED_KEY,
     UNGROUPED_LABEL,
 } from "@/lib/document-groups";
 import { zipDocuments, downloadDocument } from "@/lib/document-download";
 import { useDocumentGroups } from "@/hooks/use-document-groups";
+import { useLenderFolders } from "@/hooks/use-lender-folders";
 
 // Slack deal-channel integration is built but not yet tested end-to-end.
 // Flip to `true` to re-enable the "Create / Open Slack Channel" button.
@@ -563,11 +565,26 @@ export default function UnderwritingClientDetailsPage() {
         return out;
     }, [required_docs, active_business_id]);
 
-    // Files on the active tab that sit outside the required set — the
+    // What the Documents tab renders: the requested set, plus Lender
+    // Documentation on EVERY file. UW keeps each lender's branded app / COI
+    // there, split by lender, without opening it per file first. It is a
+    // display-only addition — never a requirement — so it stays out of
+    // scoped_required_docs and every completeness count built on it (docs
+    // approved, the outstanding banner, the Slack-channel gate). It can't be
+    // requested (requestDocuments refuses it, and required_docs drops any
+    // stray request row), so it is always appended here.
+    const packet_docs = useMemo(() => {
+        const def = all_available_docs.find((d) => d.code === LENDER_DOCUMENTATION_DOC_CODE);
+        // Before migration 20261028 there is no catalog row — show nothing.
+        if (!def) return scoped_required_docs;
+        return [...scoped_required_docs, { code: def.code, label: def.label }];
+    }, [scoped_required_docs, all_available_docs]);
+
+    // Files on the active tab that sit outside the rendered set — the
     // "Miscellaneous Files" block at the foot of the packet.
     const misc_documents = useMemo<UserDocument[]>(
-        () => scoped_documents.filter((d) => !scoped_required_docs.some((r) => r.code === d.category)),
-        [scoped_documents, scoped_required_docs],
+        () => scoped_documents.filter((d) => !packet_docs.some((r) => r.code === d.category)),
+        [scoped_documents, packet_docs],
     );
 
     // "Full documentation approved" for the active business tab: every required
@@ -598,6 +615,18 @@ export default function UnderwritingClientDetailsPage() {
         addGroup: add_document_group,
         refresh: refresh_document_groups,
     } = useDocumentGroups(active_business_id);
+
+    // Lender Documentation folders: lender-list suggestions, plus a folder per
+    // lender working the file, created when the section is opened.
+    const { lender_name_suggestions } = useLenderFolders({
+        client_vault_id: client_id,
+        active_business_id,
+        document_groups,
+        add_document_group,
+        open: expanded_categories.has(LENDER_DOCUMENTATION_DOC_CODE),
+        refresh_key: lender_assignments,
+    });
+
     // The group new uploads are filed under. Chosen once in the category
     // header, then reused for the whole batch — documents arrive one group at a
     // time, so per-file tagging would be busywork.
@@ -680,8 +709,11 @@ export default function UnderwritingClientDetailsPage() {
      * says how many, because "12 files filed" while two of them quietly kept a
      * name that doesn't mention the account is a surprise at download time.
      */
-    async function handle_assign_documents(target_group_id: string | null) {
-        const ids = Array.from(selected_document_ids);
+    async function handle_assign_documents(target_group_id: string | null, doc_ids?: string[]) {
+        // doc_ids: a drag-and-drop move names its files directly; the bulk
+        // bar moves the current selection.
+        const from_selection = !doc_ids;
+        const ids = doc_ids ?? Array.from(selected_document_ids);
         if (ids.length === 0) return;
 
         set_is_assigning_documents(true);
@@ -713,8 +745,10 @@ export default function UnderwritingClientDetailsPage() {
             if (preserved > 0) parts.push(`${preserved} kept their custom name`);
             toast.success(parts.join(', '));
 
-            set_selected_document_ids(new Set());
-            set_assign_target_group_id(null);
+            if (from_selection) {
+                set_selected_document_ids(new Set());
+                set_assign_target_group_id(null);
+            }
             fetch_client_details();
         } catch (err: any) {
             console.error('assign documents error:', err);
@@ -1001,7 +1035,9 @@ export default function UnderwritingClientDetailsPage() {
                         business_profile_id: d.business_profile_id ?? null,
                     };
                 })
-                .filter((d: any) => d.code);
+                // Lender Documentation is never a requirement (it comes FROM
+                // lenders); a stray request row for it must not count.
+                .filter((d: any) => d.code && d.code !== LENDER_DOCUMENTATION_DOC_CODE);
             set_required_docs(dynamicReqs);
 
             // 4. Fetch all available document types FOR THE CATALOG
@@ -1614,7 +1650,13 @@ export default function UnderwritingClientDetailsPage() {
 
     // Core upload: sign → push to storage → register. Caller owns the spinner
     // and any modal/reset. Returns true when at least one file registered.
-    async function run_doc_upload(doc_code: string, files: File[]): Promise<boolean> {
+    async function run_doc_upload(
+        doc_code: string,
+        files: File[],
+        // A drop onto a lender folder names its group; everything else uses
+        // the group picked in the category header.
+        opts?: { group_id: string | null },
+    ): Promise<boolean> {
         if (files.length === 0 || !doc_code) return false;
         try {
             const supabase = createClient();
@@ -1690,7 +1732,7 @@ export default function UnderwritingClientDetailsPage() {
                     // The API re-checks that the group belongs to this field and
                     // this business, so a stale selection downgrades to
                     // ungrouped rather than failing the upload.
-                    document_group_id: upload_group_id,
+                    document_group_id: opts ? opts.group_id : upload_group_id,
                     files: successful.map((s) => ({
                         storage_path: s.storage_path,
                         file_name: s.file_name,
@@ -1717,7 +1759,14 @@ export default function UnderwritingClientDetailsPage() {
                 // review. Open the slot after the fact, SILENTLY: staff are
                 // holding the document, so notifying the client about it would
                 // be chasing them for something already in hand.
-                const needs_slot = !required_docs.some(r => r.code === doc_code);
+                //
+                // Lender Documentation is exempt: it is always on screen
+                // (packet_docs), and a slot would turn it into a requirement
+                // that blocks "docs approved" and vault_completed on every
+                // file UW drops a lender's COI into.
+                const needs_slot =
+                    doc_code !== LENDER_DOCUMENTATION_DOC_CODE &&
+                    !required_docs.some(r => r.code === doc_code);
                 if (needs_slot) {
                     const def = all_available_docs.find(d => d.code === doc_code);
                     if (def) {
@@ -1749,7 +1798,11 @@ export default function UnderwritingClientDetailsPage() {
                     console.error('auto-approve after staff upload failed (non-fatal):', approve_err);
                 }
 
-                toast.success(`${result.uploaded} file(s) uploaded and approved`);
+                toast.success(
+                    doc_code === LENDER_DOCUMENTATION_DOC_CODE
+                        ? `${result.uploaded} file(s) added to the lender folder`
+                        : `${result.uploaded} file(s) uploaded and approved`
+                );
                 fetch_client_details();
                 return true;
             }
@@ -2226,7 +2279,8 @@ export default function UnderwritingClientDetailsPage() {
                             block — is one component so phase 3 can mount the same
                             surface on the admin client file. */}
                         <UwDocumentPacket
-                            required_docs={scoped_required_docs}
+                            required_docs={packet_docs}
+                            lender_name_suggestions={lender_name_suggestions}
                             documents={scoped_documents}
                             misc_documents={misc_documents}
                             approvals={approvals}
@@ -2263,6 +2317,14 @@ export default function UnderwritingClientDetailsPage() {
                             on_assign_target_change={set_assign_target_group_id}
                             is_assigning={is_assigning_documents}
                             on_assign={handle_assign_documents}
+                            on_move_to_group={(doc_ids, group_id) => handle_assign_documents(group_id, doc_ids)}
+                            on_groups_changed={() => {
+                                refresh_document_groups();
+                                fetch_client_details();
+                            }}
+                            on_upload_to_group={async (doc_code, group_id, files) => {
+                                await run_doc_upload(doc_code, files, { group_id });
+                            }}
                             on_edit_group={(group) => {
                                 set_group_edit_error(null);
                                 set_group_being_edited({
@@ -2599,6 +2661,7 @@ export default function UnderwritingClientDetailsPage() {
                                 <p className="text-xs text-cb-ink/50">Additional documents to request</p>
                                 <div className="grid grid-cols-1 gap-2 border rounded-2xl p-4 bg-slate-50/50 max-h-[250px] overflow-y-auto custom-scrollbar">
                                     {all_available_docs
+                                        .filter(doc => doc.code !== LENDER_DOCUMENTATION_DOC_CODE)
                                         .filter(doc => !scoped_required_docs.some(r => r.code === doc.code))
                                         .map((doc) => (
                                             <div key={`extra-${doc.code}`} className="flex items-center space-x-3 p-2 rounded-lg hover:bg-white transition-colors">
@@ -2828,6 +2891,7 @@ export default function UnderwritingClientDetailsPage() {
                             </div>
                             <div className="max-h-[320px] overflow-y-auto rounded-xl border border-slate-200 divide-y divide-slate-100">
                                 {all_available_docs
+                                    .filter(d => d.code !== LENDER_DOCUMENTATION_DOC_CODE)
                                     .filter(d => !scoped_required_docs.some(r => r.code === d.code))
                                     .filter(d => d.label.toLowerCase().includes(request_search.toLowerCase()))
                                     .map(d => {

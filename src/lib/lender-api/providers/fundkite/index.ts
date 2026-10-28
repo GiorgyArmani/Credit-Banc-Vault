@@ -22,14 +22,21 @@ import {
 import { createDeal, fetchFile, getDeal, isFundkiteConfigured, uploadDealDocument } from "./client";
 
 /**
- * UNCONFIRMED scheme — the doc only says "HMAC signature in
- * X-Fundkite-Signature". Read as HMAC-SHA256 of the raw body, hex, with an
- * optional "sha256=" prefix. Harmless if wrong: the body is never believed,
- * a rejected callback just waits for the next Refresh.
+ * Portal doc (2026-10-28): headers X-Fundkite-Event, X-Fundkite-Delivery,
+ * X-Fundkite-Timestamp (unix seconds) and X-Fundkite-Signature
+ * "v1=<HMAC-SHA256>". The doc doesn't say what string is signed, so we accept
+ * the conventional `${timestamp}.${rawBody}` first and the bare body second
+ * (hex either way). Low risk if loose: the body is never believed — a
+ * callback only triggers a re-fetch of the deal with our own credentials.
+ * Once a real delivery confirms which one matches, drop the other.
  */
-export function fundkiteSignature(secret: string, rawBody: string): string {
-  return createHmac("sha256", secret).update(rawBody).digest("hex");
+export function fundkiteSignature(secret: string, rawBody: string, timestamp?: string): string {
+  const signed = timestamp ? `${timestamp}.${rawBody}` : rawBody;
+  return createHmac("sha256", secret).update(signed).digest("hex");
 }
+
+/** Replay window for X-Fundkite-Timestamp. */
+export const FUNDKITE_WEBHOOK_TOLERANCE_S = 5 * 60;
 
 function timingSafeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
@@ -101,16 +108,33 @@ export const fundkite: LenderApiProvider = {
         console.error("fundkite: FUND_KITE_WEBHOOK_SECRET is not set — rejecting callback");
         return false;
       }
-      const header = req.headers.get("x-fundkite-signature")?.trim().toLowerCase().replace(/^sha256=/, "");
-      if (!header) return false;
+      // A header may carry several comma-separated versions ("v1=…,v1=…" during
+      // a secret rotation); any v1 match passes.
+      const sigs = (req.headers.get("x-fundkite-signature") ?? "")
+        .split(",")
+        .map((s) => s.trim().toLowerCase())
+        .filter((s) => s.startsWith("v1="))
+        .map((s) => s.slice(3));
+      if (sigs.length === 0) return false;
+
+      const timestamp = req.headers.get("x-fundkite-timestamp")?.trim() ?? "";
+      const ts = Number(timestamp);
+      if (!/^\d+$/.test(timestamp) || Math.abs(Date.now() / 1000 - ts) > FUNDKITE_WEBHOOK_TOLERANCE_S) {
+        console.warn("fundkite: webhook timestamp missing or outside the replay window");
+        return false;
+      }
+
       // Clone: the route reads the body again after this.
       const raw = await req.clone().text();
-      return timingSafeEqual(header, fundkiteSignature(secret, raw));
+      const expected = [fundkiteSignature(secret, raw, timestamp), fundkiteSignature(secret, raw)];
+      return sigs.some((s) => expected.some((e) => timingSafeEqual(s, e)));
     },
     extractExternalId(body) {
+      // deal.received: { id: "evt_…", type, data: { deal_id, external_id, submission_number, status } }.
+      // Top-level `id` is the EVENT id, never a deal — don't fall back to it.
       type Ids = { id?: unknown; deal_id?: unknown };
       const b = (body ?? {}) as Ids & { data?: Ids; deal?: Ids };
-      return idOf(b.data?.id) ?? idOf(b.data?.deal_id) ?? idOf(b.deal_id) ?? idOf(b.deal?.id) ?? idOf(b.id);
+      return idOf(b.data?.deal_id) ?? idOf(b.data?.id) ?? idOf(b.deal_id) ?? idOf(b.deal?.id);
     },
   },
 };

@@ -9,6 +9,7 @@ import { syncUnifiedClientData } from "@/lib/user-management";
 import { updateLoanStatus } from "@/app/actions/pipeline";
 import { ghlSyncDocument } from "@/lib/ghl-document-sync";
 import { isClientScopedDoc } from "@/lib/document-scope";
+import { LENDER_DOCUMENTATION_DOC_CODE } from "@/lib/document-groups";
 import { getActiveDeal, getOrCreateActiveDeal, isDealFunded } from "@/lib/funding-deals";
 import { resolveCatchAllAdvisor } from "@/lib/catch-all-advisor";
 import { send_file_reassignment_notification } from "@/lib/email";
@@ -255,6 +256,13 @@ export async function requestDocuments(
 
         if (docsError || !docDefs || docDefs.length === 0) {
             throw new Error("Selected document types not found");
+        }
+
+        // Lender Documentation is what LENDERS send us — it is never asked of
+        // the client, and a request row for it would make it a "missing"
+        // requirement that blocks docs-approved and vault_completed.
+        if (docDefs.some((d: any) => d.code === LENDER_DOCUMENTATION_DOC_CODE)) {
+            throw new Error("Lender Documentation comes from lenders and can't be requested from the client");
         }
 
         // 4. Resolve which business each request belongs to. Falls back to the

@@ -100,7 +100,9 @@ import { ClientNotesCard, type FileNote } from "@/app/advisor/dashboard/clients/
 // import { CommunicationsTimeline } from "@/app/advisor/dashboard/clients/[id]/_components/communications-timeline";
 import { AdminLenderReviewCard } from "@/components/admin/admin-lender-review-card";
 import { isClientScopedDoc, matchesActiveBusiness, matchesActiveDeal, normalizeSupabaseJoin } from "@/lib/document-scope";
-import { offersGrouping, groupsForDocCode } from "@/lib/document-groups";
+import { offersGrouping, groupsForDocCode, LENDER_DOCUMENTATION_DOC_CODE } from "@/lib/document-groups";
+import { LenderDocumentFolders } from "@/components/client-file/panels/lender-document-folders";
+import { useLenderFolders } from "@/hooks/use-lender-folders";
 import { zipDocuments, downloadDocument } from "@/lib/document-download";
 import { DocumentGroupPicker } from "@/components/document-group-picker";
 import { useDocumentGroups } from "@/hooks/use-document-groups";
@@ -450,7 +452,11 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
     const [is_zipping, set_is_zipping] = useState<{ completed: number; total: number } | null>(null);
     // Filing groups for the business tab on screen, across every field. Feeds
     // both the upload picker and the per-group sections in the document list.
-    const { groups: document_groups, addGroup: add_document_group } = useDocumentGroups(active_business_id);
+    const {
+        groups: document_groups,
+        addGroup: add_document_group,
+        refresh: refresh_document_groups,
+    } = useDocumentGroups(active_business_id);
 
     // vault-submit-state: Controls for advisor vault submission
     const [is_submit_confirm_open, set_is_submit_confirm_open] = useState(false);
@@ -603,6 +609,8 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
         for (const doc of scoped_documents) {
             const code = (doc as any).doc_code ?? doc.category;
             if (!code || seen.has(code)) continue;
+            // Rendered as the lender folders, outside the required set.
+            if (code === LENDER_DOCUMENTATION_DOC_CODE) continue;
             const type = types_by_code.get(code);
             if (!type) continue;
             seen.add(code);
@@ -650,6 +658,47 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
     const [renaming_file, set_renaming_file] = useState<{ id: string; label: string } | null>(null);
     const [is_renaming_loading, setIs_renaming_loading] = useState(false);
     const [is_approving_loading, setIs_approving_loading] = useState(false);
+
+    // ── Lender Documentation folders (admin) ────────────────────────────────
+    // Papers lenders send us, sorted into one folder per lender. Never a
+    // requirement: it is not in scoped_required_docs, never offered by
+    // Request, and never counts toward "docs approved".
+    const requestable_doc_types = useMemo(
+        () => all_doc_types.filter((t) => t.code !== LENDER_DOCUMENTATION_DOC_CODE),
+        [all_doc_types]
+    );
+    const lender_documents = useMemo(
+        () => scoped_documents.filter((d) => ((d as any).doc_code ?? d.category) === LENDER_DOCUMENTATION_DOC_CODE),
+        [scoped_documents]
+    );
+    const [lender_folders_open, set_lender_folders_open] = useState(false);
+    const { lender_name_suggestions } = useLenderFolders({
+        client_vault_id: client_id,
+        active_business_id,
+        document_groups,
+        add_document_group,
+        open: lender_folders_open,
+    });
+
+    /** Drag-and-drop move between lender folders (null = Unsorted). */
+    async function move_lender_documents(doc_ids: string[], group_id: string | null) {
+        try {
+            const res = await fetch("/api/document-groups/assign", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ document_ids: doc_ids, document_group_id: group_id }),
+            });
+            const result = await res.json().catch(() => null);
+            if (!res.ok || !(result?.updated > 0)) {
+                toast.error(result?.error || "Could not move the file");
+                return;
+            }
+            await refresh_documents();
+        } catch (err) {
+            console.error("move lender documents error:", err);
+            toast.error("Could not move the file");
+        }
+    }
 
     // ============================================
     // FETCH CLIENT DATA ON MOUNT
@@ -976,7 +1025,14 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
                         ...(normalizeSupabaseJoin(item.required_documents) || {}),
                         business_profile_id: item.business_profile_id ?? null,
                     }))
-                    .filter((doc: any) => doc.code && doc.code !== "funding_application");
+                    // Lender Documentation is never a requirement — those papers
+                    // come FROM lenders. A stray request row for it (one could be
+                    // opened before Request was blocked) must not read as missing.
+                    .filter((doc: any) =>
+                        doc.code &&
+                        doc.code !== "funding_application" &&
+                        doc.code !== LENDER_DOCUMENTATION_DOC_CODE
+                    );
                 set_required_docs(formatted_reqs);
             }
 
@@ -1419,22 +1475,29 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
      * metadata to /api/advisor/clients/upload to record the row and run GHL
      * sync.
      */
-    async function handle_advisor_upload() {
-        if (upload_files.length === 0 || !upload_doc_code) return;
+    async function handle_advisor_upload(
+        // A drop onto a lender folder uploads straight into that folder,
+        // without the upload modal.
+        direct?: { doc_code: string; files: File[]; group_id: string | null },
+    ) {
+        const upload_files_now = direct?.files ?? upload_files;
+        const upload_doc_code_now = direct?.doc_code ?? upload_doc_code;
+        const upload_group_now = direct ? direct.group_id : upload_document_group_id;
+        if (upload_files_now.length === 0 || !upload_doc_code_now) return;
 
         set_is_uploading(true);
         try {
             const supabase = createClient();
 
             const upload_results = await Promise.all(
-                upload_files.map(async (file) => {
+                upload_files_now.map(async (file) => {
                     try {
                         const sign_res = await fetch('/api/advisor/clients/upload/sign', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
                                 client_id,
-                                doc_code: upload_doc_code,
+                                doc_code: upload_doc_code_now,
                                 file_name: file.name,
                                 file_type: file.type,
                             }),
@@ -1491,14 +1554,14 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     client_id,
-                    doc_code: upload_doc_code,
+                    doc_code: upload_doc_code_now,
                     // Scope this advisor-uploaded file to the currently active
                     // business tab. The API stamps business_profile_id on the
                     // resulting user_documents row.
                     business_profile_id: active_business_id ?? null,
                     // The API re-verifies the group belongs to this field and
                     // this business, and silently ignores it otherwise.
-                    document_group_id: upload_document_group_id,
+                    document_group_id: upload_group_now,
                     files: successful.map((s) => ({
                         storage_path: s.storage_path,
                         file_name: s.file_name,
@@ -2236,6 +2299,45 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
                                             }}
                                             on_rename={(doc) => set_renaming_file({ id: doc.id, label: doc.custom_label || doc.name })}
                                         />
+                                        {/* Lender Documentation: a folder section inside
+                                            Documents, outside the required set. Admin only
+                                            (UW has the same section on its own file). */}
+                                        {is_admin_path && (
+                                            <div className="mt-4">
+                                                <LenderDocumentFolders
+                                                    documents={lender_documents}
+                                                    document_groups={document_groups}
+                                                    active_business_id={active_business_id}
+                                                    client_vault_id={client_id}
+                                                    can_manage
+                                                    expanded={lender_folders_open}
+                                                    on_toggle_expand={() => set_lender_folders_open((o) => !o)}
+                                                    lender_name_suggestions={lender_name_suggestions}
+                                                    zipping={is_zipping}
+                                                    on_download_all={download_all_documents}
+                                                    on_preview={(doc) => set_preview_modal({ isOpen: true, doc })}
+                                                    on_download={download_document}
+                                                    on_rename={(doc) => set_renaming_file({ id: doc.id, label: doc.custom_label || doc.name })}
+                                                    on_delete={(doc) => {
+                                                        set_file_to_delete(doc);
+                                                        set_is_delete_file_modal_open(true);
+                                                    }}
+                                                    on_add_group={add_document_group}
+                                                    on_groups_changed={() => {
+                                                        void refresh_document_groups();
+                                                        void refresh_documents();
+                                                    }}
+                                                    on_move_to_group={move_lender_documents}
+                                                    on_upload_to_group={(group_id, files) =>
+                                                        handle_advisor_upload({
+                                                            doc_code: LENDER_DOCUMENTATION_DOC_CODE,
+                                                            files,
+                                                            group_id,
+                                                        })
+                                                    }
+                                                />
+                                            </div>
+                                        )}
                                         {/* SubmitUnderwritingCTA retired here: the header's Submit to UW button (and its Submitted state) covers it. The capabilities.showSubmitCta flag went with it — nothing read it. */}
                                     </>
                                 ),
@@ -2678,7 +2780,7 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
                                 Cancel
                             </Button>
                             <Button
-                                onClick={handle_advisor_upload}
+                                onClick={() => handle_advisor_upload()}
                                 disabled={upload_files.length === 0 || is_uploading}
                                 className="bg-emerald-600 hover:bg-emerald-700 text-white"
                             >
@@ -2787,7 +2889,7 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
                             {/* Checklist */}
                             <div className="border rounded-lg overflow-hidden flex flex-col flex-1">
                                 <div className="overflow-y-auto p-4 space-y-3 max-h-[300px]">
-                                    {all_doc_types
+                                    {requestable_doc_types
                                         .filter(type => !scoped_required_docs.some(r => r.code === type.code))
                                         .filter(type =>
                                             type.label.toLowerCase().includes(request_search_query.toLowerCase()) ||
@@ -2831,7 +2933,7 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
                                         ))
                                     }
 
-                                    {all_doc_types.filter(type => !scoped_required_docs.some(r => r.code === type.code)).length === 0 && (
+                                    {requestable_doc_types.filter(type => !scoped_required_docs.some(r => r.code === type.code)).length === 0 && (
                                         <div className="text-center py-8">
                                             <p className="text-sm text-gray-500">
                                                 All available document types have already been requested.
@@ -2839,8 +2941,8 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
                                         </div>
                                     )}
 
-                                    {all_doc_types.filter(type => !scoped_required_docs.some(r => r.code === type.code)).length > 0 &&
-                                        all_doc_types.filter(type =>
+                                    {requestable_doc_types.filter(type => !scoped_required_docs.some(r => r.code === type.code)).length > 0 &&
+                                        requestable_doc_types.filter(type =>
                                             !scoped_required_docs.some(r => r.code === type.code) &&
                                             (type.label.toLowerCase().includes(request_search_query.toLowerCase()) ||
                                                 type.code.toLowerCase().includes(request_search_query.toLowerCase()))

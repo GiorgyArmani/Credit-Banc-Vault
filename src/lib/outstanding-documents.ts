@@ -1,6 +1,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isClientScopedDoc, formatRequirementLabel } from "@/lib/document-scope";
+import { LENDER_DOCUMENTATION_DOC_CODE } from "@/lib/document-groups";
 
 // Map for GHL Custom Field ID
 const GHL_CF_OUTSTANDING_DOCUMENTS = process.env.GHL_CF_OUTSTANDING_DOCUMENTS;
@@ -125,6 +126,8 @@ export async function calculateOutstandingDocumentsByBusiness(userId: string): P
     (dynamicDocs ?? []).forEach((row: any) => {
         const def = Array.isArray(row.required_documents) ? row.required_documents[0] : row.required_documents;
         if (!def?.code) return;
+        // Never a requirement: lender paperwork comes from the lender.
+        if (def.code === LENDER_DOCUMENTATION_DOC_CODE) return;
         // Bank statements carry a per-request period — surface it in the label
         // shown in the reminder email and the GHL outstanding-docs field.
         const label = formatRequirementLabel(def.code, def.label, row.statement_months);
@@ -271,7 +274,7 @@ export async function isVaultFullyApproved(userId: string): Promise<boolean> {
     for (const row of (dynamicDocs ?? []) as any[]) {
         const def = Array.isArray(row.required_documents) ? row.required_documents[0] : row.required_documents;
         const code: string | undefined = def?.code;
-        if (!code) continue;
+        if (!code || code === LENDER_DOCUMENTATION_DOC_CODE) continue;
         requiredCount++;
         if (isClientScopedDoc(code)) {
             if (!clientScopedApproved.has(code)) return false;

@@ -6,6 +6,7 @@
 // else goes out as the original — only because UW explicitly ticked it.
 
 import { matchesActiveBusiness, matchesActiveDeal } from "@/lib/document-scope";
+import { isLenderDocumentAllowedFor } from "@/lib/document-groups";
 import { filterToExistingObjects, groupScopedCategoryLabel, loadGroupsByBusiness } from "@/lib/share-links";
 import { DOCUMENTS_BUCKET, getWatermarkedPath, isStampable } from "@/lib/watermark";
 import type {
@@ -50,6 +51,10 @@ export function selectSubmittable(args: {
   dealId: string | null;
   labelFor: (code: string, groupId: string | null) => string;
   tagsForDocCode: (code: string | null) => string[];
+  /** The lender this submission goes to. Gates Lender Documentation files. */
+  lenderName?: string | null;
+  /** The group name a file is filed under (null when ungrouped / unknown). */
+  groupNameFor?: (groupId: string | null) => string | null;
 }): SubmittableDocument[] {
   const { rows, approvals, businessProfileId, dealId } = args;
   const out: SubmittableDocument[] = [];
@@ -60,6 +65,8 @@ export function selectSubmittable(args: {
     if (row.status === "rejected") continue;
     if (!matchesActiveBusiness(row.business_profile_id, businessProfileId, code)) continue;
     if (!matchesActiveDeal(row.funding_deal_id, dealId)) continue;
+    // Another lender's branded app / COI never goes out, not even as an option.
+    if (!isLenderDocumentAllowedFor(code, args.groupNameFor?.(row.document_group_id) ?? null, args.lenderName)) continue;
 
     const approved = approvals.some(
       (a) =>
@@ -118,6 +125,7 @@ async function loadRows(admin: AdminClient, source: LenderApiSource) {
     approvals: (approvals ?? []) as ApprovalRow[],
     labelFor: (code: string, groupId: string | null) =>
       groupScopedCategoryLabel(labelByCode.get(code) || code, groupId, groups),
+    groupNameFor: (groupId: string | null) => (groupId ? groups.get(groupId)?.name ?? null : null),
   };
 }
 
@@ -126,7 +134,7 @@ export async function listSubmittableDocuments(
   source: LenderApiSource,
   provider: LenderApiProvider
 ): Promise<SubmittableDocument[]> {
-  const { rows, approvals, labelFor } = await loadRows(admin, source);
+  const { rows, approvals, labelFor, groupNameFor } = await loadRows(admin, source);
   return selectSubmittable({
     rows,
     approvals,
@@ -134,6 +142,8 @@ export async function listSubmittableDocuments(
     dealId: source.assignment.funding_deal_id,
     labelFor,
     tagsForDocCode: (c) => provider.tagsForDocCode(c),
+    lenderName: source.assignment.lender_name,
+    groupNameFor,
   });
 }
 
@@ -143,7 +153,7 @@ export async function prepareOutboundDocuments(
   provider: LenderApiProvider,
   documentIds: string[]
 ): Promise<{ docs: OutboundDocument[]; failures: OutboundDocumentResult[] }> {
-  const { rows, approvals, labelFor } = await loadRows(admin, source);
+  const { rows, approvals, labelFor, groupNameFor } = await loadRows(admin, source);
   // Authorization: only files the panel could have offered for this business
   // and round may leave. Anything else (a forged id, or a file deleted or
   // re-scoped since the send) is recorded as unavailable — terminal, so the
@@ -156,6 +166,8 @@ export async function prepareOutboundDocuments(
       dealId: source.assignment.funding_deal_id,
       labelFor,
       tagsForDocCode: (c) => provider.tagsForDocCode(c),
+      lenderName: source.assignment.lender_name,
+      groupNameFor,
     }).map((d) => d.id)
   );
   const rowById = new Map(rows.map((r) => [r.id, r]));

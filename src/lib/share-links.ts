@@ -13,7 +13,7 @@
 import { randomBytes } from "crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { matchesActiveBusiness } from "@/lib/document-scope";
-import { formatGroupShort, type DocumentGroup } from "@/lib/document-groups";
+import { formatGroupShort, LENDER_DOCUMENTATION_DOC_CODE, type DocumentGroup } from "@/lib/document-groups";
 import { isStampable } from "@/lib/watermark";
 import { resolveServedFileName } from "@/lib/document-access";
 
@@ -516,6 +516,13 @@ async function loadShareContext(
     // — and an auto-included link would have started pulling in fresh rejects.
     // Applies to every path, snapshot links included: this is a bug fix.
     if (d.status === "rejected") return false;
+
+    // Lender Documentation is made for ONE lender (their branded app, a COI
+    // naming them). A share link isn't tied to a lender, so these files reach
+    // it only when staff ticked them by hand — never by auto-include or the
+    // legacy "every approved doc" mode, which would hand Newity's COI to
+    // whichever lender holds the link.
+    if (code === LENDER_DOCUMENTATION_DOC_CODE) return !!id_set && id_set.has(d.id);
 
     // The stored file list is the whole gate for what existed at mint time...
     if (id_set) return id_set.has(d.id) || joins_by_auto_include(d);

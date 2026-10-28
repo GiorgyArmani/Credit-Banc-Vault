@@ -95,6 +95,7 @@ export function LenderResponsePanel({ assignmentId, status }: Props) {
   const [uploading, set_uploading] = useState(false);
   const [deleting_id, set_deleting_id] = useState<string | null>(null);
   const [sending, set_sending] = useState(false);
+  const [sending_revision, set_sending_revision] = useState(false);
   const [preview, set_preview] = useState<Attachment | null>(null);
   // Past trips out to this lender. Empty on a lender worked only once, which is
   // most of them — the section hides itself rather than saying "1 attempt".
@@ -257,6 +258,44 @@ export function LenderResponsePanel({ assignmentId, status }: Props) {
     }
   }
 
+  // A lender's revised offer. Editing the note never re-posts on its own (only
+  // the FIRST note goes out automatically, so typo fixes stay quiet) — this is
+  // the explicit way to push the new terms into the channel. Saves the note as
+  // typed in the same call, so Slack and the vault can't disagree.
+  async function send_revision_to_slack() {
+    set_sending_revision(true);
+    try {
+      const res = await fetch(
+        `/api/lender-assignments/${assignmentId}/response-detail/slack`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ response_notes: notes }),
+        }
+      );
+      const data = await res.json();
+      if (data?.saved || data?.success) set_saved_notes(notes.trim());
+      if (!res.ok || !data.success) {
+        toast.error(data?.error || "Couldn't send to Slack");
+        return;
+      }
+      set_attachments(data.attachments ?? []);
+      toast.success(
+        status === "declined_by_lender" ? "Update sent to Slack" : "Revised offer sent to Slack"
+      );
+    } catch (err) {
+      console.error("send revised response to slack error:", err);
+      toast.error("An unexpected error occurred");
+    } finally {
+      set_sending_revision(false);
+    }
+  }
+
+  const is_verdict = status === "approved_by_lender" || status === "declined_by_lender";
+  // Only once a note was already recorded — the first note goes out on its own
+  // when saved, so offering "revised" before that would double-post it.
+  const can_send_revision = is_verdict && !!saved_notes.trim() && !!notes.trim();
+
   const unsent_count = attachments.filter((a) => !a.slack_posted_at).length;
 
   const summary_count =
@@ -296,7 +335,23 @@ export function LenderResponsePanel({ assignmentId, status }: Props) {
                   maxLength={5000}
                   className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-emerald-400 resize-y"
                 />
-                <div className="flex justify-end">
+                <div className="flex justify-end gap-2">
+                  {can_send_revision && (
+                    <button
+                      type="button"
+                      onClick={send_revision_to_slack}
+                      disabled={sending_revision || saving}
+                      title="Save this note and post it to the deal's Slack channel as a revision"
+                      className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:text-emerald-600 hover:border-emerald-300 transition-colors disabled:opacity-50"
+                    >
+                      {sending_revision ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Send className="h-3 w-3" />
+                      )}
+                      {status === "declined_by_lender" ? "Send update to Slack" : "Send revised offer to Slack"}
+                    </button>
+                  )}
                   <button
                     onClick={save_notes}
                     disabled={saving || !dirty}

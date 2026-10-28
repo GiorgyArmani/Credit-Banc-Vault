@@ -40,7 +40,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
   }
   // The lender's event label (FF: Approved / Declined / Waiting on ISO) — not
   // personal data, and the only record of WHICH event arrived.
-  const rawEvent = (body as Record<string, unknown> | null)?.event_type;
+  // (Fundkite names it `type`: "deal.received".)
+  const rawEvent = (body as Record<string, unknown> | null)?.event_type ?? (body as Record<string, unknown> | null)?.type;
   const eventLabel = typeof rawEvent === "string" && rawEvent ? ` [event: ${rawEvent.slice(0, 60)}]` : "";
 
   let externalId: string | null;

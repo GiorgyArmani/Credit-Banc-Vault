@@ -119,32 +119,67 @@ describe("fundkite client", () => {
 });
 
 describe("fundkite webhook", () => {
-  const body = JSON.stringify({ event: "deal.received", data: { id: "0b9e-uuid", external_id: "cb-a-1" } });
+  // Verbatim shape from the portal's "Receipt webhook payload".
+  const body = JSON.stringify({
+    id: "evt_01JDEMO8W4Q7X6K2P9R3T5Y1",
+    type: "deal.received",
+    created_at: "2026-10-28T14:22:14+00:00",
+    test: false,
+    data: {
+      deal_id: "01915f3e-70a0-7b21-9d2b-88618f586b42",
+      external_id: "partner-deal-10001",
+      submission_number: "70345711",
+      status: "received",
+    },
+  });
+  const now = () => String(Math.floor(Date.now() / 1000));
 
-  function req(signature: string | null): Request {
+  function req(signature: string | null, timestamp: string | null = now()): Request {
     return new Request("https://vault.example/api/webhooks/lender-api/fundkite", {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...(signature ? { "X-Fundkite-Signature": signature } : {}) },
+      headers: {
+        "Content-Type": "application/json",
+        "X-Fundkite-Event": "deal.received",
+        "X-Fundkite-Delivery": "dlv_1",
+        ...(timestamp ? { "X-Fundkite-Timestamp": timestamp } : {}),
+        ...(signature ? { "X-Fundkite-Signature": signature } : {}),
+      },
       body,
     });
   }
 
-  it("verifies an HMAC-SHA256 of the raw body, with or without a sha256= prefix", async () => {
-    const sig = fundkiteSignature("hook-secret", body);
-    expect(await fundkite.webhook!.verify(req(sig))).toBe(true);
-    expect(await fundkite.webhook!.verify(req(`sha256=${sig}`))).toBe(true);
+  it("verifies v1=HMAC-SHA256 over `${timestamp}.${body}`", async () => {
+    const ts = now();
+    expect(await fundkite.webhook!.verify(req(`v1=${fundkiteSignature("hook-secret", body, ts)}`, ts))).toBe(true);
   });
 
-  it("rejects a bad or missing signature, and an unset secret", async () => {
-    expect(await fundkite.webhook!.verify(req("deadbeef"))).toBe(false);
+  it("also accepts v1=HMAC over the bare body (signed string unconfirmed)", async () => {
+    expect(await fundkite.webhook!.verify(req(`v1=${fundkiteSignature("hook-secret", body)}`))).toBe(true);
+  });
+
+  it("accepts any match in a multi-signature header", async () => {
+    const ts = now();
+    const good = fundkiteSignature("hook-secret", body, ts);
+    expect(await fundkite.webhook!.verify(req(`v1=deadbeef, v1=${good}`, ts))).toBe(true);
+  });
+
+  it("rejects a bad, unprefixed or missing signature, and an unset secret", async () => {
+    expect(await fundkite.webhook!.verify(req("v1=deadbeef"))).toBe(false);
+    expect(await fundkite.webhook!.verify(req(fundkiteSignature("hook-secret", body)))).toBe(false);
     expect(await fundkite.webhook!.verify(req(null))).toBe(false);
     vi.stubEnv("FUND_KITE_WEBHOOK_SECRET", "");
-    expect(await fundkite.webhook!.verify(req(fundkiteSignature("hook-secret", body)))).toBe(false);
+    expect(await fundkite.webhook!.verify(req(`v1=${fundkiteSignature("hook-secret", body)}`))).toBe(false);
   });
 
-  it("finds the portal deal id and never reads status from the body", () => {
-    expect(fundkite.webhook!.extractExternalId(JSON.parse(body))).toBe("0b9e-uuid");
-    expect(fundkite.webhook!.extractExternalId({ deal_id: "x" })).toBe("x");
+  it("rejects a stale or missing timestamp (replay)", async () => {
+    const old = String(Math.floor(Date.now() / 1000) - 600);
+    expect(await fundkite.webhook!.verify(req(`v1=${fundkiteSignature("hook-secret", body, old)}`, old))).toBe(false);
+    expect(await fundkite.webhook!.verify(req(`v1=${fundkiteSignature("hook-secret", body)}`, null))).toBe(false);
+  });
+
+  it("finds data.deal_id, never the event id, and never reads status from the body", () => {
+    expect(fundkite.webhook!.extractExternalId(JSON.parse(body))).toBe("01915f3e-70a0-7b21-9d2b-88618f586b42");
+    expect(fundkite.webhook!.extractExternalId({ id: "evt_x", type: "deal.received", data: {} })).toBeNull();
     expect(fundkite.webhook!.extractExternalId({})).toBeNull();
     expect(fundkite.webhook!.statusFromBody).toBeUndefined();
   });

@@ -20,6 +20,7 @@ import { getBulkClientActivity } from "@/app/actions/advisor";
 import { toast } from "@/lib/toast";
 import { Loader2 } from "lucide-react";
 import { isClientScopedDoc, normalizeSupabaseJoin } from "@/lib/document-scope";
+import { LENDER_DOCUMENTATION_DOC_CODE } from "@/lib/document-groups";
 
 export function WorkspacePipeline({ basePath }: { basePath: string }) {
   const supabase = createClient();
@@ -208,7 +209,7 @@ export async function enrichDeals(
     // dynamic-doc count for every client on this list view reads as zero.
     const doc = normalizeSupabaseJoin<{ code?: string }>(row.required_documents);
     const code = doc?.code;
-    if (!code) return;
+    if (!code || code === LENDER_DOCUMENTATION_DOC_CODE) return;
     const arr = dynamicByUser.get(row.user_id) || [];
     arr.push({ code, bp: row.business_profile_id ?? null });
     dynamicByUser.set(row.user_id, arr);

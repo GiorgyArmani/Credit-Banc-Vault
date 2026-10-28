@@ -33,6 +33,67 @@
 import { BANK_STATEMENTS_DOC_CODE } from "./document-scope";
 
 /* ========================================================================== *
+ * Lender Documentation — lender-specific files
+ * ========================================================================== */
+
+/**
+ * The field for paperwork that belongs to ONE lender: their branded application
+ * or BDS, a COI listing them as certificate holder. Sending one of these to a
+ * different lender is at best useless and at worst exposes who else the file is
+ * shopped to, so every path that hands documents to a lender treats this field
+ * specially (see isLenderDocumentAllowedFor). Seeded by migration 20261028.
+ */
+export const LENDER_DOCUMENTATION_DOC_CODE = "lender_documentation";
+
+/** `Newity, LLC` → `["newity"]`. Lowercased words, entity suffixes dropped. */
+export function lenderNameWords(name: string | null | undefined): string[] {
+  return (name ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .split(" ")
+    .filter((w) => w && !/^(llc|inc|corp|co|ltd|lp)$/.test(w));
+}
+
+/**
+ * Do two free-typed lender names refer to the same lender?
+ *
+ * Groups are typed by hand ("Newity") and assignments carry the guideline name
+ * ("Newity Business Loans"), so exact equality would hide the right file from
+ * the right lender. One name being a WHOLE-WORD prefix of the other covers that
+ * without letting "Fora" match "Forward Financing" — a substring test would, and
+ * that is exactly the cross-lender leak this field exists to prevent. Spacing
+ * differences ("OnDeck" / "On Deck") match on the joined form.
+ */
+export function lenderNamesMatch(
+  a: string | null | undefined,
+  b: string | null | undefined,
+): boolean {
+  const x = lenderNameWords(a);
+  const y = lenderNameWords(b);
+  if (x.length === 0 || y.length === 0) return false;
+  if (x.join("") === y.join("")) return true;
+  const [short, long] = x.length <= y.length ? [x, y] : [y, x];
+  return short.every((w, i) => long[i] === w);
+}
+
+/**
+ * May this document go to `lender_name`?
+ *
+ * Every field except Lender Documentation: yes, this rule has no opinion.
+ * Lender Documentation: only when it is filed under a group naming that lender.
+ * An unsorted lender doc goes to nobody — we can't tell whose it is.
+ */
+export function isLenderDocumentAllowedFor(
+  doc_code: string | null | undefined,
+  group_name: string | null | undefined,
+  lender_name: string | null | undefined,
+): boolean {
+  if (doc_code !== LENDER_DOCUMENTATION_DOC_CODE) return true;
+  if (!group_name) return false;
+  return lenderNamesMatch(group_name, lender_name);
+}
+
+/* ========================================================================== *
  * The row
  * ========================================================================== */
 
@@ -294,6 +355,20 @@ export const GROUP_FIELD_CONFIGS: Record<string, GroupFieldConfig> = {
     helpText: "Group each invoice under its vendor.",
   },
 
+  /**
+   * Documents made for ONE lender — their branded application or BDS, a COI
+   * naming them as certificate holder. Only valid for that lender, so the group
+   * IS the lender and nothing else is asked. See isLenderDocumentAllowedFor for
+   * how this keeps one lender's paperwork from reaching another.
+   */
+  [LENDER_DOCUMENTATION_DOC_CODE]: {
+    noun: "Lender",
+    nounPlural: "Lenders",
+    nameLabel: "Lender name",
+    namePlaceholder: "Lender name",
+    helpText: "Group each document under the lender it was made for.",
+  },
+
   misc_files: {
     noun: "Folder",
     nounPlural: "Folders",
@@ -345,6 +420,7 @@ export const MULTI_FILE_DOC_CODES = new Set<string>([
   "drivers_license",
   "equipment_invoice",
   "insurance_documents",
+  LENDER_DOCUMENTATION_DOC_CODE,
   "loan_agreements",
   "misc_files",
   "payoff_letters",

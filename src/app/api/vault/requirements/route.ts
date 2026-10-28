@@ -91,6 +91,8 @@ export async function GET(req: Request) {
 
         const allRequirements = dynamicDocs
             .filter((doc: any) => doc.code !== 'funding_application') // Filter out auto-uploaded app
+            // Lender Documentation comes from lenders, never from the client.
+            .filter((doc: any) => doc.code !== 'lender_documentation')
             .map((doc: any) => ({
                 code: doc.code,
                 // Bank statements vary by deal — surface the exact months
