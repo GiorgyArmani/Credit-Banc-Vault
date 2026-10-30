@@ -23,6 +23,7 @@ import { generateDocUploadMagicLink } from '@/lib/magic-link';
 import { syncOutstandingDocuments } from '@/lib/outstanding-documents';
 import { send_speed_doc_request_email } from '@/lib/email';
 import { packageForLoanTypes } from '@/data/program-document-packages';
+import { isReadOnlyUser } from '@/lib/read-only-accounts';
 
 export async function releaseSpeedFormDocs(
   supabase: SupabaseClient,
@@ -192,9 +193,10 @@ export async function releaseSpeedFormDocs(
     // Followers shadow the client — keep them CC'd like every other client email.
     const { data: followerRows } = await supabase
       .from('client_followers')
-      .select('advisor_id, advisors!client_followers_advisor_id_fkey(email)')
+      .select('advisor_id, advisors!client_followers_advisor_id_fkey(email, user_id)')
       .eq('client_vault_id', vault.id);
     const followerEmails = (followerRows || [])
+      .filter((row: any) => !isReadOnlyUser(row.advisors?.user_id))
       .map((row: any) => row.advisors?.email)
       .filter((e: any): e is string => typeof e === 'string' && e.includes('@'));
 

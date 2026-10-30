@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { isReadOnlyUser } from "@/lib/read-only-accounts";
 
 /**
  * Returns the email addresses of all advisor followers for a given client vault row.
@@ -14,7 +15,7 @@ export async function getFollowerEmailsForClient(
     if (!clientVaultId) return [];
     const { data, error } = await supabase
         .from("client_followers")
-        .select("advisors:advisor_id ( email )")
+        .select("advisors:advisor_id ( email, user_id )")
         .eq("client_vault_id", clientVaultId);
 
     if (error) {
@@ -23,6 +24,8 @@ export async function getFollowerEmailsForClient(
     }
 
     return (data ?? [])
+        // Read-only accounts (the AVA bot) follow every deal but never get CC'd.
+        .filter((r: any) => !isReadOnlyUser(r.advisors?.user_id))
         .map((r: any) => r.advisors?.email)
         .filter((e: any): e is string => typeof e === "string" && e.includes("@"));
 }

@@ -1,5 +1,7 @@
 "use server";
 
+import { assertNotReadOnly } from "@/lib/read-only-accounts";
+
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
@@ -81,6 +83,7 @@ async function assertCanEditProfile(supabase: any, userId: string, clientVaultId
  * for a client. 
  */
 export async function addManualFundingApplication(clientId: string, formData: FormData, businessProfileId?: string | null) {
+    await assertNotReadOnly();
     try {
         const supabase = await createClient();
 
@@ -222,6 +225,7 @@ export async function requestDocuments(
     statementMonths?: number | null,
     options?: { notifyClient?: boolean }
 ) {
+    await assertNotReadOnly();
     const notify_client = options?.notifyClient !== false;
     try {
         if (!documentIds || documentIds.length === 0) {
@@ -468,6 +472,7 @@ export async function updateClientSignupNotes(
     clientId: string,
     data: { loan_purpose?: string; additional_notes?: string }
 ) {
+    await assertNotReadOnly();
     try {
         const supabase = await createClient();
 
@@ -526,6 +531,7 @@ export async function updateClientSignupNotes(
  * Pass `null` to clear the assignment.
  */
 export async function setReferralPartner(clientId: string, partnerName: string | null) {
+    await assertNotReadOnly();
     try {
         const supabase = await createClient();
 
@@ -597,6 +603,7 @@ export async function setReferralPartner(clientId: string, partnerName: string |
 }
 
 export async function updateClientProfile(clientId: string, data: any) {
+    await assertNotReadOnly();
     try {
         const supabase = await createClient();
 
@@ -802,6 +809,7 @@ export async function updateClientProfile(clientId: string, data: any) {
  * client_data_vault row is its source of truth).
  */
 export async function updateBusinessProfile(clientId: string, businessProfileId: string, data: any) {
+    await assertNotReadOnly();
     try {
         const supabase = await createClient();
 
@@ -958,6 +966,7 @@ export async function updateBusinessProfile(clientId: string, businessProfileId:
  * Verifies ownership before removing from storage and database.
  */
 export async function deleteClientFile(clientId: string, documentId: string) {
+    await assertNotReadOnly();
     try {
         const supabase = await createClient();
 
@@ -1033,6 +1042,7 @@ export async function deleteClientFile(clientId: string, documentId: string) {
  * Permanently deletes a client's data vault and associated records.
  */
 export async function deleteClientVault(clientId: string) {
+    await assertNotReadOnly();
     try {
         const supabase = await createClient();
 
@@ -1055,8 +1065,17 @@ export async function deleteClientVault(clientId: string) {
             .eq("user_id", advisorUser.id)
             .single();
 
-        if (!advisorData || !(await hasClientAccess(supabase, advisorData.id, clientId, client.advisor_id))) {
-            throw new Error("Access denied: You do not have access to this client");
+        // Owner or admin ONLY. Followers can work a file but never delete it —
+        // this is a one-shot cascade with no undo.
+        const { data: userRow } = await supabase
+            .from("users")
+            .select("role")
+            .eq("id", advisorUser.id)
+            .maybeSingle();
+        const isAdmin = userRow?.role === "admin";
+        const isOwner = !!advisorData && client.advisor_id === advisorData.id;
+        if (!isAdmin && !isOwner) {
+            throw new Error("Only the owning advisor or an admin can delete this client file");
         }
 
         const supabaseAdmin = createAdminClient();
@@ -1107,6 +1126,7 @@ export async function deleteClientVault(clientId: string) {
  * untouched — only the assignment changes.
  */
 export async function reassignClientAdvisor(clientId: string, newAdvisorId: string) {
+    await assertNotReadOnly();
     try {
         const supabase = await createClient();
         const { data: { user } } = await supabase.auth.getUser();
@@ -1294,6 +1314,7 @@ export async function reassignClientAdvisor(clientId: string, newAdvisorId: stri
  * is still in the future.
  */
 export async function setReassignmentPause(clientId: string, pauseDays: number | null) {
+    await assertNotReadOnly();
     try {
         const supabase = await createClient();
         const { data: { user } } = await supabase.auth.getUser();
@@ -1354,6 +1375,7 @@ export async function setReassignmentPause(clientId: string, pauseDays: number |
  * Allows an advisor to remove a document request (dynamic document).
  */
 export async function removeRequestedDocument(clientId: string, documentCode: string, businessProfileId?: string | null) {
+    await assertNotReadOnly();
     try {
         const supabase = await createClient();
 
@@ -1442,6 +1464,7 @@ export async function removeRequestedDocument(clientId: string, documentCode: st
  * Allows an advisor to mark a category as approved.
  */
 export async function approveDocumentCategory(clientId: string, docCode: string, businessProfileId?: string | null) {
+    await assertNotReadOnly();
     try {
         const supabase = await createClient();
         const { data: { user: advisorUser } } = await supabase.auth.getUser();
@@ -1555,6 +1578,7 @@ export async function approveDocumentCategory(clientId: string, docCode: string,
  * and provide feedback on why it was rejected.
  */
 export async function rejectDocumentCategory(clientId: string, docCode: string, docLabel: string, reason: string, businessProfileId?: string | null) {
+    await assertNotReadOnly();
     try {
         const supabase = await createClient();
         const { data: { user: advisorUser } } = await supabase.auth.getUser();
@@ -1713,6 +1737,7 @@ export async function rejectDocumentCategory(clientId: string, docCode: string, 
  * Allows an advisor to update the display name (custom_label) of a file.
  */
 export async function renameClientFile(clientId: string, documentId: string, newLabel: string) {
+    await assertNotReadOnly();
     try {
         const supabase = await createClient();
         const { data: { user: advisorUser } } = await supabase.auth.getUser();
@@ -1774,6 +1799,7 @@ export async function renameClientFile(clientId: string, documentId: string, new
  * Returns the secure action link which can be shared manually.
  */
 export async function generateMagicLink(clientId: string) {
+    await assertNotReadOnly();
     try {
         const supabase = await createClient();
         
@@ -1890,6 +1916,7 @@ export async function getClientOwners(clientId: string) {
 }
 
 export async function updateClientOwners(clientId: string, input: { owner1?: Owner1Input; owners: OwnerInput[] }) {
+    await assertNotReadOnly();
     try {
         const supabase = await createClient();
         const { data: { user } } = await supabase.auth.getUser();

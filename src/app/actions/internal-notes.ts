@@ -1,5 +1,7 @@
 "use server";
 
+import { assertNotReadOnly } from "@/lib/read-only-accounts";
+
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -22,6 +24,7 @@ export async function fetchInternalNotes(clientId: string) {
 }
 
 export async function addInternalNote(clientId: string, content: string, role: "underwriting" | "advisor") {
+    await assertNotReadOnly();
     const supabase = await createClient();
     const supabaseAdmin = createAdminClient();
 

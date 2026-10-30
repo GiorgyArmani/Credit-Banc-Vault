@@ -1,5 +1,7 @@
 "use server";
 
+import { assertNotReadOnly } from "@/lib/read-only-accounts";
+
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import {
@@ -138,6 +140,7 @@ export async function addClientFollower(
     clientId: string,
     followerAdvisorId: string
 ): Promise<{ success: boolean; ghlSynced?: boolean; error?: string; warning?: string }> {
+    await assertNotReadOnly();
     try {
         const supabase = await createClient();
         const { data: { user } } = await supabase.auth.getUser();
@@ -219,6 +222,7 @@ export async function removeClientFollower(
     clientId: string,
     followerAdvisorId: string
 ): Promise<{ success: boolean; ghlSynced?: boolean; error?: string; warning?: string }> {
+    await assertNotReadOnly();
     try {
         const supabase = await createClient();
         const { data: { user } } = await supabase.auth.getUser();

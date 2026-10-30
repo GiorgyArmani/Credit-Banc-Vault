@@ -1,5 +1,7 @@
 "use server";
 
+import { assertNotReadOnly } from "@/lib/read-only-accounts";
+
 /**
  * Server actions for underwriter lead groups.
  *
@@ -117,6 +119,7 @@ export async function createGroup(input: {
   criteria?: unknown;
   isShared?: boolean;
 }): Promise<ActionResult<{ id: string }>> {
+  await assertNotReadOnly();
   const actor = await requireGroupActor();
   if (!actor.ok) return { success: false, error: actor.error };
 
@@ -152,6 +155,7 @@ export async function updateGroup(
   groupId: string,
   input: { name?: string; criteria?: unknown; isShared?: boolean }
 ): Promise<ActionResult> {
+  await assertNotReadOnly();
   const actor = await requireGroupActor();
   if (!actor.ok) return { success: false, error: actor.error };
 
@@ -195,6 +199,7 @@ export async function updateGroup(
 }
 
 export async function deleteGroup(groupId: string): Promise<ActionResult> {
+  await assertNotReadOnly();
   const actor = await requireGroupActor();
   if (!actor.ok) return { success: false, error: actor.error };
 
@@ -226,6 +231,7 @@ export async function setMembership(
   clientVaultId: string,
   mode: MembershipMode | null
 ): Promise<ActionResult> {
+  await assertNotReadOnly();
   const actor = await requireGroupActor();
   if (!actor.ok) return { success: false, error: actor.error };
 
@@ -264,5 +270,6 @@ export async function setMembership(
 }
 
 export async function shareGroup(groupId: string, isShared: boolean): Promise<ActionResult> {
+  await assertNotReadOnly();
   return updateGroup(groupId, { isShared });
 }

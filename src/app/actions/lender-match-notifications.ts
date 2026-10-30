@@ -1,5 +1,7 @@
 "use server";
 
+import { assertNotReadOnly } from "@/lib/read-only-accounts";
+
 import { createClient } from "@supabase/supabase-js";
 import { send_lender_match_ready_notification } from "@/lib/email";
 import { slackPostMessage, getApproverUserIds, resolveAdvisorSlackId, formatMentions } from "@/lib/slack-api";
@@ -83,6 +85,7 @@ export async function notifyAdminsOfLenderMatchSaved(
     recommended: RecommendedLender[],
     match_basis?: MatchBasis
 ) {
+    await assertNotReadOnly();
     if (!clientId) return { notified: 0, emailed: 0, admins: 0 };
 
     let admin_users: { id: string; email: string }[] = [];

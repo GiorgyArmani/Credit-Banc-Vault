@@ -22,12 +22,10 @@ import {
 
 export const dynamic = "force-dynamic";
 
-// Who shows up under "who has access". Includes partner_advisor: they are
-// external referral partners working their own deals, and an admin asking who
-// can reach the advisor tooling needs to see them. They are NOT invitable from
-// this page — the deal desk is provisioned at /admin/referral-partners — so
-// they appear in the member list only. See [[role_model]].
-const STAFF_ROLES = ["admin", "advisor", "underwriting", "setter", "partner_advisor"] as const;
+// Who shows up under "who has access" — the INTERNAL team only. External
+// partners (partner_advisor, partner_plus) are managed on the Referral Partners
+// tab and must not be listed here. See [[role_model]].
+const STAFF_ROLES = ["admin", "advisor", "underwriting", "setter"] as const;
 
 export default async function AdminTeamPage() {
   const supabase = await createClient();
@@ -210,7 +208,16 @@ export default async function AdminTeamPage() {
     cleared_at: (r as { cleared_at?: string | null }).cleared_at ?? null,
   }));
 
-  const memberRows: MemberRow[] = (members ?? []).map((r) => {
+  // The removed-members branch of readMembers matches ANY removed account, so
+  // drop anyone whose (held) role isn't internal staff.
+  const isStaffRole = (role: string) => (STAFF_ROLES as readonly string[]).includes(role);
+  const memberRows: MemberRow[] = (members ?? [])
+    .filter((r) => {
+      const removed_role = (r as { removed_role?: string | null }).removed_role ?? null;
+      const removed_at = (r as { removed_at?: string | null }).removed_at ?? null;
+      return isStaffRole(removed_at ? (removed_role ?? r.role) : r.role);
+    })
+    .map((r) => {
     const removed_at = (r as { removed_at?: string | null }).removed_at ?? null;
     const removed_role = (r as { removed_role?: string | null }).removed_role ?? null;
     // A removed member's badge should read the role they held, not the 'free'

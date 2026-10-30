@@ -1,5 +1,7 @@
 "use server";
 
+import { assertNotReadOnly } from "@/lib/read-only-accounts";
+
 // src/app/actions/communications.ts
 //
 // The user-facing read/write surface for the communications log
@@ -155,6 +157,7 @@ export async function logCommunication(
     clientId: string,
     input: CommunicationInput,
 ): Promise<{ success: boolean; communication?: CommunicationRow; error?: string }> {
+    await assertNotReadOnly();
     try {
         const staff = await requireStaffForClient(clientId);
         return await writeCommunication(clientId, input, {
@@ -185,6 +188,7 @@ export async function logManualContact(params: {
     /** ISO string. Omit for "just now"; pass it when back-filling yesterday's call. */
     occurredAt?: string | null;
 }): Promise<{ success: boolean; communication?: CommunicationRow; error?: string }> {
+    await assertNotReadOnly();
     return logCommunication(params.clientId, {
         channel: params.channel ?? "call",
         direction: params.direction,
@@ -214,6 +218,7 @@ export async function placeCall(params: {
     fromNumber?: string | null;
     businessProfileId?: string | null;
 }): Promise<{ success: boolean; communication?: CommunicationRow; error?: string }> {
+    await assertNotReadOnly();
     try {
         const staff = await requireStaffForClient(params.clientId);
 
@@ -299,6 +304,7 @@ export async function sendClientSms(params: {
     fromNumber?: string | null;
     businessProfileId?: string | null;
 }): Promise<{ success: boolean; communication?: CommunicationRow; error?: string }> {
+    await assertNotReadOnly();
     try {
         const staff = await requireStaffForClient(params.clientId);
 
@@ -471,6 +477,7 @@ export async function sendClientEmail(params: {
     businessProfileId?: string | null;
     cc?: string[];
 }): Promise<{ success: boolean; communication?: CommunicationRow; error?: string }> {
+    await assertNotReadOnly();
     try {
         const staff = await requireStaffForClient(params.clientId);
 
@@ -589,6 +596,7 @@ export async function deleteManualCommunication(
     clientId: string,
     communicationId: string,
 ): Promise<{ success: boolean; error?: string }> {
+    await assertNotReadOnly();
     try {
         const staff = await requireStaffForClient(clientId);
 

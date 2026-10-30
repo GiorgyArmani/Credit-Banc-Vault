@@ -1,6 +1,8 @@
 // src/app/underwriting/dashboard/actions.ts
 "use server";
 
+import { assertNotReadOnly } from "@/lib/read-only-accounts";
+
 import { createAdminClient } from "@/lib/supabase/admin";
 import { send_advisor_document_notification, send_loan_funded_notification } from "@/lib/email";
 import { createClient } from "@/lib/supabase/server";
@@ -29,6 +31,7 @@ function revalidateClientSurfaces(clientId: string) {
 }
 
 export async function notifyAdvisor(clientId: string, missingDocs: string[], additionalDocs: string[], customNote?: string) {
+    await assertNotReadOnly();
     const requestedDocs = [...missingDocs, ...additionalDocs];
     const supabaseAdmin = createAdminClient();
     const supabase = await createClient();
@@ -240,6 +243,7 @@ export async function fundLoanAction(clientId: string, data: {
     /** The lender-selection row chosen as the funder; flipped to status='funded'. */
     fundedAssignmentId?: string | null;
 }) {
+    await assertNotReadOnly();
     const supabaseAdmin = createAdminClient();
 
     try {
@@ -618,6 +622,7 @@ async function requireUnderwritingOrAdmin() {
  * Allows an underwriter to update the display name (custom_label) of a file.
  */
 export async function renameClientFile(documentId: string, newLabel: string) {
+    await assertNotReadOnly();
     try {
         await requireUnderwritingOrAdmin();
 
@@ -669,6 +674,7 @@ export async function renameClientFile(documentId: string, newLabel: string) {
  * so a document id from another vault can't be passed in.
  */
 export async function deleteClientFile(clientId: string, documentId: string) {
+    await assertNotReadOnly();
     try {
         await requireUnderwritingOrAdmin();
 

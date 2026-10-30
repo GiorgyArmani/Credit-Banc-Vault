@@ -2195,6 +2195,9 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
                             case "reassign_advisor":
                                 return [{ id, label: "Reassign advisor", icon: Users, onSelect: open_reassign_modal }];
                             case "delete_vault":
+                                // Followers can see a file but never delete it — owner or admin only
+                                // (deleteClientVault enforces the same rule server-side).
+                                if (!is_owner) return [];
                                 return [{ id, label: "Delete vault", icon: Trash2, onSelect: () => set_is_delete_vault_modal_open(true), destructive: true }];
                             default:
                                 return []; // start_round lives in the funding rounds card; upload_for_client / archive_slack arrive with UW

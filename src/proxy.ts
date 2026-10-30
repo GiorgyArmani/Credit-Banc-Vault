@@ -5,6 +5,10 @@
 // Runs on the Node.js runtime (proxy default in Next 16).
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { isReadOnlyUser, READ_ONLY_ERROR } from "@/lib/read-only-accounts";
+
+/** POST endpoints that only read — allowed for read-only accounts. */
+const READ_ONLY_POST_ALLOWLIST = ["/api/documents/urls"];
 
 /**
  * Proxy for Role-Based Access Control
@@ -158,6 +162,20 @@ export async function proxy(request: NextRequest) {
       return NextResponse.json({ error: "Authentication required" }, { status: 401 });
     }
     return redirectWithCookies("/auth/login");
+  }
+
+  // ── Read-only accounts (AVA bot) ─────────────────────────────────────────
+  // They may read every file they follow but change nothing: any mutating
+  // /api/* call is refused. The few POST endpoints that only READ are allowed.
+  // Server actions are guarded separately by assertNotReadOnly().
+  if (
+    user &&
+    isReadOnlyUser(user.id) &&
+    path.startsWith("/api/") &&
+    !["GET", "HEAD", "OPTIONS"].includes(request.method) &&
+    !READ_ONLY_POST_ALLOWLIST.includes(path)
+  ) {
+    return NextResponse.json({ error: READ_ONLY_ERROR }, { status: 403 });
   }
 
   // If user is authenticated, check role-based access

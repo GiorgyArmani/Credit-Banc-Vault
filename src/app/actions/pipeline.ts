@@ -1,5 +1,7 @@
 "use server";
 
+import { assertNotReadOnly } from "@/lib/read-only-accounts";
+
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { recordPipelineTransition } from "@/lib/pipeline-core";
@@ -167,6 +169,7 @@ export async function updateLoanStatus(
    *  client-level drags leave it null, which reads as "the client's round". */
   fundingDealId?: string | null
 ): Promise<{ success: boolean; error?: string }> {
+  await assertNotReadOnly();
   const actor = await resolveActor();
   if (!actor) return { success: false, error: "Unauthenticated" };
 
