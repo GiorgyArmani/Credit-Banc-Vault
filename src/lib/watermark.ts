@@ -22,7 +22,12 @@
 // bytes travel Supabase → browser directly. The stamp is generic (no lender
 // name), so one derivative serves every link that ever exposes that document.
 
-import { PDFDocument, degrees, rgb, StandardFonts } from "pdf-lib";
+// @cantoo/pdf-lib, NOT pdf-lib: upstream pdf-lib cannot decrypt. Its
+// `ignoreEncryption` only skips the check, so an encrypted original (Chase and
+// many other bank exports use an empty user password) was saved still claiming
+// encryption while holding unencrypted new objects — every viewer refused the
+// stamped copy ("Failed to load PDF document"). The fork decrypts on load.
+import { PDFDocument, degrees, rgb, StandardFonts } from "@cantoo/pdf-lib";
 import { readFile } from "fs/promises";
 import path from "path";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -169,9 +174,18 @@ async function stampPdf(pdf: PDFDocument): Promise<void> {
  * valid PDF with the mark on every page.
  */
 export async function stampPdfBytes(bytes: Uint8Array): Promise<Uint8Array> {
-  const pdf = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  const pdf = await loadDecrypted(bytes);
   await stampPdf(pdf);
   return pdf.save();
+}
+
+/**
+ * Load a PDF, decrypting it when it's protected by an empty user password (the
+ * usual bank-export case). The saved result is written unencrypted. A file that
+ * needs a real password throws, and callers fall back to the original.
+ */
+async function loadDecrypted(bytes: Uint8Array): Promise<PDFDocument> {
+  return PDFDocument.load(bytes, { password: "" });
 }
 
 /**
@@ -239,10 +253,9 @@ export async function getWatermarkedPath(
 
     let pdf: PDFDocument;
     if (mime.includes("pdf") || /\.pdf$/i.test(name)) {
-      // ignoreEncryption: some bank exports are "protected" with an empty owner
-      // password. Refusing those would silently drop the most important
-      // documents in the packet.
-      pdf = await PDFDocument.load(bytes, { ignoreEncryption: true });
+      // Many bank exports are encrypted with an empty user password. They must
+      // be DECRYPTED, not loaded with ignoreEncryption — see the import note.
+      pdf = await loadDecrypted(bytes);
     } else {
       pdf = await imageToPdf(bytes, mime, name);
     }
