@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { signWell } from '@/lib/signwell';
 
 export const dynamic = 'force-dynamic';
@@ -151,8 +152,9 @@ export async function POST(request: Request) {
             const baseUrl = embeddedSigningUrl || signingUrl;
             const finalUrl = `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}doc_id=${documentId}`;
 
-            // 5. Save URL to DB
-            const { error: updateError } = await supabase
+            // 5. Save URL to DB. Service role: clients have no direct UPDATE on
+            //    their vault row (they could otherwise forge contract_url).
+            const { error: updateError } = await createAdminClient()
                 .from('client_data_vault')
                 .update({
                     contract_url: finalUrl,

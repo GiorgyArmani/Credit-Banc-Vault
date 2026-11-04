@@ -53,8 +53,9 @@ export async function POST() {
             await ghlAddTags(clientData.ghl_contact_id, ["vault_submitted"]);
         }
 
-        // 3. Mark as submitted in local client_data_vault
-        const { error: updateError } = await supabase
+        // 3. Mark as submitted in local client_data_vault. Service role: clients
+        //    have no direct UPDATE on their vault row; clientData is the caller's own.
+        const { error: updateError } = await createAdminClient()
             .from("client_data_vault")
             .update({
                 data_vault_submitted_at: new Date().toISOString(),

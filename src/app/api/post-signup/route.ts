@@ -1,6 +1,7 @@
 // app/api/post-signup/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { createClient as createServerClient } from "@/lib/supabase/server";
 import { syncUnifiedClientData } from "@/lib/user-management";
 
 export const runtime = "nodejs";
@@ -54,27 +55,37 @@ async function upsertGHLContact({
 
 export async function POST(req: NextRequest) {
   try {
-    const { userId, firstName, lastName, email, tags } = await req.json();
+    // Identity comes from the session, never the body. This route is public in
+    // the proxy and writes with the service role, so trusting a body userId/email
+    // let anyone rewrite any user's email (→ magic-link takeover) or role.
+    const supabase = await createServerClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user?.email) {
+      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    }
+    const userId = user.id;
+    const email = user.email.toLowerCase();
 
-    if (!userId || !firstName || !lastName || !email) {
+    const { firstName, lastName } = await req.json();
+
+    if (!firstName || !lastName) {
       return NextResponse.json({ message: "Missing fields" }, { status: 400 });
     }
 
-    // 1) Sync to Unified Tables (users, client_data_vault, business_profiles)
+    // 1) Sync to Unified Tables (users, client_data_vault, business_profiles).
+    //    No `role`: a fresh insert defaults to 'free', and an existing user's
+    //    role must never be rewritten from here.
     await syncUnifiedClientData(supabaseAdmin, {
       userId,
-      email: email.toLowerCase(),
+      email,
       clientName: `${firstName} ${lastName}`.trim(),
       companyName: firstName + "'s Business", // Fallback name
-      role: 'free',
     });
     console.log(`✅ Unified sync completed for user: ${userId}`);
 
-    // 2) Upsert contacto en GHL
-    // Always include 'vault-user' so GHL automations trigger correctly,
-    // regardless of what tags the caller provides.
-    const mergedTags = [...new Set(['vault-user', ...(tags || [])])];
-    await upsertGHLContact({ firstName, lastName, email, tags: mergedTags });
+    // 2) Upsert contacto en GHL. Tags are fixed server-side — caller-supplied
+    //    tags could fire arbitrary GHL workflows.
+    await upsertGHLContact({ firstName, lastName, email, tags: ['vault-user', 'repair-dashboard'] });
 
     return NextResponse.json({ ok: true });
   } catch (err: any) {

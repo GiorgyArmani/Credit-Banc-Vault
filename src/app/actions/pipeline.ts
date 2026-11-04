@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { recordPipelineTransition } from "@/lib/pipeline-core";
 import { canRecordFunded, isStaffRole } from "@/lib/auth/roles";
+import { actorMayWorkClient, dealBelongsToVault } from "@/lib/client-access";
 import { revalidatePath } from "next/cache";
 
 export type LoanStatus =
@@ -185,6 +186,19 @@ export async function updateLoanStatus(
       `[pipeline] BLOCKED funded transition on ${clientVaultId} by ${actor.role} ${actor.userId}`
     );
     return { success: false, error: "Forbidden" };
+  }
+
+  // Role alone isn't enough: an advisor / partner may only move files they own
+  // or follow, and a setter moves none (the setter dashboard never calls this).
+  const admin = createAdminClient();
+  if (!(await actorMayWorkClient(admin, actor, clientVaultId))) {
+    console.warn(
+      `[pipeline] BLOCKED "${newStatus}" on ${clientVaultId} by ${actor.role} ${actor.userId} (no access to this file)`
+    );
+    return { success: false, error: "Forbidden" };
+  }
+  if (fundingDealId && !(await dealBelongsToVault(admin, fundingDealId, clientVaultId))) {
+    return { success: false, error: "That funding round does not belong to this client" };
   }
 
   const result = await recordPipelineTransition({

@@ -56,8 +56,9 @@ export async function POST(request: Request) {
 
         const ghlContactId = vaultData.ghl_contact_id;
 
-        // 2. Store in Supabase client_data_vault
-        const { error: vaultUpdateError } = await supabase
+        // 2. Store in Supabase client_data_vault. Service role: clients have no
+        //    direct UPDATE on their vault row; this route is the gate (own row only).
+        const { error: vaultUpdateError } = await createAdminClient()
             .from('client_data_vault')
             .update({
                 ein,

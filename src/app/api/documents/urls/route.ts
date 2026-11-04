@@ -27,7 +27,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { callerMayReadClientFiles } from "@/lib/document-access";
+import { callerMayReadClientFiles, isOwnedStoragePath } from "@/lib/document-access";
 import { DOCUMENTS_BUCKET } from "@/lib/watermark";
 
 export const dynamic = "force-dynamic";
@@ -86,7 +86,10 @@ export async function POST(request: Request) {
     }
 
     const allowed = (docs ?? []).filter(
-      (d) => d.storage_path && permitted.has(d.user_id as string)
+      (d) =>
+        d.storage_path &&
+        permitted.has(d.user_id as string) &&
+        isOwnedStoragePath(d.storage_path as string, d.user_id as string)
     );
 
     const urls: Record<string, string> = {};

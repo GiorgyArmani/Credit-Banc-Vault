@@ -94,10 +94,21 @@ export function OfficeFileViewer({ kind, url, name, downloadUrl }: Props) {
           ignoreWidth: false,
           ignoreHeight: true,
           breakPages: true,
-          // Word documents can carry script-bearing content; docx-preview
-          // strips it, and we never inject the raw XML ourselves.
           renderHeaders: true,
           renderFooters: true,
+        });
+        // docx-preview copies hyperlink targets from the file straight onto
+        // <a href> (raw DOM, so React's javascript: guard never sees it). A
+        // client-uploaded .docx could carry `javascript:` links that run as the
+        // staff member who clicks them. Keep only web/mail/in-page links.
+        target.querySelectorAll("a[href]").forEach((a) => {
+          const href = (a.getAttribute("href") ?? "").trim();
+          if (/^(https?:|mailto:|#)/i.test(href)) {
+            a.setAttribute("target", "_blank");
+            a.setAttribute("rel", "noopener noreferrer");
+          } else {
+            a.removeAttribute("href");
+          }
         });
         set_loading(false);
         return;

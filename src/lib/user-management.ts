@@ -18,6 +18,25 @@ export function generateSecurePassword(): string {
  * Interface representing the core client data needed across all tables.
  * This is a subset of fields that are common or needed for initialization.
  */
+/**
+ * Find an existing account by email via public.users (case-insensitive, LIKE
+ * wildcards escaped). Never use a bare auth.admin.listUsers() for this — it
+ * returns only the first 50 accounts.
+ */
+export async function findUserByEmail(
+    supabase: SupabaseClient,
+    email: string
+): Promise<{ id: string; role: string | null } | null> {
+    const pattern = email.trim().toLowerCase().replace(/[\\%_]/g, '\\$&');
+    const { data } = await supabase
+        .from('users')
+        .select('id, role')
+        .ilike('email', pattern)
+        .limit(1)
+        .maybeSingle();
+    return data ? { id: data.id as string, role: (data.role as string | null) ?? null } : null;
+}
+
 export interface UnifiedClientData {
     userId: string;
     email: string;

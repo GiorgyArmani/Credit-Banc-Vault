@@ -61,6 +61,18 @@ const UNSCOPED_STAFF_ROLES = ["admin", "underwriting"] as const;
  * ids are real — the same reason /api/share/[token]/file collapses its
  * failures into one 404.
  */
+/**
+ * Is `path` inside `owner_id`'s own folder? Access is authorised against the
+ * row's user_id, but the file served is whatever storage_path says — and rows
+ * are writable by their owner under RLS. Without this, a client could point a
+ * row of their own at another client's object. storage-js doesn't encode
+ * paths, so `..`, `#`, `?`, `\` and `//` are refused too.
+ * DB backstop: user_documents_storage_path_in_owner_folder (20261105).
+ */
+export function isOwnedStoragePath(path: string, owner_id: string): boolean {
+  return path.startsWith(`${owner_id}/`) && !/\.\.|[#?\\]|\/\//.test(path);
+}
+
 export async function resolveDocumentForCaller(
   document_id: string
 ): Promise<DocumentAccessResult> {
@@ -83,6 +95,7 @@ export async function resolveDocumentForCaller(
     .maybeSingle();
 
   if (!doc?.storage_path) return { ok: false, status: 404 };
+  if (!isOwnedStoragePath(doc.storage_path, doc.user_id)) return { ok: false, status: 404 };
 
   const allowed = await callerMayReadClientFiles(admin, user.id, doc.user_id);
   if (!allowed) return { ok: false, status: 404 };

@@ -39,6 +39,7 @@ import {
     type DocumentGroup,
 } from '@/lib/document-groups';
 import { getActiveDeal } from '@/lib/funding-deals';
+import { isOwnedStoragePath } from '@/lib/document-access';
 
 export const maxDuration = 60;
 
@@ -236,12 +237,11 @@ export async function POST(request: Request) {
         // STEP 5: INSERT user_documents ROWS (sequential — fast)
         // ========================================================================
         const uploaded_documents: any[] = [];
-        const expected_prefix = `${client.user_id}/`;
 
         for (const f of files) {
             // Security: signed-URL paths are server-minted, but double-check the
             // browser didn't tamper before we record it as belonging to this client.
-            if (!f.storage_path || !f.storage_path.startsWith(expected_prefix)) {
+            if (!f.storage_path || !isOwnedStoragePath(f.storage_path, client.user_id)) {
                 console.error(`❌ Rejected storage_path outside client folder: ${f.storage_path}`);
                 continue;
             }

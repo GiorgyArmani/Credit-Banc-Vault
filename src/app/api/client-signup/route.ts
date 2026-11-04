@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import { createClient as createServerSupabaseClient } from '@/lib/supabase/server';
 import { send_client_welcome_email } from '@/lib/email';
 import { syncOutstandingDocuments } from '@/lib/outstanding-documents';
-import { syncUnifiedClientData, generateSecurePassword } from '@/lib/user-management';
+import { syncUnifiedClientData, generateSecurePassword, findUserByEmail } from '@/lib/user-management';
 import { ghlSearchContacts, ghlUpdateContact, ghlAddContactFollowers, ghlAddTags, ghlSyncRequestedDocTags, extractGhlDuplicateContactId } from '@/lib/ghl-api';
 import { formatPhoneUS, isValidUsPhone, phoneKey, toE164 } from '@/lib/phone';
 import { generateOnboardingMagicLink, pushMagicLinkToGhl } from '@/lib/magic-link';
@@ -449,11 +449,18 @@ export async function POST(request: Request) {
     console.log(`✅ Advisor resolved from session: ${advisor_row.id} (${body.advisor_name})`);
 
     // ========== STEP 2: CREATE/UPDATE USER IN AUTH ==========
-    const { data: existing_user } = await supabase_admin.auth.admin
-      .listUsers()
-      .then(res => ({
-        data: res.data.users.find(u => u.email === body.client_email.toLowerCase())
-      }));
+    const existing_user = await findUserByEmail(supabase_admin, body.client_email);
+
+    // Never turn a non-client account into a client. The reuse path below resets
+    // the password and the sync forces role 'free' — on a staff or partner email
+    // that would hijack and demote their account.
+    if (existing_user && existing_user.role && existing_user.role !== 'free') {
+      console.warn(`🚫 Client creation blocked: ${body.client_email} is an existing ${existing_user.role} account`);
+      return NextResponse.json({
+        success: false,
+        error: 'This email belongs to an existing team or partner account and cannot be used for a client. Use a different email.',
+      }, { status: 409 });
+    }
 
     let user_id = existing_user?.id;
 

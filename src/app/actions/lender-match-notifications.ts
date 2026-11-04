@@ -3,6 +3,7 @@
 import { assertNotReadOnly } from "@/lib/read-only-accounts";
 
 import { createClient } from "@supabase/supabase-js";
+import { createClient as createServerClient } from "@/lib/supabase/server";
 import { send_lender_match_ready_notification } from "@/lib/email";
 import { slackPostMessage, getApproverUserIds, resolveAdvisorSlackId, formatMentions } from "@/lib/slack-api";
 
@@ -86,6 +87,16 @@ export async function notifyAdminsOfLenderMatchSaved(
     match_basis?: MatchBasis
 ) {
     await assertNotReadOnly();
+    // Lender Match lives only on the admin + underwriting surfaces. Without
+    // this, anyone (no login) could email every admin and post into a deal's
+    // Slack channel with caller-written lender names.
+    const {
+        data: { user },
+    } = await (await createServerClient()).auth.getUser();
+    if (!user) throw new Error("Unauthorized");
+    const { data: actor } = await supabase_admin.from("users").select("role").eq("id", user.id).maybeSingle();
+    if (actor?.role !== "admin" && actor?.role !== "underwriting") throw new Error("Forbidden");
+
     if (!clientId) return { notified: 0, emailed: 0, admins: 0 };
 
     let admin_users: { id: string; email: string }[] = [];

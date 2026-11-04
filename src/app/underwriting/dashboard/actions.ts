@@ -15,6 +15,7 @@ import { computeRenewalDates } from "@/lib/renewals";
 import { revalidatePath } from "next/cache";
 import { markLabelAsManual } from "@/lib/group-assignment";
 import { canRecordFunded } from "@/lib/auth/roles";
+import { actorMayWorkClient, businessBelongsToVault } from "@/lib/client-access";
 import { slackPostMessage, resolveAdvisorSlackId, formatMentions } from "@/lib/slack-api";
 
 /**
@@ -34,12 +35,11 @@ export async function notifyAdvisor(clientId: string, missingDocs: string[], add
     await assertNotReadOnly();
     const requestedDocs = [...missingDocs, ...additionalDocs];
     const supabaseAdmin = createAdminClient();
-    const supabase = await createClient();
 
     try {
-        // Get the current user (Underwriter)
-        const { data: { user: currentUser } } = await supabase.auth.getUser();
-        if (!currentUser) throw new Error("Unauthorized");
+        // Underwriting / admin only — this sends branded staff email + Slack
+        // posts with caller-chosen text, so a bare login check isn't enough.
+        const { user: currentUser } = await requireUnderwritingOrAdmin();
 
         // 1. Fetch client and advisor info
         const { data: client, error: clientError } = await supabaseAdmin
@@ -263,6 +263,16 @@ export async function fundLoanAction(clientId: string, data: {
                 `[fundLoanAction] BLOCKED funding of ${clientId} by ${actor.role} ${actor.userId}`
             );
             return { success: false, error: "Forbidden" };
+        }
+        // An advisor may only fund files they own or follow.
+        if (!(await actorMayWorkClient(supabaseAdmin, actor, clientId))) {
+            console.warn(
+                `[fundLoanAction] BLOCKED funding of ${clientId} by ${actor.role} ${actor.userId} (no access to this file)`
+            );
+            return { success: false, error: "Forbidden" };
+        }
+        if (data.businessProfileId && !(await businessBelongsToVault(supabaseAdmin, data.businessProfileId, clientId))) {
+            return { success: false, error: "That business does not belong to this client" };
         }
 
         // 1. Fetch client GHL ID
@@ -575,6 +585,8 @@ export async function fundLoanAction(clientId: string, data: {
 }
 
 export async function markDocumentAsViewed(documentId: string) {
+    await assertNotReadOnly();
+    await requireUnderwritingOrAdmin();
     const supabase = createAdminClient();
     const { error } = await supabase
         .from("user_documents")

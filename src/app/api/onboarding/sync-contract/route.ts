@@ -90,7 +90,7 @@ export async function POST(request: Request) {
             .limit(1);
         if (alreadySynced && alreadySynced.length > 0) {
             console.log(`⏩ Funding application for document ${documentId} already synced — skipping duplicate.`);
-            await supabase
+            await createAdminClient()
                 .from('client_data_vault')
                 .update({ contract_completed: true, updated_at: new Date().toISOString() })
                 .eq('user_id', user.id);
@@ -209,8 +209,9 @@ export async function POST(request: Request) {
             throw dbError;
         }
 
-        // 5. Update client_data_vault status
-        await supabase
+        // 5. Update client_data_vault status. Service role: clients have no
+        //    direct UPDATE on their vault row; this route is the gate (own row only).
+        await createAdminClient()
             .from('client_data_vault')
             .update({
                 contract_completed: true,

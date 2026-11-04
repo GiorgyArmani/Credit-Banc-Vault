@@ -132,10 +132,14 @@ export async function POST(request: Request) {
         // ========================================================================
         // STEP 4: BUILD STORAGE PATH + MINT SIGNED UPLOAD URL
         // ========================================================================
-        const ext = file_name.split('.').pop() || 'bin';
+        // Both land in a storage key and storage-js does not encode paths, so an
+        // unsanitised `../` or `#` here could mint an upload URL for another
+        // client's object. Same sanitising as /api/documents/upload/sign.
+        const ext = (file_name.split('.').pop() || 'bin').toLowerCase().replace(/[^a-z0-9]/g, '') || 'bin';
+        const safe_code = String(doc_code).replace(/[^A-Za-z0-9_-]/g, '');
         const timestamp = Date.now();
         const random = Math.random().toString(36).substr(2, 9);
-        const normalized_filename = `${doc_code}-${timestamp}-${random}.${ext}`;
+        const normalized_filename = `${safe_code}-${timestamp}-${random}.${ext}`;
         const file_path = `${client.user_id}/${normalized_filename}`;
 
         const { data: signed, error: sign_error } = await supabase_admin.storage
