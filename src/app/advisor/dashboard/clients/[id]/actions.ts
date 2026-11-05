@@ -19,6 +19,7 @@ import { resolvePartnerByName } from "@/lib/referral-partners";
 import { partnerAssignedCustomFields } from "@/lib/referral-partner-attribution";
 import { markLabelAsManual } from "@/lib/group-assignment";
 import { canEditClientProfile } from "@/lib/auth/profile-edit-access";
+import { assertActorMayWorkClient } from "@/lib/client-access";
 import { loadClientOwners, saveClientOwners, maskOwner, resolveOwner1Address, legacyOwnerDrafts } from "@/lib/owners";
 import type { OwnerInput, Owner1Input } from "@/lib/owners";
 
@@ -97,6 +98,10 @@ export async function addManualFundingApplication(clientId: string, formData: Fo
         if (!file) {
             throw new Error("No file provided");
         }
+
+        // Server actions are public endpoints: without this a client could
+        // mark their own contract signed by uploading any file.
+        await assertActorMayWorkClient(createAdminClient(), advisorUser.id, clientId, businessProfileId);
 
         // 2. Verify client and get user_id
         const { data: client, error: clientError } = await supabase
@@ -239,6 +244,7 @@ export async function requestDocuments(
         if (!advisorUser) {
             throw new Error("Unauthorized");
         }
+        await assertActorMayWorkClient(createAdminClient(), advisorUser.id, clientId, businessProfileId);
 
         // 2. Verify advisor ownership and get client user_id + ghl_contact_id
         const { data: client, error: clientError } = await supabase

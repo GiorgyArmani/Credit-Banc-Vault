@@ -19,6 +19,8 @@ export interface ApiAssignmentSummary {
     reference_id: string;
     documents_total: number;
     documents_accepted: number;
+    /** Files the lender didn't take, with the reason, so staff see WHY "Docs 7/21". */
+    documents_failed: Array<{ filename: string; error: string }>;
     last_stage: string | null;
     error: string | null;
     error_kind: SubmissionErrorKind | null;

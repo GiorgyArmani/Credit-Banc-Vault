@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { secretsMatch } from '@/lib/secret-compare';
 
 // Create Supabase admin client
 const supabase = createClient(
@@ -27,7 +28,7 @@ export async function POST(request: NextRequest) {
         const payload = await request.json();
 
         // 1. Validate Secret
-        if (!payload.secret || payload.secret !== WEBHOOK_SECRET) {
+        if (!secretsMatch(payload.secret, WEBHOOK_SECRET)) {
             console.error('❌ Invalid secret token');
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
@@ -36,6 +37,12 @@ export async function POST(request: NextRequest) {
 
         if (!email || !signing_url) {
             return NextResponse.json({ error: 'Missing email or signing_url' }, { status: 400 });
+        }
+
+        // contract_url is what the client is sent to sign, so only accept a
+        // real SignWell https link.
+        if (!isSignWellUrl(signing_url)) {
+            return NextResponse.json({ error: 'signing_url must be a SignWell https link' }, { status: 400 });
         }
 
         console.log(`📝 Processing contract link for: ${email}`);
@@ -73,5 +80,15 @@ export async function POST(request: NextRequest) {
     } catch (error: any) {
         console.error('❌ Webhook error:', error);
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    }
+}
+
+function isSignWellUrl(value: unknown): boolean {
+    try {
+        const url = new URL(String(value));
+        return url.protocol === 'https:' &&
+            (url.hostname === 'signwell.com' || url.hostname.endsWith('.signwell.com'));
+    } catch {
+        return false;
     }
 }

@@ -74,6 +74,23 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: 'Forbidden: Document ID mismatch' }, { status: 403 });
         }
 
+        // contract_url can also be set by the Zapier webhook, so don't trust it
+        // alone: SignWell must confirm the document was sent to this client.
+        let recipients: string[];
+        try {
+            recipients = await signWell.getRecipientEmails(documentId);
+        } catch (lookupErr) {
+            console.error('❌ SignWell recipient lookup failed:', lookupErr);
+            return NextResponse.json({ error: 'Could not verify the contract with SignWell' }, { status: 502 });
+        }
+        const own_emails = [client_data.client_email, user.email]
+            .filter(Boolean)
+            .map((e) => String(e).trim().toLowerCase());
+        if (!recipients.some((r) => own_emails.includes(r))) {
+            console.error(`❌ Document ${documentId} was not sent to user ${user.id}`);
+            return NextResponse.json({ error: 'Forbidden: Document ID mismatch' }, { status: 403 });
+        }
+
         // 1.5 Dedupe guard. This route gets called more than once for the same
         //      signed contract (the onboarding contract-check step polls + the
         //      Signwell webhook can also fire), which previously produced two

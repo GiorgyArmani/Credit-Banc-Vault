@@ -74,6 +74,27 @@ export async function actorMayWorkClient(
   return access.isOwner || access.isFollower;
 }
 
+/**
+ * Server-action gate built on actorMayWorkClient: looks up the caller's role and
+ * throws unless they may work this file. Optionally also checks that a
+ * caller-supplied business belongs to the same vault.
+ */
+export async function assertActorMayWorkClient(
+  admin: SupabaseClient,
+  userId: string,
+  clientVaultId: string,
+  businessProfileId?: string | null
+): Promise<void> {
+  const { data: row } = await admin.from("users").select("role").eq("id", userId).maybeSingle();
+  const role = (row?.role as string | undefined) ?? "";
+  if (!(await actorMayWorkClient(admin, { userId, role }, clientVaultId))) {
+    throw new Error("Access denied: You do not have access to this client");
+  }
+  if (businessProfileId && !(await businessBelongsToVault(admin, businessProfileId, clientVaultId))) {
+    throw new Error("That business does not belong to this client");
+  }
+}
+
 /** Does this business_profile belong to this client vault? */
 export async function businessBelongsToVault(
   admin: SupabaseClient,

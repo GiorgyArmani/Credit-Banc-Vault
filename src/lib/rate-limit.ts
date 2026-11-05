@@ -126,4 +126,13 @@ export const RATE_LIMITS = {
 
   /** Per IP. Creates a Stripe Customer and a Checkout Session before any card is taken. */
   partnerPlusCheckout: { name: "partner-plus-checkout", windowSeconds: 3600, max: 5 } as RateLimitRule,
+
+  /** Per IP. Each request mails a reset link, so unlimited calls = mail bombing. */
+  resetPassword: { name: "reset-password", windowSeconds: 3600, max: 10 } as RateLimitRule,
+
+  /** Per target EMAIL, whoever asks. Caps how many reset mails one inbox gets. */
+  resetPasswordPerEmail: { name: "reset-password-email", windowSeconds: 3600, max: 3 } as RateLimitRule,
+
+  /** Per IP. Public form that emails the support inbox. */
+  supportTicket: { name: "support-ticket", windowSeconds: 3600, max: 5 } as RateLimitRule,
 } as const;

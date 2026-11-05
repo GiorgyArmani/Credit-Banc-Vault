@@ -216,12 +216,13 @@ async function resolveClient(params: {
     }
 
     // 3. Sender on file. ilike keeps this case-insensitive without assuming the
-    // stored address was ever normalized.
+    // stored address was ever normalized. The sender is attacker-controlled, so
+    // escape % and _ or "%@gmail.com" would match some client's file.
     if (params.sender) {
         const { data: client } = await supabase
             .from("client_data_vault")
             .select("id")
-            .ilike("client_email", params.sender)
+            .ilike("client_email", params.sender.trim().replace(/[\\%_]/g, "\\$&"))
             .limit(1)
             .maybeSingle();
 

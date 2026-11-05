@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { send_password_reset_email } from "@/lib/email";
+import { checkRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,6 +31,18 @@ export async function POST(req: NextRequest) {
             return NextResponse.json(
                 { message: "Email is required" },
                 { status: 400 }
+            );
+        }
+
+        const normalized_email = String(email).trim().toLowerCase();
+        const [per_ip, per_email] = await Promise.all([
+            checkRateLimit(req, RATE_LIMITS.resetPassword),
+            checkRateLimit(req, RATE_LIMITS.resetPasswordPerEmail, normalized_email),
+        ]);
+        if (!per_ip.allowed || !per_email.allowed) {
+            return NextResponse.json(
+                { message: "Too many reset requests. Please wait a while and try again." },
+                { status: 429 }
             );
         }
 

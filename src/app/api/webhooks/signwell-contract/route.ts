@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { signWell } from '@/lib/signwell';
 import { releaseSpeedFormDocs } from '@/lib/speed-form';
+import { secretsMatch } from '@/lib/secret-compare';
 
 // Cliente de Supabase con service role para operaciones del servidor
 const supabase = createClient(
@@ -39,7 +40,7 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        if (!payload.secret || payload.secret !== WEBHOOK_SECRET) {
+        if (!secretsMatch(payload.secret, WEBHOOK_SECRET)) {
             console.error('❌ Token de seguridad inválido');
             return NextResponse.json(
                 {
@@ -58,8 +59,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json(
                 {
                     success: false,
-                    error: 'Bad Request - client_email is required',
-                    received_payload: payload
+                    error: 'Bad Request - client_email is required'
                 },
                 { status: 400 }
             );
@@ -74,6 +74,30 @@ export async function POST(request: NextRequest) {
         //      "lookup by email" behavior if no funding_deal matches (covers
         //      the original onboarding contract which lives on client_data_vault).
         const signwellDocumentId: string | null = payload.document_id || payload.contract_id || null;
+
+        // The secret only proves the caller is our Zap. Also prove the document
+        // was sent to THIS email, so a bad payload can't copy another client's
+        // signed application into this vault or mark their deal complete.
+        if (signwellDocumentId) {
+            let recipients: string[];
+            try {
+                recipients = await signWell.getRecipientEmails(signwellDocumentId);
+            } catch (lookupErr) {
+                console.error('❌ SignWell recipient lookup failed:', lookupErr);
+                return NextResponse.json(
+                    { success: false, error: 'Could not verify the document with SignWell' },
+                    { status: 502 }
+                );
+            }
+            if (!recipients.includes(String(client_email).trim().toLowerCase())) {
+                console.error('❌ Document', signwellDocumentId, 'was not sent to', client_email);
+                return NextResponse.json(
+                    { success: false, error: 'Document does not belong to this client' },
+                    { status: 403 }
+                );
+            }
+        }
+
         let matchedFundingDealId: string | null = null;
         let matchedBusinessProfileId: string | null = null;
         if (signwellDocumentId) {
@@ -114,8 +138,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json(
                 {
                     success: false,
-                    error: 'Database error while fetching client',
-                    details: fetch_error.message
+                    error: 'Database error while fetching client'
                 },
                 { status: 500 }
             );
@@ -191,8 +214,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json(
                 {
                     success: false,
-                    error: 'Database error while updating client',
-                    details: update_error.message
+                    error: 'Database error while updating client'
                 },
                 { status: 500 }
             );
@@ -422,9 +444,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(
             {
                 success: false,
-                error: 'Internal server error',
-                message: error.message,
-                stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+                error: 'Internal server error'
             },
             { status: 500 }
         );

@@ -4,6 +4,7 @@ import { assertNotReadOnly } from "@/lib/read-only-accounts";
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { assertActorMayWorkClient } from "@/lib/client-access";
 
 export async function fetchInternalNotes(clientId: string) {
     const supabase = await createClient();
@@ -32,6 +33,7 @@ export async function addInternalNote(clientId: string, content: string, role: "
         // Get the current user
         const { data: { user: currentUser } } = await supabase.auth.getUser();
         if (!currentUser) throw new Error("Unauthorized");
+        await assertActorMayWorkClient(supabaseAdmin, currentUser.id, clientId);
 
         // Fetch profile to get name
         const { data: profile } = await supabaseAdmin

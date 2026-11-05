@@ -157,6 +157,14 @@ describe("loot webhook", () => {
     });
   }
 
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-24T12:05:00.000Z"));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("accepts their HMAC-SHA512 in the header or the body", async () => {
     expect(sig).toHaveLength(128);
     expect(await loot.webhook!.verify(req(sig))).toBe(true);
@@ -169,6 +177,15 @@ describe("loot webhook", () => {
     expect(await loot.webhook!.verify(req(sig, { ...body, createdAt: "2026-09-25T12:00:00.000Z" }))).toBe(false);
     vi.stubEnv("LOOT_WEBHOOK_SECRET", "");
     expect(await loot.webhook!.verify(req(sig))).toBe(false);
+  });
+
+  it("rejects a correctly signed callback outside the replay window", async () => {
+    const old_body = { ...body, createdAt: "2026-09-24T11:30:00.000Z" };
+    const old_sig = lootSignature("webhook-secret-123456", old_body.nonce, old_body.eventType, old_body.createdAt);
+    expect(await loot.webhook!.verify(req(old_sig, old_body))).toBe(false);
+    const bad_date = { ...body, createdAt: "not-a-date" };
+    const bad_sig = lootSignature("webhook-secret-123456", bad_date.nonce, bad_date.eventType, bad_date.createdAt);
+    expect(await loot.webhook!.verify(req(bad_sig, bad_date))).toBe(false);
   });
 
   it("leaves the body readable for the route", async () => {

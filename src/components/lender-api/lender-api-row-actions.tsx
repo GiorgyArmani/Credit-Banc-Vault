@@ -132,6 +132,20 @@ export function LenderApiRowActions({
           </div>
           {latest.last_stage && <p>{summary.display_name}: {latest.last_stage}</p>}
           {latest.error && <p className="text-rose-600">{latest.error}</p>}
+          {latest.documents_failed?.length > 0 && (
+            <details className="text-rose-600">
+              <summary className="cursor-pointer">
+                {latest.documents_failed.length} file(s) not accepted — why?
+              </summary>
+              <ul className="mt-1 space-y-0.5 max-h-40 overflow-y-auto">
+                {latest.documents_failed.map((f, i) => (
+                  <li key={i} className="break-words">
+                    <span className="font-medium">{f.filename}</span>: {f.error}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
           {latest.external_id && (
             <div className="flex gap-2 pt-1">
               <Button size="sm" variant="outline" className="h-7 text-[10px]" disabled={!!busy} onClick={() => post("refresh", "refresh")}>

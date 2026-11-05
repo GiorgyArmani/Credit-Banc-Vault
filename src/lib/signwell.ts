@@ -47,6 +47,18 @@ export class SignWell {
     }
 
     /**
+     * Lower-cased emails of everyone the document was sent to. Used to prove a
+     * document id handed to us (webhook payload, client request) really belongs
+     * to that client before we copy its signed PDF into their vault.
+     */
+    async getRecipientEmails(documentId: string): Promise<string[]> {
+        const doc = await this.getDocument(documentId);
+        return ((doc?.recipients ?? []) as Array<{ email?: string }>)
+            .map((r) => (r.email ?? '').trim().toLowerCase())
+            .filter(Boolean);
+    }
+
+    /**
      * Creates a document from a template and returns the signing URL for the first recipient
      */
     async createDocument(params: {

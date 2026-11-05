@@ -71,7 +71,9 @@ export async function GET(request: NextRequest) {
       }
 
       // Check for 'next' param to redirect to specific page
-      if (next) {
+      // Same-site paths only: `${origin}${next}` with next="@evil.com" or
+      // ".evil.com" would send a freshly signed-in user to another host.
+      if (next && /^\/(?![\/\\])/.test(next)) {
         console.log(`✅ Redirecting to: ${next}`);
         return NextResponse.redirect(`${origin}${next}`);
       }

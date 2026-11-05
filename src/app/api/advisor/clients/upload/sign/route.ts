@@ -25,6 +25,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createClient as createAdminClient } from '@supabase/supabase-js';
+import { isScopedAdvisorRole } from '@/lib/auth/roles';
 
 const supabase_admin = createAdminClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -71,6 +72,11 @@ export async function POST(request: Request) {
         // Admin and underwriting are trusted staff: they can upload for any
         // client and don't need an advisor profile.
         const is_staff = caller_role?.role === 'admin' || caller_role?.role === 'underwriting';
+        // The advisors row outlives a revoked account (removal only changes
+        // users.role), so the current role is what grants the advisor path.
+        if (!is_staff && !isScopedAdvisorRole(caller_role?.role)) {
+            return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
+        }
 
         let { data: advisor_data } = await supabase_admin
             .from('advisors')

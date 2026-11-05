@@ -60,6 +60,9 @@ export async function GET(request: Request) {
               reference_id: latest.reference_id,
               documents_total: (latest.document_ids ?? []).length,
               documents_accepted: (latest.attachments ?? []).filter((r: any) => r.accepted).length,
+              documents_failed: (latest.attachments ?? [])
+                .filter((r: any) => !r.accepted)
+                .map((r: any) => ({ filename: r.filename ?? "file", error: r.error ?? "Not accepted" })),
               last_stage: latest.last_status ? provider!.interpretStatus(latest.last_status).stage : null,
               error: latest.error,
               error_kind: submissionErrorKind(latest.error),

@@ -87,7 +87,7 @@ export const CREDIBLY_STIP_RULES: Array<{ test: RegExp; docCodes: readonly strin
   { test: /bank\s*statement/i, docCodes: ["business_bank_statements"] },
   {
     test: /signed\s*app|application/i,
-    docCodes: ["funding_application", "signed_application"],
+    docCodes: ["funding_application", "funding_application_lenders", "signed_application"],
   },
   { test: /driver|licen[cs]e|\bid\b/i, docCodes: ["drivers_license", "drivers_license_front", "drivers_license_back"] },
   { test: /voided\s*check|bank\s*letter/i, docCodes: ["voided_check"] },

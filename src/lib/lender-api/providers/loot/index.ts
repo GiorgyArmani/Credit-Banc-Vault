@@ -56,6 +56,13 @@ export function lootDuplicateExplanation(lootMessage: string): string {
   );
 }
 
+/**
+ * How old a callback's createdAt may be. The signature doesn't cover `data`, so
+ * a captured callback could be replayed with another deal's data; this caps
+ * that to a short window. Loot retries at 1/2/4 min, well inside it.
+ */
+const LOOT_WEBHOOK_MAX_AGE_MS = 15 * 60 * 1000;
+
 function timingSafeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;
@@ -127,6 +134,11 @@ export const loot: LenderApiProvider = {
         .toLowerCase();
       const { nonce, eventType, createdAt } = body ?? {};
       if (!signature || typeof nonce !== "string" || typeof eventType !== "string" || typeof createdAt !== "string") {
+        return false;
+      }
+      const sent_at = Date.parse(createdAt);
+      if (!Number.isFinite(sent_at) || Math.abs(Date.now() - sent_at) > LOOT_WEBHOOK_MAX_AGE_MS) {
+        console.warn(`loot: callback createdAt ${createdAt.slice(0, 40)} is outside the replay window — rejecting`);
         return false;
       }
       return timingSafeEqual(signature, lootSignature(secret, nonce, eventType, createdAt));

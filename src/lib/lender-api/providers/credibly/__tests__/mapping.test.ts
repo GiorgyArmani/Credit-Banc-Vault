@@ -139,6 +139,8 @@ describe("stip matching", () => {
   it("sends each document to the stip whose text matches it", () => {
     expect(matchStipForDocCode("business_bank_statements", stips)?.stip_id).toBe("O-2");
     expect(matchStipForDocCode("funding_application", stips)?.stip_id).toBe("O-5");
+    // UW stores the signed app under this code (same as FF + Samson).
+    expect(matchStipForDocCode("funding_application_lenders", stips)?.stip_id).toBe("O-5");
   });
 
   it("returns null rather than guessing a slot", () => {
