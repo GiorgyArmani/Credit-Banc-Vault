@@ -2400,7 +2400,11 @@ export default function UnderwritingClientDetailsPage() {
                                 on_open_bank_analysis={() => set_is_bank_analysis_viewer_open(true)}
                                 // The admin routes redirect elsewhere, so the admin match-tool
                                 // branch this used to carry was dead.
-                                on_open_match_tool={() => router.push(`/underwriting/lender-match?client=${client_id}`)}
+                                on_open_match_tool={() =>
+                                    router.push(
+                                        `/underwriting/lender-match?client=${client_id}${active_business_id ? `&business=${active_business_id}` : ""}`
+                                    )
+                                }
                                 client_id={client_id}
                                 business_profile_id={active_business_id}
                                 on_lender_added={fetch_lender_assignments}

@@ -96,7 +96,7 @@ export default function UnderwritingDashboardPage() {
     const q = search_query.trim().toLowerCase();
     const searched = q
       ? base.filter(l =>
-          [l.company_name, l.client_name, l.client_email, l.advisor_name]
+          [l.company_name, l.business_names, l.client_name, l.client_email, l.advisor_name]
             .join(" ")
             .toLowerCase()
             .includes(q)
@@ -166,7 +166,8 @@ export default function UnderwritingDashboardPage() {
                     advisors!client_data_vault_advisor_id_fkey (
                         first_name,
                         last_name
-                    )
+                    ),
+                    business_profiles ( company_name )
                 `
         )
         .order("created_at", { ascending: false });
@@ -301,6 +302,9 @@ export default function UnderwritingDashboardPage() {
           client_name: client.client_name,
           client_email: client.client_email,
           company_name: client.company_name,
+          business_names: ((client as any).business_profiles ?? [])
+            .map((b: { company_name: string | null }) => b.company_name ?? "")
+            .join(" "),
           advisor_name,
         });
       }

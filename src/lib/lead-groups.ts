@@ -54,6 +54,9 @@ export interface GroupableLead {
   client_name: string;
   client_email: string;
   company_name: string;
+  /** Every business name on the client (multi-business clients), so search
+   *  finds the file by any of them, not only the primary. */
+  business_names?: string;
   advisor_name: string;
 }
 
@@ -233,7 +236,7 @@ export function matchesCriteria(lead: GroupableLead, criteria: GroupCriteria): b
   const search = criteria.search?.trim().toLowerCase();
   if (search) {
     const haystack = [
-      lead.company_name, lead.client_name, lead.client_email, lead.advisor_name,
+      lead.company_name, lead.business_names, lead.client_name, lead.client_email, lead.advisor_name,
     ]
       .filter(Boolean)
       .join(" ")

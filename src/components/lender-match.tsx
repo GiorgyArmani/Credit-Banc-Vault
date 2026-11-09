@@ -288,6 +288,7 @@ interface ClientOption {
   // row), so we embed it here as the reliable source for the industry filter.
   business_profiles?: {
     id: string;
+    company_name?: string | null;
     industry: string | null;
     is_primary: boolean;
     display_order: number;
@@ -356,13 +357,38 @@ function primaryBusiness(client: ClientOption | undefined) {
     )[0];
 }
 
-function buildProfileDeal(client: ClientOption | undefined, openPositions: number): DealSummary {
+type BusinessRow = NonNullable<ClientOption["business_profiles"]>[number];
+
+/** The business being matched: the one asked for, else the primary. */
+function businessFor(client: ClientOption | undefined, businessId: string | null | undefined) {
+  return (
+    (businessId ? client?.business_profiles?.find((b) => b.id === businessId) : undefined) ??
+    primaryBusiness(client)
+  );
+}
+
+/** Rows written before per-business tracking have business_profile_id NULL and
+ *  belong to the primary business. Scopes a query to one business on that rule. */
+// `any` inside on purpose: constraining Q to Supabase's builder type sends tsc
+// into "excessively deep" instantiation. Callers keep their own builder type.
+function scopeToBusiness<Q>(q: Q, biz: BusinessRow | undefined): Q {
+  if (!biz) return q;
+  const b = q as any;
+  return biz.is_primary
+    ? b.or(`business_profile_id.eq.${biz.id},business_profile_id.is.null`)
+    : b.eq("business_profile_id", biz.id);
+}
+
+function buildProfileDeal(
+  client: ClientOption | undefined,
+  openPositions: number,
+  biz: BusinessRow | undefined
+): DealSummary {
   if (!client) return { ...DEFAULT_DEAL };
-  const biz = primaryBusiness(client);
 
   // Business-level values win over the vault row when present: on a
   // multi-business file the vault row still carries the first business's
-  // numbers, and the deal being matched belongs to the primary business.
+  // numbers, and the deal being matched is the selected business's.
   const startDate = biz?.business_start_date || client.business_start_date || "";
   const annualRevenue = Number(biz?.avg_annual_revenue ?? client.avg_annual_revenue) || 0;
   const rawIndustry = (biz?.industry || client.industry || "").trim();
@@ -377,7 +403,7 @@ function buildProfileDeal(client: ClientOption | undefined, openPositions: numbe
     numOpenPositions: openPositions,
     avgMonthlyDeposits: Number(biz?.avg_monthly_deposits ?? client.avg_monthly_deposits) || 0,
     hasBankruptcy: !!client.has_bankruptcy_foreclosure_3y,
-    businessName: client.company_name || "",
+    businessName: biz?.company_name || client.company_name || "",
     ownerName: client.client_name || "",
     capitalRequested: Number(biz?.amount_requested ?? client.capital_requested) || 0,
     state: (biz?.company_state || client.company_state || "").toUpperCase().slice(0, 2),
@@ -470,8 +496,11 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
   // Accept ?client=<id> from URL so deep-links from the client detail view
   // auto-select the client and load their saved match.
   const initial_client_id = searchParams?.get("client") ?? "";
+  // ?business=<id> picks which business of a multi-business client is matched.
+  const initial_business_id = searchParams?.get("business") ?? "";
   const [clientList, setClientList] = useState<ClientOption[]>([]);
   const [selectedClientId, setSelectedClientId] = useState<string>(initial_client_id);
+  const [selectedBusinessId, setSelectedBusinessId] = useState<string>(initial_business_id);
   const [isLoadingClient, setIsLoadingClient] = useState(false);
   // Provenance of the numbers currently on screen, surfaced as a badge. A
   // profile-based match is a legitimate match, but the team has to be able to
@@ -504,6 +533,9 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
   // assignments cannot be told apart once a second round opens.
   const [activeDealId, setActiveDealId] = useState<string | null>(null);
   const [activeBusinessId, setActiveBusinessId] = useState<string | null>(null);
+  // Legacy rows with business_profile_id NULL belong to the primary business,
+  // so the save's cleanup scope depends on which kind is being matched.
+  const [activeBusinessIsPrimary, setActiveBusinessIsPrimary] = useState(true);
   // What earlier rounds' lenders said, keyed by lender name. Drives the inline
   // warning — UW is never blocked, only told before they pick.
   const [priorOutcomes, setPriorOutcomes] = useState<Map<string, PriorOutcome>>(new Map());
@@ -536,7 +568,7 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
         owner_4_name, owner_4_ownership_pct,
         owner_5_name, owner_5_ownership_pct,
         business_profiles (
-          id, industry, is_primary, display_order, business_start_date, company_state,
+          id, company_name, industry, is_primary, display_order, business_start_date, company_state,
           avg_monthly_deposits, avg_annual_revenue, amount_requested, credit_score
         )
       `)
@@ -556,7 +588,7 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
     if (!initial_client_id || clientList.length === 0) return;
     if (deepLinkedRef.current === initial_client_id) return;
     deepLinkedRef.current = initial_client_id;
-    loadClientResults(initial_client_id);
+    loadClientResults(initial_client_id, initial_business_id || null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initial_client_id, clientList.length]);
 
@@ -571,24 +603,41 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const selectedClient = useMemo(
-    () => clientList.find((c) => c.id === selectedClientId),
-    [clientList, selectedClientId]
+  // One picker entry per business: a multi-business client is matched (and
+  // submitted to lenders) one business at a time, each on its own numbers.
+  const matchOptions = useMemo(
+    () =>
+      clientList.flatMap((c) => {
+        const bizs = (c.business_profiles ?? [])
+          .slice()
+          .sort((a, b) => Number(b.is_primary) - Number(a.is_primary) || a.display_order - b.display_order);
+        if (bizs.length < 2) {
+          return [{ client: c, businessId: "", companyName: c.company_name }];
+        }
+        return bizs.map((b) => ({ client: c, businessId: b.id, companyName: b.company_name || c.company_name }));
+      }),
+    [clientList]
   );
 
-  const filteredClientList = useMemo(() => {
-    const q = clientSearch.trim().toLowerCase();
-    if (!q) return clientList;
-    return clientList.filter((c) =>
-      `${c.company_name ?? ""} ${c.client_name ?? ""}`.toLowerCase().includes(q)
-    );
-  }, [clientList, clientSearch]);
+  const selectedOption = useMemo(() => {
+    const forClient = matchOptions.filter((o) => o.client.id === selectedClientId);
+    return forClient.find((o) => o.businessId === selectedBusinessId) ?? forClient[0];
+  }, [matchOptions, selectedClientId, selectedBusinessId]);
 
-  function selectClient(clientId: string) {
+  const filteredOptions = useMemo(() => {
+    const q = clientSearch.trim().toLowerCase();
+    if (!q) return matchOptions;
+    return matchOptions.filter((o) =>
+      `${o.companyName ?? ""} ${o.client.client_name ?? ""}`.toLowerCase().includes(q)
+    );
+  }, [matchOptions, clientSearch]);
+
+  function selectClient(clientId: string, businessId: string) {
     setSelectedClientId(clientId);
+    setSelectedBusinessId(businessId);
     setClientDropdownOpen(false);
     setClientSearch("");
-    loadClientResults(clientId);
+    loadClientResults(clientId, businessId || null);
   }
 
   // Fully reset the tool to its empty state. The ✕ used to only clear the
@@ -596,6 +645,7 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
   // read as a live match with no client. Wipe everything the deal drives.
   function clearSelectedClient() {
     setSelectedClientId("");
+    setSelectedBusinessId("");
     setClientSearch("");
     setClientDropdownOpen(false);
     setDeal({ ...DEFAULT_DEAL });
@@ -626,15 +676,21 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
   //   filter or disable anything: a decline goes stale, revenue grows, an MCA
   //   gets paid off. UW is told, then decides.
   const loadDecisions = useCallback(
-    async (clientId: string, dealId: string | null, businessId: string | null) => {
+    async (clientId: string, dealId: string | null, biz: BusinessRow | undefined) => {
       if (!clientId) return;
+      const businessId = biz?.id ?? null;
       const supabase = createClient();
-      const { data } = await supabase
-        .from("client_lender_assignments")
-        .select(
-          "id, lender_name, specialty, tier_label, decision, status, response_notes, funding_deal_id, business_profile_id, assigned_at, admin_review"
-        )
-        .eq("client_id", clientId);
+      // Only this business's rows: another business's lenders are neither its
+      // picks nor its history.
+      const { data } = await scopeToBusiness(
+        supabase
+          .from("client_lender_assignments")
+          .select(
+            "id, lender_name, specialty, tier_label, decision, status, response_notes, funding_deal_id, business_profile_id, assigned_at, admin_review"
+          )
+          .eq("client_id", clientId),
+        biz
+      );
       if (!data) return;
 
       const rows = data as unknown as (LenderAssignmentRow & {
@@ -678,21 +734,27 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
   // number the engine needs is already captured at vault creation — so the
   // profile is now always loaded first, and the analysis is layered over it
   // when one exists.
-  async function loadClientResults(clientId: string) {
+  async function loadClientResults(clientId: string, requestedBusinessId: string | null = null) {
     if (!clientId) return;
     setIsLoadingClient(true);
     const supabase = createClient();
     const client = clientList.find((c) => c.id === clientId);
+    // Every read and write below is for THIS business. On a multi-business
+    // client the others have their own numbers, statements and lenders.
+    const biz = businessFor(client, requestedBusinessId);
 
     // Open positions come from the vault's own ground-truth table, so a
     // profile-only deal still gets scored on position count. Best-effort: a
     // failure leaves 0, which the engine reads as "unknown" and skips.
     let openPositions = 0;
     try {
-      const { count } = await supabase
-        .from("client_open_positions")
-        .select("id", { count: "exact", head: true })
-        .eq("client_vault_id", clientId);
+      const { count } = await scopeToBusiness(
+        supabase
+          .from("client_open_positions")
+          .select("id", { count: "exact", head: true })
+          .eq("client_vault_id", clientId),
+        biz
+      );
       openPositions = count ?? 0;
     } catch (err) {
       console.warn("lender-match: open positions lookup failed (non-fatal):", err);
@@ -701,10 +763,13 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
     // History-aware load: take the LATEST snapshot. bank_analysis_results
     // no longer has UNIQUE(client_id) — each save in the bank-analysis tool
     // appends a row, so we sort desc + limit 1 to get the current state.
-    const { data: analysis, error: aError } = await supabase
-      .from("bank_analysis_results")
-      .select("*")
-      .eq("client_id", clientId)
+    const { data: analysis, error: aError } = await scopeToBusiness(
+      supabase
+        .from("bank_analysis_results")
+        .select("*")
+        .eq("client_id", clientId),
+      biz
+    )
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -713,7 +778,7 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
     // row — that one still carries the first round's numbers for a repeat
     // client. Newest deal wins (see the funding-rounds contract). Best-effort:
     // no row, or no read access, falls back to the profile ask.
-    const businessId = primaryBusiness(client)?.id;
+    const businessId = biz?.id;
     let activeDeal: {
       id?: string;
       capital_requested?: number | null;
@@ -734,9 +799,10 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
     // Held in state so saveAssignments stamps the same round the criteria came
     // from, rather than re-resolving it and racing a round opened meanwhile.
     setActiveBusinessId(businessId ?? null);
+    setActiveBusinessIsPrimary(biz?.is_primary ?? true);
     setActiveDealId(activeDeal?.id ?? null);
 
-    const profileDeal = buildProfileDeal(client, openPositions);
+    const profileDeal = buildProfileDeal(client, openPositions, biz);
     if (activeDeal) {
       profileDeal.capitalRequested =
         Number(activeDeal.capital_requested) || profileDeal.capitalRequested;
@@ -754,7 +820,7 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
     setFilterIndustry(newDeal.industry || "");
     setDecisions({});
     setPriorOutcomes(new Map());
-    await loadDecisions(clientId, activeDeal?.id ?? null, businessId ?? null);
+    await loadDecisions(clientId, activeDeal?.id ?? null, biz);
     setIsLoadingClient(false);
   }
 
@@ -855,7 +921,7 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
     // specialtyTabs is derived from lenderData; lenderData.length gates on load
     // without re-firing on unrelated re-renders.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedClientId, deal.proposedLoanType, lenderData.length]);
+  }, [selectedClientId, selectedBusinessId, deal.proposedLoanType, lenderData.length]);
 
   // Three result buckets the analyst actually reasons about, scoped to what's
   // currently shown: clean matches, matches with at least one flag to review,
@@ -909,6 +975,11 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
     //      matching this filter.
     //
     // admin_manual rows are still preserved: the source filter has not moved.
+    //
+    //   3. Only THIS business. Legacy NULL rows (no deal, no business) are the
+    //      primary's, so a secondary business only ever clears rows stamped
+    //      with its own id, and the primary never clears another business's
+    //      deal-less rows.
     {
       let del = supabase
         .from("client_lender_assignments")
@@ -916,9 +987,26 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
         .eq("client_id", selectedClientId)
         .eq("source", "match_tool")
         .eq("status", "pending");
-      del = activeDealId
-        ? del.or(`funding_deal_id.eq.${activeDealId},funding_deal_id.is.null`)
-        : del.is("funding_deal_id", null);
+      if (activeBusinessId && !activeBusinessIsPrimary) {
+        del = del.eq("business_profile_id", activeBusinessId);
+        del = activeDealId ? del.eq("funding_deal_id", activeDealId) : del.is("funding_deal_id", null);
+      } else {
+        const ownNull = activeBusinessId
+          ? `or(business_profile_id.eq.${activeBusinessId},business_profile_id.is.null)`
+          : null;
+        if (activeDealId) {
+          del = del.or(
+            ownNull
+              ? `funding_deal_id.eq.${activeDealId},and(funding_deal_id.is.null,${ownNull})`
+              : `funding_deal_id.eq.${activeDealId},funding_deal_id.is.null`
+          );
+        } else {
+          del = del.is("funding_deal_id", null);
+          if (activeBusinessId) {
+            del = del.or(`business_profile_id.eq.${activeBusinessId},business_profile_id.is.null`);
+          }
+        }
+      }
       await del;
     }
 
@@ -977,6 +1065,10 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
         .join(", ");
       await supabase.from("loan_status_history").insert({
         client_vault_id: selectedClientId,
+        // The stage moves on the matched business's round, not the client's
+        // first business.
+        business_profile_id: activeBusinessId,
+        funding_deal_id: activeDealId,
         status: "lender_matched",
         changed_by_role: "underwriting",
         note: `${rows.length} lender${rows.length > 1 ? "s" : ""} selected and cleared for submission: ${recommendedNames}`,
@@ -1049,7 +1141,7 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
                   </svg>
                   <input
                     type="text"
-                    value={clientDropdownOpen ? clientSearch : selectedClient ? `${selectedClient.company_name} (${selectedClient.client_name})` : clientSearch}
+                    value={clientDropdownOpen ? clientSearch : selectedOption ? `${selectedOption.companyName} (${selectedOption.client.client_name})` : clientSearch}
                     placeholder="Search by client or company..."
                     onChange={(e) => {
                       setClientSearch(e.target.value);
@@ -1074,20 +1166,20 @@ export default function LenderMatch({ dealSummary: propDeal = DEFAULT_DEAL, stat
                 </div>
                 {clientDropdownOpen && (
                   <div className="absolute z-20 mt-1 w-full max-h-72 overflow-y-auto rounded-md border border-slate-200 bg-white shadow-lg">
-                    {filteredClientList.length === 0 ? (
+                    {filteredOptions.length === 0 ? (
                       <div className="px-3 py-2 text-xs text-slate-400 font-mono">No matching client found.</div>
                     ) : (
-                      filteredClientList.map((c) => (
+                      filteredOptions.map((o) => (
                         <button
-                          key={c.id}
+                          key={`${o.client.id}:${o.businessId}`}
                           type="button"
-                          onClick={() => selectClient(c.id)}
+                          onClick={() => selectClient(o.client.id, o.businessId)}
                           className={`w-full text-left px-3 py-2 text-sm font-mono hover:bg-emerald-50 ${
-                            c.id === selectedClientId ? "bg-emerald-50 text-emerald-700" : "text-slate-900"
+                            o === selectedOption ? "bg-emerald-50 text-emerald-700" : "text-slate-900"
                           }`}
                         >
-                          <span className="font-semibold">{c.company_name}</span>
-                          <span className="text-slate-500"> ({c.client_name})</span>
+                          <span className="font-semibold">{o.companyName}</span>
+                          <span className="text-slate-500"> ({o.client.client_name})</span>
                         </button>
                       ))
                     )}

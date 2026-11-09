@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import clsx from "clsx";
+import { CLIENT_SEARCH_SELECT, searchClients, type ClientSearchRow } from "@/lib/client-search";
 
 interface SearchResult {
     id: string;
@@ -15,7 +16,7 @@ export function GlobalSearch() {
     const supabase = createClient();
     const router = useRouter();
     const [query, setQuery] = useState("");
-    const [clients, setClients] = useState<SearchResult[]>([]);
+    const [clients, setClients] = useState<ClientSearchRow[]>([]);
     const [results, setResults] = useState<SearchResult[]>([]);
     const [isOpen, setIsOpen] = useState(false);
     const [activeIndex, setActiveIndex] = useState(-1);
@@ -30,9 +31,9 @@ export function GlobalSearch() {
             // For underwriting, fetch all clients
             const { data } = await supabase
                 .from('client_data_vault')
-                .select('id, client_name, company_name');
+                .select(CLIENT_SEARCH_SELECT);
 
-            if (data) setClients(data as SearchResult[]);
+            if (data) setClients(data as ClientSearchRow[]);
         }
         fetchClients();
     }, []);
@@ -45,10 +46,7 @@ export function GlobalSearch() {
             return;
         }
 
-        const filtered = clients.filter(c => 
-            c.client_name.toLowerCase().includes(query.toLowerCase()) || 
-            c.company_name.toLowerCase().includes(query.toLowerCase())
-        ).slice(0, 8); // Limit to top 8 results
+        const filtered = searchClients(clients, query, 8);
 
         setResults(filtered);
         setIsOpen(filtered.length > 0);
