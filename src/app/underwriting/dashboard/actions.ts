@@ -17,6 +17,7 @@ import { markLabelAsManual } from "@/lib/group-assignment";
 import { canRecordFunded } from "@/lib/auth/roles";
 import { actorMayWorkClient, businessBelongsToVault } from "@/lib/client-access";
 import { slackPostMessage, resolveAdvisorSlackId, formatMentions } from "@/lib/slack-api";
+import { isSubmissionLocked, notifyUwTeamOfDocRequest } from "@/lib/submission-lock";
 
 /**
  * Centralizes the cache-invalidation surface every mutation in this file
@@ -119,15 +120,28 @@ export async function notifyAdvisor(clientId: string, missingDocs: string[], add
             });
         }
 
-        // 4. Update submission status to 'documents_requested'
-        const { error: statusError } = await supabaseAdmin
-            .from("submissions")
-            .update({ status: 'documents_requested' })
-            .eq("user_id", client.user_id);
+        // 4. A file already with UW (`locked`) stays locked so it never leaves
+        // the Ready tab; the rest of UW + admins get an in-app alert instead.
+        // Anything not yet submitted drops to 'documents_requested' as before.
+        if (await isSubmissionLocked(supabaseAdmin, client.user_id)) {
+            await notifyUwTeamOfDocRequest(supabaseAdmin, {
+                clientId,
+                clientName: client.client_name,
+                companyName: client.company_name,
+                docCount,
+                requestedBy: authorName,
+                actorUserId: currentUser.id,
+            });
+        } else {
+            const { error: statusError } = await supabaseAdmin
+                .from("submissions")
+                .update({ status: 'documents_requested' })
+                .eq("user_id", client.user_id);
 
-        if (statusError) {
-            console.error("Error updating submission status:", statusError);
-            // Non-fatal, but good to know
+            if (statusError) {
+                console.error("Error updating submission status:", statusError);
+                // Non-fatal, but good to know
+            }
         }
 
         // 5. Send notification email (CC followers)

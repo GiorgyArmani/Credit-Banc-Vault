@@ -48,7 +48,10 @@ export interface OutstandingDocsBreakdown {
  *     Single-business clients see them inline with the business section so
  *     the email looks identical to today.
  */
-export async function calculateOutstandingDocumentsByBusiness(userId: string): Promise<OutstandingDocsBreakdown> {
+export async function calculateOutstandingDocumentsByBusiness(
+    userId: string,
+    options?: { excludeSilentSlots?: boolean }
+): Promise<OutstandingDocsBreakdown> {
     const supabase = createAdminClient();
 
     // 1. Resolve the client and every business they own.
@@ -80,12 +83,19 @@ export async function calculateOutstandingDocumentsByBusiness(userId: string): P
         .select(`
             business_profile_id,
             statement_months,
+            requested_via,
             required_documents ( code, label )
         `)
         .eq("user_id", userId)
         .eq("is_active", true);
 
     if (dynamicError) throw new Error(`Error fetching dynamic documents: ${dynamicError.message}`);
+
+    // Silent slots are opened by staff for a document they already hold — the
+    // client owes nothing there, so client-facing chasers skip them.
+    const requestRows = options?.excludeSilentSlots
+        ? (dynamicDocs ?? []).filter((r: any) => r.requested_via !== "staff_silent_slot")
+        : (dynamicDocs ?? []);
 
     // 3. Fetch every uploaded doc for this user, with its business binding and
     //    code. Skips rejected uploads — the reminder should still chase a fix.
@@ -123,7 +133,7 @@ export async function calculateOutstandingDocumentsByBusiness(userId: string): P
     const clientScopedRequested = new Map<string, string>(); // code -> label
     const perBusinessRequested = new Map<string, Map<string, string>>(); // bid -> (code -> label)
 
-    (dynamicDocs ?? []).forEach((row: any) => {
+    requestRows.forEach((row: any) => {
         const def = Array.isArray(row.required_documents) ? row.required_documents[0] : row.required_documents;
         if (!def?.code) return;
         // Never a requirement: lender paperwork comes from the lender.

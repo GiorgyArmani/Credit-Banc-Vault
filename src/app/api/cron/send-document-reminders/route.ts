@@ -9,15 +9,18 @@ import { send_outstanding_docs_reminder_email } from "@/lib/email";
 //   inactivity_days  >= 30 → stop (auto-decline already kicks in elsewhere)
 //
 // Pipeline statuses that stop reminders: funded, declined.
-// Submission statuses that stop reminders: locked.
 // Manual pause via client_data_vault.reminders_paused_until.
+//
+// Files with underwriting (`locked`) are still reminded: docs requested
+// mid-underwriting no longer unlock the file, and the client must keep being
+// told what they owe. Staff silent slots are never chased (see the
+// excludeSilentSlots call below) — that used to be what the locked skip covered.
 const FAST_CADENCE_HOURS = 23;
 const SLOW_CADENCE_HOURS = 71;
 const SLOW_CADENCE_DAYS = 14;
 const STOP_DAYS = 30;
 
 const STOP_PIPELINE_STATUSES = new Set(["funded", "declined"]);
-const STOP_SUBMISSION_STATUSES = new Set(["locked"]);
 
 interface ReminderResult {
     clientVaultId: string;
@@ -105,13 +108,6 @@ export async function GET(req: Request) {
         if (!pipelineMap.has(r.client_vault_id)) pipelineMap.set(r.client_vault_id, r.status);
     });
 
-    // 3. Submission status per user.
-    const { data: subRows } = await supabase
-        .from("submissions")
-        .select("user_id, status")
-        .in("user_id", userIds);
-    const submissionMap = new Map<string, string>((subRows || []).map(s => [s.user_id, s.status]));
-
     // 4. Activity = max(created_at, latest loan_status_history row, latest user_documents.upload_date,
     //    latest client_internal_notes.created_at). Mirrors getBulkClientActivity from advisor.ts.
     const activityMap = new Map<string, Date>();
@@ -187,13 +183,6 @@ export async function GET(req: Request) {
                 continue;
             }
 
-            const submission = submissionMap.get(client.user_id);
-            if (submission && STOP_SUBMISSION_STATUSES.has(submission)) {
-                result.skipReason = `submission_${submission}`;
-                results.push(result);
-                continue;
-            }
-
             const lastActivity = activityMap.get(client.id) || new Date(client.created_at);
             const inactivityDays = daysBetween(startedAt, lastActivity);
             result.inactivityDays = inactivityDays;
@@ -219,7 +208,7 @@ export async function GET(req: Request) {
             // per-business sections in the email; the flat list still drives
             // the subject line + "any outstanding docs at all?" gate so the
             // cadence rules stay identical to the pre-multi-business behavior.
-            const breakdown = await calculateOutstandingDocumentsByBusiness(client.user_id);
+            const breakdown = await calculateOutstandingDocumentsByBusiness(client.user_id, { excludeSilentSlots: true });
             const missingDocs = breakdown.flat;
             result.missingDocs = missingDocs;
             if (missingDocs.length === 0) {

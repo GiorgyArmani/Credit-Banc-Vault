@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { ghlAddTags } from "@/lib/ghl-api";
 import { send_advisor_vault_submission_notification } from "@/lib/email";
 import { recordPipelineTransition } from "@/lib/pipeline-core";
+import { isSubmissionLocked } from "@/lib/submission-lock";
 
 export const dynamic = 'force-dynamic';
 
@@ -66,18 +67,22 @@ export async function POST() {
             throw updateError;
         }
 
-        // 4. Create or Update record in public.submissions for Underwriting using upsert
-        const { error: submissionError } = await supabase
-            .from("submissions")
-            .upsert({
-                user_id: user.id,
-                advisor_id: clientData.advisor_id,
-                status: 'submitted',
-                submitted_at: new Date().toISOString()
-            }, { onConflict: 'user_id' });
+        // 4. Create or Update record in public.submissions for Underwriting using upsert.
+        //    Never downgrade a file already with underwriting: `locked` is what
+        //    keeps it on the UW Ready tab.
+        if (!(await isSubmissionLocked(createAdminClient(), user.id))) {
+            const { error: submissionError } = await supabase
+                .from("submissions")
+                .upsert({
+                    user_id: user.id,
+                    advisor_id: clientData.advisor_id,
+                    status: 'submitted',
+                    submitted_at: new Date().toISOString()
+                }, { onConflict: 'user_id' });
 
-        if (submissionError) {
-            console.error("Error creating submission record:", submissionError);
+            if (submissionError) {
+                console.error("Error creating submission record:", submissionError);
+            }
         }
 
         // 5. Update Pipeline Status to Under Review.

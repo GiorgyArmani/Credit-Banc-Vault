@@ -20,6 +20,7 @@ import { partnerAssignedCustomFields } from "@/lib/referral-partner-attribution"
 import { markLabelAsManual } from "@/lib/group-assignment";
 import { canEditClientProfile } from "@/lib/auth/profile-edit-access";
 import { assertActorMayWorkClient } from "@/lib/client-access";
+import { isSubmissionLocked, notifyUwTeamOfDocRequest } from "@/lib/submission-lock";
 import { loadClientOwners, saveClientOwners, maskOwner, resolveOwner1Address, legacyOwnerDrafts } from "@/lib/owners";
 import type { OwnerInput, Owner1Input } from "@/lib/owners";
 
@@ -249,7 +250,7 @@ export async function requestDocuments(
         // 2. Verify advisor ownership and get client user_id + ghl_contact_id
         const { data: client, error: clientError } = await supabase
             .from("client_data_vault")
-            .select("user_id, ghl_contact_id, client_email, client_name, advisor_id")
+            .select("user_id, ghl_contact_id, client_email, client_name, company_name, advisor_id")
             .eq("id", clientId)
             .single();
 
@@ -348,8 +349,10 @@ export async function requestDocuments(
             }
         }
 
-        // 5. Update submission status to 'documents_requested'
-        // This ensures the vault is no longer marked as 'locked' or 'submitted'.
+        // 5. Update submission status to 'documents_requested' — unless the file
+        // is already with underwriting (`locked`). A locked file stays locked so
+        // it never leaves the UW Ready tab; UW + admins get an in-app alert
+        // instead (see lib/submission-lock.ts).
         //
         // SKIPPED when silent. Unlocking the vault is what puts the file back in
         // range of the outstanding-docs reminder cron (it stops on `locked`), so
@@ -358,12 +361,29 @@ export async function requestDocuments(
         // reason plus one of its own: on a file heading to lenders, "documents
         // requested" is a step backwards that nobody asked for.
         if (notify_client) {
-            const { error: statusError } = await supabaseAdmin
-                .from("submissions")
-                .upsert({
-                    user_id: client.user_id,
-                    status: 'documents_requested'
-                }, { onConflict: 'user_id' });
+            let statusError: unknown = null;
+            if (await isSubmissionLocked(supabaseAdmin, client.user_id)) {
+                const { data: requester } = await supabaseAdmin
+                    .from("users")
+                    .select("first_name, last_name")
+                    .eq("id", advisorUser.id)
+                    .maybeSingle();
+                await notifyUwTeamOfDocRequest(supabaseAdmin, {
+                    clientId,
+                    clientName: client.client_name,
+                    companyName: client.company_name,
+                    docCount: documentIds.length,
+                    requestedBy: `${requester?.first_name ?? ""} ${requester?.last_name ?? ""}`.trim() || "An advisor",
+                    actorUserId: advisorUser.id,
+                });
+            } else {
+                ({ error: statusError } = await supabaseAdmin
+                    .from("submissions")
+                    .upsert({
+                        user_id: client.user_id,
+                        status: 'documents_requested'
+                    }, { onConflict: 'user_id' }));
+            }
 
             // 5.1 Update Loan Pipeline status — on THIS business's round, so a
             // request on business #2 doesn't move business #1's stage.
