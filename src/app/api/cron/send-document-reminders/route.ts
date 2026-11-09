@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { calculateOutstandingDocumentsByBusiness } from "@/lib/outstanding-documents";
 import { send_outstanding_docs_reminder_email } from "@/lib/email";
 
@@ -98,11 +99,15 @@ export async function GET(req: Request) {
     const userIds = clients.map(c => c.user_id);
 
     // 2. Latest pipeline status per client (mirrors getBulkLatestStatus).
-    const { data: statusRows } = await supabase
-        .from("loan_status_history")
-        .select("client_vault_id, status, created_at")
-        .in("client_vault_id", vaultIds)
-        .order("created_at", { ascending: false });
+    // Paged (fetchAllRows): every one of these bulk reads is past the 1000-row cap.
+    const { data: statusRows } = await fetchAllRows<{ client_vault_id: string; status: string; created_at: string }>(() =>
+        supabase
+            .from("loan_status_history")
+            .select("client_vault_id, status, created_at")
+            .in("client_vault_id", vaultIds)
+            .order("created_at", { ascending: false })
+            .order("id", { ascending: false })
+    );
     const pipelineMap = new Map<string, string>();
     (statusRows || []).forEach(r => {
         if (!pipelineMap.has(r.client_vault_id)) pipelineMap.set(r.client_vault_id, r.status);
@@ -119,10 +124,9 @@ export async function GET(req: Request) {
     });
 
     const userToVault = new Map<string, string>(clients.map(c => [c.user_id, c.id]));
-    const { data: docRows } = await supabase
-        .from("user_documents")
-        .select("user_id, upload_date")
-        .in("user_id", userIds);
+    const { data: docRows } = await fetchAllRows<{ user_id: string; upload_date: string }>(() =>
+        supabase.from("user_documents").select("user_id, upload_date").in("user_id", userIds).order("id")
+    );
     (docRows || []).forEach(d => {
         const vaultId = userToVault.get(d.user_id);
         if (!vaultId) return;
@@ -131,10 +135,9 @@ export async function GET(req: Request) {
         if (!cur || ts > cur) activityMap.set(vaultId, ts);
     });
 
-    const { data: noteRows } = await supabase
-        .from("client_internal_notes")
-        .select("client_id, created_at")
-        .in("client_id", vaultIds);
+    const { data: noteRows } = await fetchAllRows<{ client_id: string; created_at: string }>(() =>
+        supabase.from("client_internal_notes").select("client_id, created_at").in("client_id", vaultIds).order("id")
+    );
     (noteRows || []).forEach(n => {
         const ts = new Date(n.created_at);
         const cur = activityMap.get(n.client_id);

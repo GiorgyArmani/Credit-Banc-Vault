@@ -17,6 +17,10 @@
       "schedule": "0 16 * * *"
     },
     {
+      "path": "/api/cron/auto-decline-inactive",
+      "schedule": "30 16 * * *"
+    },
+    {
       "path": "/api/cron/send-affiliate-payouts",
       "schedule": "0 17 * * *"
     },

@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 
 export interface ClientActivity {
     vault_id: string;
@@ -52,25 +53,41 @@ export async function getBulkClientActivity(vaultIds: string[]): Promise<Map<str
     // nothing there. It is scoped safely: the merge below only touches vault ids
     // already present in activityMap, i.e. rows this caller could read under RLS
     // in query 1. Passing in someone else's vault id still yields nothing.
+    //
+    // Paged: each of these spans every client and is past PostgREST's 1000-row
+    // cap in prod. A capped read silently dropped recent activity, which made
+    // live files look idle (and fed the old inactivity auto-decline).
     const supabaseAdmin = createAdminClient();
     const [{ data: statusHistory }, { data: userDocs }, { data: internalNotes }, { data: comms }] = await Promise.all([
-        supabase
-            .from("loan_status_history")
-            .select("client_vault_id, created_at")
-            .in("client_vault_id", vaultIds),
-        supabase
-            .from("user_documents")
-            .select("user_id, upload_date")
-            .in("user_id", userIds),
-        supabase
-            .from("client_internal_notes")
-            .select("client_id, created_at")
-            .in("client_id", vaultIds),
-        supabaseAdmin
-            .from("communications")
-            .select("client_id, occurred_at")
-            .in("client_id", vaultIds)
-            .eq("is_automated", false),
+        fetchAllRows<{ client_vault_id: string; created_at: string }>(() =>
+            supabase
+                .from("loan_status_history")
+                .select("client_vault_id, created_at")
+                .in("client_vault_id", vaultIds)
+                .order("id")
+        ),
+        fetchAllRows<{ user_id: string; upload_date: string }>(() =>
+            supabase
+                .from("user_documents")
+                .select("user_id, upload_date")
+                .in("user_id", userIds)
+                .order("id")
+        ),
+        fetchAllRows<{ client_id: string; created_at: string }>(() =>
+            supabase
+                .from("client_internal_notes")
+                .select("client_id, created_at")
+                .in("client_id", vaultIds)
+                .order("id")
+        ),
+        fetchAllRows<{ client_id: string; occurred_at: string }>(() =>
+            supabaseAdmin
+                .from("communications")
+                .select("client_id, occurred_at")
+                .in("client_id", vaultIds)
+                .eq("is_automated", false)
+                .order("id")
+        ),
     ]);
 
     // 2. loan_status_history

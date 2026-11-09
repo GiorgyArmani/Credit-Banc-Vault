@@ -27,7 +27,8 @@ export async function recordPipelineTransition(args: {
   clientVaultId: string;
   newStatus: LoanStatus;
   note?: string | null;
-  actorUserId: string;
+  /** null = the system (a cron), not a person. */
+  actorUserId: string | null;
   actorRole: string;
   /** The round this transition belongs to; stamped on the history row. */
   fundingDealId?: string | null;

@@ -4,6 +4,7 @@ import { assertNotReadOnly } from "@/lib/read-only-accounts";
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { recordPipelineTransition } from "@/lib/pipeline-core";
 import { canRecordFunded, isStaffRole } from "@/lib/auth/roles";
 import { actorMayWorkClient, dealBelongsToVault } from "@/lib/client-access";
@@ -63,11 +64,16 @@ export async function getBulkLatestStatus(
   if (clientVaultIds.length === 0) return new Map();
 
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("loan_status_history")
-    .select("client_vault_id, status, created_at")
-    .in("client_vault_id", clientVaultIds)
-    .order("created_at", { ascending: false });
+  // Paged: past 1000 history rows an unpaged read dropped whole clients, who
+  // then defaulted to "created" and landed in the wrong queue tab.
+  const { data, error } = await fetchAllRows<{ client_vault_id: string; status: string }>(() =>
+    supabase
+      .from("loan_status_history")
+      .select("client_vault_id, status, created_at")
+      .in("client_vault_id", clientVaultIds)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+  );
 
   if (error) {
     console.error("[pipeline] getBulkLatestStatus error:", error);

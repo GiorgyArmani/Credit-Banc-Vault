@@ -16,7 +16,7 @@ import { canUseAdvisorWorkspace } from "@/lib/auth/roles";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import clsx from "clsx";
-import { getBulkLatestStatus, updateLoanStatus, type LoanStatus } from "@/app/actions/pipeline";
+import { getBulkLatestStatus, type LoanStatus } from "@/app/actions/pipeline";
 import { getBulkClientActivity } from "@/app/actions/advisor";
 import { LoanPipelineBadge } from "@/components/loan-pipeline-status";
 import { ActivityAgeBadge } from "@/components/advisor/activity-age-badge";
@@ -339,8 +339,10 @@ export function WorkspaceProspects({ basePath }: { basePath: string }) {
             if (vaultIds.length > 0) {
                 const now = new Date();
                 const updated_clients = [...clients_with_doc_counts];
-                const declineOps: Promise<unknown>[] = [];
 
+                // Inactivity is display-only here. Auto-declining stale prospects
+                // is the nightly /api/cron/auto-decline-inactive job — it used to
+                // run right here on page load and declined files UW was working.
                 for (const client of updated_clients) {
                     client.pipeline_status = pipelineMap.get(client.id) ?? "created";
                     client.submission_status = submissionMap.get(client.user_id);
@@ -350,27 +352,6 @@ export function WorkspaceProspects({ basePath }: { basePath: string }) {
                     const activityDate = new Date(lastActivity);
                     const daysInactive = differenceInDays(now, activityDate);
                     client.inactivity_days = daysInactive;
-
-                    const isExempt = ["funded", "under_review"].includes(client.pipeline_status);
-                    if (daysInactive >= 30 && !isExempt && client.pipeline_status !== "declined") {
-                        // Reflect the decline locally now so the filters are
-                        // correct, but persist in parallel after the loop instead
-                        // of blocking the first paint on a sequential await chain.
-                        client.pipeline_status = "declined";
-                        declineOps.push(
-                            updateLoanStatus(
-                                client.id,
-                                "declined",
-                                `System: Auto-declined due to ${daysInactive} days of inactivity.`
-                            )
-                        );
-                    }
-                }
-
-                if (declineOps.length > 0) {
-                    void Promise.all(declineOps).catch(e =>
-                        console.error("Auto-decline batch failed:", e)
-                    );
                 }
 
                 // Drop funded files — those belong to the Clients book, not Prospects.
