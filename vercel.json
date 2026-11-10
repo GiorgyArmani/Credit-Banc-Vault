@@ -21,6 +21,10 @@
       "schedule": "30 16 * * *"
     },
     {
+      "path": "/api/cron/lender-follow-up",
+      "schedule": "30 13 * * *"
+    },
+    {
       "path": "/api/cron/send-affiliate-payouts",
       "schedule": "0 17 * * *"
     },

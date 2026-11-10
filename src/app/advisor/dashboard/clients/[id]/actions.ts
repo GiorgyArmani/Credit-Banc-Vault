@@ -375,6 +375,7 @@ export async function requestDocuments(
                     docCount: documentIds.length,
                     requestedBy: `${requester?.first_name ?? ""} ${requester?.last_name ?? ""}`.trim() || "An advisor",
                     actorUserId: advisorUser.id,
+                    slack: true,
                 });
             } else {
                 ({ error: statusError } = await supabaseAdmin

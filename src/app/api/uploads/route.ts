@@ -395,8 +395,9 @@ export async function POST(req: Request) {
         id, 
         ghl_contact_id, 
         user_id, 
-        client_name, 
+        client_name,
         company_name,
+        slack_channel_id,
         advisors!client_data_vault_advisor_id_fkey (
           id,
           first_name,
@@ -497,6 +498,32 @@ export async function POST(req: Request) {
           }
         });
       }
+    }
+
+    // 4b. File is with underwriting → tell UW in the deal channel. Documents
+    //     requested mid-underwriting used to land with no signal to UW, who had
+    //     to keep re-checking the file. Deferred like the email above.
+    const slackChannel = (vaultRecord as any)?.slack_channel_id as string | null;
+    if (vaultRecord && slackChannel) {
+      after(async () => {
+        try {
+          const { isSubmissionLocked } = await import("@/lib/submission-lock");
+          if (!(await isSubmissionLocked(admin, vaultRecord.user_id))) return;
+          const { data: reqDoc } = await admin
+            .from("required_documents")
+            .select("label")
+            .eq("code", doc_code)
+            .maybeSingle();
+          const { slackPostMessage } = await import("@/lib/slack-api");
+          await slackPostMessage(
+            slackChannel,
+            `📎 ${vaultRecord.client_name || "The client"} uploaded *${reqDoc?.label || doc_code}* to ` +
+              `${vaultRecord.company_name || "this file"} — ready for review.`
+          );
+        } catch (slackErr) {
+          console.error("UW upload Slack post failed (non-fatal):", slackErr);
+        }
+      });
     }
 
     // 5. GHL Integration - Upload file and update tags. Deferred with after()

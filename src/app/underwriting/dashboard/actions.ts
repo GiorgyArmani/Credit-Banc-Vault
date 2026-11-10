@@ -18,6 +18,7 @@ import { canRecordFunded } from "@/lib/auth/roles";
 import { actorMayWorkClient, businessBelongsToVault } from "@/lib/client-access";
 import { slackPostMessage, resolveAdvisorSlackId, formatMentions } from "@/lib/slack-api";
 import { isSubmissionLocked, notifyUwTeamOfDocRequest } from "@/lib/submission-lock";
+import { buildUwQueue, loadUwQueueRows, type UwQueue } from "@/lib/uw-queue";
 
 /**
  * Centralizes the cache-invalidation surface every mutation in this file
@@ -131,6 +132,8 @@ export async function notifyAdvisor(clientId: string, missingDocs: string[], add
                 docCount,
                 requestedBy: authorName,
                 actorUserId: currentUser.id,
+                // This action already posts the request in the deal channel.
+                slack: false,
             });
         } else {
             const { error: statusError } = await supabaseAdmin
@@ -289,7 +292,9 @@ export async function fundLoanAction(clientId: string, data: {
             return { success: false, error: "That business does not belong to this client" };
         }
 
-        // 1. Fetch client GHL ID
+        // 1. Fetch the client. A GHL contact is optional: the vault record is
+        //    the source of truth, GHL is the signaling layer. Requiring it used
+        //    to make files with no GHL contact impossible to close.
         const { data: client, error: clientError } = await supabaseAdmin
             .from("client_data_vault")
             .select(`
@@ -307,12 +312,10 @@ export async function fundLoanAction(clientId: string, data: {
             .eq("id", clientId)
             .single();
 
-        if (clientError || !client || !client.ghl_contact_id) {
-            console.error("fundLoanAction Error: Client or GHL Contact ID not found", clientError);
-            return { success: false, error: "Client GHL ID not found" };
+        if (clientError || !client) {
+            console.error("fundLoanAction Error: Client not found", clientError);
+            return { success: false, error: "Client not found" };
         }
-
-        console.log("fundLoanAction: Client found. GHL Contact ID:", client.ghl_contact_id);
 
         // 1.5 GUARD — refuse to fund a round that is already funded.
         //
@@ -377,22 +380,25 @@ export async function fundLoanAction(clientId: string, data: {
             { id: process.env.FUNDING_DATE, value: data.fundingDate },
         ].filter((f): f is { id: string; value: string } => !!f.id);
 
-        console.log("fundLoanAction: GHL valid custom fields mapped:", customFields);
-
-        // 3. Update GHL Contact (Tag + Custom Fields)
-        try {
-            await ghlAddTags(client.ghl_contact_id, ["Loan Funded"]);
-            console.log("fundLoanAction: Added 'Loan Funded' tag successfully.");
-        } catch (tagError) {
-            console.error("fundLoanAction Error: Failed to add tags:", tagError);
-        }
-
-        try {
-            await ghlUpdateContact(client.ghl_contact_id, { customFields });
-            console.log("fundLoanAction: Updated custom fields successfully.");
-        } catch (updateError) {
-            console.error("fundLoanAction Error: Failed to update custom fields:", updateError);
-            throw new Error(`Failed to update GHL contact: ${(updateError as any).message}`);
+        // 3. Update GHL Contact (Tag + Custom Fields). Best-effort: a GHL
+        //    outage or a file with no contact must not stop the funding from
+        //    being recorded. UW is told so the tag can be added by hand.
+        let ghlWarning: string | null = null;
+        if (!client.ghl_contact_id) {
+            ghlWarning = "This client has no GHL contact, so GHL was not updated.";
+        } else {
+            try {
+                await ghlAddTags(client.ghl_contact_id, ["Loan Funded"]);
+            } catch (tagError) {
+                console.error("fundLoanAction Error: Failed to add tags:", tagError);
+                ghlWarning = "The GHL \"Loan Funded\" tag could not be added.";
+            }
+            try {
+                await ghlUpdateContact(client.ghl_contact_id, { customFields });
+            } catch (updateError) {
+                console.error("fundLoanAction Error: Failed to update custom fields:", updateError);
+                ghlWarning = `GHL fields were not updated: ${(updateError as any)?.message ?? "unknown error"}`;
+            }
         }
 
         // 4. Record internal note
@@ -588,8 +594,12 @@ export async function fundLoanAction(clientId: string, data: {
         if (statusWarning) {
             return {
                 success: true as const,
-                warning: `The funding details were saved, but the pipeline status did not move to Funded: ${statusWarning}`,
+                warning: `The funding details were saved, but the pipeline status did not move to Funded: ${statusWarning}` +
+                    (ghlWarning ? ` ${ghlWarning}` : ""),
             };
+        }
+        if (ghlWarning) {
+            return { success: true as const, notice: `Funding recorded. ${ghlWarning}` };
         }
         return { success: true as const };
     } catch (error: any) {
@@ -640,6 +650,22 @@ async function requireUnderwritingOrAdmin() {
         throw new Error("Access denied: Underwriting or admin only");
     }
     return { user, role: userData.role as "underwriting" | "admin" };
+}
+
+/**
+ * loadUwQueue — the UW dashboard's data, built server-side (see lib/uw-queue).
+ * Returns one summary row per vault instead of shipping every raw row to the
+ * browser. UW + admin only; reads with the service role after that check.
+ */
+export async function loadUwQueue(): Promise<{ ok: true; queue: UwQueue } | { ok: false; error: string }> {
+    try {
+        await requireUnderwritingOrAdmin();
+        const rows = await loadUwQueueRows(createAdminClient());
+        return { ok: true, queue: buildUwQueue(rows) };
+    } catch (err) {
+        console.error("loadUwQueue error:", err);
+        return { ok: false, error: err instanceof Error ? err.message : "Failed to load review data." };
+    }
 }
 
 /**

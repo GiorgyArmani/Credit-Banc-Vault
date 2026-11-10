@@ -2,7 +2,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
 import { useRouter, usePathname } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -17,15 +16,13 @@ import {
   ArrowUpNarrowWide,
 } from "lucide-react";
 import clsx from "clsx";
-import { getBulkLatestStatus, type LoanStatus } from "@/app/actions/pipeline";
-import { normalizeSupabaseJoin } from "@/lib/document-scope";
+import { loadUwQueue } from "./actions";
 import type { GroupCriteria, GroupableLead, LeadBucket } from "@/lib/lead-groups";
 import { resolveGroupMembers } from "@/lib/lead-groups";
 import { GroupChipRail, useLeadGroups } from "./_components/group-chip-rail";
 import { ReadyCard } from "./_components/ready-card";
 import { LeadTable } from "./_components/client-row";
-import { daysSince, sortLeads, type SortDir, type SortKey } from "./_components/lead-display";
-import { LENDER_DOCUMENTATION_DOC_CODE } from "@/lib/document-groups";
+import { sortLeads, type SortDir, type SortKey } from "./_components/lead-display";
 
 enum ComponentState {
   LOADING = "LOADING",
@@ -49,7 +46,6 @@ const BUCKET_META: {
 ];
 
 export default function UnderwritingDashboardPage() {
-  const supabase = createClient();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -146,181 +142,19 @@ export default function UnderwritingDashboardPage() {
   const hrefFor = (lead: GroupableLead) => detailBase + lead.id;
 
   async function fetch_data() {
-    try {
-      set_component_state(ComponentState.LOADING);
-
-      const { data: vault_data, error: vault_error } = await supabase
-        .from("client_data_vault")
-        .select(
-          `
-                    id,
-                    user_id,
-                    client_name,
-                    client_email,
-                    company_name,
-                    company_state,
-                    credit_score,
-                    capital_requested,
-                    created_at,
-                    advisor_id,
-                    advisors!client_data_vault_advisor_id_fkey (
-                        first_name,
-                        last_name
-                    ),
-                    business_profiles ( company_name )
-                `
-        )
-        .order("created_at", { ascending: false });
-
-      if (vault_error) throw vault_error;
-
-      if (!vault_data || vault_data.length === 0) {
-        set_leads([]);
-        set_component_state(ComponentState.SUCCESS);
-        return;
-      }
-
-      const { data: sub_data } = await supabase
-        .from("submissions")
-        .select("user_id, status, submitted_at");
-      const submission_map = new Map(sub_data?.map(s => [s.user_id, s]) || []);
-
-      const allVaultIds = vault_data.map(c => c.id);
-      const allUserIds = vault_data.map(c => c.user_id);
-      const pipelineMap = await getBulkLatestStatus(allVaultIds);
-
-      // Bulk-fetch doc data for every client in one shot, then bucket by
-      // user_id in memory. Doing this per-client inside the loop turned the
-      // queue load into 2×N sequential round-trips (minutes on real data);
-      // collapsing it keeps load under a few seconds regardless of vault size.
-      //
-      // NOTE: the old `required_documents where is_core = true` query is gone.
-      // Document sets are preselected per loan type now — PROGRAM_DOCUMENT_PACKAGES
-      // is materialized into client_dynamic_documents at creation, so that table
-      // IS the requirement set. is_core is true on zero rows, so the query
-      // fetched nothing while leaving a live footgun: setting it on one row
-      // would have inflated every client's denominator app-wide.
-      const { data: allDynamicDocs } = await supabase
-        .from("client_dynamic_documents")
-        .select("user_id, required_documents(code)")
-        .in("user_id", allUserIds)
-        .eq("is_active", true);
-
-      const { data: allUploadedDocs } = await supabase
-        .from("user_documents")
-        .select("user_id, category, doc_code")
-        .in("user_id", allUserIds);
-
-      // Approvals are what "done" means everywhere else in the app — the
-      // vault_completed tag keys off advisor approval, not upload. This queue
-      // was the one surface calling a document satisfied the moment a file
-      // landed, so an 8/8 file could have eight unreviewed documents on it.
-      const { data: allApprovals } = await supabase
-        .from("document_category_approvals")
-        .select("client_vault_id, doc_code")
-        .in("client_vault_id", allVaultIds);
-
-      // normalizeSupabaseJoin: SDK returns the embed as object or array.
-      // Without it the UW queue dashboard counts zero dynamic docs.
-      const dynamicByUser = new Map<string, Set<string>>();
-      for (const d of (allDynamicDocs as any[] | null) ?? []) {
-        const code = normalizeSupabaseJoin<{ code?: string }>(d.required_documents)?.code;
-        if (!code || code === LENDER_DOCUMENTATION_DOC_CODE) continue;
-        const set = dynamicByUser.get(d.user_id);
-        if (set) set.add(code);
-        else dynamicByUser.set(d.user_id, new Set([code]));
-      }
-
-      const uploadedByUser = new Map<string, Set<string>>();
-      for (const u of allUploadedDocs ?? []) {
-        let set = uploadedByUser.get(u.user_id);
-        if (!set) {
-          set = new Set<string>();
-          uploadedByUser.set(u.user_id, set);
-        }
-        if (u.category) set.add(u.category);
-        if (u.doc_code) set.add(u.doc_code);
-      }
-
-      const approvedByVault = new Map<string, Set<string>>();
-      for (const a of allApprovals ?? []) {
-        let set = approvedByVault.get(a.client_vault_id);
-        if (!set) {
-          set = new Set<string>();
-          approvedByVault.set(a.client_vault_id, set);
-        }
-        if (a.doc_code) set.add(a.doc_code);
-      }
-
-      const advisorNames = new Map<string, string>();
-      const next: GroupableLead[] = [];
-
-      for (const client of vault_data) {
-        const sub = submission_map.get(client.user_id);
-        const advisor: any = normalizeSupabaseJoin<any>(client.advisors);
-        const pStatus = (pipelineMap.get(client.id) ?? "created") as LoanStatus;
-
-        const required = dynamicByUser.get(client.user_id) ?? new Set<string>();
-        const uploaded = uploadedByUser.get(client.user_id) ?? new Set<string>();
-        const approved = approvedByVault.get(client.id) ?? new Set<string>();
-
-        let docsApproved = 0;
-        let docsAwaiting = 0;
-        for (const code of required) {
-          if (approved.has(code)) docsApproved += 1;
-          else if (uploaded.has(code)) docsAwaiting += 1;
-        }
-
-        // Routing into buckets. Pipeline status wins; submission lock is the
-        // tiebreak that separates "ready for review" from "still filling in".
-        const bucket: LeadBucket =
-          pStatus === "funded"
-            ? "funded"
-            : pStatus === "declined"
-              ? "declined"
-              : sub?.status === "locked"
-                ? "ready"
-                : "active";
-
-        const advisor_name = advisor
-          ? `${advisor.first_name ?? ""} ${advisor.last_name ?? ""}`.trim() || "Unknown Advisor"
-          : "Unknown Advisor";
-        if (client.advisor_id && advisor) advisorNames.set(client.advisor_id, advisor_name);
-
-        next.push({
-          id: client.id,
-          bucket,
-          pipeline_status: pStatus,
-          advisor_id: client.advisor_id ?? null,
-          capital_requested: client.capital_requested,
-          docs_approved: docsApproved,
-          docs_total: required.size,
-          docs_awaiting_review: docsAwaiting,
-          age_days: daysSince(sub?.submitted_at || client.created_at),
-          company_state: client.company_state,
-          credit_score: client.credit_score,
-          client_name: client.client_name,
-          client_email: client.client_email,
-          company_name: client.company_name,
-          business_names: ((client as any).business_profiles ?? [])
-            .map((b: { company_name: string | null }) => b.company_name ?? "")
-            .join(" "),
-          advisor_name,
-        });
-      }
-
-      set_leads(next);
-      set_advisors(
-        Array.from(advisorNames, ([id, name]) => ({ id, name })).sort((a, b) =>
-          a.name.localeCompare(b.name)
-        )
-      );
-      set_component_state(ComponentState.SUCCESS);
-    } catch (err: any) {
-      console.error("fetch_data error:", err);
-      set_error_message(err.message || "Failed to load review data.");
+    set_component_state(ComponentState.LOADING);
+    const res = await loadUwQueue().catch((err: unknown) => ({
+      ok: false as const,
+      error: err instanceof Error ? err.message : "Failed to load review data.",
+    }));
+    if (!res.ok) {
+      set_error_message(res.error);
       set_component_state(ComponentState.ERROR);
+      return;
     }
+    set_leads(res.queue.leads);
+    set_advisors(res.queue.advisors);
+    set_component_state(ComponentState.SUCCESS);
   }
 
   return (

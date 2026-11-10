@@ -57,6 +57,9 @@ export interface GroupableLead {
   /** Every business name on the client (multi-business clients), so search
    *  finds the file by any of them, not only the primary. */
   business_names?: string;
+  /** Lender submissions with no answer yet, and the longest wait in days. */
+  lenders_waiting?: number;
+  lender_wait_days?: number;
   advisor_name: string;
 }
 

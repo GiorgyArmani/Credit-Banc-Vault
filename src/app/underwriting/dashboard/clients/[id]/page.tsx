@@ -2098,6 +2098,9 @@ export default function UnderwritingClientDetailsPage() {
                         assignmentId: a.id,
                         lenderName: a.lender_name,
                         stateLabel: FUNDED_LABEL[a.status] ?? a.status,
+                        status: a.status,
+                        approvalNotes: a.response_notes ?? null,
+                        submittedAt: a.submitted_at ?? null,
                     }));
                 // Already-funded round → the dialog prompts for a new round
                 // instead of collecting figures that would overwrite a closed deal.
@@ -2116,6 +2119,7 @@ export default function UnderwritingClientDetailsPage() {
                             lenderOptions={lender_options}
                             defaultSalesRep={advisor_name}
                             defaultSlackChannel={slack_channel.name ?? ''}
+                            defaultUseOfProceeds={displayed.loan_purpose ?? ''}
                             activeRoundFunded={active_round_funded}
                             activeRoundLender={active_round_assignments.find((a) => a.status === 'funded')?.lender_name ?? null}
                             onSuccess={() => { fetch_client_details(); fetch_lender_assignments(); }}

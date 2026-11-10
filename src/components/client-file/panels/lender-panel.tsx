@@ -37,6 +37,9 @@ export interface LenderAssignment {
     admin_reviewed_at: string | null;
     source: 'match_tool' | 'admin_manual';
     status: 'pending' | 'submitted' | 'approved_by_lender' | 'declined_by_lender' | 'funded';
+    /** The lender's answer, pasted by UW (offer terms, stips, calculator link). */
+    response_notes?: string | null;
+    submitted_at?: string | null;
 }
 
 /** The three statuses a submitted row can be moved between from the inline dropdown. */

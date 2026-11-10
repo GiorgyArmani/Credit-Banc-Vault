@@ -81,7 +81,8 @@ export function DocCount({
   );
 }
 
-/** Age, amber past two weeks — the point where a file has gone quiet. */
+/** Age since submission (or creation), amber past two weeks. It counts time
+ *  in the queue, not time since the last action — the tooltip says so. */
 export function AgeCell({ days, className }: { days: number; className?: string }) {
   const stale = days >= 14;
   return (
@@ -91,10 +92,28 @@ export function AgeCell({ days, className }: { days: number; className?: string 
         stale ? "text-amber-600" : "text-outline",
         className
       )}
-      title={stale ? "No movement in two weeks or more" : undefined}
+      title={stale ? "In the queue two weeks or more" : undefined}
     >
       <Clock className="h-3 w-3" aria-hidden />
       {formatAge(days)}
+    </span>
+  );
+}
+
+/** Lenders sent the file that have not answered yet, and the longest wait.
+ *  Amber at a week: that is when a lender needs chasing. */
+export function LendersWaiting({ count, days, className }: { count: number; days: number; className?: string }) {
+  if (count <= 0) return null;
+  return (
+    <span
+      className={clsx(
+        "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums",
+        days >= 7 ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-600",
+        className
+      )}
+      title={`${count} lender${count === 1 ? "" : "s"} have not answered; the longest has waited ${days} day${days === 1 ? "" : "s"}`}
+    >
+      {count} lender{count === 1 ? "" : "s"} waiting · {days}d
     </span>
   );
 }

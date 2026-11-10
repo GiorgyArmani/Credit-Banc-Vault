@@ -18,11 +18,19 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { DollarSign, User, Hash, FileText, Send, Loader2, RefreshCw } from "lucide-react";
 import { fundLoanAction } from "@/app/underwriting/dashboard/actions";
 import { toast } from "@/lib/toast";
+import { parseApproval } from "@/lib/lender-approval-parse";
 
 interface LenderOption {
     assignmentId: string;
     lenderName: string;
     stateLabel: string;
+    /** Assignment status; an approved row is pre-selected when it's the only one. */
+    status?: string;
+    /** The lender's approval notes (response_notes), shown in the dialog and
+     *  used to pre-fill amount and term. */
+    approvalNotes?: string | null;
+    /** When the file was sent to this lender; pre-fills Date of Submission. */
+    submittedAt?: string | null;
 }
 
 interface LoanFundedDialogProps {
@@ -41,6 +49,8 @@ interface LoanFundedDialogProps {
     defaultSalesRep?: string;
     /** Pre-fills the Slack Channel field with the deal's channel name. */
     defaultSlackChannel?: string;
+    /** Pre-fills Use of Proceeds (the round's loan purpose). */
+    defaultUseOfProceeds?: string;
     /** True when this business's current round is already recorded as funded.
      *  The form is replaced with a prompt to open a new round — recording a
      *  second funding against a closed round is the mistake this prevents. */
@@ -63,6 +73,7 @@ export function LoanFundedDialog({
     lenderOptions = [],
     defaultSalesRep = "",
     defaultSlackChannel = "",
+    defaultUseOfProceeds = "",
     activeRoundFunded = false,
     activeRoundLender = null,
 }: LoanFundedDialogProps) {
@@ -78,7 +89,7 @@ export function LoanFundedDialog({
         fileSinopsis: "",
         termOfFundedLoan: "",
         totalAmountFunded: "",
-        useOfProceeds: "",
+        useOfProceeds: defaultUseOfProceeds,
         slackChannel: defaultSlackChannel,
         salesRepFunded: defaultSalesRep,
         lenderFunded: "",
@@ -87,20 +98,45 @@ export function LoanFundedDialog({
     });
 
     const [formData, setFormData] = useState(seed);
+    // Fields UW typed into. Picking a lender re-fills amount / term / submission
+    // date from its approval, but never over something UW typed.
+    const [touched, setTouched] = useState<Set<string>>(new Set());
+
+    // Picking a lender fills what its row already knows: the name, the date the
+    // file was sent to it, and the amount + term read from its approval notes.
+    const fillFromLender = (value: string, base: ReturnType<typeof seed>, typed: Set<string>) => {
+        const picked = lenderOptions.find((o) => o.assignmentId === value);
+        if (!picked) return { ...base, lenderFunded: "" };
+        const parsed = parseApproval(picked.approvalNotes);
+        const keep = (field: keyof ReturnType<typeof seed>, next: string | null) =>
+            typed.has(field) || !next ? base[field] : next;
+        return {
+            ...base,
+            lenderFunded: picked.lenderName,
+            totalAmountFunded: keep("totalAmountFunded", parsed.amount),
+            termOfFundedLoan: keep("termOfFundedLoan", parsed.term),
+            dateOfSubmission: keep("dateOfSubmission", picked.submittedAt ? picked.submittedAt.slice(0, 10) : null),
+        };
+    };
 
     // Re-seed from the latest file data each time the modal opens so UW always
     // starts from what's already on the file rather than stale prior input.
+    // When exactly one lender approved, it is the funder in practice — pick it.
     useEffect(() => {
         if (isOpen) {
-            setFormData(seed());
-            setFundedAssignmentId(null);
-            setLenderChoice("");
+            const approved = lenderOptions.filter((o) => o.status === "approved_by_lender" || o.status === "funded");
+            const only = approved.length === 1 ? approved[0].assignmentId : null;
+            setTouched(new Set());
+            setFundedAssignmentId(only);
+            setLenderChoice(only ?? "");
+            setFormData(only ? fillFromLender(only, seed(), new Set()) : seed());
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isOpen]);
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
         const { name, value } = e.target;
+        setTouched((prev) => new Set(prev).add(name));
         setFormData((prev) => ({ ...prev, [name]: value }));
     };
 
@@ -110,11 +146,13 @@ export function LoanFundedDialog({
             setFundedAssignmentId(null);
             setFormData((prev) => ({ ...prev, lenderFunded: "" }));
         } else {
-            const picked = lenderOptions.find((o) => o.assignmentId === value);
             setFundedAssignmentId(value);
-            setFormData((prev) => ({ ...prev, lenderFunded: picked?.lenderName ?? "" }));
+            setFormData((prev) => fillFromLender(value, prev, touched));
         }
     };
+
+    const pickedLender = lenderOptions.find((o) => o.assignmentId === lenderChoice) ?? null;
+    const pickedParsed = parseApproval(pickedLender?.approvalNotes);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -132,6 +170,8 @@ export function LoanFundedDialog({
                 // refused — surfaced so UW doesn't assume the deal fully landed.
                 if ("warning" in result && result.warning) {
                     toast.error(result.warning);
+                } else if ("notice" in result && result.notice) {
+                    toast.success(result.notice);
                 } else {
                     toast.success("Loan Funded successfully!");
                 }
@@ -202,7 +242,7 @@ export function LoanFundedDialog({
                         Loan Funded Details
                     </DialogTitle>
                     <DialogDescription className="text-slate-500 font-bold">
-                        Populate GHL custom fields for <strong>{clientName}</strong> and tag them as "Loan Funded".
+                        Record the funding for <strong>{clientName}</strong>. It&apos;s saved to the file, posted to Slack, emailed to the advisor and client, and synced to GHL when the client has a GHL contact.
                     </DialogDescription>
                 </DialogHeader>
 
@@ -253,6 +293,11 @@ export function LoanFundedDialog({
                                     </SelectContent>
                                 </Select>
                             </div>
+                            {(pickedParsed.amount || pickedParsed.term || pickedLender?.submittedAt) && (
+                                <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest">
+                                    Filled from {pickedLender?.lenderName}&apos;s approval — check below
+                                </p>
+                            )}
                             {lenderChoice === OTHER_LENDER && (
                                 <Input
                                     id="lenderFunded"
@@ -326,6 +371,17 @@ export function LoanFundedDialog({
                                 required
                             />
                         </div>
+
+                        {pickedLender?.approvalNotes?.trim() && (
+                            <div className="space-y-2 md:col-span-2">
+                                <Label className="text-xs font-black uppercase tracking-widest text-slate-400">
+                                    {pickedLender.lenderName}&apos;s approval
+                                </Label>
+                                <p className="max-h-32 overflow-y-auto whitespace-pre-wrap break-words rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+                                    {pickedLender.approvalNotes}
+                                </p>
+                            </div>
+                        )}
 
                         {/* Odd field out — spans the full width instead of being
                             stranded alone in the left column. */}

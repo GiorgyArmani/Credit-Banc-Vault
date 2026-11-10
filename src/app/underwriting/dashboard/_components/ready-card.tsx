@@ -13,7 +13,7 @@
 
 import { ChevronRight } from "lucide-react";
 import { LoanPipelineBadge } from "@/components/loan-pipeline-status";
-import { DocCount, AgeCell, formatCurrency } from "./lead-display";
+import { DocCount, AgeCell, LendersWaiting, formatCurrency } from "./lead-display";
 import { GroupPicker } from "./group-picker";
 import type { GroupableLead, MembershipMode } from "@/lib/lead-groups";
 import type { GroupWithMembers } from "./group-chip-rail";
@@ -69,6 +69,7 @@ export function ReadyCard({
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         {lead.pipeline_status && <LoanPipelineBadge currentStatus={lead.pipeline_status} />}
         <AgeCell days={lead.age_days} />
+        <LendersWaiting count={lead.lenders_waiting ?? 0} days={lead.lender_wait_days ?? 0} />
       </div>
 
       <div className="flex items-end justify-between gap-3 border-t border-outline-variant/25 pt-3">
