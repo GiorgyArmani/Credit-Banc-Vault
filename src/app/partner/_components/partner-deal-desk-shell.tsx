@@ -31,6 +31,8 @@ export function PartnerDealDeskShell({ children }: { children: React.ReactNode }
         { label: "My Referrals", href: "/partner/dashboard", icon: "handshake" },
         // Recordings of live partner sessions; Tier 1 reaches it from the header.
         { label: "Webinars", href: "/partner/webinars", icon: "smart_display" },
+        // Documents admins upload at /admin/resources; Tier 1 reaches it from the header.
+        { label: "Resources", href: "/partner/resources", icon: "folder_open" },
       ]}
     >
       {children}

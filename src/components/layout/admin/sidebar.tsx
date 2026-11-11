@@ -1,7 +1,7 @@
 // src/components/layout/admin/sidebar.tsx
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
@@ -16,16 +16,15 @@ import {
   Database,
   Users,
   LayoutGrid,
-  UserCog,
   ChevronDown,
   Gift,
   Handshake,
   UserPlus,
   CreditCard,
   MonitorPlay,
+  FolderOpen,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { Badge } from '@/components/ui/badge'
 import clsx from 'clsx'
 
 type SidebarProps = {
@@ -56,15 +55,8 @@ export function Sidebar({
 }: SidebarProps) {
   const pathname = usePathname()
   const supabase = createClient()
-  const [userEmail, setUserEmail] = useState<string | null>(null)
   const [uwOpen, setUwOpen] = useState(true)
   const [advOpen, setAdvOpen] = useState(true)
-
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user?.email) setUserEmail(user.email)
-    })
-  }, [supabase])
 
   const handleSignOut = async () => {
     await supabase.auth.signOut()
@@ -175,6 +167,19 @@ export function Sidebar({
             )}>
               <MonitorPlay className={clsx('h-5 w-5 shrink-0', pathname?.startsWith('/admin/webinars') ? 'text-emerald-500' : '')} />
               {!collapsed && <span className="text-sm font-semibold">Webinars</span>}
+            </div>
+          </Link>
+
+          {/* Partner resource library — documents Tier 1 + Tier 2 open at /partner/resources. */}
+          <Link href="/admin/resources" onClick={onMobileClose} title={collapsed ? 'Resource Library' : undefined}>
+            <div className={clsx(
+              'flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200 cursor-pointer',
+              pathname?.startsWith('/admin/resources')
+                ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50'
+            )}>
+              <FolderOpen className={clsx('h-5 w-5 shrink-0', pathname?.startsWith('/admin/resources') ? 'text-emerald-500' : '')} />
+              {!collapsed && <span className="text-sm font-semibold">Resource Library</span>}
             </div>
           </Link>
 
@@ -292,17 +297,6 @@ export function Sidebar({
 
         {/* Footer */}
         <div className="px-3 pb-6 pt-4 border-t border-slate-100">
-          <div className={clsx('flex items-center gap-3 mb-3', collapsed && 'md:flex-col md:gap-2')}>
-            <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center shrink-0">
-              <UserCog className="h-4 w-4 text-emerald-500" />
-            </div>
-            {!collapsed && (
-              <div className="min-w-0">
-                <p className="text-sm font-black text-slate-900 truncate">{userEmail?.split('@')[0] || 'Admin'}</p>
-                <Badge className="bg-emerald-50 text-emerald-600 text-[10px] font-black uppercase tracking-widest border border-emerald-100 mt-0.5">Admin</Badge>
-              </div>
-            )}
-          </div>
           <button
             onClick={handleSignOut}
             className={clsx(

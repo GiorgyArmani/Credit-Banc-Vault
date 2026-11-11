@@ -14,12 +14,33 @@ import { usePathname } from 'next/navigation'
 import { Menu } from 'lucide-react'
 import { NotificationBell } from '@/components/notifications/NotificationBell'
 import { GlobalSearch } from '@/components/layout/underwriting/global-search'
+import { createClient } from '@/lib/supabase/client'
 
 export function UnderwritingShell({ children }: { children: React.ReactNode }) {
     const pathname = usePathname()
 
     const [mobileOpen, setMobileOpen] = useState(false)
     const [collapsed, setCollapsed] = useState(false)
+    const [name, setName] = useState<string | null>(null)
+
+    // Who is signed in, for the topbar chip. Underwriters have no advisors row
+    // (and no client-facing photo), so this reads public.users only; the email
+    // prefix is the fallback for an account without a name on file.
+    useEffect(() => {
+        async function getName() {
+            const supabase = createClient()
+            const { data: { user } } = await supabase.auth.getUser()
+            if (!user) return
+            const { data } = await supabase
+                .from('users')
+                .select('first_name, last_name')
+                .eq('id', user.id)
+                .maybeSingle()
+            const full = `${data?.first_name ?? ''} ${data?.last_name ?? ''}`.trim()
+            setName(full || user.email?.split('@')[0] || 'Underwriter')
+        }
+        getName()
+    }, [])
 
     useEffect(() => {
         setMobileOpen(false)
@@ -80,6 +101,22 @@ export function UnderwritingShell({ children }: { children: React.ReactNode }) {
                         <div className="flex items-center gap-2 px-3 py-1.5 rounded-full hover:bg-slate-200 transition-colors cursor-pointer">
                             <NotificationBell clientBasePath="/underwriting/dashboard/clients" />
                         </div>
+                        {/* Same chip the admin topbar shows, minus the photo
+                            picker — that photo is the client-facing advisor one. */}
+                        {name && (
+                            <>
+                                <div className="h-8 w-px bg-slate-200" />
+                                <div className="flex items-center gap-3">
+                                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-500 text-xs font-bold text-white">
+                                        {name.split(/\s+/).slice(0, 2).map(p => p[0]).join('').toUpperCase()}
+                                    </span>
+                                    <span className="hidden text-left lg:block">
+                                        <span className="block text-xs font-bold leading-none text-slate-900">{name}</span>
+                                        <span className="block text-[10px] uppercase tracking-tighter text-slate-500">Underwriting</span>
+                                    </span>
+                                </div>
+                            </>
+                        )}
                     </div>
                 </header>
 

@@ -1,14 +1,12 @@
 // src/components/layout/underwriting/sidebar.tsx
 'use client'
 
-import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
     LayoutDashboard,
     Users,
     LogOut,
-    User,
     X,
     ChevronsLeft,
     ChevronsRight,
@@ -18,7 +16,6 @@ import {
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 
 type SidebarProps = {
     mobileOpen?: boolean
@@ -35,13 +32,6 @@ export function Sidebar({
 }: SidebarProps) {
     const pathname = usePathname()
     const supabase = createClient()
-    const [userEmail, setUserEmail] = useState<string | null>(null)
-
-    useEffect(() => {
-        supabase.auth.getUser().then(({ data: { user } }) => {
-            if (user?.email) setUserEmail(user.email)
-        })
-    }, [supabase])
 
     const handleSignOut = async () => {
         await supabase.auth.signOut()
@@ -154,17 +144,6 @@ export function Sidebar({
 
                 {/* Footer */}
                 <div className="mt-auto px-4 pb-6 pt-4 border-t border-white/5 bg-slate-800/10 backdrop-blur-md">
-                    {/* Identidad */}
-                    <div className={`space-x-4 mb-6 items-center transition-all duration-300 flex ${collapsed ? 'md:flex-col md:space-x-0 md:gap-3' : ''}`}>
-                        <div className="bg-emerald-500/20 rounded-[1.25rem] p-3 border border-emerald-500/20 flex-shrink-0">
-                            <User className="h-6 w-6 text-emerald-400" />
-                        </div>
-                        <div className={`min-w-0 transition-all duration-300 ${collapsed ? 'md:hidden block' : 'block'}`}>
-                            <p className="font-black text-white truncate text-sm mb-1">{userEmail?.split('@')[0] || 'Underwriter'}</p>
-                            <Badge className="bg-emerald-500/20 text-emerald-400 text-[10px] font-black uppercase tracking-widest border-emerald-500/30">Underwriting</Badge>
-                        </div>
-                    </div>
-
                     {/* Logout */}
                     <div className="flex items-center gap-2">
                         {!collapsed ? (

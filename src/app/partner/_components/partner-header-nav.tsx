@@ -10,6 +10,7 @@ import clsx from "clsx";
 const LINKS = [
   { href: "/partner/dashboard", label: "My Referrals" },
   { href: "/partner/webinars", label: "Webinars" },
+  { href: "/partner/resources", label: "Resources" },
 ];
 
 export function PartnerHeaderNav() {
