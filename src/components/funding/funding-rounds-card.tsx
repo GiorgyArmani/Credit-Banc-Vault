@@ -25,7 +25,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ChevronDown, Loader2, PlusCircle, RefreshCw, Trophy } from "lucide-react";
 import { toast } from "@/lib/toast";
-import { FUNDING_OPTIONS } from "@/data/loan-types";
+import { useDocumentPackages } from "@/hooks/use-document-packages";
 import clsx from "clsx";
 import {
   LENDER_STATUS_LABEL,
@@ -106,6 +106,8 @@ export function FundingRoundsCard({
   // Same shape as the client / add-business pickers: multi-select from the
   // canonical product list, stored as a comma-joined string on the deal.
   const [loan_types, set_loan_types] = useState<string[]>([]);
+  // Built-in loan types plus any added on the Loan Types page.
+  const { loanTypes: loan_type_options } = useDocumentPackages();
 
   function toggle_loan_type(type: string) {
     set_loan_types((prev) =>
@@ -215,7 +217,7 @@ export function FundingRoundsCard({
                 const previous = (current?.proposed_loan_type ?? "")
                   .split(",")
                   .map((t) => t.trim())
-                  .filter((t) => FUNDING_OPTIONS.includes(t));
+                  .filter((t) => loan_type_options.includes(t));
                 set_loan_types(previous);
                 set_open(true);
               }}
@@ -411,7 +413,7 @@ export function FundingRoundsCard({
             <div className="grid gap-2">
               <Label>Product type</Label>
               <div className="flex flex-wrap gap-1.5">
-                {FUNDING_OPTIONS.map((type) => {
+                {loan_type_options.map((type) => {
                   const selected = loan_types.includes(type);
                   return (
                     <button

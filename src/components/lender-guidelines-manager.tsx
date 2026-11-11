@@ -6,7 +6,7 @@ import { toast } from "@/lib/toast";
 import { useConnectedLenders } from "@/components/lender-api/use-connected-lenders";
 import { LenderApiActivityDialog } from "@/components/lender-api/lender-api-activity-dialog";
 import { connectedLender, type ConnectedLender } from "@/lib/lender-api/connected";
-import { LOAN_TYPES } from "@/data/loan-types";
+import { useDocumentPackages } from "@/hooks/use-document-packages";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -99,9 +99,6 @@ interface EditingGroup {
   programs: Record<string, Partial<Lender>[]>;
   activeSpecialty: string;
 }
-
-// Shared with bank-analysis.tsx via src/data/loan-types.ts — keep both in sync.
-const AVAILABLE_SPECIALTIES = LOAN_TYPES;
 
 const INITIAL_LENDER_FIELDS: Omit<Lender, "id" | "lender_name" | "specialty"> = {
   tier_label: null,
@@ -340,6 +337,9 @@ function TierFields({
 }
 
 export default function LenderGuidelinesManager() {
+  // Built-in loan types plus any added on the Loan Types page, so a lender can
+  // be tagged with a program the team added.
+  const { loanTypes: specialty_options } = useDocumentPackages();
   const [lenders, setLenders] = useState<Lender[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
@@ -701,7 +701,7 @@ export default function LenderGuidelinesManager() {
   //
   // This is the only way to clear the legacy "General" program: rows written
   // before the program-tag system carry specialty = NULL, which toProgramMap
-  // surfaces under the "General" key. "General" is not in AVAILABLE_SPECIALTIES,
+  // surfaces under the "General" key. "General" is not in specialty_options,
   // so it has no chip to toggle — without a control on the tab itself it was
   // unreachable, and the row kept showing up in Lender Match as "Unknown".
   const removeSpecialty = (spec: string) => {
@@ -969,7 +969,7 @@ export default function LenderGuidelinesManager() {
                   <div className="space-y-1.5">
                     <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Programs / Specialties (Select multiple)</label>
                     <div className="flex flex-wrap gap-1.5 mt-1">
-                      {AVAILABLE_SPECIALTIES.map(spec => (
+                      {specialty_options.map(spec => (
                         <button
                           key={spec}
                           onClick={() => toggleSpecialty(spec)}

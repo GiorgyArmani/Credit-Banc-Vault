@@ -40,8 +40,8 @@ import {
 } from "lucide-react";
 import { useErrorDialog } from "@/components/error-dialog";
 import { toast } from "@/lib/toast";
-import { FUNDING_OPTIONS } from "@/data/loan-types";
 import { packageForLoanTypes, FALLBACK_DOCUMENT_PACKAGE } from "@/data/program-document-packages";
+import { useDocumentPackages } from "@/hooks/use-document-packages";
 import { ReferralPartnerSelect } from "@/components/referral-partner-select";
 import { isExternalAdvisor } from "@/lib/auth/roles";
 
@@ -146,9 +146,11 @@ export default function SpeedClientSignUpForm({ isSetter = false }: { isSetter?:
    * only. A product with no package of its own ("Other") falls back to the
    * baseline rather than creating a client with an EMPTY request.
    */
+  // Built-in lists with staff edits from the Loan Types page laid over them.
+  const { packages: document_packages, loanTypes: loan_type_options } = useDocumentPackages();
   const program_package = useMemo(
-    () => packageForLoanTypes(proposed_loan_types),
-    [proposed_loan_types]
+    () => packageForLoanTypes(proposed_loan_types, document_packages),
+    [proposed_loan_types, document_packages]
   );
 
   const documents_requested = useMemo(() => {
@@ -615,7 +617,7 @@ export default function SpeedClientSignUpForm({ isSetter = false }: { isSetter?:
                         Proposed Loan Type * <span className="normal-case font-bold text-emerald-500">(select all that apply)</span>
                       </Label>
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                        {FUNDING_OPTIONS.map((type) => {
+                        {loan_type_options.map((type) => {
                           const selected = proposed_loan_types.includes(type);
                           return (
                             <button

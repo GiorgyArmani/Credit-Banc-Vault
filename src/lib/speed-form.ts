@@ -23,6 +23,7 @@ import { generateDocUploadMagicLink } from '@/lib/magic-link';
 import { syncOutstandingDocuments } from '@/lib/outstanding-documents';
 import { send_speed_doc_request_email } from '@/lib/email';
 import { packageForLoanTypes } from '@/data/program-document-packages';
+import { loadDocumentPackages } from '@/lib/document-packages';
 import { isReadOnlyUser } from '@/lib/read-only-accounts';
 
 export async function releaseSpeedFormDocs(
@@ -101,11 +102,16 @@ export async function releaseSpeedFormDocs(
   // (12 months for nearly all of them). Deriving it here from the loan type the
   // advisor picked keeps the request consistent with the package they saw,
   // without parking a second value in the vault until the signature lands.
+  //
+  // Read through loadDocumentPackages so a period edited on the Loan Types page
+  // is the one requested (it falls back to the built-in lists on any failure).
+  const { packages } = await loadDocumentPackages();
   const statementMonths = packageForLoanTypes(
     String(vault.proposed_loan_type || '')
       .split(',')
       .map(t => t.trim())
-      .filter(Boolean)
+      .filter(Boolean),
+    packages
   ).statementMonths;
 
   const dynamicDocRecords = docDefinitions.map(doc => ({

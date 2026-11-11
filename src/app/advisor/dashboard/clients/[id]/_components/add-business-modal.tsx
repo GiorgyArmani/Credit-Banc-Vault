@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { CLIENT_SCOPED_DOC_CODES } from "@/lib/document-scope";
 import { FUNDING_OPTIONS } from "@/data/loan-types";
 import { packageForLoanTypes, FALLBACK_DOCUMENT_PACKAGE } from "@/data/program-document-packages";
+import { useDocumentPackages } from "@/hooks/use-document-packages";
 import { formatPhoneInput } from "@/lib/phone";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { NaicsCombobox } from "@/components/ui/naics-combobox";
@@ -74,6 +75,8 @@ export function AddBusinessModal({ client_vault_id, open, on_close, on_created }
   // Doc requests
   const [all_doc_options, set_all_doc_options] = useState<DocOption[]>([]);
   const [requested_doc_codes, set_requested_doc_codes] = useState<Set<string>>(new Set());
+  // Built-in lists with staff edits from the Loan Types page laid over them.
+  const { packages: document_packages, loanTypes: loan_type_options } = useDocumentPackages();
 
   const [is_submitting, set_is_submitting] = useState(false);
 
@@ -124,7 +127,7 @@ export function AddBusinessModal({ client_vault_id, open, on_close, on_created }
     if (all_doc_options.length === 0) return;
 
     const offered = new Set(all_doc_options.map((d) => d.code));
-    const { codes } = packageForLoanTypes(proposed_loan_types);
+    const { codes } = packageForLoanTypes(proposed_loan_types, document_packages);
     const from_package = codes.filter((c) => offered.has(c));
 
     const fallback = FALLBACK_DOCUMENT_PACKAGE.codes.filter((c) => offered.has(c));
@@ -134,7 +137,7 @@ export function AddBusinessModal({ client_vault_id, open, on_close, on_created }
     // Intentionally not depending on requested_doc_codes: this re-derives the
     // default, it does not react to the advisor's own ticks.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, proposed_loan_types, all_doc_options]);
+  }, [open, proposed_loan_types, all_doc_options, document_packages]);
 
   if (!open) return null;
 
@@ -363,7 +366,7 @@ export function AddBusinessModal({ client_vault_id, open, on_close, on_created }
               <div className="md:col-span-2">
                 <Field label="Proposed Loan Type">
                   <div className="flex flex-wrap gap-1.5">
-                    {FUNDING_OPTIONS.map((type) => {
+                    {loan_type_options.map((type) => {
                       const selected = proposed_loan_types.includes(type);
                       return (
                         <button

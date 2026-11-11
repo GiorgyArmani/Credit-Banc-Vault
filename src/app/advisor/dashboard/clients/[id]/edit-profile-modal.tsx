@@ -24,7 +24,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { formatPhoneInput, isValidUsPhone } from "@/lib/phone";
-import { FUNDING_OPTIONS } from "@/data/loan-types";
+import { useDocumentPackages } from "@/hooks/use-document-packages";
 import {
     Select,
     SelectContent,
@@ -134,6 +134,8 @@ interface EditProfileModalProps {
 
 export function EditProfileModal({ isOpen, onClose, onSuccess, clientData, businessProfileId, isPrimary = true }: EditProfileModalProps) {
     const [isSubmitting, setIsSubmitting] = useState(false);
+    // Built-in loan types plus any added on the Loan Types page.
+    const { loanTypes: loan_type_options } = useDocumentPackages();
     const router = useRouter();
     const editingBusiness = !isPrimary && !!businessProfileId;
 
@@ -501,7 +503,7 @@ export function EditProfileModal({ isOpen, onClose, onSuccess, clientData, busin
                                             <FormLabel className="text-[10px] font-black uppercase tracking-widest text-emerald-900/60 ml-1">Proposed Loan Types</FormLabel>
                                             <FormControl>
                                                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 p-4 bg-emerald-50/20 border border-emerald-100 rounded-2xl">
-                                                    {FUNDING_OPTIONS.map((type) => {
+                                                    {loan_type_options.map((type) => {
                                                         const isSelected = field.value.includes(type);
                                                         return (
                                                             <div 

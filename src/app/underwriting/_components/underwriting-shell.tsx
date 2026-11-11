@@ -57,6 +57,7 @@ export function UnderwritingShell({ children }: { children: React.ReactNode }) {
             '/underwriting/bank-analysis': 'Bank Analysis',
             '/underwriting/lender-match': 'Lender Match',
             '/underwriting/lender-guidelines': 'Lender Guidelines',
+            '/underwriting/loan-types': 'Loan Types',
         }
         const key = Object.keys(map).find(k => pathname?.startsWith(k))
         return key ? map[key] : 'Underwriting'

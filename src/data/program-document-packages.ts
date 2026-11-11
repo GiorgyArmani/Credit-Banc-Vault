@@ -390,8 +390,15 @@ export function programsWithoutPackage(): string[] {
  *
  * `statementMonths` takes the largest any selected product asks for — the
  * longer period satisfies the shorter one, and asking twice does not.
+ *
+ * `packages` defaults to the built-in lists above. Callers that honour staff
+ * edits pass the merged map instead (@/lib/document-packages on the server,
+ * useDocumentPackages in the browser).
  */
-export function packageForLoanTypes(loanTypes: readonly string[]): {
+export function packageForLoanTypes(
+  loanTypes: readonly string[],
+  packages: Readonly<Record<string, ProgramDocumentPackage>> = PROGRAM_DOCUMENT_PACKAGES,
+): {
   codes: string[];
   statementMonths: number | null;
   /** Selected products that had no package, for the form to name. */
@@ -403,7 +410,7 @@ export function packageForLoanTypes(loanTypes: readonly string[]): {
   let statementMonths: number | null = null;
 
   for (const type of loanTypes) {
-    const pkg = PROGRAM_DOCUMENT_PACKAGES[type];
+    const pkg = packages[type];
     if (!pkg) {
       withoutPackage.push(type);
       continue;

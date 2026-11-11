@@ -23,6 +23,7 @@ import {
   CreditCard,
   MonitorPlay,
   FolderOpen,
+  ListChecks,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import clsx from 'clsx'
@@ -39,6 +40,7 @@ const uwNavItems = [
   { label: 'Bank Analysis', href: '/admin/uw/bank-analysis', icon: BarChart3 },
   { label: 'Lender Match', href: '/admin/uw/lender-match', icon: Search },
   { label: 'Lender Database', href: '/admin/uw/lender-guidelines', icon: Database },
+  { label: 'Loan Types', href: '/admin/uw/loan-types', icon: ListChecks },
 ]
 
 const advisorNavItems = [

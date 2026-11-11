@@ -13,6 +13,7 @@ import {
     BarChart3 as ChartBarIcon,
     Search,
     Database,
+    ListChecks,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
@@ -45,6 +46,7 @@ export function Sidebar({
         { label: 'Bank Analysis', href: '/underwriting/bank-analysis', icon: ChartBarIcon },
         { label: 'Lender Match', href: '/underwriting/lender-match', icon: Search },
         { label: 'Lender Database', href: '/underwriting/lender-guidelines', icon: Database },
+        { label: 'Loan Types', href: '/underwriting/loan-types', icon: ListChecks },
     ]
 
     const desktopWidth = collapsed ? 'md:w-20' : 'md:w-72'

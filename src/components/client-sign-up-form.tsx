@@ -35,8 +35,9 @@ import { addManualFundingApplication } from "@/app/advisor/dashboard/clients/[id
 import { useErrorDialog } from "@/components/error-dialog";
 import { toast } from "@/lib/toast";
 import { FollowersPicker } from "@/components/followers-picker";
-import { FUNDING_OPTIONS, LOAN_TYPES } from "@/data/loan-types";
+import { LOAN_TYPES } from "@/data/loan-types";
 import { packageForLoanTypes, FALLBACK_DOCUMENT_PACKAGE } from "@/data/program-document-packages";
+import { useDocumentPackages } from "@/hooks/use-document-packages";
 import { digitsOnly, toIsoDate, toStateCode, toZip5 } from "@/lib/lender-api/normalize";
 
 
@@ -490,9 +491,11 @@ export default function ClientSignupForm() {
    * "Other" is the one product with no package of its own; on its own it falls
    * back to the baseline rather than creating a vault with an EMPTY request.
    */
+  // Built-in lists with staff edits from the Loan Types page laid over them.
+  const { packages: document_packages, loanTypes: loan_type_options } = useDocumentPackages();
   const program_package = useMemo(
-    () => packageForLoanTypes(proposed_loan_types),
-    [proposed_loan_types]
+    () => packageForLoanTypes(proposed_loan_types, document_packages),
+    [proposed_loan_types, document_packages]
   );
 
   const document_codes = useMemo(
@@ -1372,7 +1375,7 @@ export default function ClientSignupForm() {
                         Proposed Loan Type * <span className="normal-case font-bold text-emerald-500">(select all that apply)</span>
                       </Label>
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                        {FUNDING_OPTIONS.map((type) => {
+                        {loan_type_options.map((type) => {
                           const selected = proposed_loan_types.includes(type);
                           return (
                             <button

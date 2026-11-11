@@ -80,6 +80,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
       '/admin/uw/bank-analysis': 'Bank Analysis',
       '/admin/uw/lender-match': 'Lender Match',
       '/admin/uw/lender-guidelines': 'Lender Database',
+      '/admin/uw/loan-types': 'Loan Types',
       '/admin/pipeline': 'Pipeline',
       '/admin/prospects': 'Prospects',
       '/admin/clients': 'Clients',
