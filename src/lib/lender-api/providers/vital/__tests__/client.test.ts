@@ -105,6 +105,17 @@ describe("vital documents", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("never reports a file Vital silently deduplicated as accepted", async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response(Buffer.from("SAME"), { status: 200 }))
+      .mockResolvedValueOnce(json(200, { id: "262075", filename: "app.pdf", category: "Signed Application" }));
+
+    const results = await vital.uploadDocuments("9001", [doc("d1", "check.pdf", "voided_check")]);
+
+    expect(results[0]).toMatchObject({ accepted: false, unavailable: true });
+    expect(results[0].error).toContain('"app.pdf, Signed Application"');
+  });
+
   it("reports a rejected file and keeps going", async () => {
     fetchMock
       .mockResolvedValueOnce(new Response(Buffer.from("A"), { status: 200 }))

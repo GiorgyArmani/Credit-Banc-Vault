@@ -19,6 +19,7 @@ import {
   suggestVitalPicks,
   vitalDocumentCategory,
   vitalDocumentName,
+  vitalExistingDuplicate,
   vitalSubmissionId,
   vitalTagsForDocCode,
   type VitalSubmission,
@@ -84,7 +85,19 @@ export const vital: LenderApiProvider = {
         category,
         content: file.base64,
       });
-      results.push(res.ok ? { ...base, accepted: true } : { ...base, accepted: false, error: res.error ?? "Vital Cap rejected the file" });
+      if (!res.ok) {
+        results.push({ ...base, accepted: false, error: res.error ?? "Vital Cap rejected the file" });
+        continue;
+      }
+      // Vital silently skips a file whose content is already on the deal: the 200
+      // echoes the EXISTING document instead of ours (seen 2026-11-13). Resending
+      // can't help, so it's terminal — but never reported as accepted.
+      const existing = vitalExistingDuplicate(res.data, d.filename, category);
+      results.push(
+        existing
+          ? { ...base, accepted: false, unavailable: true, error: `Vital Cap already has this exact file (as "${existing}") and did not add it again` }
+          : { ...base, accepted: true }
+      );
     }
     return results;
   },

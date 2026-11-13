@@ -50,8 +50,17 @@ export interface VitalBusiness {
   naicsCode?: string;
 }
 
+/** Their Note schema; `timestamp` + `note` are required. */
+export interface VitalNote {
+  timestamp: string;
+  note: string;
+  section: "Underwriting";
+  shareableWithIso: false;
+}
+
 export interface VitalSubmission {
   business: VitalBusiness;
+  notes?: VitalNote[];
 }
 
 export interface VitalDocument {
@@ -86,6 +95,7 @@ export function toVitalPhone(v: unknown): string | null {
 
 export function redactVitalSubmission(s: VitalSubmission): VitalSubmission {
   return {
+    ...s,
     business: {
       ...s.business,
       owners: s.business.owners.map((o) =>
@@ -251,7 +261,17 @@ export function buildVitalApplication(source: LenderApiSource, _picks: Picks, ct
     business.industryTypeMoreInfo = rawIndustry;
   }
 
+  // Vital drops business.getUseOfFunds (seen 2026-11-13: echoed back as useOfFunds ""),
+  // so the purpose and the file summary also ride in an underwriting note.
+  const synopsis = nonEmpty(d?.file_synopsis);
+  const noteText = [purpose ? `Use of funds: ${purpose}` : null, synopsis ? `File summary: ${synopsis}` : null]
+    .filter(Boolean)
+    .join("\n\n");
+
   const payload: VitalSubmission = { business };
+  if (noteText) {
+    payload.notes = [{ timestamp: new Date().toISOString(), note: noteText, section: "Underwriting", shareableWithIso: false }];
+  }
   return { payload, redacted: redactVitalSubmission(payload), gaps, effectivePicks: {} };
 }
 
@@ -270,6 +290,20 @@ export function vitalTagsForDocCode(docCode: string | null): string[] {
 /** Document.name: the filename without its extension. */
 export function vitalDocumentName(filename: string): string {
   return filename.replace(/\.[A-Za-z0-9]+$/, "").trim() || filename;
+}
+
+/**
+ * An upload's 200 body echoes the stored document. When that isn't the file we
+ * sent, Vital matched our content to a document already on the deal and kept
+ * only the old one. Returns the existing document's label, or null when ours was stored.
+ */
+export function vitalExistingDuplicate(response: unknown, sentFilename: string, sentCategory: string): string | null {
+  const r = (response && typeof response === "object" ? response : {}) as Record<string, unknown>;
+  const filename = typeof r.filename === "string" ? r.filename : null;
+  const category = typeof r.category === "string" ? r.category : null;
+  if (filename === null && category === null) return null; // nothing echoed — can't tell, trust the 200
+  if (filename === sentFilename && (category === null || category === sentCategory)) return null;
+  return [filename ?? "unnamed", category].filter(Boolean).join(", ");
 }
 
 // ── Status ─────────────────────────────────────────────────────────────────
@@ -311,6 +345,8 @@ export function sanitizeVitalStatus(raw: unknown): VitalStatus {
   return out;
 }
 
+export const VITAL_NO_STATUS_STAGE = "Submitted — Vital reports no status; record its answer by hand";
+
 export function interpretVitalStatus(raw: unknown): NormalizedStatus {
   const s = (raw && typeof raw === "object" ? raw : {}) as Partial<VitalStatus>;
   const statuses = s.statuses && typeof s.statuses === "object" ? s.statuses : {};
@@ -322,7 +358,9 @@ export function interpretVitalStatus(raw: unknown): NormalizedStatus {
     null;
   const stage = stageKey ? statuses[stageKey] : null;
   const reason = keys.filter((k) => /declin/i.test(k)).map((k) => statuses[k])[0] ?? null;
-  if (!stage) return { kind: "in_progress", stage: "Submitted" };
+  // Vital's GET carries no status at all (seen 2026-11-13); verdicts can only come
+  // from callbacks, which our key can't register yet. Say so instead of a bare "Submitted".
+  if (!stage) return { kind: "in_progress", stage: VITAL_NO_STATUS_STAGE };
 
   const lines = [`Vital Cap: ${stage}`];
   if (reason) lines.push(`Reason: ${reason}`);

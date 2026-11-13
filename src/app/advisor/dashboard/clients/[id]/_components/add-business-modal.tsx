@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, Plus, X, Building2, DollarSign, AlertTriangle, FileCheck2, Trash2 } from "lucide-react";
+import { Loader2, Plus, X, Building2, DollarSign, AlertTriangle, FileCheck2, Trash2, User } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { createClient } from "@/lib/supabase/client";
 import { CLIENT_SCOPED_DOC_CODES } from "@/lib/document-scope";
@@ -39,7 +39,27 @@ const LEGAL_ENTITY_TYPES = ["LLC", "C-Corp", "S-Corp", "Sole Prop", "Partnership
 const FUNDING_ETAS = ["Immediately", "1–3 Weeks", "3 Weeks +"];
 const PAYMENT_FREQUENCIES = ["Daily", "Weekly", "Bi-Weekly", "Monthly"] as const;
 
+/**
+ * Must match the key in FUNDING_OPTIONS / PROGRAM_DOCUMENT_PACKAGES exactly:
+ * the businesses route picks the PTL Signwell template only on an exact match
+ * of funding_deals.proposed_loan_type, so a PTL file is always single-product.
+ */
+const PTL_LOAN_TYPE = "Personal Term Loan";
+
+type FileKind = "business" | "ptl";
+
+interface ClientIdentity {
+  client_name: string | null;
+  client_email: string | null;
+  has_ssn: boolean;
+}
+
 export function AddBusinessModal({ client_vault_id, open, on_close, on_created }: AddBusinessModalProps) {
+  // Step 1: what is this new file for? Nothing else renders until it's picked.
+  const [file_kind, set_file_kind] = useState<FileKind | null>(null);
+  // The client's own data, which is all a PTL file (and its contract) needs.
+  const [identity, set_identity] = useState<ClientIdentity | null>(null);
+
   // Business info
   const [company_name, set_company_name] = useState("");
   const [legal_entity_type, set_legal_entity_type] = useState("");
@@ -102,6 +122,36 @@ export function AddBusinessModal({ client_vault_id, open, on_close, on_created }
     })();
   }, [open]);
 
+  // Client identity for the PTL path. Only SSN *presence* is kept in state —
+  // the contract is filled server-side, the modal just warns when it's blank.
+  useEffect(() => {
+    if (!open) return;
+    const supabase = createClient();
+    (async () => {
+      const { data, error } = await supabase
+        .from("client_data_vault")
+        .select("client_name, client_email, ssn")
+        .eq("id", client_vault_id)
+        .maybeSingle();
+      if (error) {
+        toast.error(`Could not load client details: ${error.message}`);
+        return;
+      }
+      set_identity({
+        client_name: data?.client_name ?? null,
+        client_email: data?.client_email ?? null,
+        has_ssn: !!(data?.ssn && String(data.ssn).trim()),
+      });
+    })();
+  }, [open, client_vault_id]);
+
+  const choose_kind = (kind: FileKind) => {
+    set_file_kind(kind);
+    // PTL is single-product (see PTL_LOAN_TYPE); picking it here drives the
+    // document-package effect below to the PTL package.
+    set_proposed_loan_types(kind === "ptl" ? [PTL_LOAN_TYPE] : []);
+  };
+
   /**
    * Picking a funding product pre-selects that product's document package.
    *
@@ -141,7 +191,12 @@ export function AddBusinessModal({ client_vault_id, open, on_close, on_created }
 
   if (!open) return null;
 
+  const is_ptl = file_kind === "ptl";
+  const ptl_file_name = `${identity?.client_name?.trim() || "Client"} – ${PTL_LOAN_TYPE}`;
+  const can_submit = is_ptl ? !!identity : !!company_name.trim();
+
   const reset = () => {
+    set_file_kind(null);
     set_company_name("");
     set_legal_entity_type("");
     set_business_start_date("");
@@ -202,16 +257,38 @@ export function AddBusinessModal({ client_vault_id, open, on_close, on_created }
   };
 
   const submit = async () => {
-    if (!company_name.trim()) {
+    if (!is_ptl && !company_name.trim()) {
       toast.error("Company name is required");
       return;
     }
+    if (is_ptl && !identity) {
+      toast.error("Client details haven't loaded yet — try again in a moment");
+      return;
+    }
+    if (is_ptl && !identity?.has_ssn) {
+      // Not a block: the advisor may collect it later. But the contract goes
+      // out with the SSN field blank, so say so.
+      toast.warning("No SSN on file — the PTL contract will be sent with that field blank");
+    }
+    // PTL files carry no business data: name it after the client, send only
+    // the funding ask and the document requests.
+    const payload = is_ptl
+      ? {
+          company_name: ptl_file_name,
+          capital_requested: capital_requested || null,
+          proposed_loan_type: PTL_LOAN_TYPE,
+          loan_purpose: loan_purpose || null,
+          funding_eta: funding_eta || null,
+          requested_doc_codes: Array.from(requested_doc_codes),
+        }
+      : null;
+    const created_name = is_ptl ? ptl_file_name : company_name;
     set_is_submitting(true);
     try {
       const res = await fetch(`/api/advisor/clients/${client_vault_id}/businesses`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        body: JSON.stringify(payload ?? {
           company_name: company_name.trim(),
           legal_entity_type: legal_entity_type || null,
           business_start_date: business_start_date || null,
@@ -248,7 +325,7 @@ export function AddBusinessModal({ client_vault_id, open, on_close, on_created }
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to create business");
-      toast.success(`${company_name} added with ${requested_doc_codes.size} doc request(s)`);
+      toast.success(`${created_name} added with ${requested_doc_codes.size} doc request(s)`);
       on_created(json.business);
       reset();
       on_close();
@@ -272,8 +349,14 @@ export function AddBusinessModal({ client_vault_id, open, on_close, on_created }
               <Plus className="h-5 w-5 text-emerald-700" />
             </div>
             <div>
-              <h3 className="text-lg font-bold text-slate-900">Add Another Business</h3>
-              <p className="text-xs text-slate-500">Creates a fully-scoped vault for this client's additional business</p>
+              <h3 className="text-lg font-bold text-slate-900">
+                {is_ptl ? "Add Personal Term Loan" : "Add Another Business"}
+              </h3>
+              <p className="text-xs text-slate-500">
+                {is_ptl
+                  ? "Opens a separate file for this client's personal term loan"
+                  : "Creates a fully-scoped vault for this client's additional business"}
+              </p>
             </div>
           </div>
           <button
@@ -286,6 +369,79 @@ export function AddBusinessModal({ client_vault_id, open, on_close, on_created }
         </div>
 
         <div className="p-6 space-y-8">
+          {/* STEP 1 — what kind of file */}
+          <Section icon={<FileCheck2 className="h-4 w-4" />} title="What is this file for?">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <KindOption
+                selected={file_kind === "business"}
+                onClick={() => choose_kind("business")}
+                icon={<Building2 className="h-5 w-5" />}
+                title="Business loan"
+                description="Another company this client owns"
+              />
+              <KindOption
+                selected={is_ptl}
+                onClick={() => choose_kind("ptl")}
+                icon={<User className="h-5 w-5" />}
+                title={PTL_LOAN_TYPE}
+                description="A personal loan for the client, using the details already on file"
+              />
+            </div>
+          </Section>
+
+          {is_ptl && (
+            <>
+              <Section icon={<User className="h-4 w-4" />} title="Client Details (from file)">
+                {!identity ? (
+                  <p className="text-sm text-slate-500 flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Loading client details…
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-4 rounded-xl border border-slate-200 bg-slate-50">
+                    <ReadOnly label="Name" value={identity.client_name || "—"} />
+                    <ReadOnly label="Email" value={identity.client_email || "—"} />
+                    <ReadOnly
+                      label="SSN"
+                      value={identity.has_ssn ? "On file" : "Missing"}
+                      warn={!identity.has_ssn}
+                    />
+                  </div>
+                )}
+                {identity && !identity.has_ssn && (
+                  <p className="mt-2 text-xs font-semibold text-amber-700">
+                    No SSN on file — the PTL contract will go out with that field blank.
+                  </p>
+                )}
+                <p className="mt-2 text-xs text-slate-500">
+                  File will be named <span className="font-semibold text-slate-700">{ptl_file_name}</span>. The client gets the PTL contract to sign at their next login.
+                </p>
+              </Section>
+
+              <Section icon={<DollarSign className="h-4 w-4" />} title="Funding Ask">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <Field label="Amount Requested">
+                    <input type="number" value={capital_requested} onChange={(e) => set_capital_requested(e.target.value)} className={input_cls} placeholder="50000" />
+                  </Field>
+                  <Field label="Funding ETA">
+                    <Select value={funding_eta} onValueChange={set_funding_eta}>
+                      <SelectTrigger className={input_cls}>
+                        <SelectValue placeholder="Select…" />
+                      </SelectTrigger>
+                      <SelectContent className="rounded-xl">
+                        {FUNDING_ETAS.map((t) => (<SelectItem key={t} value={t}>{t}</SelectItem>))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field label="Loan Purpose">
+                    <input type="text" value={loan_purpose} onChange={(e) => set_loan_purpose(e.target.value)} className={input_cls} placeholder="Debt consolidation, …" />
+                  </Field>
+                </div>
+              </Section>
+            </>
+          )}
+
+          {file_kind === "business" && (
+          <>
           {/* SECTION 1 — Business info */}
           <Section icon={<Building2 className="h-4 w-4" />} title="Business Information">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -366,7 +522,8 @@ export function AddBusinessModal({ client_vault_id, open, on_close, on_created }
               <div className="md:col-span-2">
                 <Field label="Proposed Loan Type">
                   <div className="flex flex-wrap gap-1.5">
-                    {loan_type_options.map((type) => {
+                    {/* PTL has its own path above (single-product, PTL contract). */}
+                    {loan_type_options.filter((type) => type !== PTL_LOAN_TYPE).map((type) => {
                       const selected = proposed_loan_types.includes(type);
                       return (
                         <button
@@ -504,11 +661,16 @@ export function AddBusinessModal({ client_vault_id, open, on_close, on_created }
               </button>
             )}
           </Section>
+          </>
+          )}
 
           {/* SECTION 4 — Doc requests */}
-          <Section icon={<FileCheck2 className="h-4 w-4" />} title="Documents to Request for this Business">
+          {file_kind && (
+          <Section icon={<FileCheck2 className="h-4 w-4" />} title={is_ptl ? "Documents to Request for this Loan" : "Documents to Request for this Business"}>
             <p className="text-xs text-slate-500 mb-3">
-              Core docs are pre-selected. The client will see these docs in their vault, scoped to this business.
+              {is_ptl
+                ? "The Personal Term Loan package is pre-selected. Driver's license and PFS aren't listed — the client's existing copies already count on every file."
+                : "Core docs are pre-selected. The client will see these docs in their vault, scoped to this business."}
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
               {all_doc_options.map((d) => {
@@ -530,6 +692,7 @@ export function AddBusinessModal({ client_vault_id, open, on_close, on_created }
               })}
             </div>
           </Section>
+          )}
         </div>
 
         {/* Footer */}
@@ -550,11 +713,11 @@ export function AddBusinessModal({ client_vault_id, open, on_close, on_created }
             </button>
             <button
               onClick={submit}
-              disabled={is_submitting || !company_name.trim()}
+              disabled={is_submitting || !can_submit}
               className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
             >
               {is_submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-              {is_submitting ? "Creating…" : "Create Business + Vault"}
+              {is_submitting ? "Creating…" : is_ptl ? "Create PTL File" : "Create Business + Vault"}
             </button>
           </div>
         </div>
@@ -576,6 +739,41 @@ function Section({ icon, title, children }: { icon: React.ReactNode; title: stri
       </div>
       {children}
     </section>
+  );
+}
+
+function KindOption({ selected, onClick, icon, title, description }: {
+  selected: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex items-start gap-3 p-4 rounded-xl border text-left transition-colors ${
+        selected ? "border-emerald-500 bg-emerald-50 ring-2 ring-emerald-500" : "border-slate-200 bg-white hover:border-emerald-300"
+      }`}
+    >
+      <div className={`w-9 h-9 shrink-0 rounded-lg flex items-center justify-center ${selected ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-600"}`}>
+        {icon}
+      </div>
+      <div>
+        <p className="text-sm font-bold text-slate-900">{title}</p>
+        <p className="text-xs text-slate-500">{description}</p>
+      </div>
+    </button>
+  );
+}
+
+function ReadOnly({ label, value, warn }: { label: string; value: string; warn?: boolean }) {
+  return (
+    <div>
+      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">{label}</p>
+      <p className={`text-sm font-semibold ${warn ? "text-amber-700" : "text-slate-800"}`}>{value}</p>
+    </div>
   );
 }
 

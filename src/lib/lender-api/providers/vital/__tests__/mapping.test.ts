@@ -5,8 +5,10 @@ import {
   interpretVitalStatus,
   sanitizeVitalStatus,
   toVitalPhone,
+  VITAL_NO_STATUS_STAGE,
   vitalDocumentCategory,
   vitalDocumentName,
+  vitalExistingDuplicate,
   vitalSubmissionId,
   vitalTagsForDocCode,
   type VitalSubmission,
@@ -177,6 +179,28 @@ describe("vital submission", () => {
     expect(biz.avgMonthlyRevenue).toBeUndefined();
   });
 
+  it("carries use of funds and the file summary in an underwriting note (Vital drops getUseOfFunds)", () => {
+    const source = makeSource({ deal: { loan_purpose: "inventory", file_synopsis: "Strong deposits, 2 positions." } });
+    const payload = buildVitalApplication(source, {}, ctx).payload as VitalSubmission;
+    expect(payload.notes).toHaveLength(1);
+    expect(payload.notes![0]).toMatchObject({
+      note: "Use of funds: inventory\n\nFile summary: Strong deposits, 2 positions.",
+      section: "Underwriting",
+      shareableWithIso: false,
+    });
+    expect(Number.isNaN(Date.parse(payload.notes![0].timestamp))).toBe(false);
+  });
+
+  it("sends no note when there is neither a purpose nor a summary", () => {
+    const source = makeSource({ vault: { loan_purpose: null }, deal: { loan_purpose: null, file_synopsis: null } });
+    expect((buildVitalApplication(source, {}, ctx).payload as VitalSubmission).notes).toBeUndefined();
+  });
+
+  it("keeps the note in the redacted preview", () => {
+    const source = makeSource({ deal: { file_synopsis: "Summary." } });
+    expect((buildVitalApplication(source, {}, ctx).redacted as VitalSubmission).notes?.[0].note).toContain("File summary: Summary.");
+  });
+
   it("normalizes phones to ten digits", () => {
     expect(toVitalPhone("+1 (305) 555-0100")).toBe("3055550100");
     expect(toVitalPhone("555-0100")).toBeNull();
@@ -191,6 +215,19 @@ describe("vital documents", () => {
     expect(vitalDocumentCategory("voided_check")).toBe("Voided Check");
     expect(vitalDocumentCategory("profit_loss")).toBe("Financials");
     expect(vitalTagsForDocCode("merchant_processing_statements")).toEqual(["Processing Statements"]);
+  });
+
+  it("spots an upload Vital swapped for a document already on the deal", () => {
+    expect(vitalExistingDuplicate({ filename: "b.pdf", category: "Voided Check" }, "b.pdf", "Voided Check")).toBeNull();
+    expect(vitalExistingDuplicate({ filename: "app.pdf", category: "Signed Application" }, "b.pdf", "Bank Statements")).toBe(
+      "app.pdf, Signed Application"
+    );
+    expect(vitalExistingDuplicate({ filename: "a.pdf", category: "Bank Statements" }, "b.pdf", "Bank Statements")).toBe(
+      "a.pdf, Bank Statements"
+    );
+    // Nothing echoed: no evidence either way, so the 200 stands.
+    expect(vitalExistingDuplicate({ id: 1 }, "b.pdf", "Bank Statements")).toBeNull();
+    expect(vitalExistingDuplicate(null, "b.pdf", "Bank Statements")).toBeNull();
   });
 
   it("never guesses a category", () => {
@@ -243,8 +280,9 @@ describe("vital status", () => {
 
   it("stays in progress on an unknown or absent status", () => {
     expect(interpretVitalStatus({ statuses: { status: "Underwriting" } })).toEqual({ kind: "in_progress", stage: "Underwriting" });
-    expect(interpretVitalStatus({ id: "9001", statuses: {} })).toEqual({ kind: "in_progress", stage: "Submitted" });
-    expect(interpretVitalStatus(null)).toEqual({ kind: "in_progress", stage: "Submitted" });
+    // Vital's real GET carries no status field at all: UW is told to record the answer by hand.
+    expect(interpretVitalStatus({ id: "9001", statuses: {} })).toEqual({ kind: "in_progress", stage: VITAL_NO_STATUS_STAGE });
+    expect(interpretVitalStatus(null)).toEqual({ kind: "in_progress", stage: VITAL_NO_STATUS_STAGE });
   });
 });
 
