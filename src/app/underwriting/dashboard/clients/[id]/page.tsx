@@ -492,9 +492,9 @@ export default function UnderwritingClientDetailsPage() {
     // Documents state enhancement. `approvals` is derived from approvals_raw
     // filtered by the active business tab, so switching tabs auto-recomputes
     // which categories show as approved + drives the completion percentage.
-    // The funding round on screen. Documents and approvals stamped with an
-    // OLDER round drop out of the working view — that is what makes a renewal
-    // re-collect bank statements instead of inheriting last year's.
+    // The funding round on screen. It scopes the lender list below; documents
+    // and approvals are NOT filtered by round — they carry over, so a repeat
+    // client is never re-asked for paperwork already on file.
     const active_deal_id = useMemo<string | null>(
         () => businesses.find((b) => b.id === active_business_id)?.active_deal_id ?? null,
         [businesses, active_business_id]
@@ -525,10 +525,9 @@ export default function UnderwritingClientDetailsPage() {
         return new Set(
             approvals_raw
                 .filter((a) => matchesActiveBusiness(a.business_profile_id, active_business_id, a.doc_code))
-                .filter((a) => matchesActiveDeal((a as any).funding_deal_id ?? null, active_deal_id))
                 .map((a) => a.doc_code)
         );
-    }, [approvals_raw, active_business_id, active_deal_id]);
+    }, [approvals_raw, active_business_id]);
 
     // Scoped docs + required docs for the active business tab. Client-scoped
     // codes (driver's license / MyScoreIQ / PFS) surface on every tab. De-dupe
@@ -536,18 +535,22 @@ export default function UnderwritingClientDetailsPage() {
     // multiple businesses still renders as a single card.
     const scoped_documents = useMemo<UserDocument[]>(() => {
         const active_is_primary = businesses.find((b) => b.id === active_business_id)?.is_primary ?? false;
+        // Files from an earlier funding round stay on the file (documents carry
+        // over) — they just get a "Round N" badge so staff can tell them apart.
+        const rounds = businesses.find((b) => b.id === active_business_id)?.deal_rounds ?? {};
         return documents.filter((d) => {
             const code = (d as any).doc_code ?? (d as any).category ?? null;
             const bpid = (d as any).business_profile_id ?? null;
-            // A file belonging to a previous round is that round's record, not
-            // this one's — it stays in the vault but off the active packet.
-            if (!matchesActiveDeal((d as any).funding_deal_id ?? null, active_deal_id)) return false;
             if (matchesActiveBusiness(bpid, active_business_id, code)) return true;
             // Resilience: a legacy/unscoped upload (business_profile_id = null,
             // e.g. a funding application e-signed before per-business scoping)
             // surfaces on the PRIMARY tab so it's never silently lost.
             if (bpid === null && active_is_primary) return true;
             return false;
+        }).map((d) => {
+            const deal_id = (d as any).funding_deal_id as string | null | undefined;
+            const round = deal_id && deal_id !== active_deal_id ? rounds[deal_id] : undefined;
+            return round ? { ...d, previous_round: round } : d;
         });
     }, [documents, active_business_id, businesses, active_deal_id]);
 
@@ -1104,6 +1107,13 @@ export default function UnderwritingClientDetailsPage() {
                     active_deal_id: deal?.id ?? null,
                     active_deal_funded_at: deal?.funded_at ?? null,
                     deal_count: deals.length,
+                    // Oldest first → round 1, the same numbering as the rounds card.
+                    deal_rounds: Object.fromEntries(
+                        deals
+                            .slice()
+                            .sort((x: any, y: any) => (x.display_order ?? 0) - (y.display_order ?? 0))
+                            .map((d: any, i: number) => [d.id as string, i + 1])
+                    ),
                 };
             });
             set_businesses(rows);
@@ -1989,14 +1999,17 @@ export default function UnderwritingClientDetailsPage() {
     // onto the tab row); the primary business falls back to the vault row.
     const active_business = businesses.find((b) => b.id === active_business_id);
     const use_biz = !!active_business && !active_business.is_primary;
+    // The funding ask follows the active ROUND once a business has more than
+    // one: a repeat client's vault row still holds the first round's ask.
+    const use_round = use_biz || (active_business?.deal_count ?? 0) > 1;
     const displayed = {
-        capital_requested: use_biz ? (active_business!.capital_requested ?? null) : client_profile.capital_requested,
+        capital_requested: use_round ? (active_business!.capital_requested ?? null) : client_profile.capital_requested,
         avg_monthly_deposits: use_biz ? (active_business!.avg_monthly_deposits ?? null) : client_profile.avg_monthly_deposits,
         business_start_date: use_biz ? (active_business!.business_start_date ?? null) : client_profile.business_start_date,
         legal_entity_type: use_biz ? (active_business!.legal_entity_type ?? null) : client_profile.legal_entity_type,
         industry: active_business?.industry || client_profile.industry,
-        proposed_loan_type: use_biz ? (active_business!.proposed_loan_type ?? null) : client_profile.proposed_loan_type,
-        loan_purpose: use_biz ? (active_business!.loan_purpose ?? null) : client_profile.loan_purpose,
+        proposed_loan_type: use_round ? (active_business!.proposed_loan_type ?? null) : client_profile.proposed_loan_type,
+        loan_purpose: use_round ? (active_business!.loan_purpose ?? null) : client_profile.loan_purpose,
         employees_count: use_biz ? (active_business!.employees_count ?? null) : (client_profile.employees_count ?? null),
         company_city: use_biz ? (active_business!.company_city ?? null) : client_profile.company_city,
         company_state: use_biz ? (active_business!.company_state ?? null) : client_profile.company_state,
@@ -2614,6 +2627,15 @@ export default function UnderwritingClientDetailsPage() {
                         ...client_profile,
                         industry: active_business?.industry || client_profile.industry || "",
                         employees_count: active_business?.employees_count ?? client_profile.employees_count ?? undefined,
+                        // Repeat client: prefill the ask from the active round
+                        // (what the header shows), not the first round's on the
+                        // vault row. updateClientProfile writes it to that round.
+                        ...((active_business?.deal_count ?? 0) > 1 ? {
+                            capital_requested: active_business!.capital_requested ?? 0,
+                            proposed_loan_type: active_business!.proposed_loan_type ?? "",
+                            loan_purpose: active_business!.loan_purpose ?? "",
+                            funding_eta: active_business!.funding_eta ?? "",
+                        } : {}),
                     };
                 return (
                 <EditProfileModal

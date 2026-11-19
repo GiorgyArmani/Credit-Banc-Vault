@@ -179,9 +179,7 @@ export function FundingRoundsCard({
         toast.error(data?.error || "Failed to start the funding round");
         return;
       }
-      toast.success(
-        `New round opened · ${data.requested_documents} document${data.requested_documents === 1 ? "" : "s"} re-requested`
-      );
+      toast.success("New round opened · documents on file carried over");
       set_open(false);
       set_amount("");
       set_loan_types([]);
@@ -393,9 +391,10 @@ export function FundingRoundsCard({
             <DialogTitle>Start a new funding round</DialogTitle>
             <DialogDescription>
               Opens a fresh deal for this business. The previous round keeps its funded
-              amount, lender and date — nothing is overwritten. Bank statements, P&amp;L and
-              the other time-sensitive documents are re-requested from the client;
-              identity and entity paperwork carries over.
+              amount, lender and date — nothing is overwritten. Every document already
+              on file carries over to the new round, so the client isn&apos;t asked again.
+              Request anything that needs refreshing (like newer bank statements) from
+              the vault.
             </DialogDescription>
           </DialogHeader>
 

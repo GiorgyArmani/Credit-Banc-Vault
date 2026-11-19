@@ -5,8 +5,8 @@
 // Why this exists: every funding writer used to resolve "the deal" as the
 // business's single funding_deals row and UPDATE it, so a client's second
 // financing silently erased the first one's lender, amount, term and date. A
-// round is now an explicit object: this endpoint creates the new row, retires
-// the closing round's stale paperwork, and re-requests it.
+// round is now an explicit object: this endpoint creates the new row and pins
+// the closing round's lender submissions to it. Documents carry over untouched.
 //
 // Guards: admin / underwriting, or the client's advisor (owner or follower) —
 // including an external partner advisor working their own deal.
@@ -23,7 +23,6 @@ import {
   isDealFunded,
   startNewFundingRound,
 } from "@/lib/funding-deals";
-import { CLIENT_SCOPED_DOC_CODES, isCarryOverDoc } from "@/lib/document-scope";
 import { recordPipelineTransition } from "@/lib/pipeline-core";
 import {
   slackPostMessage,
@@ -56,9 +55,8 @@ async function announceNewRound(args: {
   deal: FundingDeal;
   previousDeal: FundingDeal | null;
   actorUserId: string;
-  requestedCount: number;
 }): Promise<void> {
-  const { admin, clientVaultId, companyName, deal, previousDeal, actorUserId, requestedCount } = args;
+  const { admin, clientVaultId, companyName, deal, previousDeal, actorUserId } = args;
 
   const { data: clientRow } = await admin
     .from("client_data_vault")
@@ -111,10 +109,7 @@ async function announceNewRound(args: {
     );
   }
 
-  lines.push(
-    `• ${requestedCount} document${requestedCount === 1 ? "" : "s"} re-requested from the client` +
-      ` (identity + entity paperwork carried over).`
-  );
+  lines.push(`• Every document already on file carried over to this round.`);
   lines.push(`${baseUrl}/admin/clients/${clientVaultId}`);
 
   await slackPostMessage(channelId, lines.join("\n"));
@@ -247,7 +242,7 @@ export async function POST(
 
   const gate = await authorize(clientVaultId, businessProfileId);
   if (!gate.ok) return gate.response;
-  const { admin, client, business, user, role } = gate;
+  const { admin, business, user, role } = gate;
 
   let body: any = {};
   try {
@@ -284,67 +279,21 @@ export async function POST(
   }
   const newDeal = opened.deal;
 
-  // ── Retire the closing round's paperwork ────────────────────────────────
-  // Stamping the OLD deal's id onto its rows is what retires them: the read
-  // predicate (matchesActiveDeal) treats a foreign round's id as "not this
-  // round" and a NULL as "every round". Carry-over codes are left NULL on
-  // purpose so the client isn't asked for their driver's licence again.
-  let retiredDocs = 0;
+  // ── Documents carry over — nothing is retired or re-requested ───────────
+  // Every document and approval the business already has stays on the file
+  // for the new round. A repeat client's paperwork is usually the same as
+  // last time, and hiding it meant asking them for documents we already
+  // hold. Staff request anything that needs refreshing (e.g. newer bank
+  // statements) from the vault, like any other extra request.
+
+  // ── Retire the closing round's lender submissions ───────────────────────
   if (closingDeal) {
-    // The carry-over test runs in JS, not as a PostgREST `not.in` filter: a row
-    // with a NULL doc_code makes `NOT (NULL IN (...))` evaluate to NULL, which
-    // silently drops it from the update — exactly the rows that most need
-    // retiring. Selecting first also gives an honest count to report back.
-    const { data: priorDocRows } = await admin
-      .from("user_documents")
-      .select("id, doc_code, category")
-      .eq("business_profile_id", businessProfileId)
-      .is("funding_deal_id", null);
-
-    const staleDocIds = (priorDocRows ?? [])
-      .filter((d: any) => !isCarryOverDoc((d.doc_code ?? d.category ?? null) as string | null))
-      .map((d: any) => d.id as string);
-
-    if (staleDocIds.length > 0) {
-      const { error: stampErr } = await admin
-        .from("user_documents")
-        .update({ funding_deal_id: closingDeal.id })
-        .in("id", staleDocIds);
-      if (stampErr) {
-        console.error("startNewRound: failed to retire documents:", stampErr);
-      } else {
-        retiredDocs = staleDocIds.length;
-      }
-    }
-
-    // Approvals follow their documents — the new round starts unapproved for
-    // everything it will re-collect, so the review packet reads honestly.
-    const { data: priorApprovals } = await admin
-      .from("document_category_approvals")
-      .select("id, doc_code")
-      .eq("business_profile_id", businessProfileId)
-      .is("funding_deal_id", null);
-
-    const staleApprovalIds = (priorApprovals ?? [])
-      .filter((a: any) => !isCarryOverDoc(a.doc_code as string | null))
-      .map((a: any) => a.id as string);
-
-    if (staleApprovalIds.length > 0) {
-      const { error: apprErr } = await admin
-        .from("document_category_approvals")
-        .update({ funding_deal_id: closingDeal.id })
-        .in("id", staleApprovalIds);
-      if (apprErr) {
-        console.error("startNewRound: failed to retire approvals:", apprErr);
-      }
-    }
-
-    // Lender submissions retire the same way, and this is the one that makes
-    // the deal track work: every lender we went to, and everything they said,
-    // gets pinned to the round it happened in at the moment the next one opens.
+    // This is what makes the deal track work: every lender we went to, and
+    // everything they said, gets pinned to the round it happened in at the
+    // moment the next one opens.
     //
-    // Unlike documents there is no carry-over list — a lender response belongs
-    // to the file it was given on, always. Rows written since 20260902 already
+    // A lender response belongs to the file it was given on, always. Rows
+    // written since 20260902 already
     // carry their own funding_deal_id and are skipped by the NULL filter.
     //
     // business_profile_id is NULL on older rows (8 in prod at the time of
@@ -362,68 +311,6 @@ export async function POST(
       console.error("startNewRound: failed to retire lender assignments:", lenderErr);
     } else if (retiredLenders) {
       console.info(`startNewRound: retired ${retiredLenders} lender assignments to the closing round`);
-    }
-  }
-
-  // ── Re-request the stale documents ──────────────────────────────────────
-  // Explicit list from the modal, else every non-carry-over code the previous
-  // round actually collected. Client-scoped codes are stripped for the same
-  // reason as the add-business flow: they belong to the person, not the deal.
-  let requestedCodes: string[] = Array.isArray(body.requested_doc_codes)
-    ? body.requested_doc_codes.filter((c: unknown): c is string => typeof c === "string")
-    : [];
-
-  if (requestedCodes.length === 0) {
-    const { data: priorDocs } = await admin
-      .from("user_documents")
-      .select("doc_code, category")
-      .eq("business_profile_id", businessProfileId);
-    requestedCodes = Array.from(
-      new Set(
-        (priorDocs ?? [])
-          .map((d: any) => (d.doc_code ?? d.category ?? null) as string | null)
-          .filter((c): c is string => !!c)
-      )
-    );
-  }
-
-  requestedCodes = requestedCodes.filter(
-    (code) =>
-      !isCarryOverDoc(code) &&
-      !CLIENT_SCOPED_DOC_CODES.includes(code as any) &&
-      // The round's contract is minted by Signwell, not requested from the
-      // client as an upload.
-      code !== "funding_application"
-  );
-
-  let requestedCount = 0;
-  if (requestedCodes.length > 0) {
-    const { data: docDefs } = await admin
-      .from("required_documents")
-      .select("id, code")
-      .in("code", requestedCodes);
-
-    if (docDefs && docDefs.length > 0) {
-      const rows = docDefs.map((d: any) => ({
-        user_id: client.user_id,
-        document_id: d.id,
-        business_profile_id: businessProfileId,
-        funding_deal_id: newDeal.id,
-        is_active: true,
-        requested_at: new Date().toISOString(),
-        requested_via: "new_funding_round",
-      }));
-      // Same conflict target as the add-business flow: requests are per
-      // business + document, so this refreshes the existing row onto the new
-      // round rather than stacking duplicates.
-      const { error: reqErr } = await admin
-        .from("client_dynamic_documents")
-        .upsert(rows, { onConflict: "business_profile_id, document_id" });
-      if (reqErr) {
-        console.error("startNewRound: failed to request documents:", reqErr);
-      } else {
-        requestedCount = rows.length;
-      }
     }
   }
 
@@ -455,7 +342,6 @@ export async function POST(
       deal: newDeal,
       previousDeal: opened.previous,
       actorUserId: user.id,
-      requestedCount,
     });
   } catch (err) {
     console.error("startNewRound: Slack announcement failed (non-fatal):", err);
@@ -468,7 +354,5 @@ export async function POST(
   return NextResponse.json({
     success: true,
     deal: newDeal,
-    retired_documents: retiredDocs,
-    requested_documents: requestedCount,
   });
 }

@@ -29,10 +29,12 @@ export type ClientScopedDocCode = (typeof CLIENT_SCOPED_DOC_CODES)[number];
  * doing right now (stale the moment the last deal closed — a lender will not
  * accept 14-month-old bank statements).
  *
- * Codes listed here carry forward: their files and approvals stay unscoped
- * (funding_deal_id NULL = "belongs to every round"). Everything else is stamped
- * with the closing round's id when the next round opens, which retires it from
- * the active view and puts the category back on the request list.
+ * Codes listed here are uploaded unscoped (funding_deal_id NULL); everything
+ * else is stamped with the round it arrived in. That stamp is a record only:
+ * since 2026-11-19 NO document or approval is hidden by round — every file a
+ * business has ever had stays visible in every round, so a repeat client is
+ * never re-asked for paperwork already on file. Staff request fresher copies
+ * (e.g. newer bank statements) from the vault when they need them.
  *
  * The client-scoped codes (DL / PFS / MyScoreIQ) are already global to the
  * person; they're repeated here so the intent reads in one place.
@@ -146,9 +148,9 @@ export function matchesActiveBusiness(
  *     across rounds, OR
  *   • its funding_deal_id is the active round.
  *
- * A row stamped with an OLDER round's id is retired: it stays in the database
- * as that round's record but drops out of the working view, which is what makes
- * "re-request the stale documents" mean something on a repeat deal.
+ * A row stamped with an OLDER round's id drops out of the working view. Used
+ * for lender assignments only — documents and approvals are deliberately NOT
+ * round-filtered (they carry over to every round).
  *
  * Pass `null` for activeDealId when the caller has no round context — nothing
  * is hidden in that case, so a surface that hasn't been taught about rounds

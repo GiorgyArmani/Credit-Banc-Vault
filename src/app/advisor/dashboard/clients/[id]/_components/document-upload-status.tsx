@@ -51,6 +51,9 @@ interface UserDocument {
     /** 'rejected' after rejectDocumentCategory; a replacement upload arrives
      *  with its own non-rejected status. */
     status?: string | null;
+    /** Round number when this file arrived in an EARLIER funding round than
+     *  the one on screen; drives the "Round N" badge. Unset otherwise. */
+    previous_round?: number | null;
 }
 
 /**
@@ -147,6 +150,14 @@ function DocumentFileRow({
                                 </span>
                             ) : null;
                         })()}
+                        {doc.previous_round ? (
+                            <span
+                                className="shrink-0 rounded-full bg-amber-50 px-1.5 text-[11px] font-semibold text-amber-700"
+                                title="Carried over from an earlier funding round"
+                            >
+                                Round {doc.previous_round}
+                            </span>
+                        ) : null}
                         {doc.is_favorite && <Star className="h-3 w-3 text-amber-400 fill-amber-400 flex-shrink-0" />}
                     </p>
                     <p className="text-xs text-cb-ink/40">

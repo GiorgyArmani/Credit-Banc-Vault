@@ -27,13 +27,18 @@ export interface BusinessTab {
   loan_purpose?: string | null;
   funding_eta?: string | null;
   // The funding ROUND currently being worked on this business — the newest
-  // funding_deals row. Repeat clients have several; documents and approvals are
-  // scoped to this one so a renewal doesn't inherit last year's paperwork.
+  // funding_deals row. Repeat clients have several. Documents are NOT scoped
+  // to it: they carry over, and a file from an earlier round gets a badge.
   active_deal_id?: string | null;
+  /** Every round of this business: funding_deals.id → round number (1-based,
+   *  oldest first). Labels files that arrived in an earlier round. */
+  deal_rounds?: Record<string, number>;
   /** Set once UW records the round funded. A funded active round is what makes
    *  "Start New Funding Round" available. */
   active_deal_funded_at?: string | null;
-  /** How many rounds this business has had, for the "Round N" label. */
+  /** How many rounds this business has had, for the "Round N" label. A value
+   *  above 1 also makes the header read the funding ask from the active round
+   *  rather than the client record (which holds the first round's ask). */
   deal_count?: number;
   /** When the business was added — a second business's pipeline clock starts
    *  here, not at the vault's creation. */

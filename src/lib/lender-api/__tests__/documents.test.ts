@@ -27,13 +27,12 @@ const row = (o: Partial<DocumentRow>): DocumentRow => ({
 
 const base = {
   businessProfileId: "bp-1",
-  dealId: "deal-2",
   labelFor: (code: string) => code.toUpperCase(),
   tagsForDocCode: (code: string | null) => (code === "business_bank_statements" ? ["bank_statement"] : []),
 };
 
 describe("selectSubmittable", () => {
-  it("keeps this business + round (or carry-over), drops rejected, other business and older rounds", () => {
+  it("keeps this business across every funding round, drops rejected and other business", () => {
     const docs = selectSubmittable({
       ...base,
       approvals: [],
@@ -47,19 +46,24 @@ describe("selectSubmittable", () => {
         row({ id: "no-code", doc_code: null, category: null }),
       ],
     });
-    expect(docs.map((d) => d.id).sort()).toEqual(["dl-any-biz", "keep-carry", "keep-round"]);
+    expect(docs.map((d) => d.id).sort()).toEqual(["dl-any-biz", "keep-carry", "keep-round", "old-round"]);
   });
 
-  it("preselects categories approved for this business and round", () => {
+  it("preselects categories approved for this business, in any round", () => {
     const docs = selectSubmittable({
       ...base,
       approvals: [
         { doc_code: "business_bank_statements", business_profile_id: "bp-1", funding_deal_id: "deal-2" },
         { doc_code: "voided_check", business_profile_id: "bp-1", funding_deal_id: "deal-1" },
+        { doc_code: "tax_returns", business_profile_id: "bp-9", funding_deal_id: null },
       ],
-      rows: [row({ id: "stmt" }), row({ id: "check", doc_code: "voided_check" })],
+      rows: [
+        row({ id: "stmt" }),
+        row({ id: "check", doc_code: "voided_check" }),
+        row({ id: "tax", doc_code: "tax_returns" }),
+      ],
     });
-    expect(Object.fromEntries(docs.map((d) => [d.id, d.preselected]))).toEqual({ stmt: true, check: false });
+    expect(Object.fromEntries(docs.map((d) => [d.id, d.preselected]))).toEqual({ stmt: true, check: true, tax: false });
   });
 
   it("flags unstampable files and attaches provider tags and labels", () => {

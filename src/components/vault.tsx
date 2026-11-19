@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { PremiumLoader } from "./ui/premium-loader";
 import DocumentPreviewModal from "@/components/pdf/pdf-viewer";
-import { isClientScopedDoc, isCarryOverDoc, matchesActiveBusiness, matchesActiveDeal } from "@/lib/document-scope";
+import { isClientScopedDoc, isCarryOverDoc, matchesActiveBusiness } from "@/lib/document-scope";
 import {
   buildGroupedDisplayLabel,
   groupsForDocCode,
@@ -623,12 +623,10 @@ export default function Vault({
         .eq("client_vault_id", vid);
       if (error) throw error;
       // Scope to active business via the shared matcher — client-scoped doc
-      // approvals (DL/PFS/MyScoreIQ) automatically surface on every tab — then
-      // to the active round, so a closed financing's approvals don't make the
-      // new round look already-satisfied.
+      // approvals (DL/PFS/MyScoreIQ) automatically surface on every tab.
+      // Approvals from earlier funding rounds count too: documents carry over.
       const filtered = (data || []).filter((d: any) =>
-        matchesActiveBusiness(d.business_profile_id, activeBusinessId, d.doc_code) &&
-        matchesActiveDeal(d.funding_deal_id, activeDealId)
+        matchesActiveBusiness(d.business_profile_id, activeBusinessId, d.doc_code)
       );
       setApprovals(new Set(filtered.map((d: any) => d.doc_code)));
     } catch (e) {
@@ -672,10 +670,10 @@ export default function Vault({
       if (error) throw error;
       // Scope to active business via the shared matcher — client-scoped docs
       // (DL/PFS/MyScoreIQ) automatically surface on every tab regardless of
-      // which business they were uploaded under — then to the active round.
+      // which business they were uploaded under. Files from earlier funding
+      // rounds stay visible: a repeat client is never re-asked for them.
       const filtered = (data || []).filter((d: any) =>
-        matchesActiveBusiness(d.business_profile_id, activeBusinessId, d.doc_code || d.category) &&
-        matchesActiveDeal(d.funding_deal_id, activeDealId)
+        matchesActiveBusiness(d.business_profile_id, activeBusinessId, d.doc_code || d.category)
       );
       setDocuments(filtered);
       const { data: v } = await supabase.from("client_data_vault").select("data_vault_submitted_at").eq("user_id", uid).maybeSingle();

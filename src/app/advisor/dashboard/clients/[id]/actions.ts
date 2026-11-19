@@ -751,6 +751,26 @@ export async function updateClientProfile(clientId: string, data: any) {
                 console.error("updateClientProfile primary business sync error:", pbErr.message);
                 primaryBizWarning = `Profile saved, but the business record (employees / industry) could not be updated: ${pbErr.message}`;
             }
+
+            // The funding ask also lands on the primary business's CURRENT
+            // round — that is what the header shows for a repeat client. A
+            // funded round is never rewritten (same rule as updateBusinessProfile).
+            const activeDeal = await getActiveDeal(supabaseAdmin, primaryBiz.id);
+            if (activeDeal && !isDealFunded(activeDeal)) {
+                const { error: dealErr } = await supabaseAdmin
+                    .from("funding_deals")
+                    .update({
+                        capital_requested: data.capital_requested ?? null,
+                        proposed_loan_type: data.proposed_loan_type || null,
+                        loan_purpose: data.loan_purpose || null,
+                        funding_eta: data.funding_eta || null,
+                    })
+                    .eq("id", activeDeal.id);
+                if (dealErr) {
+                    console.error("updateClientProfile funding round sync error:", dealErr.message);
+                    primaryBizWarning = `Profile saved, but the funding round's ask could not be updated: ${dealErr.message}`;
+                }
+            }
         }
 
         // 4b. Sync email to Supabase Auth (so client can log in with new email)

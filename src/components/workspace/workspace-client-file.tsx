@@ -99,7 +99,7 @@ import { ClientNotesCard, type FileNote } from "@/app/advisor/dashboard/clients/
 // the entry point is withdrawn. Restore both this import and the section below.
 // import { CommunicationsTimeline } from "@/app/advisor/dashboard/clients/[id]/_components/communications-timeline";
 import { AdminLenderReviewCard } from "@/components/admin/admin-lender-review-card";
-import { isClientScopedDoc, matchesActiveBusiness, matchesActiveDeal, normalizeSupabaseJoin } from "@/lib/document-scope";
+import { isClientScopedDoc, matchesActiveBusiness, normalizeSupabaseJoin } from "@/lib/document-scope";
 import { offersGrouping, groupsForDocCode, LENDER_DOCUMENTATION_DOC_CODE } from "@/lib/document-groups";
 import { LenderDocumentFolders } from "@/components/client-file/panels/lender-document-folders";
 import { useLenderFolders } from "@/hooks/use-lender-folders";
@@ -318,6 +318,8 @@ interface UserDocument {
     metadata?: any;
     /** 'rejected' once staff reject the category — see isCategoryRejected. */
     status?: string | null;
+    /** Round number of an EARLIER funding round this file arrived in. */
+    previous_round?: number | null;
 }
 
 interface InternalNote {
@@ -550,8 +552,8 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
     // so switching businesses automatically recomputes which categories are
     // shown as approved + drives the completion percentage.
     // The funding round on screen — the business's newest funding_deals row.
-    // Rows stamped with an older round belong to a financing that already
-    // closed and drop out of the active view. See [[funding_deals_refactor]].
+    // Documents and approvals are NOT filtered by round: everything from
+    // earlier rounds carries over, so a repeat client is never re-asked.
     const active_deal_id = useMemo<string | null>(
         () => businesses.find((b) => b.id === active_business_id)?.active_deal_id ?? null,
         [businesses, active_business_id]
@@ -561,24 +563,23 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
         return new Set(
             approvals_raw
                 .filter((a) => matchesActiveBusiness(a.business_profile_id, active_business_id, a.doc_code))
-                .filter((a) => matchesActiveDeal((a as any).funding_deal_id ?? null, active_deal_id))
                 .map((a) => a.doc_code)
         );
-    }, [approvals_raw, active_business_id, active_deal_id]);
+    }, [approvals_raw, active_business_id]);
 
     // Scoped versions of the dynamic doc requests + uploaded files for the
     // active business tab. The matchesActiveBusiness predicate also lets
     // client-scoped docs (driver's license, MyScoreIQ, PFS) through for any
     // tab, since they describe the person and shouldn't be re-collected per
     // business.
-    const scoped_documents = useMemo(() => {
+    const scoped_documents = useMemo<UserDocument[]>(() => {
         const active_is_primary = businesses.find((b) => b.id === active_business_id)?.is_primary ?? false;
+        // Files from an earlier funding round stay on the file (documents carry
+        // over) — they just get a "Round N" badge so staff can tell them apart.
+        const rounds = businesses.find((b) => b.id === active_business_id)?.deal_rounds ?? {};
         return documents.filter((d) => {
             const code = (d as any).doc_code ?? (d as any).category ?? null;
             const bpid = (d as any).business_profile_id ?? null;
-            // Files stamped with a previous round stay in the vault as that
-            // round's record but leave the current packet.
-            if (!matchesActiveDeal((d as any).funding_deal_id ?? null, active_deal_id)) return false;
             if (matchesActiveBusiness(bpid, active_business_id, code)) return true;
             // Resilience: a legacy/unscoped upload (business_profile_id = null,
             // e.g. a funding application e-signed before per-business scoping)
@@ -587,6 +588,10 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
             // always carry a business_profile_id, so only legacy nulls are caught.
             if (bpid === null && active_is_primary) return true;
             return false;
+        }).map((d) => {
+            const deal_id = (d as any).funding_deal_id as string | null | undefined;
+            const round = deal_id && deal_id !== active_deal_id ? rounds[deal_id] : undefined;
+            return round ? { ...d, previous_round: round } : d;
         });
     }, [documents, active_business_id, businesses, active_deal_id]);
 
@@ -628,7 +633,20 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
     const displayed_profile = useMemo(() => {
         if (!client_profile) return client_profile;
         const active_business = businesses.find((b) => b.id === active_business_id);
-        if (!active_business || active_business.is_primary) return client_profile;
+        if (!active_business) return client_profile;
+        if (active_business.is_primary) {
+            // A repeat client's vault row still holds the FIRST round's ask, so
+            // once a business has more than one round the header reads the
+            // round actually being worked — never the closed one.
+            if ((active_business.deal_count ?? 0) <= 1) return client_profile;
+            return {
+                ...client_profile,
+                capital_requested: active_business.capital_requested ?? 0,
+                proposed_loan_type: active_business.proposed_loan_type ?? undefined,
+                loan_purpose: active_business.loan_purpose ?? undefined,
+                funding_eta: active_business.funding_eta ?? undefined,
+            } as ClientProfile;
+        }
         return {
             ...client_profile,
             company_name: active_business.company_name || "—",
@@ -1101,8 +1119,15 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
                         loan_purpose: deal?.loan_purpose ?? null,
                         funding_eta: deal?.funding_eta ?? null,
                         active_deal_id: deal?.id ?? null,
-                        active_deal_funded_at: deal?.funded_at ?? null,
+                    active_deal_funded_at: deal?.funded_at ?? null,
                         deal_count: deals.length,
+                        // Oldest first → round 1, the same numbering as the rounds card.
+                        deal_rounds: Object.fromEntries(
+                            deals
+                                .slice()
+                                .sort((x: any, y: any) => (x.display_order ?? 0) - (y.display_order ?? 0))
+                                .map((d: any, i: number) => [d.id as string, i + 1])
+                        ),
                     };
                 });
                 set_businesses(rows);
@@ -3034,6 +3059,15 @@ export function WorkspaceClientFile({ basePath }: { basePath: string }) {
                             // Same drift for employees_count: the lender engine reads
                             // the business row, so prefill from it.
                             employees_count: active_business?.employees_count ?? client_profile.employees_count ?? undefined,
+                            // Repeat client: prefill the ask from the active round
+                            // (what the header shows), not the first round's on the
+                            // vault row. updateClientProfile writes it to that round.
+                            ...((active_business?.deal_count ?? 0) > 1 ? {
+                                capital_requested: active_business!.capital_requested ?? 0,
+                                proposed_loan_type: active_business!.proposed_loan_type ?? "",
+                                loan_purpose: active_business!.loan_purpose ?? "",
+                                funding_eta: active_business!.funding_eta ?? "",
+                            } : {}),
                         };
                     return (
                     <EditProfileModal

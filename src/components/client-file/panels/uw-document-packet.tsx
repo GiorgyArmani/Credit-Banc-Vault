@@ -73,6 +73,9 @@ export interface UserDocument {
     document_group_id?: string | null;
     /** Carries metadata.original_file_name, which dates a periodic file. */
     metadata?: Record<string, unknown> | null;
+    /** Round number when this file arrived in an EARLIER funding round than
+     *  the one on screen; drives the "Round N" badge. Unset otherwise. */
+    previous_round?: number | null;
 }
 
 export type UwDocumentPacketProps = {
@@ -220,6 +223,15 @@ export function UwDocumentPacket({
                                         {period.label}
                                     </Badge>
                                 )}
+                                {doc.previous_round ? (
+                                    <Badge
+                                        variant="outline"
+                                        title="Carried over from an earlier funding round"
+                                        className="h-4 shrink-0 rounded-full border-none bg-amber-50 px-2 text-[11px] font-semibold text-amber-700"
+                                    >
+                                        Round {doc.previous_round}
+                                    </Badge>
+                                ) : null}
                                 {doc.uploaded_by_role && (
                                     <Badge variant="outline" className={clsx(
                                         "h-4 shrink-0 rounded-full border-none px-2 text-[11px] font-semibold",

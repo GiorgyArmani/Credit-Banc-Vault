@@ -5,7 +5,7 @@
 // stampable files (PDF/JPEG/PNG) go out as the cached stamped copy; anything
 // else goes out as the original — only because UW explicitly ticked it.
 
-import { matchesActiveBusiness, matchesActiveDeal } from "@/lib/document-scope";
+import { matchesActiveBusiness } from "@/lib/document-scope";
 import { isLenderDocumentAllowedFor } from "@/lib/document-groups";
 import { filterToExistingObjects, groupScopedCategoryLabel, loadGroupsByBusiness } from "@/lib/share-links";
 import { DOCUMENTS_BUCKET, getWatermarkedPath, isStampable } from "@/lib/watermark";
@@ -48,7 +48,6 @@ export function selectSubmittable(args: {
   rows: DocumentRow[];
   approvals: ApprovalRow[];
   businessProfileId: string | null;
-  dealId: string | null;
   labelFor: (code: string, groupId: string | null) => string;
   tagsForDocCode: (code: string | null) => string[];
   /** The lender this submission goes to. Gates Lender Documentation files. */
@@ -56,7 +55,7 @@ export function selectSubmittable(args: {
   /** The group name a file is filed under (null when ungrouped / unknown). */
   groupNameFor?: (groupId: string | null) => string | null;
 }): SubmittableDocument[] {
-  const { rows, approvals, businessProfileId, dealId } = args;
+  const { rows, approvals, businessProfileId } = args;
   const out: SubmittableDocument[] = [];
 
   for (const row of rows) {
@@ -64,15 +63,13 @@ export function selectSubmittable(args: {
     if (!code) continue;
     if (row.status === "rejected") continue;
     if (!matchesActiveBusiness(row.business_profile_id, businessProfileId, code)) continue;
-    if (!matchesActiveDeal(row.funding_deal_id, dealId)) continue;
     // Another lender's branded app / COI never goes out, not even as an option.
     if (!isLenderDocumentAllowedFor(code, args.groupNameFor?.(row.document_group_id) ?? null, args.lenderName)) continue;
 
     const approved = approvals.some(
       (a) =>
         a.doc_code === code &&
-        matchesActiveBusiness(a.business_profile_id, businessProfileId, code) &&
-        matchesActiveDeal(a.funding_deal_id, dealId)
+        matchesActiveBusiness(a.business_profile_id, businessProfileId, code)
     );
 
     out.push({
@@ -139,7 +136,6 @@ export async function listSubmittableDocuments(
     rows,
     approvals,
     businessProfileId: source.assignment.business_profile_id,
-    dealId: source.assignment.funding_deal_id,
     labelFor,
     tagsForDocCode: (c) => provider.tagsForDocCode(c),
     lenderName: source.assignment.lender_name,
@@ -155,7 +151,7 @@ export async function prepareOutboundDocuments(
 ): Promise<{ docs: OutboundDocument[]; failures: OutboundDocumentResult[] }> {
   const { rows, approvals, labelFor, groupNameFor } = await loadRows(admin, source);
   // Authorization: only files the panel could have offered for this business
-  // and round may leave. Anything else (a forged id, or a file deleted or
+  // may leave. Anything else (a forged id, or a file deleted or
   // re-scoped since the send) is recorded as unavailable — terminal, so the
   // submission can still settle instead of retrying it forever.
   const allowed = new Set(
@@ -163,8 +159,7 @@ export async function prepareOutboundDocuments(
       rows,
       approvals,
       businessProfileId: source.assignment.business_profile_id,
-      dealId: source.assignment.funding_deal_id,
-      labelFor,
+        labelFor,
       tagsForDocCode: (c) => provider.tagsForDocCode(c),
       lenderName: source.assignment.lender_name,
       groupNameFor,
